@@ -89,6 +89,7 @@ import { createLocalRequestAuthenticator } from "./local-db/auth.js";
 import { createLocalProjectService } from "./local-db/project-service.js";
 import { createLocalViewerService } from "./local-db/viewer-service.js";
 import { createLocalCanvasService } from "./local-db/canvas-service.js";
+import { createLocalChatService } from "./local-db/chat-service.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
 import { registerModelRoutes } from "./http/models.js";
@@ -197,7 +198,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const threadService =
     options.threadService ?? createThreadService({ createUserClient });
   const chatService =
-    options.chatService ?? createChatService({ createUserClient, threadService });
+    options.chatService ??
+    (env.authProvider === "local" && localDb
+      ? createLocalChatService(localDb)
+      : createChatService({ createUserClient, threadService }));
   const agentRunMetadataService =
     options.agentRunMetadataService ??
     createAgentRunMetadataService({ getAdminClient });
