@@ -36,6 +36,7 @@ export function registerAuthRoutes(
       host: mailHost,
       port: options.env.mailPort ?? 465,
       secure: (options.env.mailPort ?? 465) === 465,
+      requireTLS: (options.env.mailPort ?? 465) === 587,
       auth: { user: mailUser, pass: mailPassword },
     });
     await transporter.sendMail({
