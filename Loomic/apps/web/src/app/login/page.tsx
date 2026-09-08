@@ -38,7 +38,7 @@ function LoginPageContent() {
       title="Welcome back"
       description="Sign in to continue where your workspace left off."
       features={[
-        "Use password, magic link, or Google sign-in",
+        "Use password or magic link sign-in",
         "Keep your canvas and workspace state in one place",
         "Move from idea to delivery without switching tools",
       ]}

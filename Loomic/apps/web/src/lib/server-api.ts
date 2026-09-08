@@ -30,6 +30,13 @@ import type {
 import { dedupeRequest } from "./dedupe-request";
 import { getServerBaseUrl } from "./env";
 
+export async function requestMagicLink(email: string): Promise<void> {
+  const response = await fetch(`${getServerBaseUrl()}/api/auth/magic-link`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email }),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+}
+
 // --- Error types ---
 
 export class ApiAuthError extends Error {

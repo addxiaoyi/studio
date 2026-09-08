@@ -8,8 +8,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Separator } from "./ui/separator";
-import { fetchViewer } from "../lib/server-api";
+import { requestMagicLink, fetchViewer } from "../lib/server-api";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
 
 const stagger = {
@@ -30,10 +29,9 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [code, setCode] = useState("");
   const [mode, setMode] = useState<"otp" | "password">("otp");
   const [loading, setLoading] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
+  const [linkSent, setLinkSent] = useState(false);
   const [error, setError] = useState<string | null>(initialErrorMessage);
 
   async function bootstrapWorkspace(accessToken: string) {
@@ -45,7 +43,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
     }
   }
 
-  async function handleOtp(e: FormEvent<HTMLFormElement>) {
+  async function handleMagicLink(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const trimmed = email.trim();
     if (!trimmed) return;
@@ -53,32 +51,14 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
     setLoading(true);
     setError(null);
 
-    const supabase = getSupabaseBrowserClient();
-    if (!otpSent) {
-      const { error: authError } = await supabase.auth.signInWithOtp({
-        email: trimmed,
-        options: { shouldCreateUser: false },
-      });
-
+    try {
+      await requestMagicLink(trimmed);
+      setLinkSent(true);
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "登录邮件发送失败，请稍后重试");
+    } finally {
       setLoading(false);
-      if (authError) setError(authError.message);
-      else setOtpSent(true);
-      return;
     }
-
-    const { data, error: authError } = await supabase.auth.verifyOtp({
-      email: trimmed,
-      token: code.trim(),
-      type: "email",
-    });
-
-    setLoading(false);
-    if (authError || !data.session?.access_token) {
-      setError(authError?.message ?? "验证码无效或已过期，请重新获取");
-      return;
-    }
-
-    await bootstrapWorkspace(data.session.access_token);
   }
 
   async function handlePassword(e: FormEvent<HTMLFormElement>) {
@@ -110,24 +90,10 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
     }
   }
 
-  async function handleGoogle() {
-    setError(null);
-    const supabase = getSupabaseBrowserClient();
-    const { error: authError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-    if (authError) {
-      setError(authError.message);
-    }
-  }
-
   return (
     <div className="w-full max-w-sm">
       <AnimatePresence mode="wait">
-              {otpSent && mode === "otp" ? (
+              {linkSent && mode === "otp" ? (
           <motion.div
             key="sent"
             initial={{ opacity: 0, scale: 0.95 }}
@@ -155,7 +121,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
             </motion.div>
             <h2 className="text-lg font-medium">Check your email</h2>
             <p className="text-sm text-muted-foreground">
-              We sent a verification code to <strong>{email}</strong>
+              We sent a login link to <strong>{email}</strong>
             </p>
           </motion.div>
         ) : (
@@ -183,7 +149,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
             </AnimatePresence>
 
             <form
-              onSubmit={mode === "password" ? handlePassword : handleOtp}
+              onSubmit={mode === "password" ? handlePassword : handleMagicLink}
               className="space-y-4"
             >
               <div className="space-y-2.5">
@@ -210,33 +176,19 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
                   />
                 </div>
               )}
-              {mode === "otp" && otpSent && (
-                <div className="space-y-2.5">
-                  <Label htmlFor="code">验证码</Label>
-                  <Input
-                    id="code"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    placeholder="输入邮箱中的验证码"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    required
-                  />
-                </div>
-              )}
               <Button
                 type="submit"
                 className="w-full"
                 disabled={loading}
                 aria-label={
                   loading
-                    ? mode === "password" ? "正在登录" : otpSent ? "正在验证" : "正在发送验证码"
-                    : mode === "password" ? "登录" : otpSent ? "确认验证码" : "发送验证码"
+                    ? mode === "password" ? "正在登录" : "正在发送登录链接"
+                    : mode === "password" ? "登录" : "发送登录链接"
                 }
               >
                 {loading
-                  ? mode === "password" ? "正在登录..." : otpSent ? "正在验证..." : "正在发送验证码..."
-                  : mode === "password" ? "登录" : otpSent ? "确认验证码" : "发送验证码"}
+                  ? mode === "password" ? "正在登录..." : "正在发送登录链接..."
+                  : mode === "password" ? "登录" : "发送登录链接"}
               </Button>
               <button
                 type="button"
@@ -249,24 +201,6 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
                 {mode === "password" ? "使用验证码登录" : "使用密码登录"}
               </button>
             </form>
-
-            <motion.div variants={fadeIn} className="flex items-center gap-4">
-              <Separator className="flex-1" />
-              <span className="text-xs text-muted-foreground uppercase">or</span>
-              <Separator className="flex-1" />
-            </motion.div>
-
-            <motion.div variants={fadeIn}>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={handleGoogle}
-                type="button"
-                aria-label="使用 Google 账号继续"
-              >
-                Continue with Google
-              </Button>
-            </motion.div>
 
             <motion.p variants={fadeIn} className="text-center text-sm text-muted-foreground">
               Need an account?{" "}

@@ -52,6 +52,11 @@ export type ServerEnv = {
   lemonSqueezyApiKey?: string;
   lemonSqueezyStoreId?: string;
   lemonSqueezyWebhookSecret?: string;
+  mailHost?: string;
+  mailPort?: number;
+  mailUser?: string;
+  mailPassword?: string;
+  mailFrom?: string;
   lemonSqueezyVariantStarterMonthly?: string;
   lemonSqueezyVariantStarterYearly?: string;
   lemonSqueezyVariantProMonthly?: string;
@@ -166,6 +171,11 @@ export function loadServerEnv(
     normalizeOptionalString(source.LEMONSQUEEZY_VARIANT_BUSINESS_YEARLY);
   const skillsRoot =
     overrides.skillsRoot ?? normalizeOptionalString(source.HELSTERA_SKILLS_ROOT);
+  const mailHost = overrides.mailHost ?? normalizeOptionalString(source.MAIL_HOST);
+  const mailPort = overrides.mailPort ?? (source.MAIL_PORT ? Number.parseInt(source.MAIL_PORT, 10) : undefined);
+  const mailUser = overrides.mailUser ?? normalizeOptionalString(source.MAIL_USER);
+  const mailPassword = overrides.mailPassword ?? normalizeOptionalString(source.MAIL_PASSWORD);
+  const mailFrom = overrides.mailFrom ?? normalizeOptionalString(source.MAIL_FROM);
   const workerConcurrency =
     overrides.workerConcurrency ??
     (source.WORKER_CONCURRENCY
@@ -260,6 +270,11 @@ export function loadServerEnv(
       ? { lemonSqueezyVariantBusinessYearly }
       : {}),
     ...(skillsRoot ? { skillsRoot } : {}),
+    ...(mailHost ? { mailHost } : {}),
+    ...(mailPort ? { mailPort } : {}),
+    ...(mailUser ? { mailUser } : {}),
+    ...(mailPassword ? { mailPassword } : {}),
+    ...(mailFrom ? { mailFrom } : {}),
     ...(workerConcurrency ? { workerConcurrency } : {}),
     ...(workerImageConcurrency ? { workerImageConcurrency } : {}),
     ...(workerVideoConcurrency ? { workerVideoConcurrency } : {}),
