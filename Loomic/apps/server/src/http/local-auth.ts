@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
+import nodemailer from "nodemailer";
 import { issueLoginToken, exchangeLoginToken } from "../local-db/auth.js";
 import type { ServerEnv } from "../config/env.js";
 
@@ -14,8 +15,26 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
     }
     const token = await issueLoginToken(options.db, email);
     const link = `${options.env.webOrigin}/auth/callback?local_token=${encodeURIComponent(token)}`;
+    const { mailHost, mailUser, mailPassword, mailFrom } = options.env;
+    if (!mailHost || !mailUser || !mailPassword || !mailFrom) {
+      return reply.code(503).send({ error: { code: "email_not_configured", message: "登录邮件服务暂不可用" } });
+    }
+    const transporter = nodemailer.createTransport({
+      host: mailHost,
+      port: options.env.mailPort ?? 587,
+      secure: false,
+      requireTLS: true,
+      auth: { user: mailUser, pass: mailPassword },
+    });
+    await transporter.sendMail({
+      from: mailFrom,
+      to: email,
+      subject: "登录 Helstera",
+      text: `点击以下链接登录 Helstera（15 分钟内有效）：\n\n${link}`,
+      html: `<p>点击以下链接登录 Helstera（15 分钟内有效）：</p><p><a href="${link}">登录 Helstera</a></p>`,
+    });
     request.log.info({ email }, "local auth link issued");
-    return reply.send({ ok: true, link });
+    return reply.send({ ok: true });
   });
 
   app.post<{ Body: { token?: string } }>("/api/local-auth/exchange", async (request, reply) => {
