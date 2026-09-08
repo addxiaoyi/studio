@@ -10,7 +10,7 @@ import {
 } from "react";
 
 import { getSupabaseBrowserClient } from "./supabase-browser";
-import { fetchLocalSession } from "./local-auth";
+import { fetchLocalSession, signOutLocal } from "./local-auth";
 import { isLocalAuth } from "./env";
 
 interface AuthContextValue {
@@ -57,6 +57,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function signOut() {
+    if (isLocalAuth()) {
+      await signOutLocal();
+      setSession(null);
+      setUser(null);
+      return;
+    }
     const supabase = getSupabaseBrowserClient();
     await supabase.auth.signOut();
     setSession(null);

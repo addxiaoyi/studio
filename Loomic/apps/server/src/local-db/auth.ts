@@ -95,6 +95,10 @@ export async function getLocalSession(db: Pool, token: string) {
   return rows[0] ?? null;
 }
 
+export async function revokeLocalSession(db: Pool, token: string) {
+  await db.query("delete from sessions where token_hash = $1", [hashToken(token)]);
+}
+
 function readSessionToken(authorization: string | string[] | undefined, cookie: string | undefined) {
   const cookieMatch = cookie?.match(/(?:^|;\s*)helstera_session=([^;]+)/);
   if (cookieMatch?.[1]) return cookieMatch[1];

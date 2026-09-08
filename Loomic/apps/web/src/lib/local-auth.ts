@@ -23,3 +23,10 @@ export async function exchangeLocalToken(token: string) {
   if (!response.ok) throw new Error("登录链接已过期或已使用");
   return (await response.json()) as { access_token: string; user: { id: string; email: string } };
 }
+
+export async function signOutLocal(): Promise<void> {
+  await fetch(`${getServerBaseUrl()}/api/local-auth/sign-out`, {
+    method: "POST",
+    credentials: "include",
+  });
+}

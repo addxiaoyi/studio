@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import nodemailer from "nodemailer";
-import { issueLoginToken, exchangeLoginToken, getLocalSession } from "../local-db/auth.js";
+import { issueLoginToken, exchangeLoginToken, getLocalSession, revokeLocalSession } from "../local-db/auth.js";
 import type { ServerEnv } from "../config/env.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -50,5 +50,12 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
     const cookie = request.headers.cookie?.match(/(?:^|;\s*)helstera_session=([^;]+)/)?.[1];
     const user = cookie ? await getLocalSession(options.db, cookie) : null;
     return reply.send({ session: user ? { access_token: "local-session", user } : null });
+  });
+
+  app.post("/api/local-auth/sign-out", async (request, reply) => {
+    const token = request.headers.cookie?.match(/(?:^|;\s*)helstera_session=([^;]+)/)?.[1];
+    if (token) await revokeLocalSession(options.db, token);
+    reply.header("set-cookie", `${COOKIE}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax`);
+    return reply.code(204).send();
   });
 }
