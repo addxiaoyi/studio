@@ -25,6 +25,7 @@ export function resolveDefaultAgentModel(env: {
 export type AgentBackendMode = "filesystem" | "state";
 
 export type ServerEnv = {
+  authProvider?: "supabase" | "local";
   databaseUrl?: string;
   agentBackendMode: AgentBackendMode;
   agentFilesRoot?: string;
@@ -91,6 +92,8 @@ export function loadServerEnv(
     parseAgentFilesRoot(source.HELSTERA_AGENT_FILES_ROOT);
   const databaseUrl =
     overrides.databaseUrl ?? normalizeOptionalString(source.DATABASE_URL);
+  const authProvider =
+    overrides.authProvider ?? (source.AUTH_PROVIDER === "local" ? "local" : "supabase");
   const openAIApiBase =
     overrides.openAIApiBase ?? normalizeOptionalString(source.OPENAI_API_BASE);
   const openAIApiKey =
@@ -221,6 +224,7 @@ export function loadServerEnv(
     });
 
   return {
+    authProvider,
     ...(databaseUrl ? { databaseUrl } : {}),
     agentBackendMode:
       overrides.agentBackendMode ??

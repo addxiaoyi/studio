@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Pool } from "pg";
+import type { FastifyRequest } from "fastify";
+import type { AuthenticatedUser, RequestAuthenticator } from "../supabase/user.js";
 
 const TOKEN_TTL_MS = 15 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -15,11 +17,13 @@ export async function issueLoginToken(db: Pool, email: string) {
      returning id`,
     [email],
   );
+  const userId = user.rows[0]?.id;
+  if (!userId) throw new Error("Local auth user creation returned no id");
   const token = randomBytes(32).toString("base64url");
   await db.query(
     `insert into login_tokens (user_id, token_hash, expires_at)
      values ($1, $2, $3)`,
-    [user.rows[0].id, hashToken(token), new Date(Date.now() + TOKEN_TTL_MS)],
+    [userId, hashToken(token), new Date(Date.now() + TOKEN_TTL_MS)],
   );
   return token;
 }
@@ -55,4 +59,38 @@ export async function exchangeLoginToken(db: Pool, token: string) {
   } finally {
     client.release();
   }
+}
+
+export function createLocalRequestAuthenticator(db: Pool): RequestAuthenticator {
+  return {
+    async authenticate(request: Pick<FastifyRequest, "headers">) {
+      const token = readSessionToken(request.headers.authorization, request.headers.cookie);
+      if (!token) return null;
+      const { rows } = await db.query<{ id: string; email: string }>(
+        `select u.id, u.email from sessions s
+         join app_users u on u.id = s.user_id
+         where s.token_hash = $1 and s.expires_at > now()`,
+        [hashToken(token)],
+      );
+      const row = rows[0];
+      if (!row) return null;
+      await db.query("update sessions set last_seen_at = now() where token_hash = $1", [hashToken(token)]);
+      const user: AuthenticatedUser = {
+        accessToken: token,
+        email: row.email,
+        id: row.id,
+        userMetadata: {},
+      };
+      return user;
+    },
+  };
+}
+
+function readSessionToken(authorization: string | string[] | undefined, cookie: string | undefined) {
+  if (typeof authorization === "string") {
+    const [scheme, token] = authorization.trim().split(/\s+/, 2);
+    if (scheme?.toLowerCase() === "bearer" && token) return token;
+  }
+  const match = cookie?.match(/(?:^|;\s*)helstera_session=([^;]+)/);
+  return match?.[1] ?? null;
 }
