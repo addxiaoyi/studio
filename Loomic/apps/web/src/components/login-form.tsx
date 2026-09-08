@@ -9,6 +9,8 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { requestMagicLink, fetchViewer } from "../lib/server-api";
+import { requestLocalMagicLink } from "../lib/local-auth";
+import { isLocalAuth } from "../lib/env";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
 
 const stagger = {
@@ -52,7 +54,8 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
     setError(null);
 
     try {
-      await requestMagicLink(trimmed);
+      if (isLocalAuth()) await requestLocalMagicLink(trimmed);
+      else await requestMagicLink(trimmed);
       setLinkSent(true);
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : "登录邮件发送失败，请稍后重试");

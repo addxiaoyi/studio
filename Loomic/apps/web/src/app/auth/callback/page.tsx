@@ -10,6 +10,8 @@ import {
   fetchViewer,
 } from "../../../lib/server-api";
 import { getSupabaseBrowserClient } from "../../../lib/supabase-browser";
+import { exchangeLocalToken } from "../../../lib/local-auth";
+import { isLocalAuth } from "../../../lib/env";
 
 const CALLBACK_TIMEOUT_MS = 5_000;
 
@@ -27,10 +29,16 @@ function AuthCallbackPageContent() {
     started.current = true;
 
     const code = searchParams.get("code");
+    const localToken = searchParams.get("local_token");
     const providerError = searchParams.get("error");
 
     if (providerError) {
       router.replace(loginErrorUrl(providerError));
+      return;
+    }
+
+    if (isLocalAuth() && localToken) {
+      void exchangeLocalToken(localToken).then(() => router.replace("/home")).catch(() => router.replace(loginErrorUrl("auth_exchange_failed")));
       return;
     }
 

@@ -10,6 +10,8 @@ import {
 } from "react";
 
 import { getSupabaseBrowserClient } from "./supabase-browser";
+import { fetchLocalSession } from "./local-auth";
+import { isLocalAuth } from "./env";
 
 interface AuthContextValue {
   user: User | null;
@@ -26,6 +28,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (isLocalAuth()) {
+      void fetchLocalSession().then(({ session: localSession }) => {
+        const nextSession = localSession as unknown as Session | null;
+        setSession(nextSession);
+        setUser(localSession?.user as User | undefined ?? null);
+        setLoading(false);
+      }).catch(() => setLoading(false));
+      return;
+    }
     const supabase = getSupabaseBrowserClient();
 
     supabase.auth.getSession().then(({ data }) => {

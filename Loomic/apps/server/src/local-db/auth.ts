@@ -86,11 +86,21 @@ export function createLocalRequestAuthenticator(db: Pool): RequestAuthenticator 
   };
 }
 
+export async function getLocalSession(db: Pool, token: string) {
+  const { rows } = await db.query<{ id: string; email: string }>(
+    `select u.id, u.email from sessions s join app_users u on u.id = s.user_id
+     where s.token_hash = $1 and s.expires_at > now()`,
+    [hashToken(token)],
+  );
+  return rows[0] ?? null;
+}
+
 function readSessionToken(authorization: string | string[] | undefined, cookie: string | undefined) {
+  const cookieMatch = cookie?.match(/(?:^|;\s*)helstera_session=([^;]+)/);
+  if (cookieMatch?.[1]) return cookieMatch[1];
   if (typeof authorization === "string") {
     const [scheme, token] = authorization.trim().split(/\s+/, 2);
     if (scheme?.toLowerCase() === "bearer" && token) return token;
   }
-  const match = cookie?.match(/(?:^|;\s*)helstera_session=([^;]+)/);
-  return match?.[1] ?? null;
+  return null;
 }

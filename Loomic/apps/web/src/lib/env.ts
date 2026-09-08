@@ -1,5 +1,9 @@
 const defaultServerBaseUrl = "http://localhost:3001";
 
+export function isLocalAuth() {
+  return process.env.NEXT_PUBLIC_AUTH_PROVIDER === "local";
+}
+
 export function getServerBaseUrl() {
   // Must access process.env.NEXT_PUBLIC_* directly — webpack DefinePlugin
   // only replaces direct references, not indirect access via a variable.
