@@ -87,6 +87,7 @@ import { registerLocalAuthRoutes } from "./http/local-auth.js";
 import { createLocalDbPool } from "./local-db/client.js";
 import { createLocalRequestAuthenticator } from "./local-db/auth.js";
 import { createLocalProjectService } from "./local-db/project-service.js";
+import { createLocalViewerService } from "./local-db/viewer-service.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
 import { registerModelRoutes } from "./http/models.js";
@@ -176,7 +177,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     return adminClient;
   };
   const viewerService =
-    options.viewerService ?? createViewerService({ getAdminClient });
+    options.viewerService ??
+    (env.authProvider === "local" && localDb
+      ? createLocalViewerService(localDb)
+      : createViewerService({ getAdminClient }));
   const projectService =
     options.projectService ??
     (env.authProvider === "local" && localDb
