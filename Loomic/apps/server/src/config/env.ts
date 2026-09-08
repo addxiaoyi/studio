@@ -25,6 +25,7 @@ export function resolveDefaultAgentModel(env: {
 export type AgentBackendMode = "filesystem" | "state";
 
 export type ServerEnv = {
+  databaseUrl?: string;
   agentBackendMode: AgentBackendMode;
   agentFilesRoot?: string;
   agentModel: string;
@@ -88,6 +89,8 @@ export function loadServerEnv(
   const agentFilesRoot =
     overrides.agentFilesRoot ??
     parseAgentFilesRoot(source.HELSTERA_AGENT_FILES_ROOT);
+  const databaseUrl =
+    overrides.databaseUrl ?? normalizeOptionalString(source.DATABASE_URL);
   const openAIApiBase =
     overrides.openAIApiBase ?? normalizeOptionalString(source.OPENAI_API_BASE);
   const openAIApiKey =
@@ -218,6 +221,7 @@ export function loadServerEnv(
     });
 
   return {
+    ...(databaseUrl ? { databaseUrl } : {}),
     agentBackendMode:
       overrides.agentBackendMode ??
       parseAgentBackendMode(source.HELSTERA_AGENT_BACKEND_MODE),

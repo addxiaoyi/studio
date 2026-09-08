@@ -83,6 +83,8 @@ import { registerChatRoutes } from "./http/chat.js";
 import { registerGenerateRoutes } from "./http/generate.js";
 import { registerHealthRoutes } from "./http/health.js";
 import { registerMetricsRoutes } from "./http/metrics.js";
+import { registerLocalAuthRoutes } from "./http/local-auth.js";
+import { createLocalDbPool } from "./local-db/client.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
 import { registerModelRoutes } from "./http/models.js";
@@ -268,6 +270,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   void registerHealthRoutes(app, env);
   void registerMetricsRoutes(app);
+  if (env.databaseUrl) {
+    const localDb = createLocalDbPool(env.databaseUrl);
+    void registerLocalAuthRoutes(app, { db: localDb, env });
+  }
   void registerAuthRoutes(app, { env, getAdminClient });
   void registerFontsRoutes(app, { env });
   void registerImageProxyRoute(app);
