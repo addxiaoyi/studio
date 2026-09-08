@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import nodemailer from "nodemailer";
-import { issueLoginToken, exchangeLoginToken } from "../local-db/auth.js";
+import { issueLoginToken, exchangeLoginToken, getLocalSession } from "../local-db/auth.js";
 import type { ServerEnv } from "../config/env.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -43,6 +43,12 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
     const session = await exchangeLoginToken(options.db, token);
     if (!session) return reply.code(401).send({ error: { code: "invalid_token", message: "登录链接已过期或已使用" } });
     reply.header("set-cookie", `${COOKIE}=${session.token}; Max-Age=${30 * 24 * 60 * 60}; Path=/; HttpOnly; Secure; SameSite=Lax`);
-    return reply.send({ ok: true, user: { id: session.userId, email: session.email } });
+    return reply.send({ ok: true, access_token: "local-session", user: { id: session.userId, email: session.email } });
+  });
+
+  app.get("/api/local-auth/session", async (request, reply) => {
+    const cookie = request.headers.cookie?.match(/(?:^|;\s*)helstera_session=([^;]+)/)?.[1];
+    const user = cookie ? await getLocalSession(options.db, cookie) : null;
+    return reply.send({ session: user ? { access_token: "local-session", user } : null });
   });
 }
