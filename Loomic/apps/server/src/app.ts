@@ -86,6 +86,7 @@ import { registerMetricsRoutes } from "./http/metrics.js";
 import { registerLocalAuthRoutes } from "./http/local-auth.js";
 import { createLocalDbPool } from "./local-db/client.js";
 import { createLocalRequestAuthenticator } from "./local-db/auth.js";
+import { createLocalProjectService } from "./local-db/project-service.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
 import { registerModelRoutes } from "./http/models.js";
@@ -178,7 +179,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     options.viewerService ?? createViewerService({ getAdminClient });
   const projectService =
     options.projectService ??
-    createProjectService({ createUserClient, viewerService });
+    (env.authProvider === "local" && localDb
+      ? createLocalProjectService(localDb)
+      : createProjectService({ createUserClient, viewerService }));
   const brandKitService =
     options.brandKitService ?? createBrandKitService({ createUserClient });
   const canvasService =
