@@ -93,6 +93,7 @@ import { createLocalChatService } from "./local-db/chat-service.js";
 import { createLocalUploadService } from "./local-db/upload-service.js";
 import { createLocalCreditService } from "./local-db/credit-service.js";
 import { createLocalThreadService } from "./local-db/thread-service.js";
+import { createLocalSettingsService } from "./local-db/settings-service.js";
 import { registerLocalAssetRoutes } from "./http/local-assets.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
@@ -216,10 +217,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     options.agentPersistenceService ?? createAgentPersistenceService(env);
   const settingsService =
     options.settingsService ??
-      createSettingsService({
+      (env.authProvider === "local" && localDb
+        ? createLocalSettingsService(localDb)
+        : createSettingsService({
         createUserClient,
         defaultModel: resolveDefaultAgentModel(env),
-      });
+      }));
   const uploadService =
     options.uploadService ??
     (env.authProvider === "local" && localDb

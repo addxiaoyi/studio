@@ -129,5 +129,11 @@ create table if not exists credit_transactions (
 );
 create index if not exists credit_transactions_workspace_idx on credit_transactions(workspace_id, created_at desc);
 
+create table if not exists workspace_settings (
+  workspace_id uuid primary key references workspaces(id) on delete cascade,
+  default_model text not null,
+  updated_at timestamptz not null default now()
+);
+
 create unique index if not exists canvases_one_primary_per_project_idx
   on canvases(project_id) where is_primary;
