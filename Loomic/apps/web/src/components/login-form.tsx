@@ -30,9 +30,10 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"magic" | "password">("magic");
+  const [code, setCode] = useState("");
+  const [mode, setMode] = useState<"otp" | "password">("otp");
   const [loading, setLoading] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
   const [error, setError] = useState<string | null>(initialErrorMessage);
 
   async function bootstrapWorkspace(accessToken: string) {
@@ -44,28 +45,40 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
     }
   }
 
-  async function handleMagicLink(e: FormEvent<HTMLFormElement>) {
+  async function handleOtp(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const trimmed = email.trim();
     if (!trimmed) return;
+
     setLoading(true);
     setError(null);
 
     const supabase = getSupabaseBrowserClient();
-    const { error: authError } = await supabase.auth.signInWithOtp({
+    if (!otpSent) {
+      const { error: authError } = await supabase.auth.signInWithOtp({
+        email: trimmed,
+        options: { shouldCreateUser: false },
+      });
+
+      setLoading(false);
+      if (authError) setError(authError.message);
+      else setOtpSent(true);
+      return;
+    }
+
+    const { data, error: authError } = await supabase.auth.verifyOtp({
       email: trimmed,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-        shouldCreateUser: false,
-      },
+      token: code.trim(),
+      type: "email",
     });
 
     setLoading(false);
-    if (authError) {
-      setError(authError.message);
-    } else {
-      setSent(true);
+    if (authError || !data.session?.access_token) {
+      setError(authError?.message ?? "验证码无效或已过期，请重新获取");
+      return;
     }
+
+    await bootstrapWorkspace(data.session.access_token);
   }
 
   async function handlePassword(e: FormEvent<HTMLFormElement>) {
@@ -114,7 +127,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
   return (
     <div className="w-full max-w-sm">
       <AnimatePresence mode="wait">
-        {sent ? (
+              {otpSent && mode === "otp" ? (
           <motion.div
             key="sent"
             initial={{ opacity: 0, scale: 0.95 }}
@@ -142,7 +155,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
             </motion.div>
             <h2 className="text-lg font-medium">Check your email</h2>
             <p className="text-sm text-muted-foreground">
-              We sent a login link to <strong>{email}</strong>
+              We sent a verification code to <strong>{email}</strong>
             </p>
           </motion.div>
         ) : (
@@ -170,7 +183,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
             </AnimatePresence>
 
             <form
-              onSubmit={mode === "password" ? handlePassword : handleMagicLink}
+              onSubmit={mode === "password" ? handlePassword : handleOtp}
               className="space-y-4"
             >
               <div className="space-y-2.5">
@@ -197,29 +210,43 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
                   />
                 </div>
               )}
+              {mode === "otp" && otpSent && (
+                <div className="space-y-2.5">
+                  <Label htmlFor="code">验证码</Label>
+                  <Input
+                    id="code"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    placeholder="输入邮箱中的验证码"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
               <Button
                 type="submit"
                 className="w-full"
                 disabled={loading}
                 aria-label={
                   loading
-                    ? mode === "password" ? "正在登录" : "正在发送登录链接"
-                    : mode === "password" ? "登录" : "发送登录链接"
+                    ? mode === "password" ? "正在登录" : otpSent ? "正在验证" : "正在发送验证码"
+                    : mode === "password" ? "登录" : otpSent ? "确认验证码" : "发送验证码"
                 }
               >
                 {loading
-                  ? mode === "password" ? "正在登录..." : "正在发送登录链接..."
-                  : mode === "password" ? "登录" : "发送登录链接"}
+                  ? mode === "password" ? "正在登录..." : otpSent ? "正在验证..." : "正在发送验证码..."
+                  : mode === "password" ? "登录" : otpSent ? "确认验证码" : "发送验证码"}
               </Button>
               <button
                 type="button"
                 onClick={() => {
-                  setMode(mode === "password" ? "magic" : "password");
+                  setMode(mode === "password" ? "otp" : "password");
                   setError(null);
                 }}
                 className="w-full text-xs text-muted-foreground hover:text-foreground transition-all duration-300"
               >
-                {mode === "password" ? "Use login link instead" : "Use password instead"}
+                {mode === "password" ? "使用验证码登录" : "使用密码登录"}
               </button>
             </form>
 
