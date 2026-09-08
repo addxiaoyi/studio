@@ -95,6 +95,7 @@ import { createLocalCreditService } from "./local-db/credit-service.js";
 import { createLocalThreadService } from "./local-db/thread-service.js";
 import { createLocalSettingsService } from "./local-db/settings-service.js";
 import { createLocalBrandKitService } from "./local-db/brand-kit-service.js";
+import { createLocalAgentRunMetadataService } from "./local-db/agent-run-service.js";
 import { registerLocalAssetRoutes } from "./http/local-assets.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
@@ -216,7 +217,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       : createChatService({ createUserClient, threadService }));
   const agentRunMetadataService =
     options.agentRunMetadataService ??
-    createAgentRunMetadataService({ getAdminClient });
+    (env.authProvider === "local" && localDb
+      ? createLocalAgentRunMetadataService(localDb)
+      : createAgentRunMetadataService({ getAdminClient }));
   const agentPersistenceService =
     options.agentPersistenceService ?? createAgentPersistenceService(env);
   const settingsService =

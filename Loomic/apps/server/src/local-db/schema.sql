@@ -162,5 +162,19 @@ create table if not exists brand_kit_assets (
 );
 create index if not exists brand_kit_assets_kit_idx on brand_kit_assets(kit_id, sort_order, created_at);
 
+create table if not exists agent_runs (
+  id uuid primary key,
+  session_id uuid not null references chat_sessions(id) on delete cascade,
+  thread_id text not null,
+  status text not null check (status in ('accepted', 'running', 'completed', 'failed')),
+  model text,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz,
+  error_code text,
+  error_message text
+);
+create index if not exists agent_runs_session_idx on agent_runs(session_id, created_at desc);
+create index if not exists agent_runs_thread_idx on agent_runs(thread_id, created_at desc);
+
 create unique index if not exists canvases_one_primary_per_project_idx
   on canvases(project_id) where is_primary;
