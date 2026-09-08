@@ -1,0 +1,13 @@
+packages:
+  - apps/web
+  - apps/server
+  - packages/*
+  - local-infra/supabase-mock
+
+ignoredBuiltDependencies:
+  - '@biomejs/biome'
+  - msw
+
+onlyBuiltDependencies:
+  - esbuild
+  - sharp

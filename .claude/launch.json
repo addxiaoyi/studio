@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "helstera-web",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev"],
+      "port": 3004,
+      "autoPort": true,
+      "cwd": "D:/qwq/项目/scpit/Loomic/apps/web"
+    }
+  ]
+}

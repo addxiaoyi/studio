@@ -1,0 +1,31 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /canvas/
+Disallow: /home
+Disallow: /settings
+Disallow: /projects/
+Disallow: /brand-kit
+Disallow: /team
+Disallow: /skills
+Disallow: /onboarding
+Disallow: /auth/
+
+# AI crawlers — explicitly allow for search visibility
+User-agent: GPTBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+# Sitemaps
+Sitemap: https://helstera.com/sitemap.xml

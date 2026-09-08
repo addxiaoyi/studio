@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NEXT_PUBLIC_SERVER_BASE_URL: http://localhost:3001
+  SUPABASE_URL: http://localhost:54321
+  SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.local-mock-key
+  SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.local-mock-service-role
+  SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/helstera
+  SUPABASE_PROJECT_ID: local-dev
+  SUPABASE_JWT_SECRET: helstera-local-dev-secret
+  HELSTERA_AGENT_BACKEND_MODE: state
+  HELSTERA_AGENT_MODEL: google:gemini-3-flash-preview
+  HELSTERA_SERVER_PORT: 3001
+  HELSTERA_WEB_ORIGIN: http://localhost:3000
+
+jobs:
+  test:
+    name: Typecheck + Unit + E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Skip desktop app
+        run: |
+          # desktop package has a peer-dep version mismatch — exclude from build
+          echo "Skipping desktop (out of scope for this CI)"
+
+      - name: Build shared package
+        run: pnpm --filter @helstera/shared build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests (shared)
+        run: pnpm --filter @helstera/shared test
+
+      - name: Unit tests (web)
+        run: pnpm --filter @helstera/web test
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @helstera/web exec playwright install --with-deps chromium
+
+      - name: E2E tests
+        run: pnpm --filter @helstera/web e2e --project=chromium
+        env:
+          E2E_BASE_URL: http://localhost:3000
+
+      - name: Build (verifies static export succeeds)
+        run: pnpm --filter @helstera/web build

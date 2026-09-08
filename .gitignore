@@ -1,0 +1,92 @@
+# Dependencies
+node_modules/
+**/node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+.next/
+out/
+dist/
+build/
+.vercel/
+**/dist-electron/
+**/.turbo/
+
+# Testing
+coverage/
+.mimosa/hook-state/
+.mimosa/hook-status/
+
+# Mimosa ignore file (tracked)
+!.mimosaignore
+**/.mimosa/
+
+# Local deployment helpers may contain server credentials
+deploy_*.py
+
+# Local generated artifacts
+.video_agent/
+**/supabase/.branches/
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.secret
+*.jwt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+bun-debug.log*
+
+# Supabase local
+supabase/.branches
+supabase/.temp
+supabase/migrations/
+
+# local-infra
+local-infra/
+
+# Desktop build
+apps/desktop/dist/
+apps/desktop/dist-electron/
+apps/desktop/.turbo/
+apps/desktop/node_modules/
+
+# Server build
+apps/server/node_modules/
+apps/server/dist/
+apps/server/.turbo/
+apps/server/.dockerignore
+
+# Web build
+apps/web/.next/
+apps/web/out/
+apps/web/dist/
+apps/web/node_modules/
+
+# Shared packages
+packages/*/dist/
+packages/*/node_modules/
+packages/ui/node_modules/
+
+# UI package build
+packages/ui/.next/
+
+# Lock files (keep pnpm-lock.yaml for reproducibility)
+pnpm-lock.yaml
+bun.lock
