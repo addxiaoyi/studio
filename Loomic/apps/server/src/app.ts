@@ -92,6 +92,7 @@ import { createLocalCanvasService } from "./local-db/canvas-service.js";
 import { createLocalChatService } from "./local-db/chat-service.js";
 import { createLocalUploadService } from "./local-db/upload-service.js";
 import { createLocalCreditService } from "./local-db/credit-service.js";
+import { createLocalThreadService } from "./local-db/thread-service.js";
 import { registerLocalAssetRoutes } from "./http/local-assets.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
@@ -199,7 +200,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ? createLocalCanvasService(localDb)
       : createCanvasService({ createUserClient }));
   const threadService =
-    options.threadService ?? createThreadService({ createUserClient });
+    options.threadService ??
+    (env.authProvider === "local" && localDb
+      ? createLocalThreadService(localDb)
+      : createThreadService({ createUserClient }));
   const chatService =
     options.chatService ??
     (env.authProvider === "local" && localDb
