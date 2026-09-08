@@ -176,5 +176,46 @@ create table if not exists agent_runs (
 create index if not exists agent_runs_session_idx on agent_runs(session_id, created_at desc);
 create index if not exists agent_runs_thread_idx on agent_runs(thread_id, created_at desc);
 
+create table if not exists skills (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  slug text not null unique,
+  description text not null default '',
+  author text not null default 'system',
+  version text not null default '1.0',
+  license text,
+  category text not null default 'custom',
+  icon_name text,
+  source text not null default 'system',
+  skill_content text not null default '',
+  metadata jsonb not null default '{}'::jsonb,
+  is_featured boolean not null default false,
+  created_by uuid references app_users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists skill_files (
+  id uuid primary key default gen_random_uuid(),
+  skill_id uuid not null references skills(id) on delete cascade,
+  file_path text not null,
+  content text not null default '',
+  mime_type text not null default 'text/plain',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (skill_id, file_path)
+);
+
+create table if not exists workspace_skills (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  skill_id uuid not null references skills(id) on delete cascade,
+  enabled boolean not null default true,
+  config jsonb not null default '{}'::jsonb,
+  installed_at timestamptz not null default now(),
+  installed_by uuid references app_users(id) on delete set null,
+  unique (workspace_id, skill_id)
+);
+
 create unique index if not exists canvases_one_primary_per_project_idx
   on canvases(project_id) where is_primary;
