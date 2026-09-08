@@ -91,6 +91,7 @@ import { createLocalViewerService } from "./local-db/viewer-service.js";
 import { createLocalCanvasService } from "./local-db/canvas-service.js";
 import { createLocalChatService } from "./local-db/chat-service.js";
 import { createLocalUploadService } from "./local-db/upload-service.js";
+import { registerLocalAssetRoutes } from "./http/local-assets.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
 import { registerModelRoutes } from "./http/models.js";
@@ -300,6 +301,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   void registerMetricsRoutes(app);
   if (localDb) {
     void registerLocalAuthRoutes(app, { db: localDb, env });
+    void registerLocalAssetRoutes(app, { db: localDb, auth, root: "/www/helstera/uploads" });
   }
   void registerAuthRoutes(app, { env, getAdminClient });
   void registerFontsRoutes(app, { env });
