@@ -14,7 +14,7 @@ export type AgentPersistenceService = {
 };
 
 export function createAgentPersistenceService(
-  env: Pick<ServerEnv, "supabaseDbUrl">,
+  env: Pick<ServerEnv, "supabaseDbUrl" | "databaseUrl" | "authProvider">,
   overrides?: {
     createCheckpointer?: typeof createSupabaseCheckpointer;
     createStore?: typeof createSupabaseStore;
@@ -24,17 +24,19 @@ export function createAgentPersistenceService(
 
   return {
     async getPersistence() {
-      if (!env.supabaseDbUrl) {
+      const connectionString =
+        env.authProvider === "local" ? env.databaseUrl : env.supabaseDbUrl;
+      if (!connectionString) {
         return null;
       }
 
       if (!pendingPersistence) {
         pendingPersistence = Promise.all([
-          (overrides?.createCheckpointer ?? createSupabaseCheckpointer)({
-            connectionString: env.supabaseDbUrl,
+            (overrides?.createCheckpointer ?? createSupabaseCheckpointer)({
+              connectionString,
           }),
-          (overrides?.createStore ?? createSupabaseStore)({
-            connectionString: env.supabaseDbUrl,
+            (overrides?.createStore ?? createSupabaseStore)({
+              connectionString,
           }),
         ])
           .then(([checkpointer, store]) => ({ checkpointer, store }))
