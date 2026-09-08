@@ -109,5 +109,25 @@ create table if not exists asset_objects (
   created_at timestamptz not null default now()
 );
 
+create table if not exists credit_balances (
+  workspace_id uuid primary key references workspaces(id) on delete cascade,
+  balance integer not null default 0 check (balance >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists credit_transactions (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  user_id uuid references app_users(id) on delete set null,
+  transaction_type text not null,
+  amount integer not null,
+  balance_after integer,
+  job_id text,
+  description text,
+  created_at timestamptz not null default now()
+);
+create index if not exists credit_transactions_workspace_idx on credit_transactions(workspace_id, created_at desc);
+
 create unique index if not exists canvases_one_primary_per_project_idx
   on canvases(project_id) where is_primary;

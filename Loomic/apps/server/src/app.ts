@@ -91,6 +91,7 @@ import { createLocalViewerService } from "./local-db/viewer-service.js";
 import { createLocalCanvasService } from "./local-db/canvas-service.js";
 import { createLocalChatService } from "./local-db/chat-service.js";
 import { createLocalUploadService } from "./local-db/upload-service.js";
+import { createLocalCreditService } from "./local-db/credit-service.js";
 import { registerLocalAssetRoutes } from "./http/local-assets.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
@@ -229,7 +230,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ? createJobService({ createUserClient, getAdminClient, pgmq })
       : undefined);
   const creditService =
-    options.creditService ?? createCreditService({ getAdminClient });
+    options.creditService ??
+    (env.authProvider === "local" && localDb
+      ? createLocalCreditService(localDb)
+      : createCreditService({ getAdminClient }));
   const tierGuard =
     options.tierGuard ?? createTierGuard({ getAdminClient });
 
