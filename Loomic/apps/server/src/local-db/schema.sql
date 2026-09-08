@@ -72,5 +72,7 @@ create table if not exists canvases (
   updated_at timestamptz not null default now()
 );
 
+alter table canvases add column if not exists content jsonb not null default '{}'::jsonb;
+
 create unique index if not exists canvases_one_primary_per_project_idx
   on canvases(project_id) where is_primary;
