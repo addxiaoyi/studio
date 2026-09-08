@@ -97,5 +97,17 @@ create table if not exists chat_messages (
 create index if not exists chat_sessions_canvas_idx on chat_sessions(canvas_id);
 create index if not exists chat_messages_session_idx on chat_messages(session_id, created_at);
 
+create table if not exists asset_objects (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  project_id uuid references projects(id) on delete cascade,
+  bucket text not null,
+  object_path text not null unique,
+  mime_type text,
+  byte_size bigint,
+  created_by uuid references app_users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
 create unique index if not exists canvases_one_primary_per_project_idx
   on canvases(project_id) where is_primary;

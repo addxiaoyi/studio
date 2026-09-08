@@ -90,6 +90,7 @@ import { createLocalProjectService } from "./local-db/project-service.js";
 import { createLocalViewerService } from "./local-db/viewer-service.js";
 import { createLocalCanvasService } from "./local-db/canvas-service.js";
 import { createLocalChatService } from "./local-db/chat-service.js";
+import { createLocalUploadService } from "./local-db/upload-service.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
 import { registerModelRoutes } from "./http/models.js";
@@ -214,7 +215,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         defaultModel: resolveDefaultAgentModel(env),
       });
   const uploadService =
-    options.uploadService ?? createUploadService({ createUserClient });
+    options.uploadService ??
+    (env.authProvider === "local" && localDb
+      ? createLocalUploadService(localDb)
+      : createUploadService({ createUserClient }));
   const pgmq = env.supabaseDbUrl
     ? createPgmqClient(env.supabaseDbUrl)
     : undefined;
