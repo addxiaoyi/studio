@@ -74,10 +74,11 @@ export function createSupabaseRequestAuthenticator(
 ): RequestAuthenticator {
   jwtPublicKeyPromise = initJwtKey(env);
 
-  // Fallback: remote verification when JWT key is not configured
-  const createUserClient = jwtPublicKeyPromise
-    ? null
-    : createUserSupabaseClientFactory(env);
+  // Supabase is the source of truth. Local verification can drift after key rotation.
+  const createUserClient =
+    env.supabaseUrl && env.supabaseAnonKey
+      ? createUserSupabaseClientFactory(env)
+      : null;
 
   return {
     async authenticate(request) {
@@ -88,8 +89,26 @@ export function createSupabaseRequestAuthenticator(
       const cached = getCachedAuth(accessToken);
       if (cached) return cached;
 
-      // 2. Local JWT verification (preferred)
-      if (jwtPublicKeyPromise) {
+      // 2. Remote verification keeps this process aligned with Supabase keys.
+      if (createUserClient) {
+        const client = createUserClient(accessToken);
+        const { data, error } = await client.auth.getUser();
+        if (!error && data.user?.email) {
+          const user: AuthenticatedUser = {
+            accessToken,
+            email: data.user.email,
+            id: data.user.id,
+            userMetadata: isRecord(data.user.user_metadata)
+              ? data.user.user_metadata
+              : {},
+          };
+          setCachedAuth(accessToken, user);
+          return user;
+        }
+      }
+
+      // 3. Local verification is only a fallback for self-hosted setups.
+      if (jwtPublicKeyPromise && !createUserClient) {
         try {
           const key = await jwtPublicKeyPromise;
           const { payload } = await jwtVerify(accessToken, key, {
@@ -117,26 +136,6 @@ export function createSupabaseRequestAuthenticator(
           // Invalid / expired token
           return null;
         }
-      }
-
-      // 3. Fallback: remote auth.getUser()
-      if (createUserClient) {
-        const client = createUserClient(accessToken);
-        const { data, error } = await client.auth.getUser();
-
-        if (error || !data.user || !data.user.email) return null;
-
-        const user: AuthenticatedUser = {
-          accessToken,
-          email: data.user.email,
-          id: data.user.id,
-          userMetadata: isRecord(data.user.user_metadata)
-            ? data.user.user_metadata
-            : {},
-        };
-
-        setCachedAuth(accessToken, user);
-        return user;
       }
 
       return null;
