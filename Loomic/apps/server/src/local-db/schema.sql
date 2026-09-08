@@ -135,5 +135,32 @@ create table if not exists workspace_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists brand_kits (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references app_users(id) on delete cascade,
+  name text not null default '未命名',
+  is_default boolean not null default false,
+  guidance_text text,
+  cover_url text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists brand_kits_default_idx on brand_kits(user_id) where is_default;
+
+create table if not exists brand_kit_assets (
+  id uuid primary key default gen_random_uuid(),
+  kit_id uuid not null references brand_kits(id) on delete cascade,
+  asset_type text not null check (asset_type in ('color', 'font', 'logo', 'image')),
+  display_name text not null default '',
+  role text,
+  sort_order integer not null default 0,
+  text_content text,
+  file_url text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists brand_kit_assets_kit_idx on brand_kit_assets(kit_id, sort_order, created_at);
+
 create unique index if not exists canvases_one_primary_per_project_idx
   on canvases(project_id) where is_primary;

@@ -94,6 +94,7 @@ import { createLocalUploadService } from "./local-db/upload-service.js";
 import { createLocalCreditService } from "./local-db/credit-service.js";
 import { createLocalThreadService } from "./local-db/thread-service.js";
 import { createLocalSettingsService } from "./local-db/settings-service.js";
+import { createLocalBrandKitService } from "./local-db/brand-kit-service.js";
 import { registerLocalAssetRoutes } from "./http/local-assets.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
@@ -194,7 +195,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ? createLocalProjectService(localDb)
       : createProjectService({ createUserClient, viewerService }));
   const brandKitService =
-    options.brandKitService ?? createBrandKitService({ createUserClient });
+    options.brandKitService ??
+    (env.authProvider === "local" && localDb
+      ? createLocalBrandKitService(localDb)
+      : createBrandKitService({ createUserClient }));
   const canvasService =
     options.canvasService ??
     (env.authProvider === "local" && localDb
