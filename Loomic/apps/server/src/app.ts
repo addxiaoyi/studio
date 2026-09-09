@@ -107,6 +107,7 @@ import { registerRunRoutes } from "./http/runs.js";
 import { registerSettingsRoutes } from "./http/settings.js";
 import { registerUploadRoutes } from "./http/uploads.js";
 import { registerSkillRoutes } from "./http/skills.js";
+import { registerLocalSkillRoutes } from "./http/local-skills.js";
 import { registerMarketplaceRoutes } from "./http/skills-marketplace.js";
 import { registerViewerRoutes } from "./http/viewer.js";
 import { CanvasEventBuffer } from "./ws/event-buffer.js";
@@ -383,7 +384,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   if (jobService) {
     void registerJobRoutes(app, { auth, creditService, jobService, tierGuard, viewerService });
   }
-  void registerSkillRoutes(app, { auth, createUserClient, viewerService });
+  if (env.authProvider === "local" && localDb) {
+    void registerLocalSkillRoutes(app, { auth, db: localDb, viewerService });
+  } else {
+    void registerSkillRoutes(app, { auth, createUserClient, viewerService });
+  }
   void registerMarketplaceRoutes(app, { auth, createUserClient, viewerService });
 
   // Contact sales — public endpoint, no auth required
