@@ -59,7 +59,12 @@ export function YeePayCheckoutDialog({
         );
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : "创建订单失败");
+        const message = err instanceof Error ? err.message : "创建订单失败";
+        setError(
+          message.includes("404")
+            ? "易支付渠道尚未配置，请联系管理员。"
+            : message,
+        );
         setStatus("failed");
       });
   }, [open, packageId, accessToken, retryKey]);
@@ -249,18 +254,18 @@ export function YeePayCheckoutDialog({
             {status === "failed" && (
               <div className="flex flex-col items-center gap-3 py-10">
                 <p className="text-base font-medium text-foreground">
-                  创建订单失败
+                  支付渠道暂不可用
                 </p>
                 <p className="text-sm text-destructive text-center max-w-xs font-light leading-relaxed">
                   {error}
                 </p>
                 <Button
-                  onClick={() => setRetryKey((k) => k + 1)}
+                  onClick={() => onOpenChange(false)}
                   className="mt-2 rounded-full"
                   variant="outline"
                 >
                   <RefreshCw className="size-3.5 mr-1" strokeWidth={1.5} />
-                  重试
+                  返回
                 </Button>
               </div>
             )}
