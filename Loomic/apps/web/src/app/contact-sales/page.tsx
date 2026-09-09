@@ -170,8 +170,7 @@ export default function ContactSalesPage() {
           <motion.div
             {...fadeUp}
             initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true, amount: 0.1 }}
+            animate="visible"
             className="mt-6"
           >
             <p className="body-relaxed max-w-2xl">
@@ -187,6 +186,8 @@ export default function ContactSalesPage() {
                 <motion.div
                   key={plan.name}
                   {...fadeUp}
+                  initial="hidden"
+                  animate="visible"
                   className={cn(
                     "rounded-[1.5rem] p-7 transition-all duration-500",
                     plan.highlighted
@@ -234,6 +235,8 @@ export default function ContactSalesPage() {
               {/* Contact info — glass card */}
               <motion.div
                 {...fadeUp}
+                initial="hidden"
+                animate="visible"
                 className="mt-6 rounded-[1.5rem] glass-soft border border-border/40 p-7"
               >
                 <h3 className="text-sm font-medium text-foreground tracking-tight">
@@ -263,7 +266,7 @@ export default function ContactSalesPage() {
             </div>
 
             {/* Right: Form — glass card */}
-            <motion.div {...fadeUp}>
+            <motion.div {...fadeUp} initial="hidden" animate="visible">
               <div className="rounded-[1.5rem] glass border border-border/40 p-8 sticky top-28">
                 {state.kind === "success" ? (
                   <div className="flex flex-col items-center gap-5 py-16 text-center">
