@@ -17,6 +17,7 @@ import {
   type SubmitVideoJobFn,
 } from "./video-generate.js";
 import { createPersistSandboxFileTool } from "./persist-sandbox-file.js";
+import type { Pool } from "pg";
 
 export { createImageGenerateTool } from "./image-generate.js";
 export { createVideoGenerateTool } from "./video-generate.js";
@@ -55,6 +56,7 @@ export function createMainAgentTools(
   backend: BackendProtocol | BackendFactory,
   deps: {
     createUserClient: (accessToken: string) => any;
+    localDb?: Pool;
     brandKitId?: string | null;
     connectionManager?: ConnectionManager;
     persistImage?: PersistImageFn;
@@ -76,6 +78,7 @@ export function createMainAgentTools(
     }),
     createPersistSandboxFileTool({
       createUserClient: deps.createUserClient,
+      ...(deps.localDb ? { localDb: deps.localDb } : {}),
       ...(deps.sandboxDir ? { sandboxDir: deps.sandboxDir } : {}),
     }),
     // execute 工具由 deepagents FilesystemMiddleware 自动注入，

@@ -1,8 +1,11 @@
 import { realpathSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname } from "node:path";
+import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { tool } from "@langchain/core/tools";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Pool } from "pg";
 import { z } from "zod";
 
 const MIME_MAP: Record<string, string> = {
@@ -32,6 +35,7 @@ const persistSandboxFileSchema = z.object({
 export type PersistSandboxFileDeps = {
   createUserClient: (accessToken: string) => SupabaseClient;
   sandboxDir?: string;
+  localDb?: Pool;
 };
 
 export function createPersistSandboxFileTool(deps: PersistSandboxFileDeps) {
@@ -43,8 +47,9 @@ export function createPersistSandboxFileTool(deps: PersistSandboxFileDeps) {
       const canvasId = (config as any)?.configurable?.canvas_id as
         | string
         | undefined;
+      const userId = (config as any)?.configurable?.user_id as string | undefined;
 
-      if (!accessToken) {
+      if (!accessToken && !deps.localDb) {
         return "Error: No access token available. Cannot upload file.";
       }
 
@@ -77,6 +82,17 @@ export function createPersistSandboxFileTool(deps: PersistSandboxFileDeps) {
           ? `${safeTitle}${ext}`
           : basename(input.filePath);
 
+        if (deps.localDb && userId) {
+          const workspace = (await deps.localDb.query("select p.workspace_id from canvases c join projects p on p.id = c.project_id join workspace_members wm on wm.workspace_id = p.workspace_id where c.id = $1 and wm.user_id = $2", [canvasId, userId])).rows[0];
+          if (!workspace) return "Error: Canvas is not owned by the current user.";
+          const storagePath = `${workspace.workspace_id}/generated/${Date.now()}-${fileName}`;
+          await mkdir(join("/www/helstera/uploads", workspace.workspace_id, "generated"), { recursive: true });
+          await writeFile(join("/www/helstera/uploads", storagePath), fileBuffer, { flag: "wx" });
+          const asset = await deps.localDb.query("insert into asset_objects (workspace_id, bucket, object_path, mime_type, byte_size, created_by) values ($1, 'project-assets', $2, $3, $4, $5) returning id", [workspace.workspace_id, storagePath, mimeType, fileBuffer.length, userId]);
+          return JSON.stringify({ summary: `File uploaded successfully: ${fileName}`, url: `/api/uploads/${asset.rows[0].id}/file`, path: storagePath, mimeType, size: fileBuffer.length });
+        }
+
+        if (!accessToken) return "Error: No access token available. Cannot upload file.";
         const client = deps.createUserClient(accessToken);
 
         // Resolve workspace ID from canvas for Storage RLS compliance.

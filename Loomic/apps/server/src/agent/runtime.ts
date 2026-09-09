@@ -1005,6 +1005,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           ...(persistence ? { checkpointer: persistence.checkpointer } : {}),
           ...(options.connectionManager ? { connectionManager: options.connectionManager } : {}),
           env: options.env,
+          ...(options.localDb ? { localDb: options.localDb } : {}),
           ...(resolvedModel ? { model: resolvedModel } : {}),
           ...(persistImage ? { persistImage } : {}),
           // execute 工具由 LocalShellBackend 自动提供，无需手动传递

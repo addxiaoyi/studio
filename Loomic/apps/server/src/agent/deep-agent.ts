@@ -14,6 +14,7 @@ import { createMainAgentTools } from "./tools/index.js";
 import type { PersistImageFn, SubmitImageJobFn } from "./tools/image-generate.js";
 import type { SubmitVideoJobFn } from "./tools/video-generate.js";
 import type { WorkspaceSkillEntry } from "./workspace-skills.js";
+import type { Pool } from "pg";
 
 export type HelsteraAgent = Pick<
   ReturnType<typeof createDeepAgent>,
@@ -26,6 +27,7 @@ export type HelsteraAgentFactory = (options: {
   canvasId?: string;
   checkpointer?: BaseCheckpointSaver;
   connectionManager?: ConnectionManager;
+  localDb?: Pool;
   createUserClient?: (accessToken: string) => any;
   env: ServerEnv;
   model?: BaseLanguageModel | string;
@@ -43,6 +45,7 @@ export function createHelsteraDeepAgent(options: {
   canvasId?: string;
   checkpointer?: BaseCheckpointSaver;
   connectionManager?: ConnectionManager;
+  localDb?: Pool;
   createUserClient?: (accessToken: string) => any;
   env: ServerEnv;
   model?: BaseLanguageModel | string;
@@ -111,6 +114,7 @@ export function createHelsteraDeepAgent(options: {
     systemPrompt,
     tools: createMainAgentTools(backendResult.factory, {
       createUserClient,
+      ...(options.localDb ? { localDb: options.localDb } : {}),
       ...(options.brandKitId != null ? { brandKitId: options.brandKitId } : {}),
       ...(options.connectionManager ? { connectionManager: options.connectionManager } : {}),
       ...(options.persistImage ? { persistImage: options.persistImage } : {}),
