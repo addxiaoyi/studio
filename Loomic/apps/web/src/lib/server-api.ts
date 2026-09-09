@@ -256,6 +256,7 @@ export async function fetchWorkspaceSettings(
 ): Promise<WorkspaceSettingsResponse> {
   const response = await fetch(`${getServerBaseUrl()}/api/workspace/settings`, {
     headers: authHeaders(accessToken),
+    credentials: "include",
   });
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json()) as WorkspaceSettingsResponse;
@@ -268,6 +269,7 @@ export async function updateWorkspaceSettings(
   const response = await fetch(`${getServerBaseUrl()}/api/workspace/settings`, {
     method: "PUT",
     headers: authJsonHeaders(accessToken),
+    credentials: "include",
     body: JSON.stringify(data),
   });
   if (!response.ok) return handleErrorResponse(response);

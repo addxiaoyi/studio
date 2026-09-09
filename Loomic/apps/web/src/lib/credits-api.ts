@@ -67,6 +67,7 @@ export async function fetchCredits(
 ): Promise<CreditBalance> {
   const response = await fetch(`${getServerBaseUrl()}/api/credits`, {
     headers: authHeaders(accessToken),
+    credentials: "include",
   });
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json()) as CreditBalance;
@@ -78,7 +79,7 @@ export async function fetchCreditTransactions(
 ): Promise<{ transactions: CreditTransaction[] }> {
   const response = await fetch(
     `${getServerBaseUrl()}/api/credits/transactions?limit=${limit}`,
-    { headers: authHeaders(accessToken) },
+    { headers: authHeaders(accessToken), credentials: "include" },
   );
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json()) as { transactions: CreditTransaction[] };
@@ -101,6 +102,7 @@ export async function createTopupOrder(
     {
       method: "POST",
       headers: authJsonHeaders(accessToken),
+      credentials: "include",
       body: JSON.stringify({ packageId }),
     },
   );
@@ -121,6 +123,7 @@ export async function createTopupCheckout(
     {
       method: "POST",
       headers: authJsonHeaders(accessToken),
+      credentials: "include",
       body: JSON.stringify({ packageId }),
     },
   );
@@ -134,7 +137,7 @@ export async function getTopupOrder(
 ): Promise<{ order: TopupOrder }> {
   const response = await fetch(
     `${getServerBaseUrl()}/api/credits/topup/${encodeURIComponent(outTradeNo)}`,
-    { headers: authHeaders(accessToken) },
+    { headers: authHeaders(accessToken), credentials: "include" },
   );
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json()) as { order: TopupOrder };
