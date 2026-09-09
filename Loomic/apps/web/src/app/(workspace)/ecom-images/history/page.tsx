@@ -77,6 +77,7 @@ export default function EcomHistoryPage() {
           `${process.env.NEXT_PUBLIC_SERVER_BASE_URL ?? "http://localhost:3001"}/api/ecom/jobs`,
           {
             headers: { Authorization: `Bearer ${session.access_token}` },
+            credentials: "include",
             cache: "no-store",
           },
         );
@@ -84,6 +85,10 @@ export default function EcomHistoryPage() {
           const err = (await res.json().catch(() => ({}))) as {
             error?: { message?: string };
           };
+          if (res.status === 404) {
+            setJobs([]);
+            return;
+          }
           throw new Error(err.error?.message ?? "加载失败");
         }
         const data = (await res.json()) as { jobs: EcomJob[] };

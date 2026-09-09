@@ -317,7 +317,7 @@ export default function EcomImagesPage() {
               </div>
               {!canAfford && (
                 <Link
-                  href="/settings?tab=credits"
+                  href="/settings?tab=billing"
                   className="mt-2 flex items-center justify-center gap-1.5 w-full rounded-full bg-foreground text-background px-4 py-2 text-xs font-medium transition-all duration-300 hover:scale-[1.02] active:scale-[0.99]"
                 >
                   <Sparkles className="size-3" strokeWidth={1.5} />
