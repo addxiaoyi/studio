@@ -168,7 +168,7 @@ export default function ContactSalesPage() {
             与企业销售团队对话
           </h1>
           <motion.div
-            {...fadeUp}
+            variants={fadeUp}
             initial="hidden"
             animate="visible"
             className="mt-6"
@@ -185,7 +185,7 @@ export default function ContactSalesPage() {
               {PLANS.map((plan) => (
                 <motion.div
                   key={plan.name}
-                  {...fadeUp}
+                  variants={fadeUp}
                   initial="hidden"
                   animate="visible"
                   className={cn(
@@ -234,7 +234,7 @@ export default function ContactSalesPage() {
 
               {/* Contact info — glass card */}
               <motion.div
-                {...fadeUp}
+                variants={fadeUp}
                 initial="hidden"
                 animate="visible"
                 className="mt-6 rounded-[1.5rem] glass-soft border border-border/40 p-7"
@@ -266,7 +266,7 @@ export default function ContactSalesPage() {
             </div>
 
             {/* Right: Form — glass card */}
-            <motion.div {...fadeUp} initial="hidden" animate="visible">
+            <motion.div variants={fadeUp} initial="hidden" animate="visible">
               <div className="rounded-[1.5rem] glass border border-border/40 p-8 sticky top-28">
                 {state.kind === "success" ? (
                   <div className="flex flex-col items-center gap-5 py-16 text-center">
