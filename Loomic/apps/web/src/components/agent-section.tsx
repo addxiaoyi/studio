@@ -19,6 +19,7 @@ export function AgentSection({
   const [selectedModel, setSelectedModel] = useState(initialModel);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
+  const [modelsError, setModelsError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
@@ -30,13 +31,17 @@ export function AgentSection({
   useEffect(() => {
     fetchModels()
       .then((data) => {
+        setModelsError(false);
         setModels(data.models);
         const ids = data.models.map((m: ModelInfo) => m.id);
         if (ids.length > 0 && !ids.includes(selectedModel) && ids[0]) {
           setSelectedModel(ids[0]);
         }
       })
-      .catch(() => setModels([]))
+      .catch(() => {
+        setModels([]);
+        setModelsError(true);
+      })
       .finally(() => setModelsLoading(false));
   }, [fetchModels]);
 
@@ -73,7 +78,15 @@ export function AgentSection({
         <div className="space-y-2.5">
           <Label htmlFor="defaultModel">默认模型</Label>
           {modelsLoading ? (
-            <p className="text-sm text-muted-foreground">加载模型中…</p>
+            <div className="h-9 w-full animate-pulse rounded-md border border-border/40 bg-foreground/[0.03]" aria-label="加载模型中" />
+          ) : modelsError ? (
+            <p className="rounded-xl border border-destructive/30 bg-destructive/[0.04] px-3 py-2 text-sm text-destructive">
+              模型列表加载失败，请稍后刷新。
+            </p>
+          ) : models.length === 0 ? (
+            <p className="rounded-xl border border-border/40 bg-foreground/[0.03] px-3 py-2 text-sm text-muted-foreground">
+              暂无可用模型，请先配置模型服务。
+            </p>
           ) : (
             <select
               id="defaultModel"
