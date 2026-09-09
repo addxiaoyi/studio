@@ -20,6 +20,8 @@ type DiscoveryTabProps = {
   onClick: () => void;
 };
 
+const LOCAL_FALLBACK_IMAGE = "/images/showcase/showcase-1.jpg";
+
 function DiscoveryTab({ active, label, onClick }: DiscoveryTabProps) {
   return (
     <button
@@ -140,6 +142,10 @@ export function HomeDiscoveryGallery({
                 src={item.coverImageUrl}
                 alt={item.title}
                 loading="lazy"
+                onError={(event) => {
+                  event.currentTarget.onerror = null;
+                  event.currentTarget.src = LOCAL_FALLBACK_IMAGE;
+                }}
                 className="h-full w-full object-cover transition-all duration-300 duration-500 group-hover:scale-[1.03]"
               />
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent p-4">
@@ -158,6 +164,10 @@ export function HomeDiscoveryGallery({
                   <img
                     src={item.authorAvatarUrl}
                     alt=""
+                    onError={(event) => {
+                      event.currentTarget.onerror = null;
+                      event.currentTarget.src = LOCAL_FALLBACK_IMAGE;
+                    }}
                     className="h-6 w-6 rounded-full object-cover"
                   />
                   <span className="truncate text-sm text-foreground">

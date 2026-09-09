@@ -18,6 +18,8 @@ import { useAgentModel } from "../hooks/use-agent-model";
 import { useImageModelPreference } from "../hooks/use-image-model-preference";
 import { useVideoModelPreference } from "../hooks/use-video-model-preference";
 
+const LOCAL_FALLBACK_IMAGE = "/images/showcase/showcase-1.jpg";
+
 export type HomePromptHandle = {
   /** Programmatically set the textarea value (e.g. from an example pill). */
   fill: (text: string) => void;
@@ -225,6 +227,10 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
                     <img
                       src={mention.imgSrc}
                       alt={mention.name}
+                      onError={(event) => {
+                        event.currentTarget.onerror = null;
+                        event.currentTarget.src = LOCAL_FALLBACK_IMAGE;
+                      }}
                       className="h-full w-full object-cover"
                     />
                   </div>

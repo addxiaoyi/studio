@@ -9,6 +9,8 @@ import type {
 } from "@/lib/home-example-seeds";
 import { cn } from "@/lib/utils";
 
+const LOCAL_FALLBACK_IMAGE = "/images/showcase/showcase-1.jpg";
+
 type HomeExampleBrowserProps = {
   categories: HomeExampleCategory[];
   selectedExample?: HomeExampleSelection | null;
@@ -99,6 +101,10 @@ function ExamplePreviewCard({
               src={image}
               alt={`${title} preview ${index + 1}`}
               loading="lazy"
+              onError={(event) => {
+                event.currentTarget.onerror = null;
+                event.currentTarget.src = LOCAL_FALLBACK_IMAGE;
+              }}
               className={cn(
                 "absolute aspect-[7/8] rounded-[4px] border-[0.5px] border-border object-cover transition-all duration-500 ease-out group-hover:shadow-lg",
                 positionClasses[index] ?? positionClasses[0],
