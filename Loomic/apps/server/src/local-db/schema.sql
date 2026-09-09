@@ -217,5 +217,33 @@ create table if not exists workspace_skills (
   unique (workspace_id, skill_id)
 );
 
+create table if not exists credit_topups (
+  out_trade_no text primary key,
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  package_id text not null,
+  amount_cny_fen integer not null,
+  amount_usd_cents integer not null,
+  credits_granted integer not null,
+  status text not null default 'pending',
+  provider text not null,
+  trade_no text,
+  qr_code_url text,
+  expired_at bigint not null,
+  paid_at bigint,
+  created_at bigint not null
+);
+
+create table if not exists payment_events (
+  id uuid primary key default gen_random_uuid(),
+  event_name text not null,
+  provider_event_id text,
+  workspace_id uuid references workspaces(id) on delete set null,
+  payload jsonb not null default '{}'::jsonb,
+  processed boolean not null default false,
+  error_message text,
+  created_at timestamptz not null default now()
+);
+create index if not exists payment_events_workspace_idx on payment_events(workspace_id, created_at desc);
+
 create unique index if not exists canvases_one_primary_per_project_idx
   on canvases(project_id) where is_primary;
