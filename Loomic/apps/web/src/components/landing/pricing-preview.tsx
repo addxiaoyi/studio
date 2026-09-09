@@ -22,7 +22,7 @@ const PLANS: PricingPlan[] = [
     price: "¥50",
     period: "永久免费",
     features: [
-      "每月 10 次 AI 生成",
+      "500 积分额度",
       "基础设计模板",
       "单项目空间",
       "社区支持",
