@@ -207,7 +207,7 @@ export function AppSidebar({ currentPage }: { currentPage?: string } = {}) {
   return (
     <>
       {/* Desktop sidebar rail -- hidden below md */}
-      <aside className="hidden md:flex h-screen w-[60px] flex-col items-center border-r border-border/40 glass-soft py-4 gap-1.5">
+      <aside className="hidden h-[100dvh] w-[60px] shrink-0 flex-col items-center gap-1.5 border-r border-border/40 glass-soft py-4 md:flex">
         {/* Logo */}
         <Link
           href="/home"

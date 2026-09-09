@@ -43,7 +43,7 @@ export default function WorkspaceLayout({
       </a>
       <AppSidebar />
       {/* pb-14 on mobile for the fixed bottom navigation bar, reset on md+ */}
-      <main id="main" className="relative flex-1 overflow-auto pb-14 md:pb-0">
+      <main id="main" className="relative min-w-0 flex-1 overflow-auto pb-14 md:pb-0">
         {/* Top-right header credits button */}
         <div className="absolute right-4 top-3 z-10">
           <CreditHeaderButton />
