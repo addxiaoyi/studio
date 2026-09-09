@@ -41,5 +41,21 @@ export function mapHomeExampleRows(
 }
 
 export async function loadHomeExampleCategories(): Promise<HomeExampleCategory[]> {
-  return homeExampleSeedCategories;
+  let imageIndex = 1;
+  return homeExampleSeedCategories.map((category) => ({
+    ...category,
+    examples: category.examples.map((example) => ({
+      ...example,
+      previewImages: example.previewImages.map(() => {
+        const image = `/images/showcase/showcase-${imageIndex}.jpg`;
+        imageIndex = (imageIndex % 12) + 1;
+        return image;
+      }),
+      inputMentions: example.inputMentions.map((mention) =>
+        mention.type === "image"
+          ? { ...mention, imgSrc: `/images/showcase/showcase-${imageIndex}.jpg` }
+          : mention,
+      ),
+    })),
+  }));
 }
