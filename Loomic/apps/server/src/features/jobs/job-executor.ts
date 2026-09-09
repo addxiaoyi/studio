@@ -1,4 +1,5 @@
 import type { BackgroundJobType } from "@helstera/shared";
+import type { Pool } from "pg";
 
 import type { JobService } from "./job-service.js";
 import type { PgmqClient } from "../../queue/pgmq-client.js";
@@ -20,6 +21,7 @@ export type ExecutorContext = {
    * Never throws; logs on failure.
    */
   renewVt: (vtSeconds: number) => Promise<void>;
+  localDb?: Pool;
 };
 
 export type JobExecutor = (
