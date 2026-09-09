@@ -284,6 +284,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ? {}
       : { eventDelayMs: options.mockEventDelayMs }),
     env,
+    ...(localDb ? { localDb } : {}),
     ...(jobService ? { jobService } : {}),
     creditService,
     tierGuard,

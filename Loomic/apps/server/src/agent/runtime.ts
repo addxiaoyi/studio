@@ -4,6 +4,7 @@ import { rm } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
+import type { Pool } from "pg";
 import { HumanMessage } from "@langchain/core/messages";
 import type {
   ImageAttachment,
@@ -247,6 +248,7 @@ type RuntimeRunRecord = RunCreateRequest & {
 };
 
 type CreateAgentRuntimeOptions = {
+  localDb?: Pool;
   agentPersistenceService?: AgentPersistenceService;
   agentFactory?: HelsteraAgentFactory;
   agentRunMetadataService?: AgentRunMetadataService;
@@ -872,17 +874,35 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         // when an image is actually generated (avoids throwing in tests
         // that don't configure Supabase env vars).
         let persistImage: ((url: string, mime: string, prompt: string) => Promise<string>) | undefined;
-        if (options.createUserClient && run.accessToken) {
+        if (options.localDb || (options.createUserClient && run.accessToken)) {
           const createClient = options.createUserClient;
           const accessToken = run.accessToken;
           persistImage = async (sourceUrl, mimeType, prompt) => {
-            const client = createClient(accessToken) as UserSupabaseClient;
             const response = await fetch(sourceUrl);
             if (!response.ok) throw new Error(`Download failed: ${response.status}`);
             const buffer = Buffer.from(await response.arrayBuffer());
             const ext = mimeType === "image/webp" ? "webp" : "png";
             const slug = prompt.slice(0, 40).replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "");
             const fileName = `gen-${slug}-${Date.now()}.${ext}`;
+
+            if (options.localDb) {
+              const workspace = run.userId
+                ? (await options.localDb.query("select id from workspaces where owner_user_id = $1 order by created_at limit 1", [run.userId])).rows[0]
+                : null;
+              if (!workspace) throw new Error("Personal workspace not found");
+              const objectPath = `${workspace.id}/generated/${fileName}`;
+              const { mkdir, writeFile } = await import("node:fs/promises");
+              const { join } = await import("node:path");
+              await mkdir(join("/www/helstera/uploads", workspace.id, "generated"), { recursive: true });
+              await writeFile(join("/www/helstera/uploads", objectPath), buffer, { flag: "wx" });
+              const asset = await options.localDb.query("insert into asset_objects (workspace_id, bucket, object_path, mime_type, byte_size, created_by) values ($1, 'project-assets', $2, $3, $4, $5) returning id", [workspace.id, objectPath, mimeType, buffer.length, run.userId ?? null]);
+              return `/api/uploads/${asset.rows[0].id}/file`;
+            }
+
+            if (!createClient || !accessToken) {
+              throw new Error("No user storage client available");
+            }
+            const client = createClient(accessToken) as UserSupabaseClient;
 
             const { data: ws } = await client
               .from("workspaces")
