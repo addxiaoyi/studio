@@ -77,6 +77,12 @@ export type ServerEnv = {
   airwallexApiSecret?: string;
   airwallexWebhookSecret?: string;
   airwallexBaseUrl?: string;
+  epayBaseUrl?: string;
+  epayMerchantId?: string;
+  epayMd5Key?: string;
+  epayPrivateKey?: string;
+  epayPlatformPublicKey?: string;
+  epaySignType?: "MD5" | "RSA";
   skillsRoot?: string;
   webOrigin: string;
   workerConcurrency?: number;
@@ -190,6 +196,12 @@ export function loadServerEnv(
   const airwallexApiSecret = overrides.airwallexApiSecret ?? normalizeOptionalString(source.AIRWALLEX_API_SECRET);
   const airwallexWebhookSecret = overrides.airwallexWebhookSecret ?? normalizeOptionalString(source.AIRWALLEX_WEBHOOK_SECRET);
   const airwallexBaseUrl = overrides.airwallexBaseUrl ?? normalizeOptionalString(source.AIRWALLEX_BASE_URL);
+  const epayBaseUrl = overrides.epayBaseUrl ?? normalizeOptionalString(source.EPAY_BASE_URL);
+  const epayMerchantId = overrides.epayMerchantId ?? normalizeOptionalString(source.EPAY_MERCHANT_ID);
+  const epayMd5Key = overrides.epayMd5Key ?? normalizeOptionalString(source.EPAY_MD5_KEY);
+  const epayPrivateKey = overrides.epayPrivateKey ?? normalizeOptionalString(source.EPAY_PRIVATE_KEY);
+  const epayPlatformPublicKey = overrides.epayPlatformPublicKey ?? normalizeOptionalString(source.EPAY_PLATFORM_PUBLIC_KEY);
+  const epaySignType = overrides.epaySignType ?? (source.EPAY_SIGN_TYPE === "RSA" ? "RSA" : source.EPAY_SIGN_TYPE === "MD5" ? "MD5" : undefined);
   const workerConcurrency =
     overrides.workerConcurrency ??
     (source.WORKER_CONCURRENCY
@@ -295,6 +307,12 @@ export function loadServerEnv(
     ...(airwallexApiSecret ? { airwallexApiSecret } : {}),
     ...(airwallexWebhookSecret ? { airwallexWebhookSecret } : {}),
     ...(airwallexBaseUrl ? { airwallexBaseUrl } : {}),
+    ...(epayBaseUrl ? { epayBaseUrl } : {}),
+    ...(epayMerchantId ? { epayMerchantId } : {}),
+    ...(epayMd5Key ? { epayMd5Key } : {}),
+    ...(epayPrivateKey ? { epayPrivateKey } : {}),
+    ...(epayPlatformPublicKey ? { epayPlatformPublicKey } : {}),
+    ...(epaySignType ? { epaySignType } : {}),
     ...(workerConcurrency ? { workerConcurrency } : {}),
     ...(workerImageConcurrency ? { workerImageConcurrency } : {}),
     ...(workerVideoConcurrency ? { workerVideoConcurrency } : {}),
