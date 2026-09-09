@@ -38,7 +38,9 @@ function AuthCallbackPageContent() {
     }
 
     if (localToken) {
-      void exchangeLocalToken(localToken).then(() => router.replace("/home")).catch(() => router.replace(loginErrorUrl("auth_exchange_failed")));
+      void exchangeLocalToken(localToken)
+        .then(() => window.location.replace("/home"))
+        .catch(() => router.replace(loginErrorUrl("auth_exchange_failed")));
       return;
     }
 
