@@ -73,6 +73,10 @@ export type ServerEnv = {
   yeepayBaseUrl?: string;
   yeepayWebhookSecret?: string;
   yeepayNotifyUrl?: string;
+  airwallexClientId?: string;
+  airwallexApiSecret?: string;
+  airwallexWebhookSecret?: string;
+  airwallexBaseUrl?: string;
   skillsRoot?: string;
   webOrigin: string;
   workerConcurrency?: number;
@@ -182,6 +186,10 @@ export function loadServerEnv(
   const mailUser = overrides.mailUser ?? normalizeOptionalString(source.MAIL_USER);
   const mailPassword = overrides.mailPassword ?? normalizeOptionalString(source.MAIL_PASSWORD);
   const mailFrom = overrides.mailFrom ?? normalizeOptionalString(source.MAIL_FROM);
+  const airwallexClientId = overrides.airwallexClientId ?? normalizeOptionalString(source.AIRWALLEX_CLIENT_ID);
+  const airwallexApiSecret = overrides.airwallexApiSecret ?? normalizeOptionalString(source.AIRWALLEX_API_SECRET);
+  const airwallexWebhookSecret = overrides.airwallexWebhookSecret ?? normalizeOptionalString(source.AIRWALLEX_WEBHOOK_SECRET);
+  const airwallexBaseUrl = overrides.airwallexBaseUrl ?? normalizeOptionalString(source.AIRWALLEX_BASE_URL);
   const workerConcurrency =
     overrides.workerConcurrency ??
     (source.WORKER_CONCURRENCY
@@ -283,6 +291,10 @@ export function loadServerEnv(
     ...(mailUser ? { mailUser } : {}),
     ...(mailPassword ? { mailPassword } : {}),
     ...(mailFrom ? { mailFrom } : {}),
+    ...(airwallexClientId ? { airwallexClientId } : {}),
+    ...(airwallexApiSecret ? { airwallexApiSecret } : {}),
+    ...(airwallexWebhookSecret ? { airwallexWebhookSecret } : {}),
+    ...(airwallexBaseUrl ? { airwallexBaseUrl } : {}),
     ...(workerConcurrency ? { workerConcurrency } : {}),
     ...(workerImageConcurrency ? { workerImageConcurrency } : {}),
     ...(workerVideoConcurrency ? { workerVideoConcurrency } : {}),
