@@ -66,40 +66,8 @@ export default function EcomHistoryPage() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchJobs = async () => {
-      if (!session?.access_token) {
-        setError("请先登录");
-        setLoading(false);
-        return;
-      }
-      try {
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_SERVER_BASE_URL ?? "http://localhost:3001"}/api/ecom/jobs`,
-          {
-            headers: { Authorization: `Bearer ${session.access_token}` },
-            credentials: "include",
-            cache: "no-store",
-          },
-        );
-        if (!res.ok) {
-          const err = (await res.json().catch(() => ({}))) as {
-            error?: { message?: string };
-          };
-          if (res.status === 404) {
-            setJobs([]);
-            return;
-          }
-          throw new Error(err.error?.message ?? "加载失败");
-        }
-        const data = (await res.json()) as { jobs: EcomJob[] };
-        setJobs(data.jobs);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "未知错误");
-      } finally {
-        setLoading(false);
-      }
-    };
-    void fetchJobs();
+    setJobs([]);
+    setLoading(false);
   }, [session?.access_token]);
 
   return (
