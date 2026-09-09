@@ -34,7 +34,12 @@ export function createLocalViewerService(db: Pool): ViewerService {
           await client.query("commit");
           const row = profile.rows[0];
           return {
-            profile: { id: row.id, email: row.email, displayName: row.display_name ?? row.email.split("@")[0], avatarUrl: row.avatar_url },
+            profile: {
+              id: row.id,
+              email: row.email,
+              displayName: row.display_name?.trim() || row.email.split("@")[0],
+              avatarUrl: row.avatar_url?.trim() || null,
+            },
             workspace: { id: workspaceRow.id, name: workspaceRow.name, ownerUserId: user.id, type: "personal" },
             membership: { workspaceId: workspaceRow.id, userId: user.id, role: "owner" },
           };
