@@ -6,7 +6,6 @@ import { Settings, Zap, Shield, Clock } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 import { useCredits } from "@/hooks/use-credits";
-import { createTopupCheckout } from "@/lib/credits-api";
 import { TOPUP_PACKAGES, type TopupPackage } from "@helstera/shared";
 import { YeePayCheckoutDialog } from "@/components/yeepay-checkout-dialog";
 
@@ -45,7 +44,7 @@ export default function PricingPage() {
   const { session } = useAuth();
   const { balance, refresh: refreshCredits } = useCredits();
 
-  // Open YeePay dialog for Chinese users; route international users to Lemon Squeezy
+  // Only the enabled CNY channel can create a real top-up order.
   const handleSelectPackage = useCallback(
     async (pkg: TopupPackage) => {
       const token = session?.access_token;
@@ -61,11 +60,8 @@ export default function PricingPage() {
         if (region === "china") {
           setYeepayOpen(true);
         } else {
-          // International: open Lemon Squeezy checkout
-          const { checkoutUrl } = await createTopupCheckout(token, pkg.id);
-          if (typeof window !== "undefined") {
-            window.open(checkoutUrl, "_blank", "noopener,noreferrer");
-          }
+          alert("国际支付渠道正在接入中，请切换为中国大陆 (CNY)。");
+          setActivePackage(null);
         }
       } catch (err) {
         console.error("[pricing] Topup order failed:", err);

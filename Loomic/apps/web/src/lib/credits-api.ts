@@ -30,7 +30,7 @@ export type TopupOrder = {
   amountUsdCents: number;
   creditsGranted: number;
   status: "pending" | "paid" | "failed" | "refunded" | "expired";
-  provider: "yeepay" | "lemonsqueezy" | "manual";
+  provider: "yeepay" | "airwallex" | "lemonsqueezy" | "manual";
   qrCodeUrl: string | null;
   expiredAt: number;
   paidAt: number | null;

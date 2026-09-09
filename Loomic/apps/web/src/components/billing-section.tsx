@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { Zap, Plus, Loader2, ChevronRight } from "lucide-react";
@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 import { useAuth } from "@/lib/auth-context";
 import { useCredits } from "@/hooks/use-credits";
-import { fetchTopupPackages, createTopupCheckout, type TopupOrder } from "@/lib/credits-api";
+import { fetchTopupPackages } from "@/lib/credits-api";
 import { YeePayCheckoutDialog } from "@/components/yeepay-checkout-dialog";
 import { CreditUsageHistory } from "@/components/credits/credit-usage-history";
 import type { TopupPackage } from "@helstera/shared";
@@ -47,10 +47,7 @@ export function BillingSection() {
   const [notice, setNotice] = useState<string | null>(null);
 
   // Detect region and load packages
-  useState(() => {
-    setRegion(detectRegion());
-  });
-  useCallback(() => {
+  useEffect(() => {
     setRegion(detectRegion());
   }, []);
 
@@ -65,7 +62,9 @@ export function BillingSection() {
       setLoadingPackages(false);
     }
   }, []);
-  loadPackages();
+  useEffect(() => {
+    void loadPackages();
+  }, [loadPackages]);
 
   const handleTopup = useCallback(
     async (pkg: TopupPackage) => {
@@ -83,11 +82,8 @@ export function BillingSection() {
         if (region === "china") {
           setYeepayOpen(true);
         } else {
-          // International: create Lemon Squeezy checkout
-          const { checkoutUrl } = await createTopupCheckout(token, pkg.id);
-          if (typeof window !== "undefined") {
-            window.open(checkoutUrl, "_blank", "noopener,noreferrer");
-          }
+          setNotice("国际支付渠道正在接入中，请切换为 CNY 使用易支付充值。");
+          setActivePackage(null);
         }
       } catch (err) {
         setNotice(
@@ -157,7 +153,7 @@ export function BillingSection() {
             <p className="mt-2 text-sm text-muted-foreground font-light">
               {region === "china"
                 ? "中国大陆：易支付 (YeePay)，支持支付宝/微信扫码"
-                : "International: USD pricing, payment coming soon"}
+                : "国际支付渠道正在接入中，当前仅开放 CNY 易支付充值"}
             </p>
           </div>
 
