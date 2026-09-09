@@ -146,6 +146,8 @@ create table if not exists brand_kits (
   updated_at timestamptz not null default now()
 );
 create unique index if not exists brand_kits_default_idx on brand_kits(user_id) where is_default;
+alter table projects add column if not exists brand_kit_id uuid references brand_kits(id) on delete set null;
+alter table projects add column if not exists thumbnail_path text;
 
 create table if not exists brand_kit_assets (
   id uuid primary key default gen_random_uuid(),
