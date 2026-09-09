@@ -43,7 +43,7 @@ export function createLocalViewerService(db: Pool): ViewerService {
           throw error;
         } finally { client.release(); }
       } catch (error) {
-        console.error("[local-bootstrap] failed:", error);
+        console.error("[local-bootstrap] failed:", error instanceof Error ? error.stack : error);
         throw new BootstrapError();
       }
     },
