@@ -40,9 +40,11 @@ export function mapHomeExampleRows(
     }));
 }
 
-export async function loadHomeExampleCategories(): Promise<HomeExampleCategory[]> {
+export function localizeHomeExampleCategories(
+  categories: HomeExampleCategory[],
+): HomeExampleCategory[] {
   let imageIndex = 1;
-  return homeExampleSeedCategories.map((category) => ({
+  return categories.map((category) => ({
     ...category,
     examples: category.examples.map((example) => ({
       ...example,
@@ -58,4 +60,8 @@ export async function loadHomeExampleCategories(): Promise<HomeExampleCategory[]
       ),
     })),
   }));
+}
+
+export async function loadHomeExampleCategories(): Promise<HomeExampleCategory[]> {
+  return localizeHomeExampleCategories(homeExampleSeedCategories);
 }

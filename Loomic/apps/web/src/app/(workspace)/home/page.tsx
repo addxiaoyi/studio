@@ -19,12 +19,12 @@ import { useCreateProject } from "@/hooks/use-create-project";
 import { useDeleteProject } from "@/hooks/use-delete-project";
 import { useImageAttachments } from "@/hooks/use-image-attachments";
 import { useAuth } from "@/lib/auth-context";
-import { loadHomeDiscoveryCategories } from "@/lib/home-discovery-library";
+import { loadHomeDiscoveryCategories, localizeHomeDiscoveryCategories } from "@/lib/home-discovery-library";
 import {
   homeDiscoverySeedCategories,
   type HomeDiscoverySelection,
 } from "@/lib/home-discovery-seeds";
-import { loadHomeExampleCategories } from "@/lib/home-example-library";
+import { loadHomeExampleCategories, localizeHomeExampleCategories } from "@/lib/home-example-library";
 import {
   homeExampleSeedCategories,
   type HomeExampleSelection,
@@ -78,10 +78,10 @@ export default function HomePage() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [homeDiscoveryCategories, setHomeDiscoveryCategories] = useState(
-    homeDiscoverySeedCategories,
+    localizeHomeDiscoveryCategories(homeDiscoverySeedCategories),
   );
   const [homeExampleCategories, setHomeExampleCategories] = useState(
-    homeExampleSeedCategories,
+    localizeHomeExampleCategories(homeExampleSeedCategories),
   );
   const [selectedExample, setSelectedExample] =
     useState<HomeExampleSelection | null>(null);

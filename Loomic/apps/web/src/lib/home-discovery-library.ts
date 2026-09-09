@@ -40,12 +40,18 @@ export function mapHomeDiscoveryRows(
     }));
 }
 
-export async function loadHomeDiscoveryCategories(): Promise<HomeDiscoveryCategory[]> {
-  return homeDiscoverySeedCategories.map((category, categoryIndex) => ({
+export function localizeHomeDiscoveryCategories(
+  categories: HomeDiscoveryCategory[],
+): HomeDiscoveryCategory[] {
+  return categories.map((category, categoryIndex) => ({
     ...category,
     cases: category.cases.map((item, itemIndex) => {
       const image = `/images/showcase/showcase-${((categoryIndex * 3 + itemIndex) % 12) + 1}.jpg`;
       return { ...item, coverImageUrl: image, authorAvatarUrl: image };
     }),
   }));
+}
+
+export async function loadHomeDiscoveryCategories(): Promise<HomeDiscoveryCategory[]> {
+  return localizeHomeDiscoveryCategories(homeDiscoverySeedCategories);
 }
