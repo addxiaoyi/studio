@@ -11,7 +11,6 @@ import {
 } from "../../../lib/server-api";
 import { getSupabaseBrowserClient } from "../../../lib/supabase-browser";
 import { exchangeLocalToken } from "../../../lib/local-auth";
-import { isLocalAuth } from "../../../lib/env";
 
 const CALLBACK_TIMEOUT_MS = 5_000;
 
@@ -38,7 +37,7 @@ function AuthCallbackPageContent() {
       return;
     }
 
-    if (isLocalAuth() && localToken) {
+    if (localToken) {
       void exchangeLocalToken(localToken).then(() => router.replace("/home")).catch(() => router.replace(loginErrorUrl("auth_exchange_failed")));
       return;
     }
