@@ -71,6 +71,7 @@ import { registerPaymentWebhookRoute } from "./http/payments-webhook.js";
 import { registerContactSalesRoutes } from "./http/contact-sales.js";
 import { registerEcomRoutes } from "./http/ecom-image.js";
 import { registerLocalEcomRoutes } from "./http/local-ecom-image.js";
+import { registerEpayRoutes } from "./http/epay.js";
 import { createEcomService } from "./features/ecom-image/ecom-service.js";
 import { createYeePayClient, type YeePayClient } from "./features/payments/yeepay-client.js";
 import { YeePayService } from "./features/payments/yeepay-service.js";
@@ -328,6 +329,17 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void registerLocalAuthRoutes(app, { db: localDb, env });
     void registerLocalAssetRoutes(app, { db: localDb, auth, root: "/www/helstera/uploads" });
     void registerLocalEcomRoutes(app, { db: localDb, auth });
+  }
+  if (localDb && env.epayBaseUrl && env.epayMerchantId && env.epayMd5Key) {
+    void registerEpayRoutes(app, {
+      auth,
+      creditService,
+      viewerService,
+      baseUrl: env.epayBaseUrl,
+      merchantId: env.epayMerchantId,
+      md5Key: env.epayMd5Key,
+      notifyUrl: `${env.webOrigin}/api/epay/notify`,
+    });
   }
   void registerAuthRoutes(app, { env, getAdminClient });
   void registerFontsRoutes(app, { env });

@@ -48,7 +48,7 @@ export type TopupOrder = {
   amountUsdCents: number;
   creditsGranted: number;
   status: "pending" | "paid" | "failed" | "refunded" | "expired";
-  provider: "yeepay" | "lemonsqueezy" | "manual";
+  provider: "yeepay" | "epay" | "lemonsqueezy" | "manual";
   qrCodeUrl: string | null;
   expiredAt: number;
   paidAt: number | null;
@@ -91,7 +91,7 @@ export type CreditService = {
   createTopupOrder(
     workspaceId: string,
     packageId: string,
-    provider: "yeepay" | "lemonsqueezy",
+    provider: "yeepay" | "epay" | "lemonsqueezy",
   ): Promise<TopupOrder>;
   getTopupOrder(outTradeNo: string): Promise<TopupOrder | null>;
   activateTopup(
