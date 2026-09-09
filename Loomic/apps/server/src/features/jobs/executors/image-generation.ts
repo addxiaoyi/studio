@@ -1,5 +1,7 @@
 // @credits-system — Image generation executor: applies watermark (only on insufficient credits)
 import { registerExecutor, type ExecutorContext } from "../job-executor.js";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { generateImage } from "../../../generation/image-generation.js";
 import { resolveImageProviderName } from "../../../generation/providers/registry.js";
 import { applyWatermark } from "../../credits/watermark.js";
@@ -11,11 +13,9 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
   // The PGMQ message only contains { job_id, job_type, workspace_id },
   // so we must fetch prompt/model/aspect_ratio from background_jobs.payload.
   const admin = ctx.getAdminClient();
-  const { data: jobRow } = await admin
-    .from("background_jobs")
-    .select("created_by, workspace_id, canvas_id, session_id, payload")
-    .eq("id", jobId)
-    .single();
+  const jobRow = ctx.localDb
+    ? (await ctx.localDb.query("select created_by, workspace_id, canvas_id, session_id, payload from background_jobs where id = $1", [jobId])).rows[0]
+    : (await admin.from("background_jobs").select("created_by, workspace_id, canvas_id, session_id, payload").eq("id", jobId).single()).data;
 
   if (!jobRow) throw new Error(`Job ${jobId} not found in database`);
 
@@ -94,49 +94,37 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
     const timestamp = Date.now();
     const objectPath = `${workspaceId}/generated/${timestamp}-${jobId}.png`;
 
-    const { error: uploadError } = await admin.storage
-      .from("project-assets")
-      .upload(objectPath, buffer, {
-        contentType: generated.mimeType ?? "image/png",
-        upsert: false,
-      });
-
-    if (uploadError) {
-      throw new Error(`Storage upload failed: ${uploadError.message}`);
+    if (ctx.localDb) {
+      const localPath = join("/www/helstera/uploads", objectPath);
+      await mkdir(join("/www/helstera/uploads", workspaceId, "generated"), { recursive: true });
+      await writeFile(localPath, buffer, { flag: "wx" });
+    } else {
+      const { error: uploadError } = await admin.storage.from("project-assets").upload(objectPath, buffer, { contentType: generated.mimeType ?? "image/png", upsert: false });
+      if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`);
     }
     lap("storage_upload_done");
 
     // Insert asset_objects record — only include created_by if we have a valid user UUID
-    const { data: assetRow, error: assetError } = await admin
-      .from("asset_objects")
-      .insert({
-        workspace_id: workspaceId,
-        bucket: "project-assets",
-        object_path: objectPath,
-        mime_type: generated.mimeType ?? "image/png",
-        byte_size: buffer.length,
-        ...(createdBy ? { created_by: createdBy } : {}),
-      })
-      .select("id")
-      .single();
-
-    if (assetError || !assetRow) {
+    const assetRow = ctx.localDb
+      ? (await ctx.localDb.query("insert into asset_objects (workspace_id, bucket, object_path, mime_type, byte_size, created_by) values ($1, 'project-assets', $2, $3, $4, $5) returning id", [workspaceId, objectPath, generated.mimeType ?? "image/png", buffer.length, createdBy])).rows[0]
+      : (await admin.from("asset_objects").insert({ workspace_id: workspaceId, bucket: "project-assets", object_path: objectPath, mime_type: generated.mimeType ?? "image/png", byte_size: buffer.length, ...(createdBy ? { created_by: createdBy } : {}) }).select("id").single()).data;
+    if (!assetRow) {
       throw new Error(
-        `Failed to create asset record: ${assetError?.message ?? "unknown error"}`,
+        "Failed to create asset record: unknown error",
       );
     }
 
     lap("asset_record_done");
 
     // Generate a public URL for the result consumer
-    const { data: urlData } = admin.storage
-      .from("project-assets")
-      .getPublicUrl(objectPath);
+    const resultUrl = ctx.localDb
+      ? `/api/uploads/${(assetRow as { id: string }).id}/file`
+      : admin.storage.from("project-assets").getPublicUrl(objectPath).data.publicUrl;
 
     lap("total");
     return {
       asset_id: (assetRow as { id: string }).id,
-      signed_url: urlData.publicUrl,
+      signed_url: resultUrl,
       object_path: objectPath,
       width: generated.width,
       height: generated.height,

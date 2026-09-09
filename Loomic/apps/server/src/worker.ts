@@ -82,6 +82,7 @@ async function main() {
     pgmq,
     getAdminClient,
     env,
+    ...(localDb ? { localDb } : {}),
   };
 
   const CONCURRENCY_BY_QUEUE: Record<string, number> = {

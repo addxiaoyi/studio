@@ -13,7 +13,7 @@ async function copyTable(table: string, columns: string[]) {
   const { data, error } = await source.from(table).select(columns.join(","));
   if (error) throw new Error(`${table}: ${error.message}`);
   for (const row of data ?? []) {
-    const values = columns.map((column) => (row as Record<string, unknown>)[column]);
+    const values = columns.map((column) => (row as unknown as Record<string, unknown>)[column]);
     const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
     await target.query(`insert into ${table} (${columns.join(", ")}) values (${placeholders}) on conflict do nothing`, values);
   }
