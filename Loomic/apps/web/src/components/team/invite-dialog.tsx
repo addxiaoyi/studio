@@ -15,7 +15,7 @@ interface TeamInviteDialogProps {
 const ROLE_OPTIONS = [
   { value: "member", label: "成员", description: "可以创建和编辑项目" },
   { value: "admin", label: "管理员", description: "管理团队成员和设置" },
-  { value: "billing", label: "计费管理员", description: "管理订阅和积分" },
+  { value: "billing", label: "额度管理员", description: "管理额度充值和账单" },
 ];
 
 export function TeamInviteDialog({ open, onOpenChange }: TeamInviteDialogProps) {

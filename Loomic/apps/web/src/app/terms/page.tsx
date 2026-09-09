@@ -50,21 +50,21 @@ export default function TermsPage() {
           <section>
             <h2 className="text-xl font-medium mb-3">3. 知识产权</h2>
             <p className="text-muted-foreground leading-relaxed">
-              您保留对您通过 Helstera 创建的品牌套件、画布内容和提示词的所有权。AI 生成内容的所有权归属取决于您的订阅计划：个人版生成内容归您所有；企业版提供更完整的商业授权。请参阅您的具体计划说明。
+              您保留对您通过 Helstera 创建的品牌套件、画布内容和提示词的所有权。AI 生成内容的使用权以适用法律和具体服务说明为准。
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-medium mb-3">4. 积分与计费</h2>
             <p className="text-muted-foreground leading-relaxed">
-              积分用于兑换 AI 生成服务，不可转让、退款或兑换现金。订阅按月/年计费，提前取消可于当前计费周期结束后生效，未使用积分在订阅到期后失效。免费套餐积分有效期为 30 天。
+              积分用于兑换 AI 生成服务，不可转让、退款或兑换现金。积分充值为一次性购买，到账后永久有效。退款按照页面公布的退款规则处理。
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-medium mb-3">5. 水印</h2>
             <p className="text-muted-foreground leading-relaxed">
-              根据您的订阅计划，AI 生成内容可能包含或不包含 Helstera 水印。企业版客户可在管理后台关闭水印。免费用户的所有生成内容均附带水印。
+              AI 生成内容是否包含水印以生成页面的实际提示为准。额度充值本身不代表特定的企业授权或水印权益。
             </p>
           </section>
 
