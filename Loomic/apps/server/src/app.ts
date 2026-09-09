@@ -70,6 +70,7 @@ import { registerPaymentRoutes } from "./http/payments.js";
 import { registerPaymentWebhookRoute } from "./http/payments-webhook.js";
 import { registerContactSalesRoutes } from "./http/contact-sales.js";
 import { registerEcomRoutes } from "./http/ecom-image.js";
+import { registerLocalEcomRoutes } from "./http/local-ecom-image.js";
 import { createEcomService } from "./features/ecom-image/ecom-service.js";
 import { createYeePayClient, type YeePayClient } from "./features/payments/yeepay-client.js";
 import { YeePayService } from "./features/payments/yeepay-service.js";
@@ -326,6 +327,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   if (localDb) {
     void registerLocalAuthRoutes(app, { db: localDb, env });
     void registerLocalAssetRoutes(app, { db: localDb, auth, root: "/www/helstera/uploads" });
+    void registerLocalEcomRoutes(app, { db: localDb, auth });
   }
   void registerAuthRoutes(app, { env, getAdminClient });
   void registerFontsRoutes(app, { env });

@@ -278,3 +278,19 @@ alter table background_jobs add column if not exists credits_transaction_id uuid
 
 create unique index if not exists canvases_one_primary_per_project_idx
   on canvases(project_id) where is_primary;
+create table if not exists ecom_jobs (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  user_id uuid not null references app_users(id) on delete cascade,
+  product_name text not null,
+  product_description text,
+  scene_ids jsonb not null default '[]'::jsonb,
+  outputs jsonb not null default '[]'::jsonb,
+  ratio text,
+  status text not null default 'pending',
+  credits_charged integer not null default 0,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+
+create index if not exists ecom_jobs_user_created_idx on ecom_jobs(user_id, created_at desc);
