@@ -41,6 +41,7 @@ export default function SettingsPage() {
   } | null>(null);
   const [defaultModel, setDefaultModel] = useState<string>("gpt-5.4-mini");
   const [pageLoading, setPageLoading] = useState(true);
+  const [pageError, setPageError] = useState<string | null>(null);
 
   // Ref pattern: prevent token refresh from cascading through dependency arrays
   const accessTokenRef = useRef(session?.access_token);
@@ -66,6 +67,7 @@ export default function SettingsPage() {
       });
       setDefaultModel(settings.settings.defaultModel);
     } catch (err) {
+      setPageError(err instanceof Error ? err.message : "Failed to load settings.");
       if (err instanceof ApiAuthError) {
         // Workspace layout handles auth redirect
         return;
@@ -113,7 +115,16 @@ export default function SettingsPage() {
     return <SettingsSkeleton />;
   }
 
-  if (!profile) return null;
+  if (!profile) {
+    return (
+      <div className="mx-auto max-w-2xl px-6 py-16 sm:px-8" role="alert">
+        <h1 className="display-sm text-foreground">无法加载设置</h1>
+        <p className="mt-3 text-sm text-muted-foreground">
+          {pageError ?? "登录状态已失效，请重新登录后再试。"}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="px-6 py-12 sm:px-8 sm:py-16 max-w-5xl mx-auto">
