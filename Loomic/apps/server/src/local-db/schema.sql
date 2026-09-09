@@ -270,6 +270,8 @@ create table if not exists background_jobs (
   canceled_at timestamptz
 );
 create index if not exists background_jobs_status_idx on background_jobs(status, created_at desc);
+alter table background_jobs add column if not exists credits_cost integer;
+alter table background_jobs add column if not exists credits_transaction_id uuid;
 
 create unique index if not exists canvases_one_primary_per_project_idx
   on canvases(project_id) where is_primary;

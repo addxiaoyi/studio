@@ -96,6 +96,7 @@ import { createLocalThreadService } from "./local-db/thread-service.js";
 import { createLocalSettingsService } from "./local-db/settings-service.js";
 import { createLocalBrandKitService } from "./local-db/brand-kit-service.js";
 import { createLocalAgentRunMetadataService } from "./local-db/agent-run-service.js";
+import { createLocalJobService } from "./local-db/job-service.js";
 import { registerLocalAssetRoutes } from "./http/local-assets.js";
 import { registerAuthRoutes } from "./http/auth.js";
 import { registerImageProxyRoute } from "./http/image-proxy.js";
@@ -241,7 +242,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     : undefined;
   const jobService =
     options.jobService ??
-    (pgmq
+    (env.authProvider === "local" && localDb
+      ? createLocalJobService(localDb)
+      : pgmq
       ? createJobService({ createUserClient, getAdminClient, pgmq })
       : undefined);
   const creditService =
