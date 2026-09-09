@@ -29,6 +29,7 @@ function AuthCallbackPageContent() {
     started.current = true;
 
     const code = searchParams.get("code");
+    const tokenHash = searchParams.get("token_hash");
     const localToken = searchParams.get("local_token");
     const providerError = searchParams.get("error");
 
@@ -56,7 +57,9 @@ function AuthCallbackPageContent() {
 
     void (async () => {
       try {
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        const { data, error } = tokenHash
+          ? await supabase.auth.verifyOtp({ token_hash: tokenHash, type: "email" })
+          : await supabase.auth.exchangeCodeForSession(code!);
 
         if (cancelled) return;
 
