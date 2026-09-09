@@ -101,7 +101,7 @@ export default function SecurityPage() {
       {/* Hero */}
       <section className="pt-36 pb-20">
         <div className="mx-auto max-w-4xl px-6 text-center">
-          <motion.div {...fadeUp}>
+          <motion.div variants={fadeUp} initial="hidden" animate="visible">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full glass-soft border border-border/40 px-4 py-1.5 text-sm text-foreground">
               <Shield className="size-3.5 text-accent" strokeWidth={1.5} />
               <span className="tracking-wide">安全与合规</span>
@@ -117,7 +117,9 @@ export default function SecurityPage() {
 
           {/* Certifications — glass cards */}
           <motion.div
-            {...fadeUp}
+            variants={fadeUp}
+            initial="hidden"
+            animate="visible"
             className="mt-16 grid grid-cols-2 gap-4 sm:grid-cols-4"
           >
             {CERTIFICATIONS.map((cert) => (
@@ -143,7 +145,9 @@ export default function SecurityPage() {
             {PILLARS.map((pillar, i) => (
               <motion.div
                 key={pillar.title}
-                {...fadeUp}
+                variants={fadeUp}
+                initial="hidden"
+                animate="visible"
                 transition={{ delay: i * 0.05 }}
                 className="rounded-[1.5rem] glass-soft border border-border/40 p-7 transition-all duration-500 hover:glass"
               >
@@ -160,7 +164,9 @@ export default function SecurityPage() {
 
           {/* Compliance table */}
           <motion.div
-            {...fadeUp}
+            variants={fadeUp}
+            initial="hidden"
+            animate="visible"
             className="mt-16 rounded-[1.5rem] glass border border-border/40 overflow-hidden"
           >
             <div className="border-b border-border/30 px-7 py-5">
@@ -205,7 +211,9 @@ export default function SecurityPage() {
 
           {/* CTA */}
           <motion.div
-            {...fadeUp}
+            variants={fadeUp}
+            initial="hidden"
+            animate="visible"
             className="mt-12 rounded-2xl bg-accent/5 border border-accent/20 p-8 text-center"
           >
             <h2 className="text-xl font-medium mb-2">需要更详细的安全白皮书？</h2>
