@@ -57,6 +57,14 @@ export async function registerViewerRoutes(
             balance: balance.balance,
             totalToppedUp: balance.totalToppedUp,
             totalSpent: balance.totalSpent,
+            plan: "free",
+            dailyClaimed: false,
+            limits: {
+              maxConcurrentJobs: 3,
+              maxResolution: "2160p",
+              monthlyCredits: 0,
+              dailyCredits: 0,
+            },
           };
         } catch (err) {
           console.error("[viewer] Failed to fetch credits balance:", err);
