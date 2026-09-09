@@ -127,7 +127,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="px-6 py-12 sm:px-8 sm:py-16 max-w-5xl mx-auto">
+    <div className="px-6 py-12 sm:px-8 sm:py-16 max-w-6xl mx-auto">
       <header className="mb-12">
         <p className="eyebrow mb-3">Settings</p>
         <h1 className="display-md text-foreground">工作区设置</h1>
@@ -153,7 +153,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="max-w-2xl">
+      <div className={activeTab === "billing" ? "max-w-5xl" : "max-w-2xl"}>
         {activeTab === "profile" ? (
           <ProfileSection
             displayName={profile.displayName}

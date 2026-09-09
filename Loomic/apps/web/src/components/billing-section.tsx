@@ -101,7 +101,7 @@ export function BillingSection() {
   }, [refresh]);
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-10">
       {/* Header */}
       <div>
         <h2 className="display-sm text-foreground">积分与充值</h2>
@@ -111,11 +111,11 @@ export function BillingSection() {
       </div>
 
       {/* Balance hero */}
-      <div className="rounded-[1.5rem] glass border border-border/40 p-8">
-        <div className="flex items-start justify-between">
+      <div className="rounded-2xl glass border border-border/40 p-6 sm:p-7">
+        <div className="flex items-start justify-between gap-6">
           <div>
             <p className="eyebrow">当前余额</p>
-            <p className="mt-4 text-6xl font-extralight tabular-nums tracking-tighter text-foreground">
+            <p className="mt-3 text-5xl font-extralight tabular-nums tracking-tighter text-foreground">
               {balance.toLocaleString()}
             </p>
             <p className="mt-1 text-sm text-muted-foreground font-light">可用积分</p>
@@ -129,14 +129,14 @@ export function BillingSection() {
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-2 gap-3">
-          <div className="rounded-2xl glass-soft border border-border/30 px-4 py-3">
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:max-w-md">
+          <div className="rounded-xl glass-soft border border-border/30 px-4 py-3">
             <p className="eyebrow">累计充值</p>
             <p className="mt-2 text-2xl font-light tabular-nums tracking-tight text-foreground">
               {totalToppedUp.toLocaleString()}
             </p>
           </div>
-          <div className="rounded-2xl glass-soft border border-border/30 px-4 py-3">
+          <div className="rounded-xl glass-soft border border-border/30 px-4 py-3">
             <p className="eyebrow">已消耗</p>
             <p className="mt-2 text-2xl font-light tabular-nums tracking-tight text-foreground">
               {totalSpent.toLocaleString()}
@@ -147,7 +147,7 @@ export function BillingSection() {
 
       {/* Top-up packages */}
       <div>
-        <div className="mb-6 flex items-end justify-between">
+        <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h3 className="display-sm text-foreground">选择充值包</h3>
             <p className="mt-2 text-sm text-muted-foreground font-light">
@@ -158,7 +158,7 @@ export function BillingSection() {
           </div>
 
           {/* Region toggle */}
-          <div className="inline-flex items-center gap-1 rounded-full glass-soft border border-border/40 p-1 text-xs">
+          <div className="self-start inline-flex items-center gap-1 rounded-full glass-soft border border-border/40 p-1 text-xs">
             <button
               type="button"
               onClick={() => setRegion("international")}
@@ -193,7 +193,7 @@ export function BillingSection() {
         )}
 
         {loadingPackages ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
               <div
                 key={i}
