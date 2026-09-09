@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { randomBytes } from "node:crypto";
 import type { Pool } from "pg";
 import nodemailer from "nodemailer";
 import { issueLoginToken, exchangeLoginToken, getLocalSession, revokeLocalSession, verifyPassword, hashToken } from "../local-db/auth.js";
