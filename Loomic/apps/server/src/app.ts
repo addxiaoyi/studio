@@ -192,6 +192,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     (env.authProvider === "local" && localDb
       ? createLocalViewerService(localDb)
       : createViewerService({ getAdminClient }));
+  console.log(`[auth] provider=${env.authProvider} localDb=${Boolean(localDb)} viewer=${env.authProvider === "local" && localDb ? "local" : "supabase"}`);
   const projectService =
     options.projectService ??
     (env.authProvider === "local" && localDb
