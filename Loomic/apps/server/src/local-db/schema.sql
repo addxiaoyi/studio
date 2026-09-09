@@ -245,5 +245,31 @@ create table if not exists payment_events (
 );
 create index if not exists payment_events_workspace_idx on payment_events(workspace_id, created_at desc);
 
+create table if not exists background_jobs (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  project_id uuid references projects(id) on delete set null,
+  canvas_id uuid references canvases(id) on delete set null,
+  session_id uuid references chat_sessions(id) on delete set null,
+  thread_id text,
+  queue_name text not null,
+  job_type text not null,
+  status text not null default 'queued',
+  payload jsonb not null default '{}'::jsonb,
+  result jsonb,
+  error_code text,
+  error_message text,
+  attempt_count integer not null default 0,
+  max_attempts integer not null default 3,
+  created_by uuid not null references app_users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  started_at timestamptz,
+  completed_at timestamptz,
+  failed_at timestamptz,
+  canceled_at timestamptz
+);
+create index if not exists background_jobs_status_idx on background_jobs(status, created_at desc);
+
 create unique index if not exists canvases_one_primary_per_project_idx
   on canvases(project_id) where is_primary;
