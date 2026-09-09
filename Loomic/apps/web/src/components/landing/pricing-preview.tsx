@@ -19,7 +19,7 @@ interface PricingPlan {
 const PLANS: PricingPlan[] = [
   {
     name: "免费版",
-    price: "¥0",
+    price: "¥50",
     period: "永久免费",
     features: [
       "每月 10 次 AI 生成",
@@ -31,10 +31,10 @@ const PLANS: PricingPlan[] = [
     highlighted: false,
   },
   {
-    name: "专业版",
+    name: "标准包",
     badge: "最受欢迎",
-    price: "¥99",
-    period: "每月",
+    price: "¥200",
+    period: "一次付费",
     features: [
       "无限 AI 生成",
       "全部 AI 模型",
@@ -47,9 +47,9 @@ const PLANS: PricingPlan[] = [
     highlighted: true,
   },
   {
-    name: "团队版",
-    price: "¥299",
-    period: "每月 / 每人",
+    name: "专业包",
+    price: "¥500",
+    period: "一次付费",
     features: [
       "Pro 全部功能",
       "团队协作空间",
@@ -155,8 +155,8 @@ export function PricingPreview() {
       <div className="relative max-w-6xl mx-auto px-6">
         <div className="mb-24 md:mb-32">
           <SectionHeader
-            title="选择你的计划"
-            subtitle="灵活定价，按需选择"
+            title="按需充值额度"
+            subtitle="一次购买，永久有效"
           />
         </div>
 
