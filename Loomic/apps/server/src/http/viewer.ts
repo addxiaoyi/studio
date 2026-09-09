@@ -67,6 +67,7 @@ export async function registerViewerRoutes(
         .code(200)
         .send(viewerResponseSchema.parse({ ...viewer, credits }));
     } catch (error) {
+      request.log.error({ err: error }, "viewer load failed");
       return sendApplicationError(
         error,
         reply,
