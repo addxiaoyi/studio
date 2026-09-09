@@ -109,6 +109,7 @@ export async function fetchViewer(
 ): Promise<ViewerResponse> {
   const response = await fetch(`${getServerBaseUrl()}/api/viewer`, {
     headers: authHeaders(accessToken),
+    credentials: "include",
   });
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json()) as ViewerResponse;
