@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { RequestAuthenticator } from "../supabase/user.js";
@@ -14,6 +14,9 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
     if (!asset) return reply.code(404).send({ error: { code: "asset_not_found", message: "Asset not found." } });
     try {
       const filePath = join(options.root, asset.object_path);
+      const relativePath = relative(options.root, filePath);
+      const outsideRoot = isAbsolute(relativePath) || relativePath.startsWith(".." + sep);
+      if (outsideRoot) return reply.code(404).send({ error: { code: "asset_not_found", message: "Asset not found." } });
       await stat(filePath);
       reply.type(asset.mime_type ?? "application/octet-stream");
       return reply.send(createReadStream(filePath));

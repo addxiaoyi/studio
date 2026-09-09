@@ -9,9 +9,10 @@ import { UploadServiceError, type UploadFileInput, type UploadService } from "..
 export function createLocalUploadService(db: Pool, root = "/www/helstera/uploads"): UploadService {
   return {
     async uploadFile(user, input) {
-      const path = `${input.workspaceId}/${input.projectId ?? "workspace"}/${randomUUID()}-${safeName(input.fileName)}`;
+  const scope = /^[0-9a-f-]{36}$/i.test(input.projectId ?? "") ? input.projectId! : "workspace";
+  const path = `${input.workspaceId}/${scope}/${randomUUID()}-${safeName(input.fileName)}`;
       const absolute = join(root, path);
-      await mkdir(join(root, input.workspaceId, input.projectId ?? "workspace"), { recursive: true });
+      await mkdir(join(root, input.workspaceId, scope), { recursive: true });
       await writeFile(absolute, input.fileBuffer, { flag: "wx" });
       try {
         const { rows } = await db.query(`insert into asset_objects (workspace_id, project_id, bucket, object_path, mime_type, byte_size, created_by) values ($1,$2,$3,$4,$5,$6,$7) returning id, bucket, object_path, mime_type, byte_size, workspace_id, project_id, created_at`, [input.workspaceId, input.projectId ?? null, input.bucket, path, input.mimeType, input.fileBuffer.length, user.id]);
