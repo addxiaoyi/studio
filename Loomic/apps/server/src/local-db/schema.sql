@@ -5,6 +5,7 @@ create table if not exists app_users (
   email text not null unique,
   display_name text,
   avatar_url text,
+  password_hash text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

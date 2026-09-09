@@ -1,13 +1,29 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 import type { Pool } from "pg";
 import type { FastifyRequest } from "fastify";
 import type { AuthenticatedUser, RequestAuthenticator } from "../supabase/user.js";
 
 const TOKEN_TTL_MS = 15 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const scrypt = promisify(scryptCallback);
 
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString("hex");
+  const derived = await scrypt(password, salt, 64) as Buffer;
+  return `${salt}:${derived.toString("hex")}`;
+}
+
+export async function verifyPassword(password: string, encoded: string): Promise<boolean> {
+  const [salt, expectedHex] = encoded.split(":");
+  if (!salt || !expectedHex) return false;
+  const expected = Buffer.from(expectedHex, "hex");
+  const actual = await scrypt(password, salt, expected.length) as Buffer;
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
 export async function issueLoginToken(db: Pool, email: string) {

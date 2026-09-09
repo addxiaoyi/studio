@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import nodemailer from "nodemailer";
-import { issueLoginToken, exchangeLoginToken, getLocalSession, revokeLocalSession } from "../local-db/auth.js";
+import { issueLoginToken, exchangeLoginToken, getLocalSession, revokeLocalSession, verifyPassword, hashToken } from "../local-db/auth.js";
 import type { ServerEnv } from "../config/env.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -35,6 +35,19 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
     });
     request.log.info({ email }, "local auth link issued");
     return reply.send({ ok: true });
+  });
+
+  app.post<{ Body: { email?: string; password?: string } }>("/api/local-auth/password", async (request, reply) => {
+    const email = request.body?.email?.trim().toLowerCase();
+    const password = request.body?.password;
+    if (!email || !password || !emailPattern.test(email)) return reply.code(400).send({ error: { code: "invalid_credentials", message: "邮箱或密码不正确" } });
+    const { rows } = await options.db.query("select id, email, password_hash from app_users where email = $1", [email]);
+    const user = rows[0];
+    if (!user?.password_hash || !(await verifyPassword(password, user.password_hash))) return reply.code(401).send({ error: { code: "invalid_credentials", message: "邮箱或密码不正确" } });
+    const sessionToken = randomBytes(32).toString("base64url");
+    await options.db.query("insert into sessions (user_id, token_hash, expires_at) values ($1, $2, $3)", [user.id, hashToken(sessionToken), new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)]);
+    reply.header("set-cookie", `${COOKIE}=${sessionToken}; Max-Age=${30 * 24 * 60 * 60}; Path=/; HttpOnly; Secure; SameSite=Lax`);
+    return reply.send({ ok: true, access_token: "local-session", user: { id: user.id, email: user.email } });
   });
 
   app.post<{ Body: { token?: string } }>("/api/local-auth/exchange", async (request, reply) => {

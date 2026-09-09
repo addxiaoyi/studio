@@ -9,7 +9,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { requestMagicLink, fetchViewer } from "../lib/server-api";
-import { requestLocalMagicLink } from "../lib/local-auth";
+import { requestLocalMagicLink, signInLocalWithPassword } from "../lib/local-auth";
 import { isLocalAuth } from "../lib/env";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
 
@@ -71,11 +71,20 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
     setLoading(true);
     setError(null);
 
+    if (isLocalAuth()) {
+      try {
+        await signInLocalWithPassword(trimmed, password);
+        window.location.replace("/home");
+      } catch (authError) {
+        setError(authError instanceof Error ? authError.message : "邮箱或密码不正确");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     const supabase = getSupabaseBrowserClient();
-    const { data, error: authError } = await supabase.auth.signInWithPassword({
-      email: trimmed,
-      password,
-    });
+    const { data, error: authError } = await supabase.auth.signInWithPassword({ email: trimmed, password });
 
     if (authError) {
       setLoading(false);

@@ -30,3 +30,11 @@ export async function signOutLocal(): Promise<void> {
     credentials: "include",
   });
 }
+
+export async function signInLocalWithPassword(email: string, password: string) {
+  const response = await fetch(`${getServerBaseUrl()}/api/local-auth/password`, {
+    method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }),
+  });
+  if (!response.ok) throw new Error("邮箱或密码不正确");
+  return (await response.json()) as { access_token: string; user: { id: string; email: string } };
+}
