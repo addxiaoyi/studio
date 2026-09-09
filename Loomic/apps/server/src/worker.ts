@@ -18,6 +18,10 @@ import { createCreditService, type CreditService } from "./features/credits/cred
 import { getExecutor, type ExecutorContext } from "./features/jobs/job-executor.js";
 import { createAdminSupabaseClient } from "./supabase/admin.js";
 import { createUserSupabaseClientFactory } from "./supabase/user.js";
+import { createLocalJobQueue } from "./queue/local-job-queue.js";
+import { createLocalJobService } from "./local-db/job-service.js";
+import { createLocalCreditService } from "./local-db/credit-service.js";
+import { createLocalDbPool } from "./local-db/client.js";
 
 // Import executors to trigger registration via side effects
 import "./features/jobs/executors/image-generation.js";
@@ -44,7 +48,8 @@ const VT_BY_QUEUE: Record<string, number> = {
 async function main() {
   const env = loadServerEnv();
 
-  if (!env.supabaseDbUrl) {
+  const databaseUrl = env.authProvider === "local" ? env.databaseUrl : env.supabaseDbUrl;
+  if (!databaseUrl) {
     console.error("SUPABASE_DB_URL is required for worker process.");
     process.exit(1);
   }
@@ -52,7 +57,10 @@ async function main() {
   // Register all generation providers (shared with app.ts)
   registerAllProviders(env);
 
-  const pgmq = createPgmqClient(env.supabaseDbUrl);
+  const localDb = env.authProvider === "local" && env.databaseUrl
+    ? createLocalDbPool(env.databaseUrl)
+    : null;
+  const pgmq = localDb ? createLocalJobQueue(localDb) : createPgmqClient(databaseUrl);
   const createUserClient = createUserSupabaseClientFactory(env);
 
   let adminClient: ReturnType<typeof createAdminSupabaseClient> | undefined;
@@ -61,8 +69,12 @@ async function main() {
     return adminClient;
   };
 
-  const jobService = createJobService({ createUserClient, getAdminClient, pgmq });
-  const creditService = createCreditService({ getAdminClient });
+  const jobService = localDb
+    ? createLocalJobService(localDb)
+    : createJobService({ createUserClient, getAdminClient, pgmq });
+  const creditService = localDb
+    ? createLocalCreditService(localDb)
+    : createCreditService({ getAdminClient });
 
   // Base context — per-message fields (queue, msgId, renewVt) are added in processMessage
   const baseCtx = {
