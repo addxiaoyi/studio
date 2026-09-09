@@ -54,6 +54,7 @@
     "worker": "node --env-file=../../.env.local --import tsx ./src/worker.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "db:migrate:local": "node --env-file=../../.env.local --import tsx ./src/local-db/migrate.ts"
+    "db:migrate:local": "node --env-file=../../.env.local --import tsx ./src/local-db/migrate.ts",
+    "db:migrate:data": "node --env-file=../../.env.local --import tsx ./src/local-db/migrate-data.ts"
   }
 }
