@@ -6,6 +6,17 @@ export function registerLocalEcomRoutes(
   app: FastifyInstance,
   options: { auth: RequestAuthenticator; db: Pool },
 ): void {
+  app.post("/api/ecom/jobs", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return reply.code(401).send({ error: { code: "unauthorized", message: "Missing or invalid session." } });
+    return reply.code(503).send({
+      error: {
+        code: "ecom_provider_unavailable",
+        message: "电商图生成服务尚未配置，请联系管理员。",
+      },
+    });
+  });
+
   app.get("/api/ecom/jobs", async (request, reply) => {
     const user = await options.auth.authenticate(request);
     if (!user) return reply.code(401).send({ error: { code: "unauthorized", message: "Missing or invalid session." } });
