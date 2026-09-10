@@ -30,7 +30,7 @@ export type TopupOrder = {
   amountUsdCents: number;
   creditsGranted: number;
   status: "pending" | "paid" | "failed" | "refunded" | "expired";
-  provider: "yeepay" | "airwallex" | "lemonsqueezy" | "manual";
+  provider: "yeepay" | "epay" | "airwallex" | "lemonsqueezy" | "manual";
   qrCodeUrl: string | null;
   expiredAt: number;
   paidAt: number | null;
@@ -108,6 +108,21 @@ export async function createTopupOrder(
   );
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json()) as { order: TopupOrder };
+}
+
+export async function createEpayTopup(
+  accessToken: string,
+  packageId: string,
+  type: "alipay" | "wxpay" | "qqpay" = "alipay",
+): Promise<{ order: TopupOrder; checkoutUrl: string }> {
+  const response = await fetch(`${getServerBaseUrl()}/api/epay/topup`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    credentials: "include",
+    body: JSON.stringify({ packageId, type }),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json()) as { order: TopupOrder; checkoutUrl: string };
 }
 
 /**
