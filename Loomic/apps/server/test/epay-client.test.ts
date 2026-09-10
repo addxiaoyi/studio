@@ -35,7 +35,7 @@ describe("standard EPay MD5 protocol", () => {
       money: "200.00",
     }, "test-key");
 
-    expect(url).toContain("https://gateway.example.test/mapi.php?");
+    expect(url).toContain("https://gateway.example.test/submit.php?");
     expect(url).toContain("sign_type=MD5");
   });
 });

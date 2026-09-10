@@ -57,5 +57,5 @@ export function buildEpayOrderUrl(
     sign: buildEpaySign(params, key),
     sign_type: "MD5",
   });
-  return `${baseUrl.replace(/\/$/, "")}/mapi.php?${query.toString()}`;
+  return `${baseUrl.replace(/\/$/, "")}/submit.php?${query.toString()}`;
 }
