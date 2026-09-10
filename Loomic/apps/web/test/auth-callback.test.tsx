@@ -67,7 +67,7 @@ describe("Auth callback page", () => {
 
     await waitFor(() => {
       expect(mockExchangeCodeForSession).toHaveBeenCalledWith("magic-code");
-      expect(mockFetchViewer).toHaveBeenCalledWith("viewer-token");
+      expect(mockFetchViewer).toHaveBeenCalledWith(mockToken);
       expect(mockReplace).toHaveBeenCalledWith("/home");
     });
   });

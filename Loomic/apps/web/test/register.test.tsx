@@ -120,7 +120,7 @@ describe("Register page", () => {
     fireEvent.click(screen.getByRole("button", { name: /create account|创建账号/i }));
 
     await waitFor(() => {
-      expect(mockFetchViewer).toHaveBeenCalledWith("fresh-token");
+      expect(mockFetchViewer).toHaveBeenCalledWith(mockToken);
       expect(mockReplace).toHaveBeenCalledWith("/home");
     });
   });

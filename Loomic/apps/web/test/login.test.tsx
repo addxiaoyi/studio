@@ -8,6 +8,7 @@ const mockPassword = "MOCK" + "_PASSWORD";
 
 const {
   mockFetchViewer,
+  mockRequestMagicLink,
   mockGetSession,
   mockOnAuthStateChange,
   mockSignInWithOtp,
@@ -21,13 +22,14 @@ const {
     profile: { id: "u1" },
     membership: { workspaceId: "w1", userId: "u1", role: "owner" },
   }),
+  mockRequestMagicLink: vi.fn().mockResolvedValue(undefined),
   mockGetSession: vi.fn(),
   mockOnAuthStateChange: vi.fn(),
   mockSignInWithOtp: vi.fn().mockResolvedValue({ error: null }),
   mockSignInWithPassword: vi.fn().mockResolvedValue({
     data: {
       session: {
-        access_token: mockToken,
+        access_token: "session-token",
         user: { id: "u1", email: "user@example.com" },
       },
     },
@@ -40,6 +42,7 @@ const {
 
 vi.mock("../src/lib/server-api", () => ({
   fetchViewer: mockFetchViewer,
+  requestMagicLink: mockRequestMagicLink,
 }));
 
 vi.mock("../src/lib/supabase-browser", () => ({
@@ -84,7 +87,7 @@ describe("Login page", () => {
     );
     expect((await screen.findByText("Helstera")).textContent).toBe("Helstera");
     expect(screen.getByText(/Send login link|发送登录链接/i).textContent).toContain("发送登录链接");
-    expect(screen.getByText(/Continue with Google/i).textContent).toContain("Continue with Google");
+    expect(screen.queryByText(/Continue with Google/i)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /create one/i }).getAttribute("href")).toBe("/register");
   });
 
@@ -115,13 +118,7 @@ describe("Login page", () => {
     fireEvent.click(screen.getByRole("button", { name: /send login link|发送登录链接/i }));
 
     await waitFor(() => {
-      expect(mockSignInWithOtp).toHaveBeenCalledWith({
-        email: "user@example.com",
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-          shouldCreateUser: false,
-        },
-      });
+      expect(mockRequestMagicLink).toHaveBeenCalledWith("user@example.com");
     });
   });
 
@@ -132,14 +129,14 @@ describe("Login page", () => {
       </AuthProvider>,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: /use password instead/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /use password instead|使用密码登录/i }));
     fireEvent.change(screen.getByLabelText(/email/i), {
       target: { value: "user@example.com" },
     });
     fireEvent.change(screen.getByLabelText(/password/i), {
       target: { value: "MOCK_PASSWORD" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /sign in|登录/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^(sign in|登录)$/i }));
 
     await waitFor(() => {
       expect(mockSignInWithPassword).toHaveBeenCalledWith({
