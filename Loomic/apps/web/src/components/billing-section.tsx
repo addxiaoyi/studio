@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { Zap, Plus, Loader2, ChevronRight } from "lucide-react";
@@ -8,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 import { useAuth } from "@/lib/auth-context";
 import { useCredits } from "@/hooks/use-credits";
-import { createEpayTopup, fetchTopupPackages, isEpayEnabled } from "@/lib/credits-api";
+import { createEpayTopup, fetchTopupPackages, getTopupOrder, isEpayEnabled } from "@/lib/credits-api";
 import { YeePayCheckoutDialog } from "@/components/yeepay-checkout-dialog";
 import { CreditUsageHistory } from "@/components/credits/credit-usage-history";
 import type { TopupPackage } from "@helstera/shared";
@@ -37,6 +38,7 @@ function formatPrice(pkg: TopupPackage, region: "international" | "china"): stri
 
 export function BillingSection() {
   const { session } = useAuth();
+  const searchParams = useSearchParams();
   const { balance, totalToppedUp, totalSpent, refresh } = useCredits();
   const [region, setRegion] = useState<"international" | "china">("international");
   const [packages, setPackages] = useState<TopupPackage[]>([]);
@@ -65,6 +67,39 @@ export function BillingSection() {
   useEffect(() => {
     void loadPackages();
   }, [loadPackages]);
+
+  useEffect(() => {
+    const outTradeNo = searchParams.get("topup");
+    const token = session?.access_token;
+    if (!outTradeNo || !token) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      for (let attempt = 0; attempt < 12 && !cancelled; attempt += 1) {
+        try {
+          const { order } = await getTopupOrder(token, outTradeNo);
+          if (order.status === "paid") {
+            await refresh();
+            setNotice("充值已到账。");
+            return;
+          }
+          if (["failed", "expired", "refunded"].includes(order.status)) {
+            setNotice("充值订单未完成，请重新选择充值包。");
+            return;
+          }
+        } catch (error) {
+          console.error("[billing] Failed to refresh top-up order:", error);
+          setNotice("订单状态暂时无法确认，请稍后刷新页面。");
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh, searchParams, session?.access_token]);
 
   const handleTopup = useCallback(
     async (pkg: TopupPackage) => {
