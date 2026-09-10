@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 import { useAuth } from "@/lib/auth-context";
 import { useCredits } from "@/hooks/use-credits";
-import { fetchTopupPackages } from "@/lib/credits-api";
+import { createEpayTopup, fetchTopupPackages, isEpayEnabled } from "@/lib/credits-api";
 import { YeePayCheckoutDialog } from "@/components/yeepay-checkout-dialog";
 import { CreditUsageHistory } from "@/components/credits/credit-usage-history";
 import type { TopupPackage } from "@helstera/shared";
@@ -80,7 +80,12 @@ export function BillingSection() {
 
       try {
         if (region === "china") {
-          setYeepayOpen(true);
+          if (isEpayEnabled()) {
+            const { checkoutUrl } = await createEpayTopup(token, pkg.id);
+            window.location.assign(checkoutUrl);
+          } else {
+            setYeepayOpen(true);
+          }
         } else {
           setNotice("国际支付渠道正在接入中，请切换为 CNY 使用易支付充值。");
           setActivePackage(null);

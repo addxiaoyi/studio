@@ -6,6 +6,7 @@ import { Settings, Zap, Shield, Clock } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 import { useCredits } from "@/hooks/use-credits";
+import { createEpayTopup, isEpayEnabled } from "@/lib/credits-api";
 import { TOPUP_PACKAGES, type TopupPackage } from "@helstera/shared";
 import { YeePayCheckoutDialog } from "@/components/yeepay-checkout-dialog";
 
@@ -58,7 +59,12 @@ export default function PricingPage() {
 
       try {
         if (region === "china") {
-          setYeepayOpen(true);
+          if (isEpayEnabled()) {
+            const { checkoutUrl } = await createEpayTopup(token, pkg.id);
+            window.location.assign(checkoutUrl);
+          } else {
+            setYeepayOpen(true);
+          }
         } else {
           alert("国际支付渠道正在接入中，请切换为中国大陆 (CNY)。");
           setActivePackage(null);

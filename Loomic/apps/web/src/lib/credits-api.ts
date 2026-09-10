@@ -12,6 +12,10 @@ export type CreditBalance = {
   totalSpent: number;
 };
 
+export function isEpayEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_PAYMENT_PROVIDER === "epay";
+}
+
 export type CreditTransaction = {
   id: string;
   transaction_type: string;
