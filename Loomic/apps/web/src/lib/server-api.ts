@@ -129,6 +129,22 @@ export async function fetchProjects(
   return (await response.json()) as ProjectListResponse;
 }
 
+export type TeamMember = {
+  id: string;
+  name: string;
+  email: string;
+  role: "owner" | "admin" | "member";
+  status: "active" | "pending";
+};
+
+export async function fetchTeamMembers(accessToken: string): Promise<{ members: TeamMember[] }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/workspaces/members`, {
+    headers: authHeaders(accessToken),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json()) as { members: TeamMember[] };
+}
+
 export async function createProject(
   accessToken: string,
   data: ProjectCreateRequest,
