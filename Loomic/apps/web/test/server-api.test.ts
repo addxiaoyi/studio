@@ -207,6 +207,7 @@ describe("authenticated server API", () => {
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:3001/api/video-models",
+      { credentials: "include" },
     );
     expect(result.models[0]).toMatchObject({
       id: "metaso/minimax-h3",
