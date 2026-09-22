@@ -18,7 +18,7 @@ export async function registerVideoModelRoutes(app: FastifyInstance, options: {
       const user = await options.auth.authenticate(request);
       if (user) { const viewer = await options.viewerService.ensureViewer(user); balance = (await options.creditService.getBalance(viewer.workspace.id)).balance; authenticated = true; }
     } catch { authenticated = false; }
-    if (options.localDb) {
+    if (options.localDb && configured.length > 0) {
       const models = configured.flatMap((row) => {
         const presentation = getPublicModelPresentation(row.model_id, row.display_name, "video");
         if (!presentation) return [];
