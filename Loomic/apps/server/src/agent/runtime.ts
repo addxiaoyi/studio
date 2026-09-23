@@ -43,7 +43,9 @@ import { adaptDeepAgentStream } from "./stream-adapter.js";
 import { sanitizeErrorForClient } from "../utils/error-sanitizer.js";
 import { loadWorkspaceSkills, type WorkspaceSkillEntry } from "./workspace-skills.js";
 import { buildCanvasSummaryForContext } from "./tools/inspect-canvas.js";
-import { insertImageElement, insertVideoElement } from "../features/canvas/canvas-element-writer.js";
+import { insertImageElement, insertLocalImageElement, insertVideoElement } from "../features/canvas/canvas-element-writer.js";
+import type { StorageProvider } from "../storage/index.js";
+import { resolveConfiguredModel } from "../http/model-availability.js";
 
 /**
  * Build the text portion of a user message, appending <input_images> XML
@@ -97,6 +99,10 @@ function buildInputImagesXml(attachments: ImageAttachment[]): string | null {
     .join("\n  ");
 
   return `<input_images count="${attachments.length}">\n  ${imageXml}\n</input_images>`;
+}
+
+function supportsVisionInput(model: unknown): boolean {
+  return typeof model === "string" && model.replace(/^openai:/, "") === "grok-4.6";
 }
 
 function buildImageGenerationPreferenceXml(
@@ -229,6 +235,89 @@ export function buildAttachmentDataMap(
   return map;
 }
 
+type CanvasFile = Record<string, unknown>;
+type CanvasContentWithFiles = {
+  elements?: Array<Record<string, unknown>>;
+  files?: Record<string, CanvasFile>;
+};
+
+const OSS_MARKER_PREFIX = "oss://";
+
+function isVideoCanvasElement(element: Record<string, unknown>): boolean {
+  const customData = element.customData;
+  return (
+    typeof customData === "object" &&
+    customData !== null &&
+    (customData as Record<string, unknown>).isVideo === true
+  );
+}
+
+/**
+ * Resolve the newest visible image on a canvas into a provider-ready source.
+ * Canvas saves move base64 payloads to storage, so this deliberately supports
+ * both the inline value used before a save and the persisted oss:// marker.
+ */
+export async function findCanvasReferenceImage(
+  content: unknown,
+  storage: StorageProvider,
+): Promise<string | null> {
+  if (typeof content !== "object" || content === null) return null;
+
+  const canvas = content as CanvasContentWithFiles;
+  if (!Array.isArray(canvas.elements) || !canvas.files) return null;
+
+  const images = canvas.elements
+    .filter(
+      (element) =>
+        !element.isDeleted &&
+        element.type === "image" &&
+        typeof element.fileId === "string" &&
+        !isVideoCanvasElement(element),
+    )
+    .sort((left, right) => Number(right.updated ?? 0) - Number(left.updated ?? 0));
+
+  for (const element of images) {
+    const file = canvas.files[element.fileId as string];
+    if (!file) continue;
+
+    const inlineUrl = file.dataURL;
+    if (typeof inlineUrl === "string" && inlineUrl.startsWith("data:image/")) {
+      return inlineUrl;
+    }
+
+    const publicUrl = file.storageUrl;
+    if (typeof publicUrl === "string" && /^https?:\/\//.test(publicUrl)) {
+      return publicUrl;
+    }
+
+    if (typeof inlineUrl !== "string" || !inlineUrl.startsWith(OSS_MARKER_PREFIX)) {
+      continue;
+    }
+
+    const ref = inlineUrl.slice(OSS_MARKER_PREFIX.length);
+    const separator = ref.indexOf("/");
+    if (separator < 1 || separator === ref.length - 1) continue;
+
+    const bucket = ref.slice(0, separator);
+    const objectPath = ref.slice(separator + 1);
+    try {
+      const { data: bytes, error } = await storage.download(bucket, objectPath);
+      if (error || !bytes) {
+        throw error ?? new Error("Canvas image storage returned no data");
+      }
+      const mimeType = typeof file.mimeType === "string" ? file.mimeType : "image/png";
+      return `data:${mimeType};base64,${bytes.toString("base64")}`;
+    } catch (error) {
+      console.warn("[runtime] unable to resolve canvas image reference", {
+        canvasFileId: element.fileId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return null;
+}
+
 type RuntimeRunStatus =
   | "accepted"
   | "canceled"
@@ -263,6 +352,7 @@ type CreateAgentRuntimeOptions = {
   runIdFactory?: () => string;
   tierGuard?: TierGuard;
   viewerService?: ViewerService;
+  storage: StorageProvider;
 };
 
 export type AgentRunService = ReturnType<typeof createAgentRunService>;
@@ -435,7 +525,8 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
       // Build submitImageJob / submitVideoJob closures for async jobs via PGMQ
       let submitImageJob: SubmitImageJobFn | undefined;
       let submitVideoJob: SubmitVideoJobFn | undefined;
-      if (options.jobService && options.createUserClient && run.accessToken && run.userId) {
+      let referenceImages: string[] = [];
+      if (options.jobService && (options.localDb || options.createUserClient) && run.accessToken && run.userId) {
         const jobSvc = options.jobService;
         const createClient = options.createUserClient;
         const accessToken = run.accessToken;
@@ -449,18 +540,72 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           const jobLap = (label: string, extra?: Record<string, unknown>) => {
             console.log(`[submitImageJob] ${label} +${Date.now() - jobT0}ms`, extra ? JSON.stringify(extra) : "");
           };
+          const withSubmitTimeout = async <T>(label: string, operation: Promise<T>) => {
+            const timeout = new Promise<never>((_, reject) => {
+              setTimeout(() => reject(new Error(`${label} timed out after 15s`)), 15_000);
+            });
+            return Promise.race([operation, timeout]);
+          };
+
+          jobLap("submission_started", { model: input.model });
+
+          const selectedModels =
+            run.imageGenerationPreference?.mode === "manual"
+              ? run.imageGenerationPreference.models
+              : [];
+          const requestedModel = input.model;
+          const selectedModel = selectedModels.includes(requestedModel)
+            ? requestedModel
+            : selectedModels[0];
+          if (selectedModel && requestedModel !== selectedModel) {
+            input = { ...input, model: selectedModel };
+            jobLap("model_preference_enforced", {
+              requestedModel,
+              selectedModel,
+            });
+          }
+
+          const legacyImageModels: Record<string, string> = {
+            "google/nano-banana-2": "nano-banana-2-1k",
+            "nano-banana-2": "nano-banana-2-1k",
+          };
+          const normalizedModel = legacyImageModels[input.model] ?? input.model;
+          if (normalizedModel !== input.model) {
+            jobLap("legacy_model_normalized", {
+              requestedModel: input.model,
+              selectedModel: normalizedModel,
+            });
+            input = { ...input, model: normalizedModel };
+          }
 
           // Look up personal workspace directly — the viewer is already
           // bootstrapped from the normal auth flow, so we skip ensureViewer
           // to avoid its strict email validation on the profile schema.
-          const client = createClient(accessToken) as UserSupabaseClient;
-          const { data: ws } = await client
-            .from("workspaces")
-            .select("id")
-            .eq("type", "personal")
-            .limit(1)
-            .single();
-          if (!ws?.id) throw new Error("No personal workspace found");
+          let workspaceId: string | undefined;
+          if (options.localDb) {
+            jobLap("workspace_lookup_started");
+            const { rows } = canvasId
+              ? await withSubmitTimeout("Workspace lookup", options.localDb.query(
+                  "select p.workspace_id from canvases c join projects p on p.id=c.project_id join workspace_members wm on wm.workspace_id=p.workspace_id where c.id=$1 and wm.user_id=$2",
+                  [canvasId, userId],
+                ))
+              : await withSubmitTimeout("Workspace lookup", options.localDb.query(
+                  "select id as workspace_id from workspaces where owner_user_id=$1 order by created_at limit 1",
+                  [userId],
+                ));
+            workspaceId = rows[0]?.workspace_id;
+            jobLap("workspace_lookup_done", { found: Boolean(workspaceId) });
+          } else if (createClient) {
+            const client = createClient(accessToken) as UserSupabaseClient;
+            const { data: ws } = await client
+              .from("workspaces")
+              .select("id")
+              .eq("type", "personal")
+              .limit(1)
+              .single();
+            workspaceId = ws?.id;
+          }
+          if (!workspaceId) throw new Error("No workspace found");
 
           const user: AuthenticatedUser = {
             id: userId,
@@ -470,14 +615,13 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           };
 
           // ── Cost guard + credit checks (top-up credit system) ──
-          const workspaceId = ws.id;
           let creditsCost = 0;
           if (options.creditService && options.tierGuard) {
             const quality = (input.quality as ImageQualityLevel) ?? "hd";
             try {
-              options.tierGuard.checkModelAccess(input.model);
+              await withSubmitTimeout("Model access check", options.tierGuard.checkModelAccess(input.model));
               options.tierGuard.checkResolution(quality);
-              await options.tierGuard.checkConcurrency(workspaceId);
+              await withSubmitTimeout("Concurrency check", options.tierGuard.checkConcurrency(workspaceId));
             } catch (err) {
               if (err instanceof TierGuardError) {
                 pushBillingErrorAndAbort(run, canvasId, options, err.code, err.message);
@@ -485,12 +629,16 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               }
               throw err;
             }
-            creditsCost = options.tierGuard.calculateCreditCost(input.model, "image_generation", { quality });
+            creditsCost = await withSubmitTimeout(
+              "Billing lookup",
+              options.tierGuard.calculateCreditCost(input.model, "image_generation", { quality }),
+            );
+            jobLap("billing_check_done", { creditsCost });
           }
 
           // ── Balance pre-check ──────────────────────────────
           if (options.creditService && creditsCost > 0) {
-            const balanceInfo = await options.creditService.getBalance(workspaceId);
+            const balanceInfo = await withSubmitTimeout("Balance check", options.creditService.getBalance(workspaceId));
             if (balanceInfo.balance < creditsCost) {
               pushBillingErrorAndAbort(run, canvasId, options, "insufficient_credits", "Insufficient credits", {
                 currentBalance: balanceInfo.balance,
@@ -500,7 +648,8 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             }
           }
 
-          const job = await jobSvc.createJob(user, {
+          jobLap("job_create_started");
+          const job = await withSubmitTimeout("Job creation", jobSvc.createJob(user, {
             workspaceId,
             ...(canvasId ? { canvasId } : {}),
             ...(sessionId ? { sessionId } : {}),
@@ -512,7 +661,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               aspect_ratio: input.aspectRatio,
               ...(input.inputImages ? { input_images: input.inputImages } : {}),
             },
-          });
+          }));
 
           // Deduct credits after job creation
           if (options.creditService && creditsCost > 0) {
@@ -560,7 +709,6 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               let elementId: string | undefined;
               if (canvasId && result.object_path) {
                 try {
-                  const writerClient = createClient(accessToken) as UserSupabaseClient;
                   const explicitPlacement = (input as any).placementX != null && (input as any).placementY != null
                     ? {
                         x: (input as any).placementX,
@@ -570,18 +718,27 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                       }
                     : undefined;
 
-                  const insertResult = await insertImageElement(
-                    writerClient,
-                    {
+                  const insertOptions = {
                       canvasId,
                       objectPath: result.object_path,
                       width: result.width ?? 1024,
                       height: result.height ?? 1024,
                       mimeType: result.mime_type ?? "image/png",
                       title: input.title,
-                    },
-                    explicitPlacement,
-                  );
+                    };
+                  const insertResult = options.localDb
+                    ? await insertLocalImageElement(
+                        options.localDb,
+                        options.storage,
+                        insertOptions,
+                        explicitPlacement,
+                      )
+                    : await insertImageElement(
+                        createClient!(accessToken) as UserSupabaseClient,
+                        options.storage,
+                        insertOptions,
+                        explicitPlacement,
+                      );
                   elementId = insertResult.elementId;
 
                   // Notify connected frontends to refresh canvas
@@ -641,14 +798,66 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             console.log(`[submitVideoJob] ${label} +${Date.now() - jobT0}ms`, extra ? JSON.stringify(extra) : "");
           };
 
-          const client = createClient(accessToken) as UserSupabaseClient;
-          const { data: ws } = await client
-            .from("workspaces")
-            .select("id")
-            .eq("type", "personal")
-            .limit(1)
-            .single();
-          if (!ws?.id) throw new Error("No personal workspace found");
+          let workspaceId: string | undefined;
+          if (!input.inputImages?.length && referenceImages.length > 0) {
+            input = { ...input, inputImages: [referenceImages[0]!] };
+          }
+
+          const selectedModels =
+            run.videoGenerationPreference?.mode === "manual"
+              ? run.videoGenerationPreference.models
+              : [];
+          const selectedModel = selectedModels.includes(input.model)
+            ? input.model
+            : selectedModels[0];
+          if (selectedModel) input = { ...input, model: selectedModel };
+          const selectedDuration = run.videoGenerationPreference?.duration;
+          if (selectedDuration != null) {
+            input = { ...input, duration: selectedDuration };
+          }
+
+          if (options.localDb) {
+            const { rows } = canvasId
+              ? await options.localDb.query(
+                  "select p.workspace_id from canvases c join projects p on p.id=c.project_id join workspace_members wm on wm.workspace_id=p.workspace_id where c.id=$1 and wm.user_id=$2",
+                  [canvasId, userId],
+                )
+              : await options.localDb.query(
+                  "select id as workspace_id from workspaces where owner_user_id=$1 order by created_at limit 1",
+                  [userId],
+                );
+            workspaceId = rows[0]?.workspace_id;
+          } else if (createClient) {
+            const client = createClient(accessToken) as UserSupabaseClient;
+            const { data: ws } = await client
+              .from("workspaces")
+              .select("id")
+              .eq("type", "personal")
+              .limit(1)
+              .single();
+            workspaceId = ws?.id;
+          }
+          if (!workspaceId) throw new Error("No workspace found");
+
+          if (options.localDb) {
+            const model = await resolveConfiguredModel(options.localDb, "video", input.model, {
+              requiresInputImage: Boolean(input.inputImages?.length),
+            });
+            if (!model) {
+              throw new Error("当前没有可用且已配置计费的视频模型。");
+            }
+            input = { ...input, model: model.model_id };
+          }
+
+          jobLap("input_resolved", {
+            model: input.model,
+            inputImageCount: input.inputImages?.length ?? 0,
+            inputImageSource: input.inputImages?.[0]?.startsWith("data:")
+              ? "data_uri"
+              : input.inputImages?.[0]
+                ? "url"
+                : "none",
+          });
 
           const user: AuthenticatedUser = {
             id: userId,
@@ -658,11 +867,10 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           };
 
           // ── Cost guard + credit checks (top-up credit system) ──
-          const workspaceId = ws.id;
           let creditsCost = 0;
           if (options.creditService && options.tierGuard) {
             try {
-              options.tierGuard.checkModelAccess(input.model);
+              await options.tierGuard.checkModelAccess(input.model);
               if (input.resolution) {
                 options.tierGuard.checkVideoResolution(input.resolution as any);
               }
@@ -674,7 +882,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               }
               throw err;
             }
-            creditsCost = options.tierGuard.calculateCreditCost(
+            creditsCost = await options.tierGuard.calculateCreditCost(
               input.model, "video_generation",
               {
                 ...(input.duration != null ? { duration: input.duration } : {}),
@@ -757,7 +965,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
 
               // Write element directly to canvas (backend-driven insertion)
               let elementId: string | undefined;
-              if (canvasId && result.signed_url) {
+              if (!options.localDb && createClient && canvasId && result.signed_url) {
                 try {
                   const writerClient = createClient(accessToken) as UserSupabaseClient;
                   const explicitPlacement = (input as any).placementX != null && (input as any).placementY != null
@@ -842,7 +1050,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
       // Done before backend creation so we know whether to add the
       // /workspace-skills/ Store route.
       let workspaceSkills: WorkspaceSkillEntry[] = [];
-      if (run.canvasId && run.accessToken && options.createUserClient) {
+      if (!options.localDb && run.canvasId && run.accessToken && options.createUserClient) {
         try {
           const wsClient = options.createUserClient(run.accessToken) as UserSupabaseClient;
           workspaceSkills = await loadWorkspaceSkills(wsClient, run.canvasId);
@@ -928,7 +1136,13 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
 
         // Resolve brand kit ID from canvas → project in a single joined query
         let brandKitId: string | null = null;
-        if (run.canvasId && run.accessToken && options.createUserClient) {
+        if (run.canvasId && options.localDb) {
+          const { rows } = await options.localDb.query(
+            "select p.brand_kit_id from canvases c join projects p on p.id=c.project_id where c.id=$1",
+            [run.canvasId],
+          );
+          brandKitId = rows[0]?.brand_kit_id ?? null;
+        } else if (run.canvasId && run.accessToken && options.createUserClient) {
           try {
             const client = options.createUserClient(run.accessToken) as any;
             const { data: canvas } = await client
@@ -1028,7 +1242,26 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         // Auto-inject canvas state summary so the agent has immediate awareness
         // of what's on the canvas without needing to call inspect_canvas first.
         let canvasSummary: string | null = null;
-        if (run.canvasId && run.accessToken && options.createUserClient) {
+        let canvasReferenceImage: string | null = null;
+        if (run.canvasId && options.localDb) {
+          try {
+            const { rows } = await options.localDb.query(
+              "select content from canvases where id=$1",
+              [run.canvasId],
+            );
+            const content = rows[0]?.content;
+            const elements = content?.elements;
+            if (Array.isArray(elements)) {
+              canvasSummary = buildCanvasSummaryForContext(elements);
+              canvasReferenceImage = await findCanvasReferenceImage(
+                content,
+                options.storage,
+              );
+            }
+          } catch {
+            // Non-critical: inspect_canvas remains available.
+          }
+        } else if (run.canvasId && run.accessToken && options.createUserClient) {
           try {
             const canvasClient = options.createUserClient(run.accessToken) as any;
             const { data: canvasData } = await canvasClient
@@ -1039,6 +1272,10 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             if (canvasData?.content?.elements) {
               canvasSummary = buildCanvasSummaryForContext(
                 canvasData.content.elements as Array<Record<string, unknown>>,
+              );
+              canvasReferenceImage = await findCanvasReferenceImage(
+                canvasData.content,
+                options.storage,
               );
             }
           } catch {
@@ -1055,7 +1292,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           // 1. imageBlocks: base64 content parts for LLM vision
           // 2. downloaded: assetId → base64 mapping for tool resolution
           const downloaded: Array<{ assetId: string; mimeType: string; base64: string }> = [];
-          const imageBlocks = await Promise.all(
+          const visionParts = await Promise.all(
             run.attachments!.map(async (a) => {
               try {
                 let b64: string;
@@ -1066,28 +1303,61 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                 if (dataUriMatch) {
                   mime = dataUriMatch[1]!;
                   b64 = dataUriMatch[2]!;
+                } else if (options.localDb && run.userId) {
+                  const { rows } = await options.localDb.query<{
+                    bucket: string;
+                    object_path: string;
+                    mime_type: string | null;
+                  }>(
+                    `select asset.bucket, asset.object_path, asset.mime_type
+                     from asset_objects asset
+                     join workspace_members member on member.workspace_id = asset.workspace_id
+                     where asset.id = $1 and member.user_id = $2`,
+                    [a.assetId, run.userId],
+                  );
+                  const asset = rows[0];
+                  if (!asset) {
+                    throw new Error("Attachment is not accessible to this user");
+                  }
+                  const download = await options.storage.download(
+                    asset.bucket,
+                    asset.object_path,
+                  );
+                  if (download.error || !download.data) {
+                    throw download.error ?? new Error("Attachment storage returned no data");
+                  }
+                  mime = a.mimeType || asset.mime_type || "image/png";
+                  b64 = download.data.toString("base64");
                 } else {
-                  const res = await fetch(a.url);
+                  const assetUrl = new URL(a.url, options.env.webOrigin).toString();
+                  const res = await fetch(assetUrl, {
+                    ...(run.accessToken
+                      ? { headers: { Authorization: `Bearer ${run.accessToken}` } }
+                      : {}),
+                  });
+                  if (!res.ok) {
+                    throw new Error(`Attachment download failed: ${res.status}`);
+                  }
                   const buf = Buffer.from(await res.arrayBuffer());
                   mime = a.mimeType || res.headers.get("content-type") || "image/png";
                   b64 = buf.toString("base64");
                 }
 
                 downloaded.push({ assetId: a.assetId, mimeType: mime, base64: b64 });
-                // Use standard LangChain image_url format — works with both
-                // Google Gemini and OpenAI adapters. The Anthropic-style
-                // { type: "image", source_type: "base64" } format is NOT
-                // recognized by @langchain/google-genai and gets serialized
-                // as raw text, blowing past the token limit.
+                // Standard LangChain content blocks are converted to the
+                // provider's native image_url shape by ChatOpenAI.
                 return {
-                  type: "image_url" as const,
-                  image_url: `data:${mime};base64,${b64}`,
+                  type: "image" as const,
+                  source_type: "base64" as const,
+                  mime_type: mime,
+                  data: b64,
                 };
-              } catch {
-                return {
-                  type: "image_url" as const,
-                  image_url: a.url,
-                };
+              } catch (error) {
+                rlog.warn("attachment_download_failed", {
+                  assetId: a.assetId,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+                return null;
               }
             }),
           );
@@ -1104,13 +1374,31 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
 
           // Build assetId → data URI map for tool-level resolution
           attachmentDataMap = buildAttachmentDataMap(downloaded);
+          referenceImages = [
+            ...Object.values(attachmentDataMap),
+            // Keep a fetch failure from silently dropping a selected canvas image.
+            // Providers that support URLs can still retrieve the original source.
+            ...run.attachments!
+              .map((attachment) => attachment.url)
+              .filter((url) => /^(https?:|data:image\/)/.test(url)),
+          ];
 
-          userMessage = new HumanMessage({
-            content: [
-              { type: "text" as const, text: enrichedPrompt },
-              ...imageBlocks,
-            ],
-          });
+          // Grok accepts the OpenAI image_url content format. Other gateways
+          // retain the text-only path because their compatibility behavior is
+          // inconsistent for private, uploaded assets.
+          const activeModel = run.modelOverride ?? (
+            typeof options.model === "string" ? options.model : undefined
+          );
+          userMessage = supportsVisionInput(activeModel)
+            ? new HumanMessage({
+                content: [
+                  { type: "text", text: enrichedPrompt },
+                  ...visionParts.filter(
+                    (part): part is NonNullable<typeof part> => part !== null,
+                  ),
+                ],
+              })
+            : new HumanMessage(enrichedPrompt);
         } else {
           const { text: enrichedPrompt } = buildUserMessage(
             run.prompt,
@@ -1121,6 +1409,10 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             canvasSummary,
           );
           userMessage = new HumanMessage(enrichedPrompt);
+        }
+
+        if (referenceImages.length === 0 && canvasReferenceImage) {
+          referenceImages = [canvasReferenceImage];
         }
 
         rlog.lap("stream_call_start");
@@ -1155,6 +1447,18 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         return;
       }
 
+      const MAX_AGENT_SILENCE_MS = 90_000;
+      let timedOut = false;
+      let silenceTimer: ReturnType<typeof setTimeout> | undefined;
+      const resetSilenceTimer = () => {
+        if (silenceTimer) clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+          timedOut = true;
+          run.controller.abort(new Error("Agent response timed out"));
+        }, MAX_AGENT_SILENCE_MS);
+      };
+
+      resetSilenceTimer();
       try {
       for await (const event of adaptDeepAgentStream({
         conversationId: run.conversationId,
@@ -1164,6 +1468,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         signal: run.controller.signal,
         stream,
       })) {
+        resetSilenceTimer();
         run.status = mapEventToStatus(event);
         try {
           await syncPersistedRunFromEvent(
@@ -1196,6 +1501,15 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           }
         }
       }
+      if (timedOut) {
+        const timeoutError = new Error("模型在 90 秒内未返回响应，已停止本次请求。");
+        run.status = "failed";
+        await updatePersistedRunFailure(options.agentRunMetadataService, run, now, timeoutError).catch(
+          (persistErr) => console.error("[agent-runtime] Failed to persist timed out run:", persistErr),
+        );
+        yield toFailedEvent(runId, now, timeoutError);
+        return;
+      }
       } catch (streamError) {
         // Catch DB / checkpoint errors that bubble up from the LangGraph stream
         // (e.g. Supabase circuit-breaker, connection pool exhaustion).
@@ -1208,6 +1522,8 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         );
         yield failedEvent;
         return;
+      } finally {
+        if (silenceTimer) clearTimeout(silenceTimer);
       }
       } finally {
         if (backendResult.sandboxDir) {
