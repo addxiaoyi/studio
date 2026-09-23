@@ -26,7 +26,7 @@ export async function registerImageModelRoutes(app: FastifyInstance, options: {
           description: "已配置的图片生成模型",
         };
         return [{
-        id: row.model_id, displayName: presentation.displayName, description: presentation.description, provider: "configured",
+        id: row.model_id, displayName: presentation.displayName, description: presentation.description, iconUrl: "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/openai.svg", provider: "configured",
         billingUnit: row.billing_unit, creditCost: row.billing_unit === "per_million_tokens" ? undefined : Number(row.price_credits) * CONFIGURED_PRICE_MULTIPLIER,
         providerPriceCny: row.billing_unit === "per_million_tokens" ? undefined : Number(row.price_credits) * CONFIGURED_PRICE_MULTIPLIER,
         providerInputTokenPriceCny: row.billing_unit === "per_million_tokens" ? Number(row.input_token_price_cny) : undefined,
