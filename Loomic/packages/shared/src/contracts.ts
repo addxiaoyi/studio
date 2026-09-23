@@ -28,7 +28,8 @@ export const runStatusSchema = z.enum([
 
 export const imageAttachmentSchema = z.object({
   assetId: z.string().min(1),
-  url: z.string().url(),
+  // Local storage returns a site-relative path; remote providers return URLs.
+  url: z.string().min(1),
   mimeType: z.string().min(1),
   name: z.string().min(1).optional(),
 });
@@ -45,7 +46,7 @@ export const brandKitAssetMentionSchema = z.object({
   label: z.string().min(1),
   assetType: brandKitAssetTypeSchema,
   textContent: z.string().nullable().optional(),
-  fileUrl: z.string().url().nullable().optional(),
+  fileUrl: z.string().min(1).nullable().optional(),
 });
 
 export const skillMentionSchema = z.object({
@@ -69,6 +70,7 @@ export const imageGenerationPreferenceSchema = z.object({
 export const videoGenerationPreferenceSchema = z.object({
   mode: z.enum(["auto", "manual"]),
   models: z.array(z.string().min(1)),
+  duration: z.number().int().min(1).optional(),
 });
 
 export const runCreateRequestSchema = z.object({
@@ -161,7 +163,7 @@ export const chatSessionIdSchema = identifierSchema;
 export const chatToolActivitySchema = z.object({
   toolCallId: z.string().min(1),
   toolName: z.string().min(1),
-  status: z.enum(["running", "completed"]),
+  status: z.enum(["running", "completed", "failed"]),
   input: z.record(z.unknown()).optional(),
   output: z.record(z.unknown()).optional(),
   outputSummary: z.string().optional(),
@@ -188,7 +190,7 @@ export const toolBlockSchema = z.object({
   type: z.literal("tool"),
   toolCallId: z.string().min(1),
   toolName: z.string().min(1),
-  status: z.enum(["running", "completed"]),
+  status: z.enum(["running", "completed", "failed"]),
   input: z.record(z.unknown()).optional(),
   output: z.record(z.unknown()).optional(),
   outputSummary: z.string().optional(),
@@ -198,7 +200,7 @@ export const toolBlockSchema = z.object({
 export const imageBlockSchema = z.object({
   type: z.literal("image"),
   assetId: z.string().min(1),
-  url: z.string().url(),
+  url: z.string().min(1),
   mimeType: z.string().min(1),
   source: z.enum(["upload", "canvas-ref"]),
   name: z.string().min(1).optional(),
@@ -218,7 +220,7 @@ export const brandKitAssetMentionBlockSchema = z.object({
   label: z.string().min(1),
   assetType: brandKitAssetTypeSchema,
   textContent: z.string().nullable().optional(),
-  fileUrl: z.string().url().nullable().optional(),
+  fileUrl: z.string().min(1).nullable().optional(),
 });
 
 export const skillMentionBlockSchema = z.object({

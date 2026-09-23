@@ -4,13 +4,14 @@ import { useCallback, useSyncExternalStore } from "react";
 import type { VideoGenerationPreference } from "@helstera/shared";
 
 const STORAGE_KEY = "helstera:video-model-preference";
-const DEFAULT_MODEL = "google/veo-3.1";
+const DEFAULT_MODEL = "gk-video-3.5";
 
 export type VideoModelPreference = VideoGenerationPreference;
 
 const defaultPreference: VideoModelPreference = {
   mode: "auto",
   models: [DEFAULT_MODEL],
+  duration: 5,
 };
 
 const listeners = new Set<() => void>();
@@ -61,6 +62,7 @@ function normalizePreference(
   return {
     mode: preference.mode === "manual" ? "manual" : "auto",
     models: models.length > 0 ? models : defaultPreference.models,
+    duration: typeof preference.duration === "number" ? preference.duration : defaultPreference.duration,
   };
 }
 
@@ -99,6 +101,10 @@ export function useVideoModelPreference() {
     [preference.models, setPreference],
   );
 
+  const setDuration = useCallback((duration: number) => {
+    setPreference({ ...preference, duration });
+  }, [preference, setPreference]);
+
   const activeVideoGenerationPreference =
     preference.mode === "manual" && preference.models.length > 0
       ? preference
@@ -109,6 +115,7 @@ export function useVideoModelPreference() {
     setPreference,
     setMode,
     toggleModel,
+    setDuration,
     activeVideoGenerationPreference,
   };
 }

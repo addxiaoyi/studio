@@ -2,13 +2,22 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Lock, Zap } from "lucide-react";
 
 import type { ImageModelInfo } from "../lib/server-api";
 import type { VideoModelInfo } from "../lib/server-api";
 import { fetchImageModels, fetchVideoModels } from "../lib/server-api";
 import { useImageModelPreference } from "../hooks/use-image-model-preference";
 import { useVideoModelPreference } from "../hooks/use-video-model-preference";
+import { getModelPricingLabel } from "../lib/model-pricing";
+
+const DOMESTIC_MODEL_HINTS = ["vidu", "wan", "wanxiang", "hunyuan", "hy3", "minimax", "hailuo", "kling", "seedance", "seedream", "seededit", "doubao", "volc", "jimeng", "qwen", "alibaba", "gk-video"];
+const EXCLUDED_MODEL_HINTS = ["stable diffusion", "sd 2", "sd2", "google", "gemini", "veo", "imagen", "openai", "gpt", "dall-e", "sora", "flux", "midjourney", "runway"];
+
+function isDomesticModel(model: { id: string; displayName: string }) {
+  const identity = `${model.id} ${model.displayName}`.toLowerCase();
+  if (EXCLUDED_MODEL_HINTS.some((hint) => identity.includes(hint))) return false;
+  return DOMESTIC_MODEL_HINTS.some((hint) => identity.includes(hint));
+}
 
 export function ImageModelPreferencePopover({
   open,
@@ -30,10 +39,11 @@ export function ImageModelPreferencePopover({
   useEffect(() => {
     if (!open) return;
     fetchImageModels()
+      // The image-model endpoint already applies the workspace visibility rules.
       .then((data) => setModels(data.models))
       .catch(() => {});
     fetchVideoModels()
-      .then((data) => setVideoModels(data.models))
+      .then((data) => setVideoModels(data.models.filter(isDomesticModel)))
       .catch(() => {});
   }, [open]);
 
@@ -83,6 +93,7 @@ export function ImageModelPreferencePopover({
   const currentModels = activeTab === "image" ? models : videoModels;
   const currentSetMode = activeTab === "image" ? setMode : videoPreference.setMode;
   const currentToggleModel = activeTab === "image" ? toggleModel : videoPreference.toggleModel;
+  const videoDurations = [...new Set(videoModels.flatMap((model) => model.limits?.allowedDurations ?? [4, 5, 6, 8]))].sort((a, b) => a - b);
 
   if (!open || !pos) return null;
 
@@ -94,7 +105,7 @@ export function ImageModelPreferencePopover({
         bottom: pos.above ? window.innerHeight - pos.top : undefined,
         left: pos.left,
       }}
-      className="fixed z-[9999] w-[380px] rounded-2xl border border-border/60 glass p-1 shadow-soft"
+      className="fixed z-[9999] w-[380px] rounded-2xl border border-border/60 bg-background/95 p-1 shadow-2xl backdrop-blur-xl"
     >
       <div className="flex flex-col gap-3 py-2">
         {/* Tab switcher */}
@@ -123,24 +134,23 @@ export function ImageModelPreferencePopover({
             <span className="text-sm font-medium text-foreground">
               {activeTab === "image" ? "Image Model" : "Video Model"}
             </span>
-            <button
-              type="button"
-              onClick={() =>
-                currentSetMode(currentPreference.mode === "auto" ? "manual" : "auto")
-              }
-              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all duration-300 ${
-                currentPreference.mode === "auto"
-                  ? "bg-accent/15 text-accent-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-foreground/[0.04]/80"
-              }`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  currentPreference.mode === "auto" ? "bg-accent" : "bg-muted-foreground"
-                }`}
-              />
-              {currentPreference.mode === "auto" ? "Auto" : "Manual"}
-            </button>
+            <div className="flex rounded-full bg-muted p-0.5" role="group" aria-label={`${activeTab} model mode`}>
+              {(["auto", "manual"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => currentSetMode(mode)}
+                  aria-pressed={currentPreference.mode === mode}
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium transition-all duration-200 ${
+                    currentPreference.mode === mode
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {mode === "auto" ? "Auto" : "Manual"}
+                </button>
+              ))}
+            </div>
           </div>
           <span className="text-[11px] text-muted-foreground">
             {currentPreference.mode === "auto"
@@ -149,9 +159,15 @@ export function ImageModelPreferencePopover({
           </span>
         </div>
 
-        {/* Model list */}
-        <div className="scrollbar-hidden max-h-[300px] space-y-0.5 overflow-y-auto px-1">
-          {currentModels.map((m) => {
+        {/* Manual model list */}
+        {currentPreference.mode === "manual" && (
+          <div className="scrollbar-hidden max-h-[300px] space-y-0.5 overflow-y-auto px-1">
+            {currentModels.length === 0 && (
+              <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                暂无可用的{activeTab === "image" ? "图片" : "视频"}模型
+              </div>
+            )}
+            {currentModels.map((m) => {
             const selected = currentPreference.models.includes(m.id);
             return (
               <button
@@ -172,21 +188,10 @@ export function ImageModelPreferencePopover({
                 <div className="flex flex-1 flex-col">
                   <span className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
                     {m.displayName}
-                    {m.accessible === false && (
-                      <span className="inline-flex items-center gap-0.5 rounded-full glass-soft border border-border/30 px-1.5 py-px text-[9px] font-medium uppercase leading-tight tracking-wider text-muted-foreground/80">
-                        <Lock className="h-2.5 w-2.5" strokeWidth={1.5} />
-                        {m.minTier ?? "PRO"}
-                      </span>
-                    )}
                   </span>
                   <span className="flex items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
-                    {m.description}
-                    {typeof m.creditCost === "number" && (
-                      <span className="inline-flex items-center gap-0.5 tabular-nums text-muted-foreground">
-                        <Zap className="h-2.5 w-2.5" />
-                        {m.creditCost}
-                      </span>
-                    )}
+                    <span className="font-medium text-foreground">{getModelPricingLabel(m, activeTab)}</span>
+                    <span>{m.description}</span>
                   </span>
                 </div>
                 {selected && (
@@ -204,8 +209,21 @@ export function ImageModelPreferencePopover({
                 )}
               </button>
             );
-          })}
-        </div>
+            })}
+          </div>
+        )}
+        {activeTab === "video" && (
+          <div className="border-t border-border/40 px-3 pt-2">
+            <div className="mb-1.5 text-[11px] font-medium text-muted-foreground">视频时长</div>
+            <div className="flex flex-wrap gap-1.5">
+              {videoDurations.map((duration) => (
+                <button key={duration} type="button" onClick={() => videoPreference.setDuration(duration)} className={`rounded-lg px-3 py-1 text-xs transition-colors ${videoPreference.preference.duration === duration ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground"}`}>
+                  {duration}秒
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>,
     document.body,

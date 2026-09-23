@@ -12,6 +12,12 @@ const ICON_OPENAI =
   "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/openai.svg";
 
 const OPENAI_IMAGE_MODELS: readonly ModelInfo[] = [
+  ...["gpt-image-2", "gpt-image-2-1k", "gpt-image-2-2k", "gpt-image-2-4k", "gpt-image-2-4k-超分", "gpt-image-2.5-1k", "gpt-image-2.5-2k", "gpt-image-2.5-4k"].map((id) => ({
+    id,
+    displayName: id,
+    description: "高质量图片生成，支持电商视觉与参考图创作。",
+    iconUrl: ICON_OPENAI,
+  })),
   {
     id: "gpt-image-1.5",
     displayName: "GPT Image 1.5",
