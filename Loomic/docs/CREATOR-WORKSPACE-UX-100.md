@@ -8,7 +8,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 02. Nested pages expose a useful breadcrumb/back path.
 - [x] 03. Active routes expose `aria-current="page"`.
 - [~] 04. Primary navigation remains distinct from secondary destinations.
-- [~] 05. Collapsed navigation keeps accessible labels and hover titles.
+- [~] 05. Collapsed navigation keeps accessible labels and hover titles; keyboard focus now expands the desktop sidebar, with a browser pass still pending.
 - [~] 06. Route changes preserve the expanded active navigation group.
 - [~] 07. Mobile navigation respects safe-area insets and has large targets.
 - [x] 08. Mobile More menu closes on outside pointer, Escape, and route change.
@@ -48,7 +48,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 33. Duplicate media tool blocks collapse when they reference the same Job ID.
 - [x] 34. The sidebar progress item no longer hides or duplicates unrelated Job cards.
 - [x] 35. Expired, canceled, completed, and terminal-failure approvals become compact non-actionable status rows.
-- [~] 36. Stream connection and generation states announce progress.
+- [~] 36. Stream connection and generation states announce progress, including the direct video path; a full screen-reader pass remains.
 - [x] 37. Auto-follow stops when the reader scrolls up and offers a return-to-latest action.
 - [~] 38. Retry retains the prior prompt and reference context.
 - [~] 39. Attachments can be inspected and removed before sending.
@@ -123,14 +123,14 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 
 - [~] 91. The signed-in workspace shell and More menu pass at 320, 390, and 768 CSS pixels in Chromium and iPhone Safari; asset, Feed, and canvas detail layouts still need per-page browser checks.
 - [~] 92. Workspace chrome now reflows and wraps at reduced CSS viewport widths; critical pages still need a manual 200% browser-zoom pass.
-- [~] 93. Primary workspace controls are keyboard reachable; complete end-to-end keyboard audit remains.
+- [~] 93. Primary workspace controls are keyboard reachable and the desktop sidebar expands on focus; complete end-to-end keyboard audit remains.
 - [~] 94. Dialogs use the shared accessible primitive; video preview restores focus.
 - [~] 95. Semantic contrast tokens and a `prefers-contrast: more` fallback now cover shared chrome; rendered light/dark contrast measurement remains.
 - [x] 96. CSS and Framer Motion honor `prefers-reduced-motion`.
 - [~] 97. Primary lists have loading skeletons and explicit empty states.
 - [~] 98. Network failures preserve user input and offer targeted retry where implemented.
 - [x] 99. Session/message and Feed polling ignore or stop stale asynchronous updates.
-- [~] 100. Key progress and outcome changes use status/alert semantics; full screen-reader pass remains.
+- [~] 100. Key progress and outcome changes use atomic status/alert semantics; full screen-reader pass remains.
 
 ## Verification
 
@@ -141,4 +141,6 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 
 This pass also adds route-aware document titles, nested workspace breadcrumbs with a
 parent back path, narrow-viewport wrapping for shared chrome, and stronger semantic
-tokens when the user requests increased contrast.
+tokens when the user requests increased contrast. Chat streaming now announces
+connection and direct-generation phases, and keyboard focus expands the desktop
+sidebar so its labels remain visible while navigating without a pointer.
