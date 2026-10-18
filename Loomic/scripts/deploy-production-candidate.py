@@ -19,9 +19,14 @@ DEFAULT_HEALTH_URL = "https://studio.0st.top/api/health"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Deploy a validated Helstera candidate through the configured jump host.")
+    parser = argparse.ArgumentParser(description="Deploy a validated Helstera candidate to the configured target host.")
     parser.add_argument("archive", type=pathlib.Path)
     parser.add_argument("--password-env", default="HELT_DEPLOY_PASSWORD")
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="Connect to the target host directly instead of opening the configured jump-host tunnel.",
+    )
     parser.add_argument("--jump-host", default=DEFAULT_JUMP_HOST)
     parser.add_argument("--jump-port", type=int, default=DEFAULT_JUMP_PORT)
     parser.add_argument("--jump-user", default=DEFAULT_JUMP_USER)
@@ -68,21 +73,27 @@ def deploy(args: argparse.Namespace) -> None:
         raise RuntimeError(f"Missing deployment password environment variable: {args.password_env}")
 
     local_hash = __import__("hashlib").sha256(archive.read_bytes()).hexdigest().upper()
-    jump = paramiko.SSHClient()
-    jump.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    jump = None
+    if not args.direct:
+        jump = paramiko.SSHClient()
+        jump.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     target = paramiko.SSHClient()
     target.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     backup = None
     staging = None
     try:
-        jump.connect(args.jump_host, port=args.jump_port, username=args.jump_user, allow_agent=True, look_for_keys=True, timeout=20)
-        channel = jump.get_transport().open_channel(
-            "direct-tcpip",
-            (args.target_host, 22),
-            ("127.0.0.1", 0),
-            timeout=20,
-        )
-        target.connect(args.target_host, sock=channel, username=args.target_user, password=password, timeout=20)
+        if args.direct:
+            target.connect(args.target_host, username=args.target_user, password=password, timeout=20)
+        else:
+            assert jump is not None
+            jump.connect(args.jump_host, port=args.jump_port, username=args.jump_user, allow_agent=True, look_for_keys=True, timeout=20)
+            channel = jump.get_transport().open_channel(
+                "direct-tcpip",
+                (args.target_host, 22),
+                ("127.0.0.1", 0),
+                timeout=20,
+            )
+            target.connect(args.target_host, sock=channel, username=args.target_user, password=password, timeout=20)
 
         remote_run(target, f"test -d {shlex.quote(args.root)} && test -f {shlex.quote(args.root + '/.env.local')}")
         jobs = active_jobs(target, args.root)
@@ -153,7 +164,7 @@ def deploy(args: argparse.Namespace) -> None:
     finally:
         if target.get_transport() and target.get_transport().is_active():
             target.close()
-        if jump.get_transport() and jump.get_transport().is_active():
+        if jump is not None and jump.get_transport() and jump.get_transport().is_active():
             jump.close()
 
 
