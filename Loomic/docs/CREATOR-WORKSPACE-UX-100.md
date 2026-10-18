@@ -122,10 +122,10 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 ## Responsive, accessibility, and resilience
 
 - [~] 91. The signed-in workspace shell and More menu pass at 320, 390, and 768 CSS pixels in Chromium and iPhone Safari; asset, Feed, and canvas detail layouts still need per-page browser checks.
-- [~] 92. Workspace chrome now reflows and wraps at reduced CSS viewport widths; critical pages still need a manual 200% browser-zoom pass.
+- [~] 92. Workspace chrome now reflows and wraps at reduced CSS viewport widths; the Chromium UX-100 test passes at a 640 CSS-pixel 200% proxy, while a manual browser-zoom pass remains.
 - [~] 93. Primary workspace controls are keyboard reachable and the desktop sidebar expands on focus; complete end-to-end keyboard audit remains.
 - [~] 94. Dialogs use the shared accessible primitive; video preview restores focus.
-- [~] 95. Semantic contrast tokens and a `prefers-contrast: more` fallback now cover shared chrome; rendered light/dark contrast measurement remains.
+- [~] 95. Semantic contrast tokens and a `prefers-contrast: more` fallback now cover shared chrome; Chromium verifies foreground and muted text AA in light/dark themes, while all control/error pairs remain to be measured.
 - [x] 96. CSS and Framer Motion honor `prefers-reduced-motion`.
 - [~] 97. Primary lists have loading skeletons and explicit empty states.
 - [~] 98. Network failures preserve user input and offer targeted retry where implemented.
@@ -137,6 +137,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - `pnpm --filter @helstera/web typecheck`
 - `pnpm --filter @helstera/web test`
 - `pnpm --filter @helstera/web build`
+- `pnpm --filter @helstera/web exec playwright test e2e/ux100.spec.ts --project=chromium`
 - Browser checks at desktop/mobile, reduced motion, keyboard-only, and 200% zoom are still required for unchecked visual/accessibility items.
 
 This pass also adds route-aware document titles, nested workspace breadcrumbs with a
