@@ -612,7 +612,9 @@ export function ChatSidebar({
         }).catch((error) => console.warn("[chat] direct video message save failed", error));
 
         setStreaming(true);
+        setStreamPhase("connecting");
         try {
+          setStreamPhase("processing");
           const video = await generateVideoDirect(accessTokenRef.current, text, {
             ...(currentVideoGenerationPreference?.mode === "manual" &&
             currentVideoGenerationPreference.models[0]
@@ -1533,7 +1535,7 @@ export function ChatSidebar({
             ))
           )}
           {streaming && streamPhase && (
-            <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground" role="status">
+            <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground" role="status" aria-live="polite" aria-atomic="true">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/50" />
               {streamPhase === "connecting"
                 ? "正在连接模型..."
@@ -1549,7 +1551,7 @@ export function ChatSidebar({
             </div>
           ) : null}
           {canvasApprovalJob && !mediaJobRenderedInMessage ? (
-            <div className="shrink-0 rounded-lg border border-border/60 bg-muted/20 px-3 py-3" role="status" aria-live="polite">
+            <div className="shrink-0 rounded-lg border border-border/60 bg-muted/20 px-3 py-3" role="status" aria-live="polite" aria-atomic="true" aria-label="生成任务状态">
               <div className="flex items-center justify-between gap-3 text-xs">
                 <span className="font-medium text-foreground">{generationTitle}</span>
                 <span className={`shrink-0 ${generationStopped ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}>
