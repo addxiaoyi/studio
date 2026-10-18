@@ -5,7 +5,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 ## Navigation and workspace shell
 
 - [~] 01. Shared page titles and primary actions use a consistent hierarchy.
-- [ ] 02. Nested pages expose a useful breadcrumb/back path.
+- [x] 02. Nested pages expose a useful breadcrumb/back path.
 - [x] 03. Active routes expose `aria-current="page"`.
 - [~] 04. Primary navigation remains distinct from secondary destinations.
 - [~] 05. Collapsed navigation keeps accessible labels and hover titles.
@@ -122,10 +122,10 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 ## Responsive, accessibility, and resilience
 
 - [~] 91. The signed-in workspace shell and More menu pass at 320, 390, and 768 CSS pixels in Chromium and iPhone Safari; asset, Feed, and canvas detail layouts still need per-page browser checks.
-- [ ] 92. Verify critical workspaces at 200% browser zoom.
+- [~] 92. Workspace chrome now reflows and wraps at reduced CSS viewport widths; critical pages still need a manual 200% browser-zoom pass.
 - [~] 93. Primary workspace controls are keyboard reachable; complete end-to-end keyboard audit remains.
 - [~] 94. Dialogs use the shared accessible primitive; video preview restores focus.
-- [ ] 95. Verify text/control/error contrast in rendered light and dark themes.
+- [~] 95. Semantic contrast tokens and a `prefers-contrast: more` fallback now cover shared chrome; rendered light/dark contrast measurement remains.
 - [x] 96. CSS and Framer Motion honor `prefers-reduced-motion`.
 - [~] 97. Primary lists have loading skeletons and explicit empty states.
 - [~] 98. Network failures preserve user input and offer targeted retry where implemented.
@@ -138,3 +138,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - `pnpm --filter @helstera/web test`
 - `pnpm --filter @helstera/web build`
 - Browser checks at desktop/mobile, reduced motion, keyboard-only, and 200% zoom are still required for unchecked visual/accessibility items.
+
+This pass also adds route-aware document titles, nested workspace breadcrumbs with a
+parent back path, narrow-viewport wrapping for shared chrome, and stronger semantic
+tokens when the user requests increased contrast.

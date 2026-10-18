@@ -267,6 +267,36 @@
   }
 }
 
+/* Keep shared workspace chrome usable when browser zoom reduces the CSS viewport. */
+.workspace-main {
+  overflow-wrap: anywhere;
+}
+
+.workspace-breadcrumbs a,
+.workspace-breadcrumbs span {
+  max-width: 100%;
+}
+
+@media (max-width: 48rem) {
+  .workspace-breadcrumbs {
+    padding-right: 5.5rem;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --muted-foreground: oklch(0.31 0.015 260);
+    --border: oklch(0.78 0.01 260);
+    --input-border: oklch(0.68 0.01 260);
+  }
+
+  .dark {
+    --muted-foreground: oklch(0.82 0.01 260);
+    --border: oklch(0.72 0.01 260);
+    --input-border: oklch(0.64 0.01 260);
+  }
+}
+
 [data-slot="dropdown-menu-trigger"] {
   min-height: 2.5rem;
   border: 1px solid var(--input-border);
