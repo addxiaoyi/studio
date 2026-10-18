@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import type { KeyboardEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { AgentSection } from "@/components/agent-section";
 import { BillingSection } from "@/components/billing-section";
@@ -16,20 +17,25 @@ import {
   fetchWorkspaceSettings,
   updateProfile,
   updateWorkspaceSettings,
+  createPublishingAccount,
+  fetchPublishingAccounts,
+  revokePublishingAccount,
+  type PublishingAccount,
 } from "@/lib/server-api";
 
 type SettingsTab = "profile" | "agent" | "billing" | "usage";
 
 const tabs: Array<{ id: SettingsTab; label: string }> = [
-  { id: "profile", label: "Profile" },
-  { id: "agent", label: "Agent" },
-  { id: "billing", label: "Billing" },
-  { id: "usage", label: "Usage" },
+  { id: "profile", label: "个人资料" },
+  { id: "agent", label: "智能体与默认模型" },
+  { id: "billing", label: "账单与充值" },
+  { id: "usage", label: "用量统计" },
 ];
 
 export default function SettingsPage() {
   const { session } = useAuth();
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   const initialTab = (searchParams.get("tab") as SettingsTab) ?? "profile";
   const [activeTab, setActiveTab] = useState<SettingsTab>(
@@ -40,8 +46,12 @@ export default function SettingsPage() {
     email: string;
   } | null>(null);
   const [defaultModel, setDefaultModel] = useState<string>("gpt-5.4-mini");
+  const [autoApprovePaidGeneration, setAutoApprovePaidGeneration] = useState(false);
+  const [autoDeleteEmptyCanvas, setAutoDeleteEmptyCanvas] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [publishingAccounts, setPublishingAccounts] = useState<PublishingAccount[]>([]);
+  const [accountBusy, setAccountBusy] = useState(false);
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab") as SettingsTab | null;
@@ -63,9 +73,10 @@ export default function SettingsPage() {
     setPageLoading(true);
 
     try {
-      const [viewer, settings] = await Promise.all([
+      const [viewer, settings, accounts] = await Promise.all([
         fetchViewer(token),
         fetchWorkspaceSettings(token),
+        fetchPublishingAccounts(token),
       ]);
 
       setProfile({
@@ -73,6 +84,9 @@ export default function SettingsPage() {
         email: viewer.profile.email,
       });
       setDefaultModel(settings.settings.defaultModel);
+      setAutoApprovePaidGeneration(Boolean(settings.settings.autoApprovePaidGeneration));
+      setAutoDeleteEmptyCanvas(Boolean(settings.settings.autoDeleteEmptyCanvas));
+      setPublishingAccounts(accounts);
     } catch (err) {
       setPageError(err instanceof Error ? err.message : "Failed to load settings.");
       if (err instanceof ApiAuthError) {
@@ -110,13 +124,86 @@ export default function SettingsPage() {
       if (!token) return;
       const result = await updateWorkspaceSettings(token, {
         defaultModel: model,
+        autoApprovePaidGeneration,
+        autoDeleteEmptyCanvas,
       });
       setDefaultModel(result.settings.defaultModel);
     },
-    [getToken],
+    [autoApprovePaidGeneration, autoDeleteEmptyCanvas, getToken],
+  );
+
+  const handleAutoApproveChange = useCallback(
+    async (value: boolean) => {
+      const token = getToken();
+      if (!token) return;
+      const result = await updateWorkspaceSettings(token, {
+        defaultModel,
+        autoApprovePaidGeneration: value,
+        autoDeleteEmptyCanvas,
+      });
+      setAutoApprovePaidGeneration(result.settings.autoApprovePaidGeneration);
+    },
+    [autoDeleteEmptyCanvas, defaultModel, getToken],
+  );
+
+  const handleAutoDeleteEmptyCanvasChange = useCallback(
+    async (value: boolean) => {
+      const token = getToken();
+      if (!token) return;
+      const result = await updateWorkspaceSettings(token, {
+        defaultModel,
+        autoApprovePaidGeneration,
+        autoDeleteEmptyCanvas: value,
+      });
+      setAutoDeleteEmptyCanvas(result.settings.autoDeleteEmptyCanvas);
+    },
+    [autoApprovePaidGeneration, defaultModel, getToken],
   );
 
   const stableFetchModels = useCallback(() => fetchModels(), []);
+
+  function handleSettingsTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTab);
+    const nextIndex = event.key === "ArrowRight"
+      ? (currentIndex + 1) % tabs.length
+      : event.key === "ArrowLeft"
+        ? (currentIndex - 1 + tabs.length) % tabs.length
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? tabs.length - 1
+            : -1;
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    const nextTab = tabs[nextIndex]!;
+    setActiveTab(nextTab.id);
+    router.replace(`/settings?tab=${nextTab.id}`, { scroll: false });
+    document.getElementById(`settings-tab-${nextTab.id}`)?.focus();
+  }
+
+  const handleBindAccount = useCallback(async (input: { platform: string; alias: string; connectionMode: PublishingAccount["connection_mode"] }) => {
+    const token = getToken();
+    if (!token) return;
+    setAccountBusy(true);
+    try {
+      const account = await createPublishingAccount(token, input);
+      setPublishingAccounts((current) => [account, ...current.filter((item) => item.id !== account.id)]);
+    } finally {
+      setAccountBusy(false);
+    }
+  }, [getToken]);
+
+  const handleRevokeAccount = useCallback(async (accountId: string) => {
+    const token = getToken();
+    if (!token) return;
+    setAccountBusy(true);
+    try {
+      await revokePublishingAccount(token, accountId);
+      setPublishingAccounts((current) => current.filter((item) => item.id !== accountId));
+    } finally {
+      setAccountBusy(false);
+    }
+  }, [getToken]);
 
   if (pageLoading) {
     return <SettingsSkeleton />;
@@ -129,6 +216,7 @@ export default function SettingsPage() {
         <p className="mt-3 text-sm text-muted-foreground">
           {pageError ?? "登录状态已失效，请重新登录后再试。"}
         </p>
+          <button type="button" onClick={() => void loadData()} className="mt-5 min-h-10 rounded-md border px-3 text-sm font-medium hover:bg-muted">重新加载设置</button>
       </div>
     );
   }
@@ -136,18 +224,27 @@ export default function SettingsPage() {
   return (
     <div className="px-6 py-12 sm:px-8 sm:py-16 max-w-6xl mx-auto">
       <header className="mb-12">
-        <p className="eyebrow mb-3">Settings</p>
+        <p className="eyebrow mb-3">设置中心</p>
         <h1 className="display-md text-foreground">工作区设置</h1>
       </header>
 
       {/* Tab bar — glass pill */}
-      <div className="mb-10 overflow-x-auto">
+      <div className="mb-10 overflow-x-auto" role="tablist" aria-label="设置分区" aria-orientation="horizontal">
         <div className="inline-flex gap-1 rounded-full glass-soft p-1">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id)}
+              role="tab"
+              id={`settings-tab-${tab.id}`}
+              aria-controls="settings-tabpanel"
+              aria-selected={activeTab === tab.id}
+              tabIndex={activeTab === tab.id ? 0 : -1}
+              onKeyDown={handleSettingsTabKeyDown}
+              onClick={() => {
+                setActiveTab(tab.id);
+                router.replace(`/settings?tab=${tab.id}`, { scroll: false });
+              }}
               className={`min-h-[44px] whitespace-nowrap rounded-full px-5 py-2 text-sm transition-all duration-300 sm:min-h-0 sm:px-4 sm:py-1.5 ${
                 activeTab === tab.id
                   ? "bg-foreground text-background font-medium"
@@ -160,18 +257,26 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className={activeTab === "billing" ? "max-w-5xl" : "max-w-2xl"}>
+      <div id="settings-tabpanel" role="tabpanel" aria-labelledby={`settings-tab-${activeTab}`} tabIndex={0} className={activeTab === "billing" ? "max-w-5xl" : "max-w-2xl"}>
         {activeTab === "profile" ? (
           <ProfileSection
             displayName={profile.displayName}
             email={profile.email}
             onSave={handleProfileSave}
+            accounts={publishingAccounts}
+            accountBusy={accountBusy}
+            onBindAccount={handleBindAccount}
+            onRevokeAccount={handleRevokeAccount}
           />
         ) : activeTab === "agent" ? (
           <AgentSection
             defaultModel={defaultModel}
             onSave={handleAgentSave}
             fetchModels={stableFetchModels}
+            autoApprovePaidGeneration={autoApprovePaidGeneration}
+            onAutoApproveChange={handleAutoApproveChange}
+            autoDeleteEmptyCanvas={autoDeleteEmptyCanvas}
+            onAutoDeleteEmptyCanvasChange={handleAutoDeleteEmptyCanvasChange}
           />
         ) : activeTab === "usage" ? (
           <CreditUsageHistory />

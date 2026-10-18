@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, type GenerateVideosOperation, type GenerateVideosParameters } from "@google/genai";
 
 import type {
   GeneratedVideo,
@@ -20,7 +20,7 @@ const ICON_GOOGLE =
  * actual Gemini API model name. The prefix avoids collision with
  * Replicate-hosted `google/*` models.
  */
-const MODEL_MAP: Record<string, string> = {
+export const GOOGLE_VIDEO_MODEL_MAP: Record<string, string> = {
   "google-official/veo-3.1-generate-preview": "veo-3.1-generate-preview",
   "google-official/veo-3.1-fast-generate-preview": "veo-3.1-fast-generate-preview",
   "google-official/veo-3.1-lite-generate-preview": "veo-3.1-lite-generate-preview",
@@ -39,7 +39,7 @@ interface ModelCapabilities {
   supportsAudio: boolean;
 }
 
-const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
+export const GOOGLE_VIDEO_CAPABILITIES: Record<string, ModelCapabilities> = {
   "veo-3.1-generate-preview": {
     allowedDurations: [4, 6, 8],
     allowedResolutions: ["720p", "1080p", "4k"],
@@ -102,7 +102,7 @@ function buildVideoModelInfo(
   description: string,
   apiModelName: string,
 ): VideoModelInfo {
-  const caps = MODEL_CAPABILITIES[apiModelName]!;
+  const caps = GOOGLE_VIDEO_CAPABILITIES[apiModelName]!;
   return {
     id,
     displayName,
@@ -162,6 +162,11 @@ const MAX_POLL_DURATION_MS = 300_000;
 /** Polling interval in milliseconds. */
 const POLL_INTERVAL_MS = 10_000;
 
+type GoogleVideoClient = {
+  models: { generateVideos(params: GenerateVideosParameters): Promise<GenerateVideosOperation> };
+  operations: { getVideosOperation(params: { operation: GenerateVideosOperation }): Promise<GenerateVideosOperation> };
+};
+
 // ── Resolution helpers ───────────────────────────────────────────────────
 
 const BASE_DIMENSIONS: Record<string, { width: number; height: number }> = {
@@ -177,7 +182,7 @@ const BASE_DIMENSIONS: Record<string, { width: number; height: number }> = {
  * The resolution controls the short-side baseline while the aspect ratio
  * stretches the other axis proportionally.
  */
-function resolutionToDimensions(
+export function googleVideoResolutionToDimensions(
   resolution: string,
   aspectRatio: string,
 ): { width: number; height: number } {
@@ -208,16 +213,16 @@ export class GoogleVideoProvider implements VideoProvider {
   readonly name = PROVIDER_NAME;
   readonly models = GOOGLE_VIDEO_MODELS;
 
-  private client: GoogleGenAI;
+  private client: GoogleVideoClient;
   private apiKey: string;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, client?: GoogleVideoClient) {
     this.apiKey = apiKey;
-    this.client = new GoogleGenAI({ apiKey });
+    this.client = client ?? new GoogleGenAI({ apiKey });
   }
 
   async generate(params: VideoGenerateParams): Promise<GeneratedVideo> {
-    const apiModel = MODEL_MAP[params.model];
+    const apiModel = GOOGLE_VIDEO_MODEL_MAP[params.model];
     if (!apiModel) {
       throw new GenerationError(
         PROVIDER_NAME,
@@ -226,7 +231,7 @@ export class GoogleVideoProvider implements VideoProvider {
       );
     }
 
-    const caps = MODEL_CAPABILITIES[apiModel];
+    const caps = GOOGLE_VIDEO_CAPABILITIES[apiModel];
     if (!caps) {
       throw new GenerationError(
         PROVIDER_NAME,
@@ -366,7 +371,7 @@ export class GoogleVideoProvider implements VideoProvider {
       );
     }
 
-    const { width, height } = resolutionToDimensions(resolution, aspectRatio);
+    const { width, height } = googleVideoResolutionToDimensions(resolution, aspectRatio);
 
     // The Veo download URI requires authentication. Append the API key so
     // the worker can fetch it with a plain `fetch()` call. This URL is only

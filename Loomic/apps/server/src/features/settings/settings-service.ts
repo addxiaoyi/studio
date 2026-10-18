@@ -1,6 +1,6 @@
 import type { WorkspaceSettings } from "@helstera/shared";
 
-import type { AuthenticatedUser, UserSupabaseClient } from "../../supabase/user.js";
+import type { AuthenticatedUser, DataClient } from "../../auth/types.js";
 
 const FALLBACK_MODEL = "gpt-5.4-mini";
 
@@ -35,10 +35,14 @@ export type SettingsService = {
     workspaceId: string,
     settings: WorkspaceSettings,
   ): Promise<WorkspaceSettings>;
+  getChatModelConfig(
+    user: AuthenticatedUser,
+    workspaceId: string,
+  ): Promise<{ model: string; baseUrl?: string; apiKey?: string }>;
 };
 
 export function createSettingsService(options: {
-  createUserClient: (accessToken: string) => UserSupabaseClient;
+  createUserClient: (accessToken: string) => DataClient;
   /** Override the fallback model when no workspace setting exists. */
   defaultModel?: string;
 }): SettingsService {
@@ -49,7 +53,7 @@ export function createSettingsService(options: {
       const client = options.createUserClient(user.accessToken);
       const { data, error } = await client
         .from("workspace_settings")
-        .select("default_model")
+        .select("default_model, chat_model, auto_approve_paid_generation, auto_delete_empty_canvas")
         .eq("workspace_id", workspaceId)
         .maybeSingle();
 
@@ -63,6 +67,9 @@ export function createSettingsService(options: {
 
       return {
         defaultModel: data?.default_model ?? defaultModel,
+        chatModel: data?.chat_model ?? data?.default_model ?? defaultModel,
+        autoApprovePaidGeneration: Boolean(data?.auto_approve_paid_generation),
+        autoDeleteEmptyCanvas: Boolean(data?.auto_delete_empty_canvas),
       };
     },
 
@@ -74,6 +81,9 @@ export function createSettingsService(options: {
           {
             workspace_id: workspaceId,
             default_model: settings.defaultModel,
+            chat_model: settings.chatModel ?? settings.defaultModel,
+            auto_approve_paid_generation: settings.autoApprovePaidGeneration,
+            auto_delete_empty_canvas: settings.autoDeleteEmptyCanvas,
           },
           { onConflict: "workspace_id" },
         );
@@ -87,6 +97,10 @@ export function createSettingsService(options: {
       }
 
       return settings;
+    },
+    async getChatModelConfig(user, workspaceId) {
+      const settings = await this.getWorkspaceSettings(user, workspaceId);
+      return { model: settings.chatModel ?? settings.defaultModel };
     },
   };
 }

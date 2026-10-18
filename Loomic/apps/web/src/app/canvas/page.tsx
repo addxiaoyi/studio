@@ -15,17 +15,29 @@ import { ChatSidebar } from "../../components/chat-sidebar";
 import { CanvasEmptyHint } from "../../components/canvas-empty-hint";
 import { CanvasLogoMenu } from "../../components/canvas-logo-menu";
 import { EditableProjectName } from "../../components/editable-project-name";
-import { insertImageOnCanvas, insertVideoOnCanvas } from "../../lib/canvas-elements";
-import { fetchCanvas, fetchProject, ApiAuthError } from "../../lib/server-api";
+import { createExcalidrawImageElement, insertImageOnCanvas, insertVideoOnCanvas } from "../../lib/canvas-elements";
+import { getServerBaseUrl } from "../../lib/env";
+import { deleteEmptyProject, fetchCanvas, fetchProject, fetchWorkspaceSettings, ApiAuthError } from "../../lib/server-api";
 import { BrandKitSelector } from "../../components/brand-kit-selector";
 import { CanvasBottomBar } from "../../components/canvas-bottom-bar";
 import { CanvasFilesPanel } from "../../components/canvas-files-panel";
 import { CanvasLayersPanel } from "../../components/canvas-layers-panel";
+import { CanvasTimelinePanel } from "../../components/canvas-timeline-panel";
 import { CreditHeaderButton } from "../../components/credits/credit-header-button";
+
+function isBlankCanvasContent(content: {
+  elements: Record<string, unknown>[];
+  files: Record<string, Record<string, unknown>>;
+}) {
+  const hasVisibleElement = content.elements.some((element) => element.isDeleted !== true);
+  return !hasVisibleElement && Object.keys(content.files).length === 0;
+}
 
 function CanvasPageContent() {
   const searchParams = useSearchParams();
   const canvasId = searchParams.get("id");
+  const assetId = searchParams.get("assetId");
+  const assetMediaType = searchParams.get("mediaType");
   const initialSessionId = searchParams.get("session") ?? undefined;
   // Capture prompt once — router.replace will strip it from URL, but the
   // value must survive for the auto-send effect in ChatSidebar.
@@ -52,9 +64,19 @@ function CanvasPageContent() {
   });
   const [layersOpen, setLayersOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const [brandKitId, setBrandKitId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("Untitled");
+  const [autoDeleteEmptyCanvas, setAutoDeleteEmptyCanvas] = useState(false);
   const [selectedCanvasElements, setSelectedCanvasElements] = useState<CanvasSelectedElement[]>([]);
+  const openedAssetRef = useRef<string | null>(null);
+  const canvasContentRef = useRef(canvasData?.content);
+  canvasContentRef.current = canvasData?.content;
+  const projectIdRef = useRef<string | null>(null);
+  projectIdRef.current = canvasData?.projectId ?? null;
+  const autoDeleteEmptyCanvasRef = useRef(false);
+  autoDeleteEmptyCanvasRef.current = autoDeleteEmptyCanvas;
+  const emptyCleanupTimerRef = useRef<number | null>(null);
 
   const excalidrawApiRef = useRef<any>(null);
   const [excalidrawApi, setExcalidrawApi] = useState<any>(null);
@@ -71,6 +93,7 @@ function CanvasPageContent() {
   const handleToggleFiles = useCallback(() => { setFilesOpen((v) => !v); setLayersOpen(false); }, []);
   const handleCloseLayers = useCallback(() => setLayersOpen(false), []);
   const handleCloseFiles = useCallback(() => setFilesOpen(false), []);
+  const handleToggleTimeline = useCallback(() => setTimelineOpen((value) => !value), []);
 
   const accessToken = session?.access_token;
   const accessTokenRef = useRef(accessToken);
@@ -79,10 +102,84 @@ function CanvasPageContent() {
   const getToken = useCallback(() => accessTokenRef.current ?? null, []);
   const ws = useWebSocket(getToken);
 
+  useEffect(() => {
+    if (!accessToken) return;
+    void fetchWorkspaceSettings(accessToken)
+      .then(({ settings }) => setAutoDeleteEmptyCanvas(settings.autoDeleteEmptyCanvas))
+      .catch((cause) => console.warn("[canvas] failed to load empty-canvas setting:", cause));
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (emptyCleanupTimerRef.current !== null) {
+      window.clearTimeout(emptyCleanupTimerRef.current);
+      emptyCleanupTimerRef.current = null;
+    }
+
+    return () => {
+      if (!autoDeleteEmptyCanvasRef.current || !projectIdRef.current) return;
+      emptyCleanupTimerRef.current = window.setTimeout(() => {
+        const content = canvasContentRef.current;
+        const token = accessTokenRef.current;
+        if (!token || !content || !isBlankCanvasContent(content)) return;
+        void deleteEmptyProject(token, projectIdRef.current!).catch((cause) =>
+          console.warn("[canvas] failed to clean up empty project:", cause),
+        );
+        emptyCleanupTimerRef.current = null;
+      }, 2000);
+    };
+  }, []);
+
   const handleApiReady = useCallback((api: any) => {
     excalidrawApiRef.current = api;
     setExcalidrawApi(api);
   }, []);
+
+  useEffect(() => {
+    if (!assetId || !excalidrawApi || !accessToken || openedAssetRef.current === assetId) return;
+    openedAssetRef.current = assetId;
+    let cancelled = false;
+    void fetch(`${getServerBaseUrl()}/api/uploads/${encodeURIComponent(assetId)}/file`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }).then(async (response) => {
+      if (!response.ok) throw new Error(`资产加载失败（${response.status}）`);
+      const blob = await response.blob();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("资产读取失败"));
+        reader.readAsDataURL(blob);
+      });
+      if (cancelled) return;
+      if (assetMediaType === "video") {
+        await insertVideoOnCanvas(excalidrawApi, {
+          type: "video",
+          url: `${getServerBaseUrl()}/api/uploads/${encodeURIComponent(assetId)}/file`,
+          mimeType: blob.type || "video/mp4",
+          width: 800,
+          height: 450,
+          durationSeconds: 0,
+          title: "资产视频",
+        });
+        return;
+      }
+      const fileId = crypto.randomUUID();
+      const image = await createImageBitmap(blob);
+      const maxSize = 900;
+      const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+      const width = Math.round(image.width * scale);
+      const height = Math.round(image.height * scale);
+      excalidrawApi.addFiles([{ id: fileId, dataURL: dataUrl, mimeType: blob.type || "image/png", created: Date.now() }]);
+      excalidrawApi.updateScene({
+        elements: [...excalidrawApi.getSceneElements(), createExcalidrawImageElement({ fileId, x: 0, y: 0, width, height, title: "资产图片", source: "uploaded" })],
+        captureUpdate: "IMMEDIATELY",
+      });
+      image.close();
+    }).catch((cause) => {
+      openedAssetRef.current = null;
+      console.error("[canvas] failed to open asset:", cause);
+    });
+    return () => { cancelled = true; };
+  }, [accessToken, assetId, assetMediaType, excalidrawApi]);
 
   const handleImageGenerated = useCallback((artifact: ImageArtifact) => {
     const api = excalidrawApiRef.current;
@@ -92,12 +189,10 @@ function CanvasPageContent() {
     });
   }, []);
 
-  const handleVideoGenerated = useCallback((artifact: VideoArtifact) => {
+  const handleVideoGenerated = useCallback(async (artifact: VideoArtifact) => {
     const api = excalidrawApiRef.current;
-    if (!api) return;
-    insertVideoOnCanvas(api, artifact).catch((err) => {
-      console.warn("Failed to insert video on canvas:", err);
-    });
+    if (!api) throw new Error("画布尚未加载完成");
+    await insertVideoOnCanvas(api, artifact);
   }, []);
 
   // Must be defined BEFORE useJobFallbackPolling which references it
@@ -116,7 +211,16 @@ function CanvasPageContent() {
         api.addFiles(Object.values(files));
       }
 
-      api.updateScene({ elements, captureUpdate: "IMMEDIATELY" });
+      const localElements = api.getSceneElements() as Array<Record<string, unknown>>;
+      const localIds = new Set(localElements.map((element) => element.id).filter((id): id is string => typeof id === "string"));
+      const remoteElements = elements.filter((element) =>
+        typeof element.id === "string"
+          && !localIds.has(element.id)
+          && element.isDeleted !== true,
+      );
+      if (remoteElements.length > 0) {
+        api.updateScene({ elements: [...localElements, ...remoteElements], captureUpdate: "NEVER" });
+      }
     } catch (err) {
       console.warn("Failed to sync canvas:", err);
     }
@@ -292,7 +396,16 @@ function CanvasPageContent() {
           onToggleLayers={handleToggleLayers}
           filesOpen={filesOpen}
           onToggleFiles={handleToggleFiles}
+          timelineOpen={timelineOpen}
+          onToggleTimeline={handleToggleTimeline}
           leftPanelOpen={layersOpen || filesOpen}
+        />
+        <CanvasTimelinePanel
+          excalidrawApi={excalidrawApi}
+          open={timelineOpen}
+          onClose={() => setTimelineOpen(false)}
+          accessToken={accessToken}
+          projectId={canvasData.projectId}
         />
         <CanvasLayersPanel
           excalidrawApi={excalidrawApi}

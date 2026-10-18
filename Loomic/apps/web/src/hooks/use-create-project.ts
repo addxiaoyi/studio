@@ -26,6 +26,7 @@ export function useCreateProject() {
   const router = useRouter();
   const { error: toastError } = useToast();
   const [creating, setCreating] = useState(false);
+  const pendingRef = useRef<Promise<void> | null>(null);
 
   const signOutRef = useRef(signOut);
   signOutRef.current = signOut;
@@ -39,9 +40,10 @@ export function useCreateProject() {
       imageGenerationPreference?: ImageGenerationPreference;
       videoGenerationPreference?: VideoGenerationPreference;
       model?: string;
+      destination?: "canvas" | "storyboard";
     }) => {
       const token = session?.access_token;
-      if (!token || creating) return;
+      if (!token || pendingRef.current) return pendingRef.current ?? undefined;
 
       // Persist attachments in sessionStorage BEFORE window.open so the
       // new tab's cloned sessionStorage already contains them.
@@ -100,35 +102,48 @@ export function useCreateProject() {
       // once the API call returns.
       const newTab = window.open("/loading-preview", "_blank");
 
+      const requestKey = crypto.randomUUID();
       setCreating(true);
-      try {
-        const result = await createProject(token, { name: "Untitled" });
-        const canvasId = result.project.primaryCanvas.id;
+      const task = (async () => {
+        try {
+          const result = await createProject(
+            token,
+            { name: "Untitled" },
+            { idempotencyKey: requestKey },
+          );
+          const canvasId = result.project.primaryCanvas.id;
 
-        const url = opts?.prompt
-          ? `/canvas?id=${canvasId}&prompt=${encodeURIComponent(opts.prompt)}`
-          : `/canvas?id=${canvasId}`;
+          const url =
+            opts?.destination === "storyboard"
+              ? `/storyboard?projectId=${encodeURIComponent(result.project.id)}`
+              : opts?.prompt
+                ? `/canvas?id=${canvasId}&prompt=${encodeURIComponent(opts.prompt)}`
+                : `/canvas?id=${canvasId}`;
 
-        if (newTab) {
-          newTab.location.href = url;
-        } else {
-          // Popup was blocked despite sync open — fallback to in-page navigation
-          routerRef.current.push(url);
+          if (newTab) {
+            newTab.location.href = url;
+          } else {
+            // Popup was blocked despite sync open — fallback to in-page navigation
+            routerRef.current.push(url);
+          }
+        } catch (err) {
+          // Close the blank tab on failure
+          newTab?.close();
+          if (err instanceof ApiAuthError) {
+            await signOutRef.current();
+            routerRef.current.replace("/login");
+            return;
+          }
+          toastError("项目创建失败");
         }
+      })().finally(() => {
+        pendingRef.current = null;
         setCreating(false);
-      } catch (err) {
-        // Close the blank tab on failure
-        newTab?.close();
-        if (err instanceof ApiAuthError) {
-          await signOutRef.current();
-          routerRef.current.replace("/login");
-          return;
-        }
-        toastError("项目创建失败");
-        setCreating(false);
-      }
+      });
+      pendingRef.current = task;
+      return task;
     },
-    [session?.access_token, creating, toastError],
+    [session?.access_token, toastError],
   );
 
   return { create, creating };

@@ -7,14 +7,25 @@
 
 /** Regex patterns for detecting image URLs in markdown content */
 const IMAGE_URL_RE = /\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i;
-const SUPABASE_STORAGE_RE = /supabase\.\w+\/storage\/v1\//i;
 
 /**
  * Check if a URL points to an image resource.
- * Matches common image extensions and Supabase storage URLs.
+ * Matches common image extensions.
  */
 export function isImageUrl(url: string): boolean {
-  return IMAGE_URL_RE.test(url) || SUPABASE_STORAGE_RE.test(url);
+  return IMAGE_URL_RE.test(url);
+}
+
+export function collapseDuplicateImageReferences<T extends { assetId?: string; url: string }>(images: readonly T[]) {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const image of images) {
+    const key = image.assetId || image.url;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(image);
+  }
+  return { images: unique, duplicateCount: images.length - unique.length };
 }
 
 /** Tool display configuration */
@@ -53,7 +64,7 @@ export function formatToolName(name: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-/** Format raw model ID to human-readable: "google/nano-banana-pro" -> "Nano Banana Pro" */
+/** Format raw model IDs for display. */
 export function formatModelDisplayName(model: string): string {
   const slug = model.split("/").pop() ?? model;
   return slug

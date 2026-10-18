@@ -4,7 +4,7 @@
 # =============================================================================
 # Removes the dedicated postgres container (along with all data),
 # and the helstera-pgdata volume. Use this when you want a fresh start.
-# Your supabase-mock / backend / web processes are NOT killed by this
+# Your retired mock / backend / web processes are NOT killed by this
 # script — run `bash scripts/dev-stop.sh` first for that.
 # =============================================================================
 set -euo pipefail

@@ -1,11 +1,13 @@
 "use client";
 
-import { ImageUp, Lock, Zap } from "lucide-react";
+import { ImageUp, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { ImageModelInfo } from "../../lib/server-api";
-import { fetchImageModels, generateImageDirect } from "../../lib/server-api";
+import { fetchImageModels, generateImageDirect, uploadFile } from "../../lib/server-api";
+import { t, useLocale } from "../../lib/i18n";
+import { getModelPricingLabel } from "../../lib/model-pricing";
 import { useGenerationErrorHandler } from "../../hooks/use-generation-error-handler";
 import {
   updateImageGeneratorElement,
@@ -49,6 +51,7 @@ export function ImageGeneratorPanel({
   canvasScrollZoom,
   onClose,
 }: ImageGeneratorPanelProps) {
+  const copy = t(useLocale()).generation;
   const [prompt, setPrompt] = useState(data.prompt);
   const [model, setModel] = useState(data.model);
   const [aspectRatio, setAspectRatio] = useState(data.aspectRatio);
@@ -59,7 +62,9 @@ export function ImageGeneratorPanel({
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showRatioDropdown, setShowRatioDropdown] = useState(false);
   const [showQualityDropdown, setShowQualityDropdown] = useState(false);
-  const [refImages, setRefImages] = useState<Array<{ id: string; dataUrl: string; file: File }>>([]);
+  const [refImages, setRefImages] = useState<
+    Array<{ id: string; dataUrl: string; file: File }>
+  >([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const refInputRef = useRef<HTMLInputElement>(null);
@@ -79,7 +84,9 @@ export function ImageGeneratorPanel({
       .catch((err) => {
         console.warn("[image-gen] Failed to fetch models:", err);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Close dropdowns when clicking outside the panel
@@ -113,8 +120,7 @@ export function ImageGeneratorPanel({
   // Calculate panel screen position from canvas coordinates
   const { scrollX, scrollY, zoom } = canvasScrollZoom;
   const screenX = (elementBounds.x + scrollX) * zoom;
-  const screenY =
-    (elementBounds.y + elementBounds.height + scrollY) * zoom + 8;
+  const screenY = (elementBounds.y + elementBounds.height + scrollY) * zoom + 8;
 
   const currentModel = models.find((m) => m.id === model);
 
@@ -167,10 +173,23 @@ export function ImageGeneratorPanel({
     });
 
     try {
+      const inputImages = needsPublicReferenceUrl(model) && refImages.length > 0
+        ? (await Promise.all(
+            refImages.map(async (reference) => {
+              const uploaded = await uploadFile(accessTokenRef.current, reference.file);
+              return uploaded.url;
+            }),
+          ))
+        : refImages.map((reference) => reference.dataUrl);
       const result = await generateImageDirect(
         accessTokenRef.current,
         prompt.trim(),
-        { model, aspectRatio, quality },
+        {
+          model,
+          aspectRatio,
+          quality,
+          ...(inputImages.length ? { inputImages } : {}),
+        },
       );
 
       // Check if this generation was cancelled while awaiting
@@ -200,12 +219,10 @@ export function ImageGeneratorPanel({
       });
 
       // Replace: delete placeholder, add image
-      const elements = excalidrawApi
-        .getSceneElements()
-        .map((el: any) => {
-          if (el.id === elementId) return { ...el, isDeleted: true };
-          return el;
-        });
+      const elements = excalidrawApi.getSceneElements().map((el: any) => {
+        if (el.id === elementId) return { ...el, isDeleted: true };
+        return el;
+      });
       excalidrawApi.updateScene({
         elements: [...elements, imageElement],
         captureUpdate: "IMMEDIATELY",
@@ -219,12 +236,12 @@ export function ImageGeneratorPanel({
       console.error("[image-gen] Generation error:", err);
       const handled = handleGenerationError(err);
       if (!handled) {
-        setError("图片生成失败，请重试或更换模型。");
+        setError(copy.imageFailed);
       }
       setLoading(false);
       updateImageGeneratorElement(excalidrawApi, elementId, {
         status: "error",
-        errorMessage: "生成失败",
+        errorMessage: copy.failed,
       });
     }
   }, [
@@ -259,7 +276,7 @@ export function ImageGeneratorPanel({
             void handleGenerate();
           }
         }}
-        placeholder="今天我们要创作什么"
+        placeholder={copy.prompt}
         disabled={loading}
         style={{ scrollbarWidth: "none" }}
         className="min-h-[74px] max-h-[140px] w-full resize-none border-none bg-transparent p-1 text-[14px] leading-[18px] text-foreground placeholder:text-muted-foreground focus:outline-none [&::-webkit-scrollbar]:hidden"
@@ -307,7 +324,7 @@ export function ImageGeneratorPanel({
                     key={m.id}
                     type="button"
                     onClick={() => handleModelChange(m.id)}
-                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-all duration-300 hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-foreground/20 ?${m.id === model ? "bg-muted" : ""} ${m.accessible === false ? "opacity-60" : ""}`}
+                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-all duration-300 hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-foreground/20 ?${m.id === model ? "bg-muted" : ""}`}
                   >
                     {m.iconUrl && (
                       <img
@@ -316,11 +333,9 @@ export function ImageGeneratorPanel({
                         className="h-3.5 w-3.5 rounded-full"
                       />
                     )}
-                    <span className="flex-1 text-foreground">
-                      {m.displayName}
-                      {m.accessible === false && (
-                        <Lock className="ml-1 inline h-2.5 w-2.5 text-muted-foreground" />
-                      )}
+                    <span className="flex min-w-0 flex-1 flex-col text-foreground">
+                      <span className="truncate">{m.displayName}</span>
+                      <span className="truncate text-[10px] text-muted-foreground">{getModelPricingLabel(m, "image")}</span>
                     </span>
                     {typeof m.creditCost === "number" && (
                       <span className="inline-flex items-center gap-0.5 text-[10px] tabular-nums text-muted-foreground">
@@ -362,7 +377,11 @@ export function ImageGeneratorPanel({
                 reader.onload = () => {
                   setRefImages((prev) => [
                     ...prev,
-                    { id: generateId(), dataUrl: reader.result as string, file },
+                    {
+                      id: generateId(),
+                      dataUrl: reader.result as string,
+                      file,
+                    },
                   ]);
                 };
                 reader.readAsDataURL(file);
@@ -374,7 +393,9 @@ export function ImageGeneratorPanel({
             type="button"
             onClick={() => refInputRef.current?.click()}
             className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-300 hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-foreground/20 ?${
-              refImages.length > 0 ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+              refImages.length > 0
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground"
             }`}
             title="Add reference image"
           >
@@ -392,7 +413,11 @@ export function ImageGeneratorPanel({
                   />
                   <button
                     type="button"
-                    onClick={() => setRefImages((prev) => prev.filter((r) => r.id !== img.id))}
+                    onClick={() =>
+                      setRefImages((prev) =>
+                        prev.filter((r) => r.id !== img.id),
+                      )
+                    }
                     className="absolute -top-1 -right-1 hidden group-hover:flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground text-[8px]"
                   >
                     x
@@ -495,4 +520,8 @@ export function ImageGeneratorPanel({
     </div>,
     document.body,
   );
+}
+
+function needsPublicReferenceUrl(model: string): boolean {
+  return model.includes("/") || /minimax-h3/i.test(model);
 }

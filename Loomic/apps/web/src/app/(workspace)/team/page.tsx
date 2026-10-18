@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Crown, Mail, Plus, Search, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Crown, Mail, Plus, Search, Users, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth-context";
+import { getServerBaseUrl } from "@/lib/env";
 import { fetchTeamMembers, type TeamMember } from "@/lib/server-api";
 import { cn } from "@/lib/utils";
 
@@ -17,15 +18,53 @@ export default function TeamPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteBusy, setInviteBusy] = useState(false);
 
-  useEffect(() => {
+  const loadMembers = useCallback(async () => {
     const token = session?.access_token;
-    if (!token) return;
-    void fetchTeamMembers(token)
-      .then(({ members: nextMembers }) => setMembers(nextMembers))
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "加载成员失败"))
-      .finally(() => setLoading(false));
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const { members: nextMembers } = await fetchTeamMembers(token);
+      setMembers(nextMembers);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "加载成员失败");
+    } finally {
+      setLoading(false);
+    }
   }, [session?.access_token]);
+
+  useEffect(() => { void loadMembers(); }, [loadMembers]);
+
+  const inviteMember = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const email = inviteEmail.trim();
+    const token = session?.access_token;
+    if (!email || !token || inviteBusy) return;
+    setInviteBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`${getServerBaseUrl()}/api/workspaces/members/invite`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(body?.error?.message ?? "邀请成员失败");
+      if (!body?.member) throw new Error("邀请已提交，但返回数据无效。请刷新列表确认结果。");
+      setMembers((current) => [...current.filter((member) => member.id !== body.member.id), body.member]);
+      setInviteEmail("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "邀请成员失败");
+    } finally {
+      setInviteBusy(false);
+    }
+  }, [inviteBusy, inviteEmail, session?.access_token]);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -41,13 +80,14 @@ export default function TeamPage() {
             <h1 className="mt-3 display-md text-foreground">团队成员</h1>
             <p className="mt-3 text-sm text-muted-foreground">管理当前工作区的成员与权限</p>
           </div>
-          <Button type="button" className="gap-2"><Plus className="size-4" />邀请成员</Button>
+          <form className="flex gap-2" onSubmit={inviteMember}><Input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="成员邮箱" type="email" autoComplete="email" aria-label="要邀请的成员邮箱" required /><Button type="submit" className="gap-2" disabled={inviteBusy || !inviteEmail.trim()} aria-busy={inviteBusy}>{inviteBusy ? "正在邀请…" : <><Plus className="size-4" />邀请成员</>}</Button></form>
         </header>
 
         <div className="mb-6 max-w-sm">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索成员" className="pl-9" />
+            <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索成员" aria-label="搜索成员" className="pr-10 pl-9" />
+            {search && <button type="button" aria-label="清除成员搜索" onClick={() => setSearch("")} className="absolute right-2 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"><X className="size-4" /></button>}
           </div>
         </div>
 

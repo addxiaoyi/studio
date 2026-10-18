@@ -17,6 +17,7 @@ import {
   type SubmitVideoJobFn,
 } from "./video-generate.js";
 import { createPersistSandboxFileTool } from "./persist-sandbox-file.js";
+import { createDouyinPublishDraftTool } from "./douyin-publish.js";
 import type { Pool } from "pg";
 
 export { createImageGenerateTool } from "./image-generate.js";
@@ -55,7 +56,7 @@ export { createManipulateCanvasTool } from "./manipulate-canvas.js";
 export function createMainAgentTools(
   backend: BackendProtocol | BackendFactory,
   deps: {
-    createUserClient: (accessToken: string) => any;
+    createUserClient?: (accessToken: string) => any;
     localDb?: Pool;
     brandKitId?: string | null;
     connectionManager?: ConnectionManager;
@@ -63,6 +64,7 @@ export function createMainAgentTools(
     sandboxDir?: string;
     submitImageJob?: SubmitImageJobFn;
     submitVideoJob?: SubmitVideoJobFn;
+    webOrigin?: string;
   },
 ) {
   const tools: StructuredTool[] = [
@@ -75,12 +77,14 @@ export function createMainAgentTools(
     }),
     createVideoGenerateTool({
       ...(deps.submitVideoJob ? { submitVideoJob: deps.submitVideoJob } : {}),
+      allowDynamicModelIds: true,
     }),
     createPersistSandboxFileTool({
-      createUserClient: deps.createUserClient,
+      ...(deps.createUserClient ? { createUserClient: deps.createUserClient } : {}),
       ...(deps.localDb ? { localDb: deps.localDb } : {}),
       ...(deps.sandboxDir ? { sandboxDir: deps.sandboxDir } : {}),
     }),
+    ...(deps.localDb && deps.webOrigin ? [createDouyinPublishDraftTool({ localDb: deps.localDb, webOrigin: deps.webOrigin })] : []),
     // execute 工具由 deepagents FilesystemMiddleware 自动注入，
     // 因为 CompositeBackend 的 default backend 是 LocalShellBackend。
     // 不需要在这里手动注册。

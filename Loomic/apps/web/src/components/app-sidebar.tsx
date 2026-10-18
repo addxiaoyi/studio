@@ -1,273 +1,219 @@
 "use client";
 
 import { motion } from "framer-motion";
+import {
+  ChevronDown,
+  Clapperboard,
+  FileText,
+  Film,
+  FolderKanban,
+  GalleryHorizontal,
+  Grid2X2,
+  Home,
+  Images,
+  LogOut,
+  Palette,
+  Settings,
+  ShoppingCart,
+  Sparkles,
+  Users,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
-import { HelsteraLogo } from "@/components/icons/helstera-logo";
 import { CreditBalance } from "@/components/credits/credit-balance";
+import { HelsteraLogo } from "@/components/icons/helstera-logo";
 import { useAuth } from "@/lib/auth-context";
+import { t } from "@/lib/i18n";
+import { fetchViewer } from "@/lib/server-api";
 import { cn } from "@/lib/utils";
 
-// ---------------------------------------------------------------------------
-// Nav item definitions
-// ---------------------------------------------------------------------------
+type NavItem = { href: string; label: string; icon: LucideIcon };
+type NavGroup = { id: string; label: string; icon: LucideIcon; items: NavItem[] };
 
-interface NavItem {
-  href: string;
-  label: string;
-  /** SVG path `d` attribute */
-  icon: string;
-  /** viewBox dimensions (square), e.g. 20 -> "0 0 20 20" */
-  viewBox: number;
-}
+const primaryItems: NavItem[] = [
+  { href: "/home", label: "工作台", icon: Home },
+  { href: "/feed", label: "信息流", icon: Film },
+  { href: "/assets", label: "我的资产", icon: Images },
+];
 
-const TOP_NAV_ITEMS: NavItem[] = [
+const navGroups: NavGroup[] = [
   {
-    href: "/home",
-    label: "工作台",
-    viewBox: 20,
-    icon: "M8.69 2.136a2 2 0 0 1 2.62 0l5.655 4.905A3 3 0 0 1 18 9.307v7.194a1.5 1.5 0 0 1-1.5 1.5h-3c-.777 0-1.415-.59-1.493-1.347L12 16.501v-5.188a.6.6 0 0 0-.48-.588l-.12-.011H8.6a.6.6 0 0 0-.6.6V16.5A1.5 1.5 0 0 1 6.5 18h-3A1.5 1.5 0 0 1 2 16.5V9.307c0-.815.332-1.593.915-2.157l.119-.11zm1.769.983a.7.7 0 0 0-.918 0L3.886 8.023A1.7 1.7 0 0 0 3.3 9.307v7.194c0 .11.09.2.2.2h3a.2.2 0 0 0 .2-.2v-5.188a1.9 1.9 0 0 1 1.9-1.9H11.4c1.05.001 1.9.851 1.9 1.9v5.188c0 .11.09.2.2.2h3a.2.2 0 0 0 .2-.2V9.307a1.7 1.7 0 0 0-.587-1.284z",
+    id: "creation",
+    label: "创作工具",
+    icon: Clapperboard,
+    items: [
+      { href: "/create", label: "剧本创作", icon: FileText },
+      { href: "/storyboard", label: "分镜工作台", icon: Clapperboard },
+      { href: "/texture-lab", label: "纹理工坊", icon: Grid2X2 },
+    ],
   },
   {
-    href: "/projects",
-    label: "项目",
-    viewBox: 20,
-    icon: "M8.968 2.004c.69.038 1.337.361 1.782.895l1 1.201c.138.166.335.27.548.294l.092.006h3.087A2.523 2.523 0 0 1 18 6.923v8.554l-.013.258a2.524 2.524 0 0 1-2.252 2.252l-.258.013H4.522a2.524 2.524 0 0 1-2.51-2.265L2 15.477V4.522A2.523 2.523 0 0 1 4.522 2H8.83zM3.3 15.477c0 .675.547 1.223 1.222 1.223h10.955c.675 0 1.223-.548 1.223-1.223V9.4H3.3zM4.522 3.3c-.674 0-1.222.547-1.222 1.222V8.1h13.4V6.923c0-.675-.547-1.223-1.223-1.223H12.39a2.14 2.14 0 0 1-1.64-.768l-1-1.2A1.2 1.2 0 0 0 8.83 3.3z",
+    id: "library",
+    label: "资源库",
+    icon: FolderKanban,
+    items: [
+      { href: "/projects", label: "项目", icon: FolderKanban },
+      { href: "/brand-kit", label: "品牌套件", icon: Palette },
+      { href: "/gallery", label: "作品库", icon: GalleryHorizontal },
+      { href: "/prompts", label: "提示词库", icon: Sparkles },
+      { href: "/ecom-images", label: "电商图", icon: ShoppingCart },
+    ],
   },
   {
-    href: "/brand-kit",
-    label: "品牌套件",
-    viewBox: 18,
-    icon: "M6.938 1.5c.545 0 1.056.156 1.488.426a2.8 2.8 0 0 1 1.5.375l2.273 1.312c.473.273.837.663 1.076 1.113.45.239.84.603 1.112 1.075L15.7 8.074a2.81 2.81 0 0 1-1.03 3.842l-6.966 4.021A4.125 4.125 0 0 1 1.5 12.376V4.313A2.813 2.813 0 0 1 4.313 1.5zm-.563 10.875a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0m7.175-5.774a2.8 2.8 0 0 1-.321.854l-3.46 5.99 4.339-2.503a1.69 1.69 0 0 0 .617-2.305zM7.5 12.375a1.875 1.875 0 1 1-3.75 0 1.875 1.875 0 0 1 3.75 0m-4.875 0a3 3 0 1 0 6 0V4.313a1.684 1.684 0 0 0-1.687-1.688H4.313c-.932 0-1.688.756-1.688 1.688zm7.125-1.144 2.505-4.338a1.685 1.685 0 0 0-.618-2.306L9.6 3.412c.096.283.149.585.149.9z",
-  },
-  {
-    href: "/team",
-    label: "团队",
-    viewBox: 20,
-    icon: "M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6M3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.96 9.96 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41A7 7 0 0 0 9.5 11h-1a7 7 0 0 0-5.035 3.493M15 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6",
-  },
-  {
-    href: "/skills",
-    label: "技能",
-    viewBox: 24,
-    icon: "M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z",
-  },
-  {
-    href: "/ecom-images",
-    label: "电商图",
-    viewBox: 20,
-    icon: "M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4m-8 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4",
+    id: "collaboration",
+    label: "协作与扩展",
+    icon: Users,
+    items: [
+      { href: "/team", label: "团队", icon: Users },
+      { href: "/skills", label: "技能", icon: Wrench },
+    ],
   },
 ];
 
-const SETTINGS_ITEM: NavItem = {
-  href: "/settings",
-  label: "设置",
-  viewBox: 20,
-  icon: "M10 1.667a5 5 0 0 1 2.525 9.313c3.355 1.035 5.844 4.047 6.03 7.37.013.22-.167.4-.388.4h-.5a.423.423 0 0 1-.414-.4C17.02 14.982 13.88 11.9 10 11.9s-7.02 3.082-7.252 6.45a.423.423 0 0 1-.414.4h-.501c-.22 0-.4-.18-.389-.4.187-3.323 2.675-6.333 6.029-7.369A5 5 0 0 1 10 1.667m0 1.3a3.7 3.7 0 1 0 .001 7.401A3.7 3.7 0 0 0 10 2.967",
-};
+const adminItem: NavItem = { href: "/admin", label: "管理中心", icon: Settings };
+const settingsItem: NavItem = { href: "/settings", label: "设置", icon: Settings };
 
-// ---------------------------------------------------------------------------
-// Reusable nav-button with active indicator
-// Touch target: min 44px on mobile, 36px on desktop (md+)
-// ---------------------------------------------------------------------------
+function isPathActive(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
-function NavButton({
-  item,
-  active,
-}: {
-  item: NavItem;
-  active: boolean;
-}) {
-  const vb = `0 0 ${item.viewBox} ${item.viewBox}`;
-
+function NavLink({ item, active, compact = false, collapsed = false }: { item: NavItem; active: boolean; compact?: boolean; collapsed?: boolean }) {
+  const Icon = item.icon;
   return (
     <Link
       href={item.href}
       title={item.label}
       aria-label={item.label}
-      className="relative flex h-11 w-11 items-center justify-center rounded-full md:h-9 md:w-9 focus-visible:ring-2 focus-visible:ring-foreground/30 focus-visible:outline-none"
-    >
-      {/* Animated active background */}
-      {active && (
-        <motion.span
-          layoutId="sidebar-active"
-          className="absolute inset-0 rounded-full glass"
-          transition={{ type: "spring", stiffness: 350, damping: 30 }}
-        />
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "relative flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30",
+        compact && "min-w-[68px] flex-col justify-center gap-0.5 px-2 text-[10px]",
+        collapsed && "w-10 justify-center px-0",
+        active ? "bg-foreground/[0.08] text-foreground" : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
       )}
-      <motion.svg
-        viewBox={vb}
-        fill="currentColor"
-        xmlns="http://www.w3.org/2000/svg"
-        className={cn(
-          "relative h-5 w-5",
-          active ? "text-foreground" : "text-muted-foreground",
-        )}
-        whileHover={{ scale: 1.15 }}
-        whileTap={{ scale: 0.9 }}
-        transition={{ type: "spring", stiffness: 400, damping: 17 }}
-      >
-        <path d={item.icon} />
-      </motion.svg>
+    >
+      <Icon className={cn("relative size-[18px] shrink-0", compact && "size-5")} strokeWidth={1.8} />
+      {!collapsed && <span className={cn("whitespace-nowrap truncate animate-in fade-in slide-in-from-left-1 duration-150", compact && "max-w-16")}>{item.label}</span>}
     </Link>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Mobile bottom bar (visible below md breakpoint)
-// Each item has min 48px touch target for comfortable tapping.
-// ---------------------------------------------------------------------------
-
-function MobileBottomBar() {
-  const pathname = usePathname();
-
-  const isActive = (href: string) =>
-    pathname === href || pathname.startsWith(`${href}/`);
-
+function GroupLinks({ group, pathname, open, onToggle, collapsed = false }: { group: NavGroup; pathname: string; open: boolean; onToggle: () => void; collapsed?: boolean }) {
+  const GroupIcon = group.icon;
+  const active = group.items.some((item) => isPathActive(pathname, item.href));
   return (
-    <nav
-      className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-border/40 glass-soft pb-[env(safe-area-inset-bottom)] md:hidden"
-      role="navigation"
-      aria-label="Main navigation"
-    >
-      {TOP_NAV_ITEMS.map((item) => {
-        const active = isActive(item.href);
-        const vb = `0 0 ${item.viewBox} ${item.viewBox}`;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-label={item.label}
-            className={cn(
-              "flex min-h-[48px] min-w-[48px] flex-col items-center justify-center gap-0.5 px-2 py-1.5 transition-all duration-300",
-              active ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            <svg
-              viewBox={vb}
-              fill="currentColor"
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5"
-            >
-              <path d={item.icon} />
-            </svg>
-            <span className="text-[10px] font-medium leading-none">
-              {item.label}
-            </span>
-          </Link>
-        );
-      })}
-
-      {/* Settings in bottom bar */}
-      <Link
-        href={SETTINGS_ITEM.href}
-        aria-label={SETTINGS_ITEM.label}
-        className={cn(
-          "flex min-h-[48px] min-w-[48px] flex-col items-center justify-center gap-0.5 px-2 py-1.5 transition-all duration-300",
-          isActive(SETTINGS_ITEM.href)
-            ? "text-foreground"
-            : "text-muted-foreground",
-        )}
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={`${group.id}-navigation-items`}
+        title={group.label}
+        className={cn("flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm transition-colors hover:bg-foreground/[0.05]", collapsed && "w-10 justify-center px-0", active ? "text-foreground" : "text-muted-foreground")}
       >
-        <svg
-          viewBox={`0 0 ${SETTINGS_ITEM.viewBox} ${SETTINGS_ITEM.viewBox}`}
-          fill="currentColor"
-          xmlns="http://www.w3.org/2000/svg"
-          className="h-5 w-5"
-        >
-          <path d={SETTINGS_ITEM.icon} />
-        </svg>
-        <span className="text-[10px] font-medium leading-none">
-          {SETTINGS_ITEM.label}
-        </span>
-      </Link>
-    </nav>
+        <GroupIcon className="size-[18px] shrink-0" strokeWidth={1.8} />
+        {!collapsed && <span className="flex-1 text-left">{group.label}</span>}
+        {!collapsed && <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />}
+      </button>
+      <div id={`${group.id}-navigation-items`} hidden={collapsed || !open} className="ml-3 space-y-0.5 border-l border-border/50 pl-3">{group.items.map((item) => <NavLink key={item.href} item={item} active={isPathActive(pathname, item.href)} />)}</div>
+    </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// AppSidebar (desktop: icon rail, mobile: bottom nav bar)
-// ---------------------------------------------------------------------------
+function MobileNavigation({ isAdmin, pathname }: { isAdmin: boolean; pathname: string }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
 
-export function AppSidebar({ currentPage }: { currentPage?: string } = {}) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const { signOut } = useAuth();
+  useEffect(() => {
+    if (!moreOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (moreMenuRef.current?.contains(event.target as Node) || moreButtonRef.current?.contains(event.target as Node)) return;
+      setMoreOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMoreOpen(false);
+      moreButtonRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [moreOpen]);
 
-  const isActive = (href: string) =>
-    pathname === href || pathname.startsWith(`${href}/`);
-
-  const handleSignOut = async () => {
-    await signOut();
-    router.replace("/login");
-  };
+  useEffect(() => setMoreOpen(false), [pathname]);
 
   return (
     <>
-      {/* Desktop sidebar rail -- hidden below md */}
-      <aside className="hidden h-[100dvh] w-[60px] shrink-0 flex-col items-center gap-1.5 border-r border-border/40 glass-soft py-4 md:flex">
-        {/* Logo */}
-        <Link
-          href="/home"
-          title="Helstera"
-          className="mb-1 flex h-9 w-9 items-center justify-center"
-        >
-          <motion.div
-            whileHover={{ scale: 1.1, rotate: 8 }}
-            whileTap={{ scale: 0.9 }}
-            transition={{ type: "spring", stiffness: 400, damping: 17 }}
-          >
-          <HelsteraLogo className="size-7 text-foreground" />
-          </motion.div>
-        </Link>
-
-        {/* Top nav items */}
-        {TOP_NAV_ITEMS.map((item) => (
-          <NavButton
-            key={item.href}
-            item={item}
-            active={isActive(item.href)}
-          />
-        ))}
-
-        {/* Spacer pushes bottom section down */}
-        <div className="flex-1" />
-
-        {/* Credits balance */}
-        <CreditBalance />
-
-        {/* Settings / Profile */}
-        <NavButton
-          item={SETTINGS_ITEM}
-          active={isActive(SETTINGS_ITEM.href)}
-        />
-
-        {/* Sign out */}
-        <button
-          type="button"
-          onClick={handleSignOut}
-          title="Sign out"
-          aria-label="Sign out"
-          className="flex h-11 w-11 items-center justify-center rounded-full md:h-9 md:w-9"
-        >
-          <motion.svg
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-5 w-5 text-muted-foreground"
-            whileHover={{ scale: 1.15 }}
-            whileTap={{ scale: 0.9 }}
-            transition={{ type: "spring", stiffness: 400, damping: 17 }}
-          >
-            <path d="M3 4.5A2.5 2.5 0 0 1 5.5 2h5A2.5 2.5 0 0 1 13 4.5v1a.5.5 0 0 1-1 0v-1A1.5 1.5 0 0 0 10.5 3h-5A1.5 1.5 0 0 0 4 4.5v11A1.5 1.5 0 0 0 5.5 17h5a1.5 1.5 0 0 0 1.5-1.5v-1a.5.5 0 0 1 1 0v1A2.5 2.5 0 0 1 10.5 18h-5A2.5 2.5 0 0 1 3 15.5zm12.354-1.354a.5.5 0 0 0-.708.708L16.793 6H7.5a.5.5 0 0 0 0 1h9.293l-2.147 2.146a.5.5 0 0 0 .708.708l3-3a.5.5 0 0 0 0-.708z" transform="translate(0, 4)" />
-          </motion.svg>
-        </button>
-      </aside>
-
-      {/* Mobile bottom navigation bar */}
-      <MobileBottomBar />
+      <nav className="pointer-events-auto fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-border/40 bg-background/90 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="主导航">
+        {primaryItems.map((item) => <NavLink key={item.href} item={item} active={isPathActive(pathname, item.href)} compact />)}
+        <button ref={moreButtonRef} type="button" onClick={() => setMoreOpen((value) => !value)} aria-expanded={moreOpen} aria-controls="workspace-more-navigation" aria-label={"\u66f4\u591a\u5de5\u4f5c\u533a\u5bfc\u822a"} className={cn("flex min-h-12 min-w-[68px] flex-col items-center justify-center gap-0.5 text-[10px]", moreOpen ? "text-foreground" : "text-muted-foreground")}><Wrench className="size-5" /><span>更多</span></button>
+      </nav>
+      {moreOpen && <div ref={moreMenuRef} id="workspace-more-navigation" className="fixed inset-x-3 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 max-h-[65vh] overflow-y-auto rounded-lg border border-border/50 bg-background p-2 shadow-xl md:hidden"><div className="grid grid-cols-2 gap-1">{navGroups.flatMap((group) => group.items).map((item) => <NavLink key={item.href} item={item} active={isPathActive(pathname, item.href)} />)}{isAdmin && <NavLink item={adminItem} active={isPathActive(pathname, adminItem.href)} />}<NavLink item={settingsItem} active={isPathActive(pathname, settingsItem.href)} /></div></div>}
     </>
   );
+}
+
+export function AppSidebar() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { session, signOut } = useAuth();
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
+  const [labelsVisible, setLabelsVisible] = useState(false);
+  const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+
+  function expandSidebar() {
+    if (revealTimer.current) clearTimeout(revealTimer.current);
+    setCollapsed(false);
+    revealTimer.current = setTimeout(() => setLabelsVisible(true), 220);
+  }
+
+  function collapseSidebar() {
+    if (revealTimer.current) clearTimeout(revealTimer.current);
+    setLabelsVisible(false);
+    setCollapsed(true);
+  }
+
+  useEffect(() => () => {
+    if (revealTimer.current) clearTimeout(revealTimer.current);
+  }, []);
+
+  useEffect(() => {
+    if (!session?.access_token) return;
+    void fetchViewer(session.access_token).then((viewer) => setIsAdmin(viewer.isSystemAdmin)).catch(() => setIsAdmin(false));
+  }, [session?.access_token]);
+
+  useEffect(() => {
+    setOpenGroups((current) => {
+      const next = { ...current };
+      for (const group of navGroups) if (group.items.some((item) => isPathActive(pathname, item.href))) next[group.id] = true;
+      return next;
+    });
+  }, [pathname]);
+
+  const labels = t("zh-CN").workspace;
+  async function handleSignOut() { await signOut(); router.replace("/login"); }
+
+  const labelsHidden = collapsed || !labelsVisible;
+
+  return <>
+    <aside onMouseEnter={expandSidebar} onMouseLeave={collapseSidebar} className={cn("relative z-30 hidden h-[100dvh] shrink-0 flex-col overflow-hidden border-r border-border/40 bg-background/75 px-3 py-4 backdrop-blur transition-[width] duration-200 md:flex", collapsed ? "w-16" : "w-56")}>
+      <Link href="/home" title="Helstera" className={cn("mb-4 flex h-8 items-center gap-2 px-2", labelsHidden && "justify-center px-0")}><motion.div whileHover={{ scale: 1.08 }}><HelsteraLogo className="size-6 text-foreground" /></motion.div>{!labelsHidden && <span className="text-sm font-semibold tracking-tight">Helstera</span>}</Link>
+      <div className="space-y-1">{primaryItems.map((item) => <NavLink key={item.href} item={{ ...item, label: item.href === "/home" ? labels.home : item.label }} active={isPathActive(pathname, item.href)} collapsed={labelsHidden} />)}</div>
+      <div className="my-3 border-t border-border/40" />
+      <div className="space-y-1">{navGroups.map((group) => <GroupLinks key={group.id} group={group} pathname={pathname} open={Boolean(openGroups[group.id])} collapsed={labelsHidden} onToggle={() => setOpenGroups((current) => ({ ...current, [group.id]: !current[group.id] }))} />)}</div>
+      {isAdmin && <div className="mt-1"><NavLink item={adminItem} active={isPathActive(pathname, adminItem.href)} collapsed={labelsHidden} /></div>}
+      <div className="mt-auto space-y-1">{!labelsHidden && <CreditBalance />}<NavLink item={{ ...settingsItem, label: labels.settings }} active={isPathActive(pathname, settingsItem.href)} collapsed={labelsHidden} /><button type="button" onClick={() => void handleSignOut()} title="退出登录" className={cn("flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground", labelsHidden && "w-10 justify-center px-0")}><LogOut className="size-[18px]" strokeWidth={1.8} />{!labelsHidden && <span>退出登录</span>}</button></div>
+    </aside>
+    <MobileNavigation isAdmin={isAdmin} pathname={pathname} />
+  </>;
 }

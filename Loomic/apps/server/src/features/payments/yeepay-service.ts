@@ -1,9 +1,9 @@
-// @payments-yeepay — YeePay business service: topup order creation, webhook handling
-import type { AdminSupabaseClient } from "../../supabase/admin.js";
 import type { TopupPackage } from "@helstera/shared";
 import { getTopupPackage } from "@helstera/shared";
+// @payments-yeepay — YeePay business service: topup order creation, webhook handling
+import type { DataAdminClient } from "../../auth/types.js";
 
-import { YeePayClient, type YeePayWebhookPayload } from "./yeepay-client.js";
+import type { YeePayClient, YeePayWebhookPayload } from "./yeepay-client.js";
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ export type YeePayOrder = {
 
 export type YeePayServiceOptions = {
   client: YeePayClient;
-  getAdminClient: () => AdminSupabaseClient;
+  getAdminClient: () => DataAdminClient;
   notifyUrl: string;
 };
 
@@ -32,9 +32,10 @@ export type YeePayServiceOptions = {
 // Top-up packages are already priced in CNY fen — no FX conversion needed.
 // YeePay receives the package's priceCnyFen directly.
 
-export function resolveYeePayTopupAmount(
-  packageId: string,
-): { totalAmount: number; package: TopupPackage } {
+export function resolveYeePayTopupAmount(packageId: string): {
+  totalAmount: number;
+  package: TopupPackage;
+} {
   const pkg = getTopupPackage(packageId);
   if (!pkg) {
     throw new Error(`Unknown topup package: ${packageId}`);
@@ -50,7 +51,7 @@ export function formatYeePayAmount(fen: number): string {
 
 export class YeePayService {
   private readonly client: YeePayClient;
-  private readonly getAdminClient: () => AdminSupabaseClient;
+  private readonly getAdminClient: () => DataAdminClient;
   private readonly notifyUrl: string;
 
   constructor(options: YeePayServiceOptions) {
@@ -77,7 +78,7 @@ export class YeePayService {
     const outTradeNo = this.generateOutTradeNo(params.workspaceId);
     const now = Date.now();
     const expiredAt = now + 30 * 60 * 1000; // 30 min expiry
-    const creditsGranted = pkg.credits + (pkg.bonusCredits ?? 0);
+    const creditsGranted = pkg.priceCnyFen / 100;
 
     // 1. Insert pending topup order in credit_topups table
     const admin = this.getAdminClient();
@@ -133,9 +134,7 @@ export class YeePayService {
    * Handle webhook callback after successful payment.
    * Verifies signature, marks topup paid, and adds credits to balance.
    */
-  async handleWebhook(
-    payload: YeePayWebhookPayload,
-  ): Promise<{
+  async handleWebhook(payload: YeePayWebhookPayload): Promise<{
     outTradeNo: string;
     action: "activated" | "already_processed" | "invalid_signature";
   }> {
@@ -191,7 +190,7 @@ export class YeePayService {
       {
         p_workspace_id: order.workspace_id,
         p_amount: order.credits_granted,
-        p_description: `YeePay 充值 ${order.package_id} 套餐`,
+        p_description: `YeePay 充值到账 ${order.out_trade_no}`,
         p_type: "topup",
       } as never,
     );
@@ -207,7 +206,10 @@ export class YeePayService {
   /**
    * Poll order status.
    */
-  async getOrderStatus(outTradeNo: string): Promise<{
+  async getOrderStatus(
+    outTradeNo: string,
+    workspaceId: string,
+  ): Promise<{
     status: "pending" | "paid" | "failed" | "expired";
     paidAt: number | null;
   }> {
@@ -216,6 +218,7 @@ export class YeePayService {
       .from("credit_topups")
       .select("status, paid_at, expired_at")
       .eq("out_trade_no", outTradeNo)
+      .eq("workspace_id", workspaceId)
       .single();
 
     if (!order) {
@@ -240,7 +243,11 @@ export class YeePayService {
 
   private generateOutTradeNo(_workspaceId: string): string {
     const ts = Date.now().toString(36).toUpperCase();
-    const rand = crypto.randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase();
+    const rand = crypto
+      .randomUUID()
+      .replace(/-/g, "")
+      .slice(0, 6)
+      .toUpperCase();
     return `HT${ts}${rand}`;
   }
 }

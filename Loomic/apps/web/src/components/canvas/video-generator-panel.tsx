@@ -1,7 +1,7 @@
 "use client";
 
 import { getVideoCreditCost } from "@helstera/shared";
-import { Lock, Plus, Zap } from "lucide-react";
+import { Plus, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -12,7 +12,9 @@ import {
   updateVideoGeneratorElement,
 } from "../../lib/canvas-video-generator";
 import type { VideoModelInfo } from "../../lib/server-api";
-import { fetchVideoModels, generateVideoDirect } from "../../lib/server-api";
+import { fetchVideoModels, generateVideoDirect, uploadFile } from "../../lib/server-api";
+import { t, useLocale } from "../../lib/i18n";
+import { getModelPricingLabel } from "../../lib/model-pricing";
 
 type VideoResolution = "720p" | "1080p" | "4k";
 // No longer needs poster frame extraction -- videos use embeddable elements
@@ -28,7 +30,7 @@ type VideoGeneratorPanelProps = {
 };
 
 const ASPECT_RATIOS = ["16:9", "9:16"] as const;
-const DURATIONS = [4, 5, 6, 8] as const;
+const DURATIONS = [4, 5, 6, 8, 10, 12, 15, 20, 25, 30] as const;
 const VIDEO_RESOLUTIONS = ["720p", "1080p", "4k"] as const;
 
 function supportedResolutions(
@@ -49,6 +51,7 @@ export function VideoGeneratorPanel({
   canvasScrollZoom,
   onClose,
 }: VideoGeneratorPanelProps) {
+  const copy = t(useLocale()).generation;
   const [prompt, setPrompt] = useState(data.prompt);
   const [model, setModel] = useState(data.model);
   const [aspectRatio, setAspectRatio] = useState(data.aspectRatio);
@@ -220,7 +223,18 @@ export function VideoGeneratorPanel({
         if (!file) return;
         const reader = new FileReader();
         reader.onload = () => {
-          setter({ dataUrl: reader.result as string, file });
+          const image = new Image();
+          image.onload = () => {
+            const maxSide = 2048;
+            const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+            canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+            canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+            setter({ dataUrl: canvas.toDataURL("image/jpeg", 0.86), file });
+          };
+          image.onerror = () => setter({ dataUrl: reader.result as string, file });
+          image.src = reader.result as string;
         };
         reader.readAsDataURL(file);
         e.target.value = "";
@@ -249,9 +263,19 @@ export function VideoGeneratorPanel({
     });
 
     try {
-      const inputImages: string[] = [];
-      if (firstFrame) inputImages.push(firstFrame.dataUrl);
-      if (lastFrame) inputImages.push(lastFrame.dataUrl);
+      const frames = [firstFrame, lastFrame].filter(
+        (frame): frame is { dataUrl: string; file: File } => Boolean(frame),
+      );
+      const uploadedFrames = needsPublicReferenceUrl(model)
+        ? await Promise.all(
+            frames.map(async (frame) => {
+              const uploaded = await uploadFile(accessTokenRef.current, frame.file);
+              return { url: uploaded.url, assetId: uploaded.asset.id };
+            }),
+          )
+        : frames.map((frame) => ({ url: frame.dataUrl, assetId: undefined }));
+      const inputImages = uploadedFrames.map((frame) => frame.url);
+      const inputAssetIds = uploadedFrames.flatMap((frame) => frame.assetId ? [frame.assetId] : []);
 
       const result = await generateVideoDirect(
         accessTokenRef.current,
@@ -261,7 +285,9 @@ export function VideoGeneratorPanel({
           duration,
           resolution,
           aspectRatio,
+          enableAudio: false,
           ...(inputImages.length ? { inputImages } : {}),
+          ...(inputAssetIds.length ? { inputAssetIds } : {}),
         },
       );
 
@@ -312,12 +338,12 @@ export function VideoGeneratorPanel({
       console.error("[video-gen] Generation error:", err);
       const handled = handleGenerationError(err);
       if (!handled) {
-        setError("视频生成失败，请重试或更换模型。");
+        setError(copy.videoFailed);
       }
       setLoading(false);
       updateVideoGeneratorElement(excalidrawApi, elementId, {
         status: "error",
-        errorMessage: "生成失败",
+        errorMessage: copy.failed,
       });
     }
   }, [
@@ -365,13 +391,15 @@ export function VideoGeneratorPanel({
           {firstFrame ? (
             <img
               src={firstFrame.dataUrl}
-              alt="首帧"
+              alt={copy.firstFrame}
               className="h-full w-full rounded-2xl object-cover"
             />
           ) : (
             <>
               <Plus className="h-4 w-4 text-muted-foreground" />
-              <span className="text-[10px] text-muted-foreground">首帧</span>
+              <span className="text-[10px] text-muted-foreground">
+                {copy.firstFrame}
+              </span>
             </>
           )}
         </button>
@@ -392,13 +420,15 @@ export function VideoGeneratorPanel({
           {lastFrame ? (
             <img
               src={lastFrame.dataUrl}
-              alt="尾帧"
+              alt={copy.lastFrame}
               className="h-full w-full rounded-2xl object-cover"
             />
           ) : (
             <>
               <Plus className="h-4 w-4 text-muted-foreground" />
-              <span className="text-[10px] text-muted-foreground">尾帧</span>
+              <span className="text-[10px] text-muted-foreground">
+                {copy.lastFrame}
+              </span>
             </>
           )}
         </button>
@@ -416,7 +446,7 @@ export function VideoGeneratorPanel({
               void handleGenerate();
             }
           }}
-          placeholder="今天我们要创作什么"
+          placeholder={copy.prompt}
           disabled={loading}
           style={{ scrollbarWidth: "none" }}
           className="min-h-[44px] max-h-[140px] w-full resize-none border-none bg-transparent text-[14px] leading-[22px] text-foreground placeholder:text-muted-foreground focus:outline-none [&::-webkit-scrollbar]:hidden"
@@ -568,7 +598,7 @@ export function VideoGeneratorPanel({
                     key={m.id}
                     type="button"
                     onClick={() => handleModelChange(m.id)}
-                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-all duration-300 hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-foreground/20 ?${m.id === model ? "bg-muted" : ""} ${m.accessible === false ? "opacity-60" : ""}`}
+                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-all duration-300 hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-foreground/20 ?${m.id === model ? "bg-muted" : ""}`}
                   >
                     {m.iconUrl && (
                       <img
@@ -577,11 +607,9 @@ export function VideoGeneratorPanel({
                         className="h-3.5 w-3.5 rounded-full"
                       />
                     )}
-                    <span className="flex-1 text-foreground">
-                      {m.displayName}
-                      {m.accessible === false && (
-                        <Lock className="ml-1 inline h-2.5 w-2.5 text-muted-foreground" />
-                      )}
+                    <span className="flex min-w-0 flex-1 flex-col text-foreground">
+                      <span className="truncate">{m.displayName}</span>
+                      <span className="truncate text-[10px] text-muted-foreground">{getModelPricingLabel(m, "video")}</span>
                     </span>
                     {typeof m.creditCost === "number" && (
                       <span className="inline-flex items-center gap-0.5 text-[10px] tabular-nums text-muted-foreground">
@@ -639,4 +667,8 @@ export function VideoGeneratorPanel({
     </div>,
     document.body,
   );
+}
+
+function needsPublicReferenceUrl(model: string): boolean {
+  return model.includes("/") || /minimax-h3/i.test(model);
 }

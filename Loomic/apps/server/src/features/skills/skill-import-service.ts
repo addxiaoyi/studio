@@ -323,7 +323,9 @@ function parseGitHubUrl(url: string): GitHubUrlInfo {
 
   // Handle /tree/{ref}/... or /blob/{ref}/... patterns
   if (segments.length >= 4 && (segments[2] === "tree" || segments[2] === "blob")) {
-    ref = segments[3]!;
+    // skills.sh uses HEAD as a display placeholder. GitHub Contents accepts
+    // an omitted ref for the repository default branch, but not `HEAD`.
+    ref = segments[3] === "HEAD" ? null : segments[3]!;
     path = segments.slice(4).join("/");
   } else if (segments.length > 2) {
     // Fallback: treat remaining segments as a path
@@ -454,6 +456,10 @@ async function collectGitHubFiles(
       }
 
       const content = await downloadGitHubFile(item.download_url);
+      if (content.includes("\0")) {
+        console.log(`[skill-import] Skipping binary content: ${relativePath}`);
+        continue;
+      }
       files.push({
         filePath: relativePath,
         content,

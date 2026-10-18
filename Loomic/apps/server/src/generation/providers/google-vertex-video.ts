@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, type GenerateVideosOperation, type GenerateVideosParameters } from "@google/genai";
 import { GoogleAuth } from "google-auth-library";
 
 import type {
@@ -20,7 +20,7 @@ const ICON_GOOGLE =
  * Maps internal model IDs (with `google-vertex/` prefix) to the
  * actual Veo API model name.
  */
-const MODEL_MAP: Record<string, string> = {
+export const GOOGLE_VERTEX_VIDEO_MODEL_MAP: Record<string, string> = {
   "google-vertex/veo-3.1-generate-001": "veo-3.1-generate-001",
   "google-vertex/veo-3.1-fast-generate-001": "veo-3.1-fast-generate-001",
   "google-vertex/veo-3.1-lite-generate-001": "veo-3.1-lite-generate-001",
@@ -39,7 +39,7 @@ interface ModelCapabilities {
   supportsAudio: boolean;
 }
 
-const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
+export const GOOGLE_VERTEX_VIDEO_CAPABILITIES: Record<string, ModelCapabilities> = {
   "veo-3.1-generate-001": {
     allowedDurations: [4, 6, 8],
     allowedResolutions: ["720p", "1080p", "4k"],
@@ -158,7 +158,7 @@ const BASE_DIMENSIONS: Record<string, { width: number; height: number }> = {
   "4k": { width: 3840, height: 2160 },
 };
 
-function resolutionToDimensions(
+export function googleVertexVideoResolutionToDimensions(
   resolution: string,
   aspectRatio: string,
 ): { width: number; height: number } {
@@ -188,28 +188,35 @@ export interface GoogleVertexConfig {
   location: string;
 }
 
+type VertexVideoClient = {
+  models: { generateVideos(params: GenerateVideosParameters): Promise<GenerateVideosOperation> };
+  operations: { getVideosOperation(params: { operation: GenerateVideosOperation }): Promise<GenerateVideosOperation> };
+};
+
+type VideoTokenClient = { getAccessToken(): Promise<{ token?: string | null }> };
+
 export class GoogleVertexVideoProvider implements VideoProvider {
   readonly name = PROVIDER_NAME;
   readonly models = GOOGLE_VERTEX_VIDEO_MODELS;
 
-  private client: GoogleGenAI;
-  private auth: GoogleAuth;
+  private client: VertexVideoClient;
+  private auth: Pick<GoogleAuth, "getClient">;
 
-  constructor(config: GoogleVertexConfig) {
-    this.client = new GoogleGenAI({
+  constructor(config: GoogleVertexConfig, dependencies?: { client?: VertexVideoClient; auth?: Pick<GoogleAuth, "getClient"> }) {
+    this.client = dependencies?.client ?? new GoogleGenAI({
       vertexai: true,
       project: config.project,
       location: config.location,
     });
     // GoogleAuth automatically picks up GOOGLE_APPLICATION_CREDENTIALS
-    this.auth = new GoogleAuth({
+    this.auth = dependencies?.auth ?? new GoogleAuth({
       scopes: ["https://www.googleapis.com/auth/cloud-platform"],
     });
     console.log(`[google-vertex-video] Initialized Vertex AI provider (project=${config.project}, location=${config.location})`);
   }
 
   async generate(params: VideoGenerateParams): Promise<GeneratedVideo> {
-    const apiModel = MODEL_MAP[params.model];
+    const apiModel = GOOGLE_VERTEX_VIDEO_MODEL_MAP[params.model];
     if (!apiModel) {
       throw new GenerationError(
         PROVIDER_NAME,
@@ -218,7 +225,7 @@ export class GoogleVertexVideoProvider implements VideoProvider {
       );
     }
 
-    const caps = MODEL_CAPABILITIES[apiModel];
+    const caps = GOOGLE_VERTEX_VIDEO_CAPABILITIES[apiModel];
     if (!caps) {
       throw new GenerationError(
         PROVIDER_NAME,
@@ -350,7 +357,7 @@ export class GoogleVertexVideoProvider implements VideoProvider {
     const generatedVideo = response.generatedVideos[0]!;
     const video = generatedVideo.video;
     const mimeType = video?.mimeType ?? "video/mp4";
-    const { width, height } = resolutionToDimensions(resolution, aspectRatio);
+    const { width, height } = googleVertexVideoResolutionToDimensions(resolution, aspectRatio);
 
     // Vertex AI returns videoBytes (base64 inline data) instead of a download URI.
     // Developer API returns a URI; Vertex AI returns the raw bytes directly.
@@ -363,20 +370,25 @@ export class GoogleVertexVideoProvider implements VideoProvider {
 
     // Fallback: if Vertex AI returns a URI (future API changes), authenticate it.
     if (video?.uri) {
-      let authenticatedUrl: string;
+      let accessToken: string;
       try {
         const client = await this.auth.getClient();
         const tokenResponse = await client.getAccessToken();
-        const accessToken = tokenResponse.token;
-        if (!accessToken) {
+        const token = tokenResponse.token;
+        if (!token) {
           throw new Error("Failed to obtain access token from service account");
         }
-        const separator = video.uri.includes("?") ? "&" : "?";
-        authenticatedUrl = `${video.uri}${separator}access_token=${accessToken}`;
+        accessToken = token;
       } catch (err) {
         console.error(`[google-vertex-video] Failed to get access token for video download:`, err);
-        authenticatedUrl = video.uri;
+        throw new GenerationError(
+          PROVIDER_NAME,
+          "download_auth_failed",
+          "Vertex AI returned a video URI but the service account could not authenticate the download.",
+        );
       }
+      const separator = video.uri.includes("?") ? "&" : "?";
+      const authenticatedUrl = `${video.uri}${separator}access_token=${encodeURIComponent(accessToken)}`;
       return { url: authenticatedUrl, mimeType, width, height, durationSeconds };
     }
 

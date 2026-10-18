@@ -123,15 +123,18 @@ export type Database = {
           error_message: string | null
           failed_at: string | null
           id: string
+          idempotency_key: string | null
           job_type: Database["public"]["Enums"]["background_job_type"]
           max_attempts: number
           payload: Json
           project_id: string | null
+          progress: number
           queue_name: string
           result: Json | null
           session_id: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["background_job_status"]
+          stage: string | null
           thread_id: string | null
           updated_at: string
           workspace_id: string
@@ -149,15 +152,18 @@ export type Database = {
           error_message?: string | null
           failed_at?: string | null
           id?: string
+          idempotency_key?: string | null
           job_type: Database["public"]["Enums"]["background_job_type"]
           max_attempts?: number
           payload?: Json
           project_id?: string | null
+          progress?: number
           queue_name: string
           result?: Json | null
           session_id?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["background_job_status"]
+          stage?: string | null
           thread_id?: string | null
           updated_at?: string
           workspace_id: string
@@ -175,15 +181,18 @@ export type Database = {
           error_message?: string | null
           failed_at?: string | null
           id?: string
+          idempotency_key?: string | null
           job_type?: Database["public"]["Enums"]["background_job_type"]
           max_attempts?: number
           payload?: Json
           project_id?: string | null
+          progress?: number
           queue_name?: string
           result?: Json | null
           session_id?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["background_job_status"]
+          stage?: string | null
           thread_id?: string | null
           updated_at?: string
           workspace_id?: string
@@ -870,18 +879,39 @@ export type Database = {
         Row: {
           created_at: string
           default_model: string
+          chat_model: string | null
+          default_model_url: string | null
+          default_model_key_ciphertext: string | null
+          chat_model_url: string | null
+          chat_model_key_ciphertext: string | null
+          auto_approve_paid_generation: boolean
+          auto_delete_empty_canvas: boolean
           updated_at: string
           workspace_id: string
         }
         Insert: {
+          auto_approve_paid_generation?: boolean
+          auto_delete_empty_canvas?: boolean
           created_at?: string
           default_model?: string
+          chat_model?: string | null
+          default_model_url?: string | null
+          default_model_key_ciphertext?: string | null
+          chat_model_url?: string | null
+          chat_model_key_ciphertext?: string | null
           updated_at?: string
           workspace_id: string
         }
         Update: {
+          auto_approve_paid_generation?: boolean
+          auto_delete_empty_canvas?: boolean
           created_at?: string
           default_model?: string
+          chat_model?: string | null
+          default_model_url?: string | null
+          default_model_key_ciphertext?: string | null
+          chat_model_url?: string | null
+          chat_model_key_ciphertext?: string | null
           updated_at?: string
           workspace_id?: string
         }
@@ -1039,7 +1069,7 @@ export type Database = {
         | "failed"
         | "canceled"
         | "dead_letter"
-      background_job_type: "image_generation" | "video_generation"
+      background_job_type: "image_generation" | "video_generation" | "feed_structure"
       billing_period: "monthly" | "yearly"
       brand_kit_asset_type: "color" | "font" | "logo" | "image"
       credit_transaction_type:
@@ -1188,7 +1218,7 @@ export const Constants = {
         "canceled",
         "dead_letter",
       ],
-      background_job_type: ["image_generation", "video_generation"],
+      background_job_type: ["image_generation", "video_generation", "feed_structure"],
       billing_period: ["monthly", "yearly"],
       brand_kit_asset_type: ["color", "font", "logo", "image"],
       credit_transaction_type: [

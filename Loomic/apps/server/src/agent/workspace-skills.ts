@@ -1,4 +1,5 @@
-import type { UserSupabaseClient } from "../supabase/user.js";
+import type { DataClient } from "../auth/types.js";
+import type { Pool } from "pg";
 
 /**
  * A file bundled with a skill (scripts/, references/, assets/).
@@ -35,7 +36,7 @@ export interface WorkspaceSkillEntry {
  * non-empty `skill_content` are returned.
  */
 export async function loadWorkspaceSkills(
-  userClient: UserSupabaseClient,
+  userClient: DataClient,
   canvasId: string,
 ): Promise<WorkspaceSkillEntry[]> {
   // Step 1: Resolve canvas → project → workspace
@@ -100,11 +101,60 @@ export async function loadWorkspaceSkills(
     .filter((entry): entry is WorkspaceSkillEntry => entry !== null);
 }
 
+export async function loadLocalWorkspaceSkills(db: Pool, canvasId: string): Promise<WorkspaceSkillEntry[]> {
+  const { rows } = await db.query<{
+    id: string;
+    slug: string;
+    description: string | null;
+    skill_content: string | null;
+    locked_version: string | null;
+    snapshot: { skillContent?: string; files?: Array<{ filePath: string; content: string }> } | null;
+  }>(
+    `select s.id, s.slug, s.description, s.skill_content, ws.locked_version, sv.snapshot
+     from canvases c
+     join projects p on p.id = c.project_id
+     join workspace_skills ws on ws.workspace_id = p.workspace_id and ws.enabled
+     join skills s on s.id = ws.skill_id
+     left join skill_versions sv on sv.skill_id = ws.skill_id and sv.version = ws.locked_version
+     where c.id = $1 and p.archived_at is null
+     order by ws.installed_at, s.slug`,
+    [canvasId],
+  );
+  if (!rows.length) return [];
+
+  const unlockedSkillIds = rows.filter((row) => !row.locked_version).map((row) => row.id);
+  const filesBySkillId = new Map<string, SkillFileEntry[]>();
+  if (unlockedSkillIds.length) {
+    const files = await db.query<{ skill_id: string; file_path: string; content: string }>(
+      "select skill_id, file_path, content from skill_files where skill_id = any($1::uuid[]) order by skill_id, file_path",
+      [unlockedSkillIds],
+    );
+    for (const file of files.rows) {
+      const entries = filesBySkillId.get(file.skill_id) ?? [];
+      entries.push({ path: file.file_path, content: file.content });
+      filesBySkillId.set(file.skill_id, entries);
+    }
+  }
+
+  return rows.flatMap((row) => {
+    const snapshot = row.locked_version ? row.snapshot : null;
+    const content = snapshot?.skillContent ?? (!row.locked_version ? row.skill_content : null);
+    if (!content) {
+      console.warn(`[workspace-skills] Skill "${row.slug}" has no content for its locked version; skipping`);
+      return [];
+    }
+    const files = row.locked_version
+      ? (snapshot?.files ?? []).map((file) => ({ path: file.filePath, content: file.content }))
+      : (filesBySkillId.get(row.id) ?? []);
+    return [{ name: row.slug, description: row.description ?? "", path: `/workspace-skills/${row.slug}/SKILL.md`, content, files }];
+  });
+}
+
 /**
  * Resolve canvas ID → workspace ID via the canvas → project join.
  */
 async function resolveWorkspaceId(
-  client: UserSupabaseClient,
+  client: DataClient,
   canvasId: string,
 ): Promise<string | null> {
   // Try joined query first (single round-trip)

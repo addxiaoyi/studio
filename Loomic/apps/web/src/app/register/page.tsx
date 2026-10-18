@@ -7,8 +7,10 @@ import { AuthShell } from "../../components/auth/auth-shell";
 import { LoadingScreen } from "../../components/loading-screen";
 import { RegisterForm } from "../../components/register-form";
 import { useAuth } from "../../lib/auth-context";
+import { t, useLocale } from "../../lib/i18n";
 
 export default function RegisterPage() {
+  const copy = t(useLocale()).authShell;
   const { user, loading } = useAuth();
   const router = useRouter();
 
@@ -22,13 +24,9 @@ export default function RegisterPage() {
 
   return (
     <AuthShell
-      title="Create a workspace account"
-      description="Register with email and password, then come back to the same canvas from any device."
-      features={[
-        "Create a dedicated account with email and password",
-        "Return to your workspace after confirming your email",
-        "Use the same workspace layout as signed-in users",
-      ]}
+      title={copy.registerTitle}
+      description={copy.registerDescription}
+      features={copy.registerFeatures}
     >
       <RegisterForm />
     </AuthShell>

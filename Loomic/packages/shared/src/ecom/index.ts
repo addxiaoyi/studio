@@ -34,6 +34,9 @@ export type SceneVariant = "luxury" | "minimal" | "fresh" | "tech" | "default";
 /** Conversion driver diagnosis. */
 export type ConversionDriver = "visual" | "pain-point" | "emotional";
 
+export type EcomGenerationMode = "hero" | "scene" | "detail-poster" | "social" | "retouch";
+export type EcomFidelity = "strict" | "balanced" | "creative";
+
 /** Supported aspect ratios. */
 export type EcomRatio =
   | "1:1"

@@ -13,7 +13,15 @@ describe("detectLocale", () => {
 
   it("returns en-US for English browser", () => {
     vi.stubGlobal("window", { navigator: { language: "en-US" } });
+    vi.stubGlobal("document", { documentElement: { lang: "" } });
     expect(detectLocale()).toBe("en-US");
+    vi.unstubAllGlobals();
+  });
+
+  it("prefers the application document language over the browser language", () => {
+    vi.stubGlobal("window", { navigator: { language: "en-US" } });
+    vi.stubGlobal("document", { documentElement: { lang: "zh-CN" } });
+    expect(detectLocale()).toBe("zh-CN");
     vi.unstubAllGlobals();
   });
 

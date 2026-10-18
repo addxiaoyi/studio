@@ -1,7 +1,6 @@
 import type { Database } from "@helstera/shared";
 
 import type { HomeDiscoveryCategory } from "./home-discovery-seeds";
-import { homeDiscoverySeedCategories } from "./home-discovery-seeds";
 
 type HomeDiscoveryCategoryRow =
   Database["public"]["Tables"]["home_discovery_categories"]["Row"];
@@ -53,5 +52,7 @@ export function localizeHomeDiscoveryCategories(
 }
 
 export async function loadHomeDiscoveryCategories(): Promise<HomeDiscoveryCategory[]> {
-  return localizeHomeDiscoveryCategories(homeDiscoverySeedCategories);
+  // Discovery content must come from the workspace content service. Until that
+  // endpoint is available, keep the section empty instead of showing fake metrics.
+  return [];
 }

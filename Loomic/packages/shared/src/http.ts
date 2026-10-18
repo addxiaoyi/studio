@@ -27,7 +27,7 @@ export const runCancelResponseSchema = z.object({
 });
 
 export const viewerCreditsSchema = z.object({
-  balance: z.number().int(),
+  balance: z.number().finite().nonnegative(),
   plan: z.string(),
   dailyClaimed: z.boolean(),
   limits: z.object({
@@ -42,6 +42,7 @@ export const viewerResponseSchema = z.object({
   profile: viewerProfileSchema,
   workspace: workspaceSummarySchema,
   membership: workspaceMembershipSchema,
+  isSystemAdmin: z.boolean().default(false),
   credits: viewerCreditsSchema.optional(),
 });
 
@@ -119,6 +120,7 @@ export const applicationErrorCodeSchema = z.enum([
   "variant_not_found",
   "checkout_failed",
   "generation_failed",
+  "generation_confirmation_required",
 ]);
 
 export const applicationErrorResponseSchema = z.object({

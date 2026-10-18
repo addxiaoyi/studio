@@ -65,7 +65,7 @@ function tool(name: string, imgSrc: string): InputMention {
  * Keep this in code for now so prompts and image assets are easy to swap later.
  */
 export const homeExampleSeedCategories: HomeExampleCategory[] = [
-  cat("nano-banana-pro", "Nano Banana Pro", "Special", [
+  cat("google-image-editing", "图片生成", "Special", [
     ex(
       "Design pixel-perfect web interface.",
       "Generate a landing page for a furniture shop called Helstera, Neo Brutalism style. These are the product images:",
@@ -75,7 +75,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
         "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/examples/nano-banana-pro/e1-3.webp",
       ],
       [
-        tool("Nano Banana Pro", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
         img("Chair", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/nano-banana-pro/e1-input-1.webp"),
         img("Nightstand", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/nano-banana-pro/e1-input-2.webp"),
         img("Beanbag", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/nano-banana-pro/e1-input-3.webp"),
@@ -92,7 +92,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
         "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/examples/nano-banana-pro/e2-3.webp",
       ],
       [
-        tool("Nano Banana Pro", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -104,7 +104,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
         "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/examples/nano-banana-pro/e3-3.webp",
       ],
       [
-        tool("Nano Banana Pro", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -116,7 +116,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
         "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/examples/nano-banana-pro/e4-3.webp",
       ],
       [
-        tool("Nano Banana Pro", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -128,7 +128,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
         "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/examples/nano-banana-pro/e5-3.webp",
       ],
       [
-        tool("Nano Banana Pro", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
         img("Image", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/nano-banana-pro/e5-input-1.webp"),
       ],
     ),
@@ -141,7 +141,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
         "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/examples/nano-banana-pro/e6-3.webp",
       ],
       [
-        tool("Nano Banana Pro", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
         img("Logo", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/common/helstera-logo.png"),
       ],
     ),
@@ -156,7 +156,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
         "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/examples/design/e1-3.webp",
       ],
       [
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -179,7 +179,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       ],
       [
         img("Necklace", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/design/e3-input-1.webp"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -192,7 +192,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       ],
       [
         img("Cocoa Puffs", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/design/e4-input-1.webp"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -244,7 +244,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       ],
       [
         img("Logo", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/common/helstera-logo.png"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -257,7 +257,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       ],
       [
         img("Logo", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/common/helstera-logo.png"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -269,7 +269,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
         "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/examples/branding/e4-3.webp",
       ],
       [
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
         img("Board", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/branding/e4-input-1.webp"),
         img("Image", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/branding/e4-input-2.webp"),
       ],
@@ -284,7 +284,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       ],
       [
         img("Reference", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/branding/e5-input-1.webp"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -296,7 +296,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
         "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/examples/branding/e6-3.webp",
       ],
       [
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
         img("Earrings", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/branding/e6-input-1.webp"),
       ],
     ),
@@ -312,7 +312,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       ],
       [
         img("Cat", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/illustration/e1-input-1.webp"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -325,7 +325,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       ],
       [
         img("Image", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/illustration/e2-input-1.webp"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -367,7 +367,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
         "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/examples/illustration/e5-3.webp",
       ],
       [
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
         img("Avocado", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/illustration/e5-input-1.webp"),
         img("Reference", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/illustration/e5-input-2.webp"),
       ],
@@ -381,7 +381,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
         "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/examples/illustration/e6-3.webp",
       ],
       [
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
         img("Image", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/illustration/e6-input-1.webp"),
       ],
     ),
@@ -398,7 +398,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       [
         img("Model", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/e-commerce/e1-input-1.webp"),
         img("Sweater", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/e-commerce/e1-input-2.webp"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -411,7 +411,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       ],
       [
         img("Front View", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/e-commerce/e2-input-1.webp"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -437,7 +437,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       ],
       [
         img("Ceramic", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/e-commerce/e4-input-1.webp"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -450,7 +450,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       ],
       [
         img("Sofa", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/e-commerce/e5-input-1.webp"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
     ex(
@@ -464,7 +464,7 @@ export const homeExampleSeedCategories: HomeExampleCategory[] = [
       [
         img("Logo", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/common/helstera-logo.png"),
         img("Perfume", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/inputs/e-commerce/e6-input-2.webp"),
-        tool("Nano Banana", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
+        tool("图片生成", "https://storage.helstera.com/storage/v1/object/public/project-assets/home-seeds/icons/imagen-3.svg"),
       ],
     ),
   ]),

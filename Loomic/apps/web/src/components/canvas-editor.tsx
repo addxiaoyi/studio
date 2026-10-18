@@ -4,16 +4,18 @@ import "@excalidraw/excalidraw/index.css";
 
 import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
+import { useLocale } from "../lib/i18n";
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 
 import type { WebSocketHandle } from "../hooks/use-websocket";
 import { getServerBaseUrl } from "../lib/env";
-import { saveCanvas, uploadThumbnail } from "../lib/server-api";
+import { fetchCanvas, saveCanvas, uploadThumbnail } from "../lib/server-api";
 import { VideoCanvasElement } from "./canvas/video-canvas-element";
-import { isVideoUrl } from "../lib/canvas-elements";
+import { createExcalidrawImageElement, isVideoUrl, scaleToFit, viewportPointToScene } from "../lib/canvas-elements";
 import { CanvasToolMenu } from "./canvas-tool-menu";
-import { normalizeCanvasElements } from "../lib/canvas-normalize";
+import { normalizeCanvasElement, normalizeCanvasElements } from "../lib/canvas-normalize";
 import { ErrorBoundary } from "./error-boundary";
+import { Trash2 } from "lucide-react";
 
 const Excalidraw = dynamic(
   () => import("@excalidraw/excalidraw").then((mod) => mod.Excalidraw),
@@ -25,7 +27,7 @@ const Excalidraw = dynamic(
 const ric: typeof requestIdleCallback =
   typeof window !== "undefined" && window.requestIdleCallback
     ? window.requestIdleCallback.bind(window)
-    : ((cb: IdleRequestCallback) => setTimeout(cb, 1) as unknown as number);
+    : (cb: IdleRequestCallback) => setTimeout(cb, 1) as unknown as number;
 const cic: typeof cancelIdleCallback =
   typeof window !== "undefined" && window.cancelIdleCallback
     ? window.cancelIdleCallback.bind(window)
@@ -47,6 +49,8 @@ export type CanvasSelectedElement = {
   dataUrl?: string;
   /** Supabase storage public URL -- prefer over dataUrl for message attachments */
   storageUrl?: string;
+  /** Persistent upload/generated asset ID used by the video first-frame path. */
+  assetId?: string;
 };
 
 type CanvasEditorProps = {
@@ -66,7 +70,47 @@ type CanvasEditorProps = {
 
 const SAVE_DEBOUNCE_MS = 1500;
 const THUMBNAIL_DEBOUNCE_MS = 10_000;
+const THUMBNAIL_INITIAL_REFRESH_DELAY_MS = 1500;
 const THUMBNAIL_MAX_SIZE = 400;
+
+async function buildThumbnailBlob(api: any): Promise<Blob | null> {
+  const sceneElements = api.getSceneElements().filter((element: any) => !element.isDeleted);
+  if (!sceneElements.length) return null;
+
+  const { exportToBlob } = await import("@excalidraw/excalidraw");
+  return exportToBlob({
+    elements: sceneElements,
+    appState: { exportBackground: true },
+    files: api.getFiles(),
+    mimeType: "image/webp",
+    quality: 0.8,
+    maxWidthOrHeight: THUMBNAIL_MAX_SIZE,
+  });
+}
+
+export function mergeCanvasSaveWithRemoteContent(
+  local: { elements: Record<string, unknown>[]; appState: Record<string, unknown>; files: Record<string, Record<string, unknown>> },
+  remote: { elements?: Record<string, unknown>[]; appState?: Record<string, unknown>; files?: Record<string, Record<string, unknown>> },
+) {
+  const localIds = new Set(local.elements.map((element) => element.id).filter((id): id is string => typeof id === "string"));
+  const remoteOnlyElements = (remote.elements ?? []).filter((element) =>
+    typeof element.id === "string"
+      && !localIds.has(element.id)
+      && element.isDeleted !== true,
+  );
+  const localFileIds = new Set(Object.keys(local.files));
+  const remoteFileIds = new Set(remoteOnlyElements.map((element) => {
+    const fileId = element.fileId;
+    return typeof fileId === "string" ? fileId : undefined;
+  }).filter((id): id is string => Boolean(id)));
+  const retainedFiles = Object.fromEntries(Object.entries(remote.files ?? {}).filter(([id]) => remoteFileIds.has(id) && !localFileIds.has(id)));
+
+  return {
+    ...local,
+    elements: [...local.elements, ...remoteOnlyElements],
+    files: { ...local.files, ...retainedFiles },
+  };
+}
 
 export function CanvasEditor({
   canvasId,
@@ -78,25 +122,78 @@ export function CanvasEditor({
   leftPanelOpen,
   onSelectionChange,
 }: CanvasEditorProps) {
+  const initialElements = initialContent.elements.map((element) =>
+    normalizeCanvasElement(element),
+  );
   const { resolvedTheme } = useTheme();
+  const locale = useLocale();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const thumbnailTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accessTokenRef = useRef(accessToken);
   accessTokenRef.current = accessToken;
   const canvasIdRef = useRef(canvasId);
   canvasIdRef.current = canvasId;
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [excalidrawApi, setExcalidrawApi] = useState<any>(null);
+  const [resolvedFilesVersion, setResolvedFilesVersion] = useState(0);
+  const [isImageDragActive, setIsImageDragActive] = useState(false);
+  const [deleteGesture, setDeleteGesture] = useState<{ active: boolean; overTrash: boolean }>({ active: false, overTrash: false });
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deletePointerRef = useRef({ x: 0, y: 0 });
+  const dragDepthRef = useRef(0);
+  const canvasRootRef = useRef<HTMLDivElement>(null);
   const prevSelectedIdsRef = useRef<string>("");
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
   // Tracks whether the one-time normalization pass has already run
   const normalizedRef = useRef(false);
+  const thumbnailRefreshCanvasRef = useRef<string | null>(null);
+
+  const cancelDeleteGesture = useCallback(() => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+    setDeleteGesture({ active: false, overTrash: false });
+  }, []);
+
+  const deleteSelectedElements = useCallback(() => {
+    if (!excalidrawApi) return;
+    const selected = Object.keys(excalidrawApi.getAppState().selectedElementIds ?? {});
+    if (!selected.length) return;
+    const selectedSet = new Set(selected);
+    excalidrawApi.updateScene({
+      elements: excalidrawApi.getSceneElements().map((element: any) => selectedSet.has(element.id) ? { ...element, isDeleted: true } : element),
+      appState: { selectedElementIds: {} },
+      captureUpdate: "IMMEDIATELY",
+    });
+  }, [excalidrawApi]);
+
+  const handleCanvasPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !excalidrawApi) return;
+    const selected = Object.keys(excalidrawApi.getAppState().selectedElementIds ?? {});
+    if (!selected.length) return;
+    deletePointerRef.current = { x: event.clientX, y: event.clientY };
+    longPressTimerRef.current = setTimeout(() => setDeleteGesture({ active: true, overTrash: false }), 550);
+  }, [excalidrawApi]);
+
+  const handleCanvasPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!longPressTimerRef.current && !deleteGesture.active) return;
+    const moved = Math.hypot(event.clientX - deletePointerRef.current.x, event.clientY - deletePointerRef.current.y);
+    if (!deleteGesture.active && moved > 10) { cancelDeleteGesture(); return; }
+    if (deleteGesture.active) setDeleteGesture((current) => ({ ...current, overTrash: event.clientY > window.innerHeight - 150 }));
+  }, [cancelDeleteGesture, deleteGesture.active]);
+
+  const handleCanvasPointerUp = useCallback(() => {
+    if (deleteGesture.active && deleteGesture.overTrash) deleteSelectedElements();
+    cancelDeleteGesture();
+  }, [cancelDeleteGesture, deleteGesture.active, deleteGesture.overTrash, deleteSelectedElements]);
 
   // Guard: prevent auto-save until Excalidraw has fully hydrated with initial data.
   // Without this, a page reload can fire onChange with empty elements before
   // initialData is applied, causing a FULL REPLACE that wipes existing content.
   const hydratedRef = useRef(false);
-  const initialElementCountRef = useRef(initialContent.elements.filter((e) => !e.isDeleted).length);
+  const initialElementCountRef = useRef(
+    initialContent.elements.filter((e) => !e.isDeleted).length,
+  );
 
   // Track pending save payload so we can flush on tab close / unmount
   const pendingSaveRef = useRef<{
@@ -113,7 +210,11 @@ export function CanvasEditor({
   // Separate inline files (ready) from storage URLs (need async fetch)
   const { inlineFiles, pendingUrls } = useMemo(() => {
     const inline: Record<string, Record<string, unknown>> = {};
-    const pending: Array<{ fileId: string; url: string; meta: Record<string, unknown> }> = [];
+    const pending: Array<{
+      fileId: string;
+      url: string;
+      meta: Record<string, unknown>;
+    }> = [];
     for (const [fileId, fileData] of Object.entries(initialContent.files)) {
       if (typeof fileData.storageUrl === "string" && fileData.storageUrl) {
         pending.push({ fileId, url: fileData.storageUrl, meta: fileData });
@@ -136,7 +237,9 @@ export function CanvasEditor({
           try {
             const resp = await fetch(url);
             if (!resp.ok) {
-              console.warn(`[canvas-editor] Failed to fetch file ${fileId}: ${resp.status}`);
+              console.warn(
+                `[canvas-editor] Failed to fetch file ${fileId}: ${resp.status}`,
+              );
               return;
             }
             const blob = await resp.blob();
@@ -153,19 +256,53 @@ export function CanvasEditor({
               dataURL,
             };
           } catch (err) {
-            console.warn(`[canvas-editor] Failed to resolve file ${fileId}:`, err);
+            console.warn(
+              `[canvas-editor] Failed to resolve file ${fileId}:`,
+              err,
+            );
           }
         }),
       );
       if (!cancelled && Object.keys(resolved).length > 0) {
         excalidrawApi.addFiles(Object.values(resolved));
-        console.log(`[canvas-editor] Resolved ${Object.keys(resolved).length} storage files`);
+        setResolvedFilesVersion((version) => version + 1);
+        console.log(
+          `[canvas-editor] Resolved ${Object.keys(resolved).length} storage files`,
+        );
       }
     }
 
     resolveFiles();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [excalidrawApi, pendingUrls]);
+
+  const uploadCurrentThumbnail = useCallback(async (api: any) => {
+    if (!api || !hydratedRef.current || thumbnailRefreshCanvasRef.current === canvasId) return;
+
+    const blob = await buildThumbnailBlob(api);
+    if (!blob) return;
+
+    thumbnailRefreshCanvasRef.current = canvasId;
+    try {
+      await uploadThumbnail(accessTokenRef.current, projectId, blob);
+    } catch (error) {
+      thumbnailRefreshCanvasRef.current = null;
+      throw error;
+    }
+  }, [canvasId, projectId]);
+
+  // Rebuild stale previews after stored canvas files have been resolved.
+  useEffect(() => {
+    if (!excalidrawApi) return;
+    const timer = setTimeout(() => {
+      uploadCurrentThumbnail(excalidrawApi).catch((error) =>
+        console.warn("[canvas-editor] initial thumbnail refresh failed:", error),
+      );
+    }, THUMBNAIL_INITIAL_REFRESH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [excalidrawApi, resolvedFilesVersion, uploadCurrentThumbnail]);
 
   const handleExcalidrawApi = useCallback(
     (api: any) => {
@@ -200,14 +337,24 @@ export function CanvasEditor({
           const files: Record<string, Record<string, unknown>> = {};
           const rawFiles = excalidrawApi.getFiles() as Record<string, any>;
           for (const [id, file] of Object.entries(rawFiles)) {
-            files[id] = { id: file.id, dataURL: file.dataURL, mimeType: file.mimeType, created: file.created };
+            files[id] = {
+              id: file.id,
+              dataURL: file.dataURL,
+              mimeType: file.mimeType,
+              created: file.created,
+            };
           }
           const appState = excalidrawApi.getAppState();
           saveCanvas(accessTokenRef.current, canvasIdRef.current, {
             elements: mutableElements.filter((el: any) => !el.isDeleted),
-            appState: { viewBackgroundColor: appState.viewBackgroundColor, gridModeEnabled: appState.gridModeEnabled },
+            appState: {
+              viewBackgroundColor: appState.viewBackgroundColor,
+              gridModeEnabled: appState.gridModeEnabled,
+            },
             files,
-          }).catch((err: Error) => console.warn("[canvas-editor] normalization save failed:", err));
+          }).catch((err: Error) =>
+            console.warn("[canvas-editor] normalization save failed:", err),
+          );
         }
       } catch (err) {
         console.warn("[canvas-editor] normalization failed:", err);
@@ -251,9 +398,10 @@ export function CanvasEditor({
           }
         }
         const content = {
-          elements: elements.filter(
-            (el: any) => !el.isDeleted,
-          ) as Record<string, unknown>[],
+          elements: elements.filter((el: any) => !el.isDeleted) as Record<
+            string,
+            unknown
+          >[],
           appState: {
             viewBackgroundColor: appState.viewBackgroundColor,
             gridModeEnabled: appState.gridModeEnabled,
@@ -262,7 +410,15 @@ export function CanvasEditor({
         };
         pendingSaveRef.current = content;
 
-        saveCanvas(accessTokenRef.current, canvasId, content)
+        const save = async () => {
+          const { canvas } = await fetchCanvas(accessTokenRef.current, canvasIdRef.current);
+          const merged = mergeCanvasSaveWithRemoteContent(content, canvas.content);
+          await saveCanvas(accessTokenRef.current, canvasIdRef.current, merged);
+        };
+        saveQueueRef.current = saveQueueRef.current
+          .catch((error) => console.warn("[canvas-editor] previous save failed:", error))
+          .then(save);
+        saveQueueRef.current
           .then(() => {
             if (pendingSaveRef.current === content) {
               pendingSaveRef.current = null;
@@ -276,34 +432,33 @@ export function CanvasEditor({
       thumbnailTimerRef.current = setTimeout(async () => {
         if (!excalidrawApi) return;
         try {
-          const { exportToBlob } = await import("@excalidraw/excalidraw");
-          const sceneElements = excalidrawApi.getSceneElements();
-          const sceneFiles = excalidrawApi.getFiles();
-          if (!sceneElements.length) return;
+          const blob = await buildThumbnailBlob(excalidrawApi);
+          if (!blob) return;
 
-          const blob = await exportToBlob({
-            elements: sceneElements,
-            appState: { exportBackground: true },
-            files: sceneFiles,
-            mimeType: "image/webp",
-            quality: 0.8,
-            maxWidthOrHeight: THUMBNAIL_MAX_SIZE,
-          });
-
-          console.log("[canvas-editor] uploading thumbnail, blob size:", blob.size);
+          console.log(
+            "[canvas-editor] uploading thumbnail, blob size:",
+            blob.size,
+          );
           await uploadThumbnail(accessTokenRef.current, projectId, blob);
           console.log("[canvas-editor] thumbnail uploaded OK");
         } catch (err) {
-          console.warn("[canvas-editor] thumbnail generation/upload failed:", err);
+          console.warn(
+            "[canvas-editor] thumbnail generation/upload failed:",
+            err,
+          );
         }
       }, THUMBNAIL_DEBOUNCE_MS);
 
       // --- 3. Selection change detection ---
       // Cheap string comparison avoids unnecessary downstream re-renders.
       const selectedIds = appState.selectedElementIds
-        ? Object.keys(appState.selectedElementIds as Record<string, boolean>).filter(
-            (id) => (appState.selectedElementIds as Record<string, boolean>)[id],
-          ).sort().join(",")
+        ? Object.keys(appState.selectedElementIds as Record<string, boolean>)
+            .filter(
+              (id) =>
+                (appState.selectedElementIds as Record<string, boolean>)[id],
+            )
+            .sort()
+            .join(",")
         : "";
 
       if (selectedIds !== prevSelectedIdsRef.current) {
@@ -313,7 +468,8 @@ export function CanvasEditor({
             onSelectionChangeRef.current([]);
           } else {
             const idSet = new Set(selectedIds.split(","));
-            const selFiles: Record<string, any> = excalidrawApi?.getFiles() ?? {};
+            const selFiles: Record<string, any> =
+              excalidrawApi?.getFiles() ?? {};
             const selected: CanvasSelectedElement[] = elements
               .filter((el: any) => idSet.has(el.id) && !el.isDeleted)
               .map((el: any) => {
@@ -330,6 +486,13 @@ export function CanvasEditor({
                 }
                 if (el.type === "image" && el.fileId) {
                   base.fileId = el.fileId;
+                  const assetId =
+                    typeof el.customData?.assetId === "string"
+                      ? el.customData.assetId
+                      : typeof initialFilesRef.current[el.fileId]?.assetId === "string"
+                        ? String(initialFilesRef.current[el.fileId]?.assetId)
+                        : undefined;
+                  if (assetId) base.assetId = assetId;
                   const file = selFiles[el.fileId];
                   if (file?.dataURL) {
                     base.dataUrl = file.dataURL;
@@ -358,79 +521,84 @@ export function CanvasEditor({
   useEffect(() => {
     if (!ws || !excalidrawApi) return;
 
-    const cleanup = ws.registerRPC(
-      "canvas.screenshot",
-      async (params) => {
-        const { mode, region, max_dimension = 1024 } = params as {
-          mode: string;
-          region?: { x: number; y: number; width: number; height: number };
-          max_dimension?: number;
-        };
+    const cleanup = ws.registerRPC("canvas.screenshot", async (params) => {
+      const {
+        mode,
+        region,
+        max_dimension = 1024,
+      } = params as {
+        mode: string;
+        region?: { x: number; y: number; width: number; height: number };
+        max_dimension?: number;
+      };
 
-        const allElements = excalidrawApi
-          .getSceneElements()
-          .filter((e: any) => !e.isDeleted);
-        const appState = excalidrawApi.getAppState();
-        const files = excalidrawApi.getFiles();
+      const allElements = excalidrawApi
+        .getSceneElements()
+        .filter((e: any) => !e.isDeleted);
+      const appState = excalidrawApi.getAppState();
+      const files = excalidrawApi.getFiles();
 
-        let elements = allElements;
+      let elements = allElements;
 
-        if (mode === "region" && region) {
-          elements = allElements.filter((el: any) => {
-            const ex = (el.x as number) ?? 0;
-            const ey = (el.y as number) ?? 0;
-            const ew = (el.width as number) ?? 0;
-            const eh = (el.height as number) ?? 0;
-            return !(
-              ex + ew < region.x ||
-              ex > region.x + region.width ||
-              ey + eh < region.y ||
-              ey > region.y + region.height
-            );
-          });
-        } else if (mode === "viewport") {
-          const zoom = (appState.zoom?.value as number) ?? 1;
-          const sx = -((appState.scrollX as number) ?? 0);
-          const sy = -((appState.scrollY as number) ?? 0);
-          const vw = ((appState.width as number) ?? 1920) / zoom;
-          const vh = ((appState.height as number) ?? 1080) / zoom;
-          elements = allElements.filter((el: any) => {
-            const ex = (el.x as number) ?? 0;
-            const ey = (el.y as number) ?? 0;
-            const ew = (el.width as number) ?? 0;
-            const eh = (el.height as number) ?? 0;
-            return !(
-              ex + ew < sx || ex > sx + vw || ey + eh < sy || ey > sy + vh
-            );
-          });
-        }
-
-        const { exportToBlob } = await import("@excalidraw/excalidraw");
-        const blob = await exportToBlob({
-          elements,
-          appState: { ...appState, exportBackground: true },
-          files,
-          maxWidthOrHeight: max_dimension,
-          mimeType: "image/png",
+      if (mode === "region" && region) {
+        elements = allElements.filter((el: any) => {
+          const ex = (el.x as number) ?? 0;
+          const ey = (el.y as number) ?? 0;
+          const ew = (el.width as number) ?? 0;
+          const eh = (el.height as number) ?? 0;
+          return !(
+            ex + ew < region.x ||
+            ex > region.x + region.width ||
+            ey + eh < region.y ||
+            ey > region.y + region.height
+          );
         });
-
-        // Convert blob to base64 data URL directly (no upload needed --
-        // the image is passed inline to the model for visual understanding)
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = () => reject(new Error("Failed to convert screenshot to data URL"));
-          reader.readAsDataURL(blob);
+      } else if (mode === "viewport") {
+        const zoom = (appState.zoom?.value as number) ?? 1;
+        const sx = -((appState.scrollX as number) ?? 0);
+        const sy = -((appState.scrollY as number) ?? 0);
+        const vw = ((appState.width as number) ?? 1920) / zoom;
+        const vh = ((appState.height as number) ?? 1080) / zoom;
+        elements = allElements.filter((el: any) => {
+          const ex = (el.x as number) ?? 0;
+          const ey = (el.y as number) ?? 0;
+          const ew = (el.width as number) ?? 0;
+          const eh = (el.height as number) ?? 0;
+          return !(
+            ex + ew < sx ||
+            ex > sx + vw ||
+            ey + eh < sy ||
+            ey > sy + vh
+          );
         });
+      }
 
-        const bmp = await createImageBitmap(blob);
-        const width = bmp.width;
-        const height = bmp.height;
-        bmp.close();
+      const { exportToBlob } = await import("@excalidraw/excalidraw");
+      const blob = await exportToBlob({
+        elements,
+        appState: { ...appState, exportBackground: true },
+        files,
+        maxWidthOrHeight: max_dimension,
+        mimeType: "image/png",
+      });
 
-        return { url: dataUrl, width, height };
-      },
-    );
+      // Convert blob to base64 data URL directly (no upload needed --
+      // the image is passed inline to the model for visual understanding)
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () =>
+          reject(new Error("Failed to convert screenshot to data URL"));
+        reader.readAsDataURL(blob);
+      });
+
+      const bmp = await createImageBitmap(blob);
+      const width = bmp.width;
+      const height = bmp.height;
+      bmp.close();
+
+      return { url: dataUrl, width, height };
+    });
 
     return cleanup;
   }, [ws, excalidrawApi, canvasId]);
@@ -450,7 +618,10 @@ export function CanvasEditor({
       // race conditions from wiping canvas content during page teardown.
       const liveCount = sceneElements.filter((el: any) => !el.isDeleted).length;
       if (liveCount === 0 && initialElementCountRef.current > 0) {
-        console.warn("[canvas-editor] skipping save: 0 elements but loaded with", initialElementCountRef.current);
+        console.warn(
+          "[canvas-editor] skipping save: 0 elements but loaded with",
+          initialElementCountRef.current,
+        );
         return null;
       }
       const files: Record<string, Record<string, unknown>> = {};
@@ -471,7 +642,10 @@ export function CanvasEditor({
         files,
       };
     } catch (err) {
-      console.warn("[canvas-editor] failed to build save payload on flush:", err);
+      console.warn(
+        "[canvas-editor] failed to build save payload on flush:",
+        err,
+      );
       return null;
     }
   }, [excalidrawApi]);
@@ -523,9 +697,13 @@ export function CanvasEditor({
       if (pendingSaveRef.current) {
         const payload = buildSavePayloadRef.current();
         if (payload) {
-          saveCanvas(accessTokenRef.current, canvasIdRef.current, payload).catch(
-            console.error,
-          );
+          saveQueueRef.current = saveQueueRef.current
+            .catch((error) => console.warn("[canvas-editor] previous save failed:", error))
+            .then(async () => {
+              const { canvas } = await fetchCanvas(accessTokenRef.current, canvasIdRef.current);
+              await saveCanvas(accessTokenRef.current, canvasIdRef.current, mergeCanvasSaveWithRemoteContent(payload, canvas.content));
+            });
+          saveQueueRef.current.catch(console.error);
         }
         pendingSaveRef.current = null;
       }
@@ -535,36 +713,123 @@ export function CanvasEditor({
   // Render custom embeddable content for video elements on canvas.
   // Excalidraw calls this for every embeddable element; we intercept video URLs
   // and render an inline player, falling back to default for everything else.
-  const renderEmbeddable = useCallback(
-    (element: any, _appState: any) => {
-      const link = element?.link;
-      if (typeof link === "string" && isVideoUrl(link)) {
-        return (
-          <VideoCanvasElement
-            src={link}
-            width={element.width ?? 640}
-            height={element.height ?? 360}
-          />
-        );
-      }
-      // Return null to let Excalidraw handle non-video embeddables with default behavior
-      return null;
-    },
-    [],
-  );
+  const renderEmbeddable = useCallback((element: any, _appState: any) => {
+    const link = element?.link;
+    const isCanvasVideo =
+      element?.customData?.isVideo === true ||
+      (typeof link === "string" &&
+        (isVideoUrl(link) || link.includes("/api/uploads/")));
+    if (typeof link === "string" && isCanvasVideo) {
+      return (
+        <VideoCanvasElement
+          src={link}
+          width={element.width ?? 640}
+          height={element.height ?? 360}
+          accessToken={accessTokenRef.current}
+          trimStart={Number(element.customData?.trimStart) || 0}
+          trimEnd={Number(element.customData?.trimEnd) || undefined}
+        />
+      );
+    }
+    // Return null to let Excalidraw handle non-video embeddables with default behavior
+    return null;
+  }, []);
 
   // Allow any URL as a valid embeddable so our video links are accepted
   const validateEmbeddable = useCallback(() => true, []);
+
+  const addDroppedImages = useCallback(async (files: File[], clientX: number, clientY: number) => {
+    const api = excalidrawApi;
+    const root = canvasRootRef.current;
+    if (!api || !root) return;
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+
+    const origin = viewportPointToScene(
+      { clientX, clientY },
+      root.getBoundingClientRect(),
+      api.getAppState(),
+    );
+    const additions: Record<string, unknown>[] = [];
+    const binaryFiles: Array<{ id: string; dataURL: string; mimeType: string; created: number }> = [];
+
+    for (const [index, file] of imageFiles.slice(0, 12).entries()) {
+      const dataURL = await fileToDataUrl(file);
+      const dimensions = await readImageDimensions(file);
+      const size = scaleToFit(dimensions.width, dimensions.height, 720);
+      const fileId = crypto.randomUUID();
+      binaryFiles.push({ id: fileId, dataURL, mimeType: file.type || "image/png", created: Date.now() });
+      additions.push(createExcalidrawImageElement({
+        fileId,
+        x: origin.x + index * 28 - size.width / 2,
+        y: origin.y + index * 28 - size.height / 2,
+        width: size.width,
+        height: size.height,
+        title: file.name || "拖入图片",
+        source: "uploaded",
+      }));
+    }
+
+    api.addFiles(binaryFiles);
+    api.updateScene({
+      elements: [...api.getSceneElements(), ...additions],
+      captureUpdate: "IMMEDIATELY",
+    });
+  }, [excalidrawApi]);
+
+  const onDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasImageFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsImageDragActive(true);
+  }, []);
+
+  const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasImageFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const onDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasImageFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsImageDragActive(false);
+  }, []);
+
+  const onDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    const files = Array.from(event.dataTransfer.files);
+    if (!files.some((file) => file.type.startsWith("image/"))) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsImageDragActive(false);
+    void addDroppedImages(files, event.clientX, event.clientY).catch((error) => {
+      console.error("[canvas] failed to add dropped images:", error);
+    });
+  }, [addDroppedImages]);
 
   return (
     <ErrorBoundary
       onError={(err) => console.error("[canvas-editor] render crashed:", err)}
     >
-      <div className="h-full w-full relative">
+      <div
+        ref={canvasRootRef}
+        className="h-full w-full relative"
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        onPointerDown={handleCanvasPointerDown}
+        onPointerMove={handleCanvasPointerMove}
+        onPointerUp={handleCanvasPointerUp}
+        onPointerCancel={cancelDeleteGesture}
+      >
         <Excalidraw
+          langCode={locale}
           theme={resolvedTheme === "dark" ? "dark" : "light"}
           initialData={{
-            elements: initialContent.elements as any,
+            elements: initialElements as any,
             appState: initialContent.appState as any,
             files: inlineFiles as any,
           }}
@@ -580,7 +845,38 @@ export function CanvasEditor({
             leftPanelOpen={leftPanelOpen ?? false}
           />
         )}
+        {isImageDragActive && (
+          <div className="pointer-events-none absolute inset-4 z-[120] grid place-items-center rounded-[28px] border-2 border-dashed border-primary/60 bg-background/75 backdrop-blur-sm">
+            <div className="rounded-2xl border border-border/60 bg-background/95 px-5 py-3 text-center shadow-xl">
+              <div className="text-sm font-semibold text-foreground">松开即可添加到画布</div>
+              <div className="mt-1 text-xs text-muted-foreground">支持同时拖入最多 12 张图片</div>
+            </div>
+          </div>
+        )}
+        {deleteGesture.active && <div className={`pointer-events-none fixed bottom-6 left-1/2 z-[130] -translate-x-1/2 rounded-2xl border px-6 py-4 shadow-2xl transition-colors ${deleteGesture.overTrash ? "border-destructive bg-destructive text-destructive-foreground" : "border-border bg-background/95 text-foreground"}`}><Trash2 className="mx-auto size-7" /><p className="mt-1 text-xs font-medium">{deleteGesture.overTrash ? "松手删除元素" : "拖到这里删除"}</p></div>}
       </div>
     </ErrorBoundary>
   );
+}
+
+function hasImageFiles(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.items ?? []).some(
+    (item) => item.kind === "file" && item.type.startsWith("image/"),
+  );
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error(`无法读取图片 ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function readImageDimensions(file: File) {
+  const bitmap = await createImageBitmap(file);
+  const dimensions = { width: bitmap.width, height: bitmap.height };
+  bitmap.close();
+  return dimensions;
 }

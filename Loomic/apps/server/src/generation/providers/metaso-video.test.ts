@@ -6,6 +6,7 @@ import {
   METASO_VIDEO_MODEL_ID,
   MetasoVideoProvider,
 } from "./metaso-video.js";
+import { getModelCallProfile } from "../../local-db/model-call-profiles.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -19,6 +20,10 @@ describe("MetasoVideoProvider", () => {
 
   beforeEach(() => {
     fetchMock.mockReset();
+  });
+
+  it("matches its model-specific Profile contract", () => {
+    expect(getModelCallProfile(METASO_VIDEO_MODEL_ID, "")).toMatchObject({ id: "metaso-minimax", requestAdapter: "metaso-v2-video-generation", responseAdapter: "metaso-task-query", maxInputImages: 2, supportsAudio: false });
   });
 
   it("creates and polls a text-to-video task with the documented defaults", async () => {

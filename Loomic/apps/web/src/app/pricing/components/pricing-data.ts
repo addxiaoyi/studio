@@ -39,7 +39,7 @@ export const faqItems: FAQItem[] = [
   {
     question: "不同模型消耗积分差异大吗？",
     answer:
-      "是的。Gemini Nano Banana / DALL·E 3 / Seedream 等基础模型约 5 积分/张；GPT Image 1.5 / Imagen 4 约 8-12 积分/张。视频模型 Veo 3.1 / Kling 2.6 约 40-50 积分/5s。",
+      "是的。DALL·E 3 / Seedream 等基础模型约 5 积分/张；GPT Image / Imagen 约 8-12 积分/张。视频模型 Veo 3.1 / Kling 2.6 约 40-50 积分/5s。",
   },
   {
     question: "购买后多久到账？",

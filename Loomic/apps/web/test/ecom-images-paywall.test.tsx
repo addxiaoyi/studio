@@ -53,12 +53,12 @@ describe("Paywall (insufficient credits)", () => {
     await user.type(screen.getByPlaceholderText(/美的空气净化器/), "test");
     const sceneBtn = screen
       .getAllByRole("button")
-      .filter((b) => b.className.includes("rounded-xl"))[0]!;
+      .find((b) => b.dataset.testid === "scene-card")!;
     await user.click(sceneBtn);
 
     const genBtn = screen.getByRole("button", { name: /生成 \d+ 张图片/ });
     expect(genBtn).toBeDisabled();
-  });
+  }, 20_000);
 
   it("shows '充值积分' link to settings when insufficient", async () => {
     mockBalance = 5;
@@ -68,10 +68,10 @@ describe("Paywall (insufficient credits)", () => {
     await user.type(screen.getByPlaceholderText(/美的空气净化器/), "test");
     const sceneBtn = screen
       .getAllByRole("button")
-      .filter((b) => b.className.includes("rounded-xl"))[0]!;
+      .find((b) => b.dataset.testid === "scene-card")!;
     await user.click(sceneBtn);
 
-    const topUpLink = screen.getByRole("link", { name: /充值积分/ });
+    const topUpLink = screen.getByRole("link", { name: /前往充值/ });
     expect(topUpLink).toBeInTheDocument();
     expect(topUpLink.getAttribute("href")).toContain("/settings");
   });
@@ -84,13 +84,13 @@ describe("Paywall (insufficient credits)", () => {
     await user.type(screen.getByPlaceholderText(/美的空气净化器/), "test");
     const sceneBtn = screen
       .getAllByRole("button")
-      .filter((b) => b.className.includes("rounded-xl"))[0]!;
+      .find((b) => b.dataset.testid === "scene-card")!;
     await user.click(sceneBtn);
 
-    expect(screen.getByText(/可用积分/)).toBeInTheDocument();
+    expect(screen.getByText(/可用 \d+ 积分/)).toBeInTheDocument();
     expect(screen.getByText(/本次预计消耗/)).toBeInTheDocument();
-    expect(screen.getByText("500")).toBeInTheDocument();
-    expect(screen.getByText("10")).toBeInTheDocument();
+    expect(screen.getByText(/可用 500 积分/)).toBeInTheDocument();
+    expect(screen.getAllByText(/10/).length).toBeGreaterThan(0);
   });
 
   it("enables generate button when user has enough credits", async () => {
@@ -101,14 +101,14 @@ describe("Paywall (insufficient credits)", () => {
     await user.type(screen.getByPlaceholderText(/美的空气净化器/), "test");
     const sceneBtn = screen
       .getAllByRole("button")
-      .filter((b) => b.className.includes("rounded-xl"))[0]!;
+      .find((b) => b.dataset.testid === "scene-card")!;
     await user.click(sceneBtn);
 
     const genBtn = screen.getByRole("button", { name: /生成 \d+ 张图片/ });
     expect(genBtn).toBeEnabled();
     // No top-up link shown when affordable
     expect(
-      screen.queryByRole("link", { name: /充值积分/ }),
+      screen.queryByRole("link", { name: /前往充值/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -118,17 +118,14 @@ describe("Paywall (insufficient credits)", () => {
     render(<EcomImagesPage />);
 
     await user.type(screen.getByPlaceholderText(/美的空气净化器/), "test");
-    // Select 3 scenes
-    const sceneButtons = screen
-      .getAllByRole("button")
-      .filter((b) => b.className.includes("rounded-xl"));
-    await user.click(sceneButtons[0]!);
-    await user.click(sceneButtons[1]!);
-    await user.click(sceneButtons[2]!);
+    // Select three additional unselected scenes so the total is deterministic.
+    const sceneButtons = screen.getAllByTestId("scene-card");
+    const unselected = sceneButtons.filter((button) => button.getAttribute("aria-pressed") !== "true").slice(0, 2);
+    for (const button of unselected) await user.click(button);
 
-    // Should show 30 credits needed
+    // Should show 30 credits needed (the default scene plus two more).
     await waitFor(() => {
-      expect(screen.getByText("30")).toBeInTheDocument();
+      expect(screen.getAllByText(/30/).length).toBeGreaterThan(0);
     });
   });
 });

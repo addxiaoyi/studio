@@ -4,7 +4,7 @@ import { basename, extname } from "node:path";
 import { join } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tool } from "@langchain/core/tools";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { DataClient } from "../../auth/types.js";
 import type { Pool } from "pg";
 import { z } from "zod";
 
@@ -33,7 +33,7 @@ const persistSandboxFileSchema = z.object({
 });
 
 export type PersistSandboxFileDeps = {
-  createUserClient: (accessToken: string) => SupabaseClient;
+  createUserClient?: (accessToken: string) => DataClient;
   sandboxDir?: string;
   localDb?: Pool;
 };
@@ -93,6 +93,7 @@ export function createPersistSandboxFileTool(deps: PersistSandboxFileDeps) {
         }
 
         if (!accessToken) return "Error: No access token available. Cannot upload file.";
+        if (!deps.createUserClient) return "Error: Storage client is unavailable.";
         const client = deps.createUserClient(accessToken);
 
         // Resolve workspace ID from canvas for Storage RLS compliance.

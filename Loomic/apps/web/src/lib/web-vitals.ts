@@ -2,6 +2,8 @@
 // Captures Core Web Vitals via native PerformanceObserver (no extra dep).
 // Falls back gracefully if API is unavailable.
 
+import { getServerBaseUrl } from "./env";
+
 type WebVitalName = "LCP" | "CLS" | "FCP" | "TTFB" | "INP" | "FID";
 
 type WebVitalRating = "good" | "needs-improvement" | "poor";
@@ -17,8 +19,14 @@ interface WebVitalMetric {
   devicePixelRatio?: number | undefined;
 }
 
-const API_ENDPOINT = "/api/metrics";
+export function resolveMetricsEndpoint(serverBaseUrl: string): string {
+  const baseUrl = serverBaseUrl.replace(/\/+$/, "");
+  return baseUrl ? `${baseUrl}/api/metrics` : "/api/metrics";
+}
+
+const API_ENDPOINT = resolveMetricsEndpoint(getServerBaseUrl());
 let installed = false;
+const sentMetricNames = new Set<WebVitalName>();
 
 /** LCP thresholds per https://web.dev/lcp/ */
 const LCP_THRESHOLDS = { good: 2500, poor: 4000 } as const;
@@ -40,6 +48,10 @@ function rate(
   return "poor";
 }
 
+function validTime(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
 /**
  * Install lightweight PerformanceObserver-based web vitals reporter.
  * Native browser API — no external dependency.
@@ -52,15 +64,19 @@ export function installWebVitals(): void {
   // LCP — Largest Contentful Paint
   try {
     const lcpObserver = new PerformanceObserver((entryList) => {
-      const entries = entryList.getEntries();
-      const last = entries[entries.length - 1];
-      if (!last) return;
-      sendMetric({
-        name: "LCP",
-        value: last.startTime,
-        rating: rate(last.startTime, LCP_THRESHOLDS),
-        id: last.entryType,
-      });
+      try {
+        const entries = entryList.getEntries();
+        const last = entries[entries.length - 1];
+        if (!last || !validTime(last.startTime)) return;
+        sendMetric({
+          name: "LCP",
+          value: last.startTime,
+          rating: rate(last.startTime, LCP_THRESHOLDS),
+          id: last.entryType,
+        });
+      } catch {
+        // Some embedded browsers expose incomplete PerformanceEntry objects.
+      }
     });
     lcpObserver.observe({ type: "largest-contentful-paint", buffered: true });
   } catch {
@@ -70,15 +86,19 @@ export function installWebVitals(): void {
   // FCP — First Contentful Paint
   try {
     const fcpObserver = new PerformanceObserver((entryList) => {
-      const entries = entryList.getEntries();
-      const fcp = entries.find((e) => e.name === "first-contentful-paint");
-      if (!fcp) return;
-      sendMetric({
-        name: "FCP",
-        value: fcp.startTime,
-        rating: rate(fcp.startTime, FCP_THRESHOLDS),
-        id: fcp.entryType,
-      });
+      try {
+        const entries = entryList.getEntries();
+        const fcp = entries.find((e) => e.name === "first-contentful-paint");
+        if (!fcp || !validTime(fcp.startTime)) return;
+        sendMetric({
+          name: "FCP",
+          value: fcp.startTime,
+          rating: rate(fcp.startTime, FCP_THRESHOLDS),
+          id: fcp.entryType,
+        });
+      } catch {
+        // Ignore malformed entries from embedded browsers.
+      }
     });
     fcpObserver.observe({ type: "paint", buffered: true });
   } catch {
@@ -163,6 +183,12 @@ function sendMetric(metric: {
   rating: WebVitalRating;
   id: string;
 }) {
+  // Observers such as layout-shift and event can fire hundreds of times. One
+  // sample per metric and page is enough for coarse monitoring and prevents
+  // telemetry from exhausting the browser's request pool.
+  if (sentMetricNames.has(metric.name)) return;
+  sentMetricNames.add(metric.name);
+
   const conn = (
     navigator as unknown as { connection?: { effectiveType?: string } }
   ).connection;

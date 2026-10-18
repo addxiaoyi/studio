@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Play } from "lucide-react";
 
 type VideoCanvasElementProps = {
   src: string;
   width: number;
   height: number;
+  accessToken?: string;
+  trimStart?: number;
+  trimEnd?: number | undefined;
 };
 
 /**
@@ -22,18 +25,53 @@ export function VideoCanvasElement({
   src,
   width,
   height,
+  accessToken,
+  trimStart = 0,
+  trimEnd,
 }: VideoCanvasElementProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
+  const [playbackSrc, setPlaybackSrc] = useState(src);
+  const endRef = useRef(trimEnd ?? Number.POSITIVE_INFINITY);
+  endRef.current = trimEnd ?? Number.POSITIVE_INFINITY;
+
+  useEffect(() => {
+    if (!src.includes("/api/uploads/") || !accessToken) {
+      setPlaybackSrc(src);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    void fetch(src, { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then((response) => {
+        if (!response.ok) throw new Error(`视频加载失败（${response.status}）`);
+        return response.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPlaybackSrc(objectUrl);
+      })
+      .catch((error) => {
+        if (!cancelled) console.warn("[canvas-video] failed to load video:", error);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [accessToken, src]);
 
   const play = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+    if (video.currentTime < trimStart || video.currentTime >= endRef.current) video.currentTime = trimStart;
     video.play().catch(() => {
       // Autoplay may be blocked by the browser; fail silently
     });
     setPlaying(true);
-  }, []);
+  }, [trimStart]);
 
   const pause = useCallback(() => {
     const video = videoRef.current;
@@ -68,6 +106,15 @@ export function VideoCanvasElement({
     e.stopPropagation();
   }, []);
 
+  const handleTimeUpdate = useCallback(() => {
+    const video = videoRef.current;
+    if (video && video.currentTime >= endRef.current) {
+      video.pause();
+      video.currentTime = trimStart;
+      setPlaying(false);
+    }
+  }, [trimStart]);
+
   return (
     <div
       style={{ width, height }}
@@ -82,11 +129,13 @@ export function VideoCanvasElement({
     >
       <video
         ref={videoRef}
-        src={src}
+        src={playbackSrc}
         muted
         loop
         playsInline
         preload="metadata"
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = trimStart; }}
         className="h-full w-full object-contain"
       />
 

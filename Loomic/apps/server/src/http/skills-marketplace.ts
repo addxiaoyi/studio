@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
+import type { Pool } from "pg";
 
 import {
   applicationErrorResponseSchema,
@@ -15,13 +16,14 @@ import {
 } from "../features/skills/marketplace-service.js";
 
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
+import { recordSkillVersion } from "../features/skills/skill-version-service.js";
 import type {
   RequestAuthenticator,
-  UserSupabaseClient,
-} from "../supabase/user.js";
+  DataClient,
+} from "../auth/types.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const untypedFrom = (client: UserSupabaseClient, table: string) => (client as any).from(table);
+const untypedFrom = (client: DataClient, table: string) => (client as any).from(table);
 
 // ---------------------------------------------------------------------------
 // Skill row mappers (duplicated from skills.ts to avoid circular imports)
@@ -115,8 +117,9 @@ export async function registerMarketplaceRoutes(
   app: FastifyInstance,
   options: {
     auth: RequestAuthenticator;
-    createUserClient: (accessToken: string) => UserSupabaseClient;
+    createUserClient?: (accessToken: string) => DataClient;
     viewerService: ViewerService;
+    localDb?: Pool;
   },
 ) {
   // GET /api/skills/marketplace/search — search skills.sh via npm registry
@@ -172,11 +175,27 @@ export async function registerMarketplaceRoutes(
       const { packageName } = marketplaceInstallRequestSchema.parse(request.body);
       const viewer = await options.viewerService.ensureViewer(user);
       const workspaceId = viewer.workspace.id;
-      const client = options.createUserClient(user.accessToken);
 
-      // Download and parse from npm registry
       const { imported, packageName: pkgName } = await installFromMarketplace(packageName);
       const slug = generateSlug(imported.manifest.name);
+
+      if (options.localDb) {
+        const tx = await options.localDb.connect();
+        try {
+          await tx.query("begin");
+          const { rows } = await tx.query("insert into skills(name,slug,description,author,version,license,category,source,skill_content,metadata,created_by) values($1,$2,$3,$4,$5,$6,'custom','user',$7,$8,$9) returning *", [imported.manifest.name, slug, imported.manifest.description, imported.manifest.author ?? "unknown", imported.manifest.version ?? "1.0", imported.manifest.license ?? null, imported.skillContent, { ...(imported.manifest.metadata ?? {}), source_url: imported.sourceUrl, package_name: pkgName }, user.id]);
+          for (const file of imported.files) await tx.query("insert into skill_files(skill_id,file_path,content,mime_type) values($1,$2,$3,$4)", [rows[0].id, file.filePath, file.content, file.mimeType]);
+          await tx.query("insert into workspace_skills(workspace_id,skill_id,enabled,installed_by) values($1,$2,true,$3) on conflict(workspace_id,skill_id) do update set enabled=true", [workspaceId, rows[0].id, user.id]);
+          await tx.query("commit");
+          return reply.code(201).send({ skill: { ...mapSkillDetailRow(rows[0]), files: imported.files.map((file, index) => ({ id: `${rows[0].id}:${index}`, filePath: file.filePath, content: file.content, mimeType: file.mimeType, createdAt: rows[0].created_at.toISOString(), updatedAt: rows[0].updated_at.toISOString() })) } });
+        } catch (error) {
+          await tx.query("rollback");
+          throw error;
+        } finally { tx.release(); }
+      }
+
+      if (!options.createUserClient) throw new MarketplaceError("install_failed", "Remote skill storage is disabled.");
+      const client = options.createUserClient(user.accessToken);
 
       // Insert skill
       const { data: skillData, error: skillError } = await untypedFrom(client, "skills")

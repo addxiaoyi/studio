@@ -11,6 +11,9 @@ import {
   fetchSessions,
   updateSessionTitle,
 } from "../lib/server-api";
+function hideRawThinkingTags(text: string): string {
+  return text.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "").replace(/<\/?think>/gi, "");
+}
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -75,11 +78,13 @@ export function mapServerMessages(
   return serverMessages.map((m) => {
     let blocks: ContentBlock[];
     if (m.contentBlocks && m.contentBlocks.length > 0) {
-      blocks = m.contentBlocks;
+      blocks = m.contentBlocks.map((block) =>
+        block.type === "text" ? { ...block, text: hideRawThinkingTags(block.text) } : block,
+      );
     } else {
       blocks = [];
       if (m.content) {
-        blocks.push({ type: "text", text: m.content });
+        blocks.push({ type: "text", text: hideRawThinkingTags(m.content) });
       }
       if (m.toolActivities) {
         for (const ta of m.toolActivities) {
@@ -116,10 +121,13 @@ export function useChatSessions({
   onSessionChange,
 }: UseChatSessionsOptions) {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
+  const selectionRequestRef = useRef(0);
   const [streaming, setStreaming] = useState(false);
 
   // Refs to avoid stale closures in callbacks
@@ -151,16 +159,57 @@ export function useChatSessions({
     [],
   );
 
+  const reloadSessions = useCallback(async () => {
+    const token = accessTokenRef.current;
+    if (!token) return;
+    const requestId = ++selectionRequestRef.current;
+    setSessionsLoading(true);
+    setSessionsError(null);
+    setMessagesError(null);
+    try {
+      const res = await fetchSessions(token, canvasId);
+      if (requestId !== selectionRequestRef.current) return;
+      setSessions(res.sessions);
+      if (res.sessions.length === 0) {
+        setActiveSessionId(null);
+        setMessages([]);
+        return;
+      }
+      const target = res.sessions.find((session) => session.id === activeSessionIdRef.current) ?? res.sessions[0]!;
+      setActiveSessionId(target.id);
+      onSessionChangeRef.current?.(target.id);
+      setMessagesLoading(true);
+      const messageResponse = await fetchMessages(token, target.id);
+      if (requestId !== selectionRequestRef.current || activeSessionIdRef.current !== target.id) return;
+      const mapped = mapServerMessages(messageResponse.messages);
+      msgCacheRef.current.set(target.id, mapped);
+      setMessages(mapped);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "无法恢复会话。";
+      if (sessionsRef.current.length === 0) setSessionsError(message);
+      else setMessagesError(message);
+    } finally {
+      if (requestId === selectionRequestRef.current) {
+        setSessionsLoading(false);
+        setMessagesLoading(false);
+      }
+    }
+  }, [canvasId]);
+
   // ── Load sessions on mount ──
   useEffect(() => {
     let cancelled = false;
 
     async function init() {
       const token = accessTokenRef.current;
+      let sessionListLoaded = false;
       setSessionsLoading(true);
+      setSessionsError(null);
+      setSessionsError(null);
       try {
         const res = await fetchSessions(token, canvasId);
         if (cancelled) return;
+        sessionListLoaded = true;
 
         if (res.sessions.length > 0) {
           setSessions(res.sessions);
@@ -183,8 +232,13 @@ export function useChatSessions({
           onSessionChangeRef.current?.(created.session.id);
           setMessages([]);
         }
-      } catch {
-        // Session loading failed — remain in empty state
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : "无法恢复聊天记录。";
+          if (sessionListLoaded) setMessagesError(message);
+          else setSessionsError(message);
+        }
+        if (!cancelled) setSessionsError(error instanceof Error ? error.message : "无法加载会话列表。");
       } finally {
         if (!cancelled) setSessionsLoading(false);
       }
@@ -204,25 +258,31 @@ export function useChatSessions({
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
       if (sessionId === activeSessionIdRef.current) return;
+      const requestId = ++selectionRequestRef.current;
       if (streaming) setStreaming(false);
       setActiveSessionId(sessionId);
       onSessionChangeRef.current?.(sessionId);
+      setMessagesError(null);
 
       const cached = msgCacheRef.current.get(sessionId);
       if (cached && cached.length > 0) {
         setMessages(cached);
+        setMessagesLoading(false);
       } else {
         setMessages([]);
         setMessagesLoading(true);
         try {
           const msgRes = await fetchMessages(accessTokenRef.current, sessionId);
+          if (requestId !== selectionRequestRef.current || activeSessionIdRef.current !== sessionId) return;
           const mapped = mapServerMessages(msgRes.messages);
           msgCacheRef.current.set(sessionId, mapped);
           setMessages(mapped);
         } catch (err) {
-          console.error("[chat] Failed to load session messages:", err);
+          if (requestId === selectionRequestRef.current && activeSessionIdRef.current === sessionId) {
+            setMessagesError(err instanceof Error ? err.message : "无法加载此会话消息。");
+          }
         } finally {
-          setMessagesLoading(false);
+          if (requestId === selectionRequestRef.current) setMessagesLoading(false);
         }
       }
     },
@@ -231,6 +291,7 @@ export function useChatSessions({
 
   // ── New chat ──
   const handleNewChat = useCallback(async () => {
+    selectionRequestRef.current += 1;
     if (streaming) setStreaming(false);
     try {
       const res = await createSession(accessTokenRef.current, canvasId);
@@ -238,6 +299,8 @@ export function useChatSessions({
       setActiveSessionId(res.session.id);
       onSessionChangeRef.current?.(res.session.id);
       setMessages([]);
+      setMessagesError(null);
+      setMessagesLoading(false);
     } catch {
       // Silently fail
     }
@@ -252,6 +315,7 @@ export function useChatSessions({
 
       if (remaining.length === 0) {
         try {
+          selectionRequestRef.current += 1;
           const res = await createSession(token, canvasId);
           setSessions([res.session]);
           setActiveSessionId(res.session.id);
@@ -263,18 +327,22 @@ export function useChatSessions({
       } else {
         setSessions(remaining);
         if (sessionId === activeSessionIdRef.current) {
+          const requestId = ++selectionRequestRef.current;
           const next = remaining[0]!;
           setActiveSessionId(next.id);
           onSessionChangeRef.current?.(next.id);
           setMessagesLoading(true);
           fetchMessages(token, next.id)
             .then((msgRes) => {
+              if (requestId !== selectionRequestRef.current || activeSessionIdRef.current !== next.id) return;
               const mapped = mapServerMessages(msgRes.messages);
               msgCacheRef.current.set(next.id, mapped);
               setMessages(mapped);
             })
-            .catch(() => setMessages([]))
-            .finally(() => setMessagesLoading(false));
+            .catch((error) => {
+              if (requestId === selectionRequestRef.current) setMessagesError(error instanceof Error ? error.message : "无法加载会话消息。");
+            })
+            .finally(() => { if (requestId === selectionRequestRef.current) setMessagesLoading(false); });
         }
       }
 
@@ -311,24 +379,28 @@ export function useChatSessions({
       console.warn("[chat] reloadMessages called with empty sessionId, skipping");
       return;
     }
+    setMessagesError(null);
+    setMessagesLoading(true);
     try {
       const msgRes = await fetchMessages(accessTokenRef.current, sessionId);
-      if (msgRes.messages && msgRes.messages.length > 0) {
-        const mapped = mapServerMessages(msgRes.messages);
-        msgCacheRef.current.set(sessionId, mapped);
-        // Only update React state if the session is still active
-        // (user may have switched sessions during the async fetch)
-        if (activeSessionIdRef.current === sessionId) {
-          setMessages(mapped);
-        }
+      const mapped = mapServerMessages(msgRes.messages);
+      msgCacheRef.current.set(sessionId, mapped);
+      if (activeSessionIdRef.current === sessionId) {
+        setMessages(mapped);
       }
     } catch (err) {
       console.warn("[chat] Failed to reload messages on reconnect:", err);
+      if (activeSessionIdRef.current === sessionId) {
+        setMessagesError(err instanceof Error ? err.message : "重新连接后无法恢复消息。");
+      }
+    } finally {
+      if (activeSessionIdRef.current === sessionId) setMessagesLoading(false);
     }
   }, []);
 
   return {
     sessions,
+    sessionsError,
     activeSessionId,
     activeSessionIdRef,
     messages,
@@ -336,6 +408,7 @@ export function useChatSessions({
     setMessages,
     sessionsLoading,
     messagesLoading,
+    messagesError,
     streaming,
     setStreaming,
     updateSessionMessages,
@@ -344,6 +417,7 @@ export function useChatSessions({
     handleDeleteSession,
     autoTitleSession,
     reloadMessages,
+    reloadSessions,
     accessTokenRef,
   };
 }

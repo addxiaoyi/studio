@@ -5,7 +5,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { ToolBlock } from "@helstera/shared";
+import { useAuth } from "../../lib/auth-context";
+import { fetchJob, fetchJobs, fetchJobTimeline } from "../../lib/server-api";
+import { canRetryGeneration, formatGenerationError, shouldFailoverVideoError } from "../../lib/generation-error-policy";
 import { ChatImage } from "./image-lightbox";
+import { AgentWorkflowCard } from "./agent-workflow-card";
+import { GenerationApprovalCard } from "./generation-approval-card";
 import {
   formatModelDisplayName,
   formatOutputPreview,
@@ -131,17 +136,135 @@ function findSidebarRect(el: HTMLElement | null): DOMRect | null {
   return null;
 }
 
+type GenerationJob = {
+  id: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "dead_letter";
+  job_type: "image_generation" | "video_generation";
+  payload: Record<string, unknown>;
+  attempt_count: number;
+  max_attempts: number;
+  error_message: string | null;
+  error_code?: string | null;
+  progress: number;
+  stage: string | null;
+  updated_at: string;
+  result?: {
+    signed_url?: string;
+    video_url?: string;
+    url?: string;
+    width?: number;
+    height?: number;
+    mime_type?: string;
+    model?: string;
+    routing?: MediaRouting;
+  } | null;
+};
+
+type MediaRouting = {
+  requestedModels?: string[];
+  preferredModel?: string;
+  selectedModel?: string;
+  fallback?: boolean;
+  reason?: string | null;
+  inputImage?: boolean;
+  duration?: number;
+  resolution?: string;
+};
+
+function getMediaRouting(job: GenerationJob | null): MediaRouting | null {
+  const resultRouting = job?.result?.routing;
+  if (resultRouting && typeof resultRouting === "object") {
+    const hasInputImage = [job?.payload?.input_images, job?.payload?.input_asset_ids].some((value) => Array.isArray(value) && value.length > 0);
+    return { ...resultRouting, inputImage: resultRouting.inputImage ?? hasInputImage };
+  }
+
+  const payloadRouting = job?.payload?.routing;
+  if (payloadRouting && typeof payloadRouting === "object") {
+    const routing = payloadRouting as MediaRouting;
+    const hasInputImage = [job?.payload?.input_images, job?.payload?.input_asset_ids].some((value) => Array.isArray(value) && value.length > 0);
+    return { ...routing, inputImage: routing.inputImage ?? hasInputImage };
+  }
+
+  const model = job?.result?.model ?? (typeof job?.payload?.model === "string" ? job.payload.model : undefined);
+  const inputImage = [job?.payload?.input_images, job?.payload?.input_asset_ids]
+    .some((value) => Array.isArray(value) && value.length > 0);
+  return model ? { selectedModel: model, inputImage } : inputImage ? { inputImage } : null;
+}
+
+function useGenerationJobStatus(
+  active: boolean,
+  toolName: string,
+  input: Record<string, unknown> | undefined,
+  output: Record<string, unknown> | undefined,
+  confirmedJobId?: string,
+) {
+  const { session } = useAuth();
+  const [job, setJob] = useState<GenerationJob | null>(null);
+
+  useEffect(() => {
+    if (!active || !session?.access_token) return;
+
+    const jobType = toolName === "generate_video" ? "video_generation" : "image_generation";
+    const outputJobId = confirmedJobId ?? (typeof output?.jobId === "string" ? output.jobId : undefined);
+    let stopped = false;
+    let timer: number | undefined;
+    let errorCount = 0;
+    const terminalStatuses = new Set(["succeeded", "failed", "canceled", "dead_letter"]);
+    const schedule = (delay: number) => {
+      if (!stopped) timer = window.setTimeout(() => void load(), delay);
+    };
+    const load = async () => {
+      try {
+        const matched = outputJobId
+          ? (await fetchJob(session.access_token, outputJobId)).job
+          : input?.prompt
+            ? (await fetchJobs(session.access_token)).jobs.find((candidate) =>
+                candidate.job_type === jobType && candidate.payload.prompt === input.prompt,
+              )
+            : undefined;
+        if (stopped) return;
+        if (matched) {
+          const next = matched as GenerationJob;
+          setJob(next);
+          errorCount = 0;
+          if (terminalStatuses.has(next.status)) return;
+        }
+        schedule(2_000);
+      } catch {
+        // The visible tool state remains useful when status polling is transiently unavailable.
+        errorCount += 1;
+        schedule(Math.min(2_000 * 2 ** errorCount, 30_000));
+      }
+    };
+
+    void load();
+    return () => {
+      stopped = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [active, confirmedJobId, input?.prompt, output?.jobId, session?.access_token, toolName]);
+
+  return job;
+}
+
 /* ------------------------------------------------------------------ */
 /*  ToolBlockView — main card in chatbar + floating detail panel       */
 /* ------------------------------------------------------------------ */
 
 export const ToolBlockView = React.memo(function ToolBlockView({
   block,
+  hideApprovalCard = false,
+  hideDuplicateJob = false,
 }: {
   block: ToolBlock;
+  hideApprovalCard?: boolean | undefined;
+  hideDuplicateJob?: boolean | undefined;
 }) {
+  const { session } = useAuth();
   const [panelOpen, setPanelOpen] = useState(false);
+  const [timeline, setTimeline] = useState<Array<{ key: string; label: string; status: "done" | "active" | "failed" | "pending"; at?: string; id?: string; detail?: string }>>([]);
   const [panelRight, setPanelRight] = useState(416);
+  const [confirmedJobId, setConfirmedJobId] = useState<string>();
   const containerRef = useRef<HTMLDivElement>(null);
 
   const config = getToolConfig(block.toolName);
@@ -164,32 +287,117 @@ export const ToolBlockView = React.memo(function ToolBlockView({
     (block.outputSummary || hasOutput);
 
   // Extract artifacts for generate_image / generate_video inline preview
-  const imageArtifact = block.artifacts?.find((a: { type: string }) => a.type === "image");
+  let imageArtifact = block.artifacts?.find((a: { type: string }) => a.type === "image");
   const isImageTool = block.toolName === "generate_image";
   const isVideoTool = block.toolName === "generate_video";
   const isMediaTool = isImageTool || isVideoTool;
-  const mediaError =
-    isMediaTool && isCompleted && !imageArtifact
-      ? ((block.output as Record<string, unknown> | undefined)
-          ?.error as string | undefined)
-      : undefined;
   const inputData = block.input as Record<string, unknown> | undefined;
   const modelName = inputData?.model as string | undefined;
   const aspectRatio =
     (inputData?.aspectRatio as string) ?? (isVideoTool ? "16:9" : "1:1");
+  const generationJob = useGenerationJobStatus(
+    isMediaTool && !hideDuplicateJob && (!isCompleted || Boolean((block.output as Record<string, unknown> | undefined)?.jobId) || Boolean(confirmedJobId)),
+    block.toolName,
+    inputData,
+    block.output as Record<string, unknown> | undefined,
+    confirmedJobId,
+  );
+  const mediaRouting = isMediaTool ? getMediaRouting(generationJob) : null;
+  const actualModelName = mediaRouting?.selectedModel ?? modelName;
+  // A timed-out agent response can still finish in the background. The live
+  // job state is authoritative and must replace the stale timeout message.
+  const lateSuccess = isMediaTool && generationJob?.status === "succeeded";
+  const backgroundPending = isMediaTool && (
+    generationJob?.status === "queued" || generationJob?.status === "running" ||
+    (!generationJob && block.output?.pending === true)
+  );
+  if (isImageTool && lateSuccess && !imageArtifact && generationJob?.result?.signed_url) {
+    imageArtifact = {
+      type: "image", url: generationJob.result.signed_url, jobId: generationJob.id,
+      width: generationJob.result.width ?? 1024, height: generationJob.result.height ?? 1024,
+      mimeType: generationJob.result.mime_type ?? "image/png",
+      title: typeof generationJob.payload.title === "string" ? generationJob.payload.title : "生成图片",
+    };
+  }
+  const terminalFailure = generationJob && ["failed", "dead_letter", "canceled"].includes(generationJob.status);
+  const outputErrorCode = (block.output as Record<string, unknown> | undefined)?.errorCode;
+  const mediaErrorCode = typeof outputErrorCode === "string"
+    ? outputErrorCode
+    : generationJob?.error_code ?? undefined;
+  const mediaError =
+    isMediaTool && isCompleted && !imageArtifact && !lateSuccess && !backgroundPending
+      ? terminalFailure
+        ? generationJob.error_message ?? "生成任务未完成，请查看任务详情。"
+        : ((block.output as Record<string, unknown> | undefined)?.error as string | undefined)
+      : undefined;
+  const approvalOutput = (block.output as Record<string, unknown> | undefined) ?? {};
+  const workflowId = typeof approvalOutput.workflowId === "string"
+    ? approvalOutput.workflowId
+    : typeof approvalOutput.workflow_id === "string"
+      ? approvalOutput.workflow_id
+      : undefined;
+  const requiresApproval = approvalOutput.status === "confirmation_required"
+    && typeof approvalOutput.approvalId === "string";
+  const hasLegacyApprovalSummary = typeof block.outputSummary === "string"
+    && /confirmation required before credits are charged/i.test(block.outputSummary);
+  const isLegacyVideoApproval = isVideoTool
+    && !requiresApproval
+    && (approvalOutput.status === "confirmation_required" || hasLegacyApprovalSummary);
+  const videoUrl = generationJob?.result?.signed_url ?? generationJob?.result?.video_url ?? generationJob?.result?.url;
+
+  useEffect(() => {
+    if (!generationJob?.id || !session?.access_token || !isMediaTool) {
+      setTimeline([]);
+      return;
+    }
+    let stopped = false;
+    const loadTimeline = async () => {
+      try {
+        const next = await fetchJobTimeline(session.access_token, generationJob.id);
+        if (!stopped) setTimeline(next.events);
+      } catch {
+        // Optional timeline failures do not affect job status.
+      }
+    };
+    void loadTimeline();
+    const timer = window.setInterval(() => void loadTimeline(), 3000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [generationJob?.id, isMediaTool, session?.access_token]);
 
   const handleOpenPanel = useCallback(() => {
     const rect = findSidebarRect(containerRef.current);
     if (rect) {
-      setPanelRight(window.innerWidth - rect.left + 12);
+      setPanelRight(Math.max(12, Math.min(window.innerWidth - 12, window.innerWidth - rect.left + 12)));
     }
     setPanelOpen(true);
   }, []);
 
   const handleClosePanel = useCallback(() => setPanelOpen(false), []);
 
+  if (hideDuplicateJob) return null;
+
   return (
     <div ref={containerRef} className="space-y-1.5">
+      {workflowId ? <AgentWorkflowCard workflowId={workflowId} /> : null}
+      {requiresApproval && !hideApprovalCard ? (
+        <GenerationApprovalCard
+          approvalId={approvalOutput.approvalId as string}
+          jobType={approvalOutput.jobType === "image_generation" ? "image_generation" : "video_generation"}
+          model={typeof approvalOutput.model === "string" ? approvalOutput.model : actualModelName ?? "未指定模型"}
+          estimatedCredits={typeof approvalOutput.estimatedCredits === "number" ? approvalOutput.estimatedCredits : 0}
+          {...(typeof approvalOutput.duration === "number" ? { duration: approvalOutput.duration } : {})}
+          {...(typeof approvalOutput.resolution === "string" ? { resolution: approvalOutput.resolution } : {})}
+          hasReferenceImage={approvalOutput.hasReferenceImage === true}
+          expiresAt={typeof approvalOutput.expiresAt === "string" ? approvalOutput.expiresAt : new Date(0).toISOString()}
+          onJobCreated={setConfirmedJobId}
+        />
+      ) : null}
+      {isLegacyVideoApproval ? (
+        <div role="status" className="rounded-xl border border-border/40 bg-muted/20 px-3 py-2 text-[12px] text-muted-foreground">
+          <div className="font-medium text-foreground">{"\u5386\u53f2\u786e\u8ba4\u5df2\u5931\u6548"}</div>
+          <p className="mt-1">{"\u5386\u53f2\u786e\u8ba4\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u53d1\u8d77\u89c6\u9891\u751f\u6210\u3002"}</p>
+        </div>
+      ) : null}
       {/* Layer 1: Status line */}
       <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
         {block.status === "running" ? (
@@ -204,18 +412,20 @@ export const ToolBlockView = React.memo(function ToolBlockView({
           </svg>
         )}
         <span className="font-medium text-muted-foreground truncate">
-          {isMediaTool && modelName
-            ? formatModelDisplayName(modelName)
+          {isMediaTool && actualModelName
+            ? formatModelDisplayName(actualModelName)
             : config.label}
         </span>
       </div>
 
       {/* Layer 2a: Media generation shimmer placeholder */}
-      {isMediaTool && !isCompleted && (
+      {isMediaTool && (!isCompleted || backgroundPending) && (
         <MediaShimmer
           isVideoTool={isVideoTool}
           aspectRatio={aspectRatio}
-          modelName={modelName}
+          modelName={actualModelName}
+          job={generationJob}
+          routing={mediaRouting}
         />
       )}
 
@@ -224,8 +434,24 @@ export const ToolBlockView = React.memo(function ToolBlockView({
         <MediaErrorCard
           isVideoTool={isVideoTool}
           error={mediaError}
+          routing={mediaRouting}
+          {...(typeof inputData?.prompt === "string" ? { prompt: inputData.prompt } : {})}
+          canRetry={Boolean(terminalFailure)}
+          {...(mediaErrorCode ? { errorCode: mediaErrorCode } : {})}
         />
       )}
+
+      {isMediaTool && isCompleted && !imageArtifact && lateSuccess && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[12px] text-emerald-700 dark:text-emerald-300">
+          {isVideoTool ? "视频" : "图片"}已生成并同步到画布
+        </div>
+      )}
+
+      {isVideoTool && isCompleted && lateSuccess && videoUrl && (
+        <video controls playsInline preload="metadata" src={videoUrl} className="w-full max-h-[420px] rounded-xl border border-border/40 bg-black" aria-label="Generated video" />
+      )}
+
+      {isMediaTool && generationJob && timeline.length > 0 ? <JobTimeline events={timeline} /> : null}
 
       {/* Layer 2b: Image generation card with inline preview */}
       {isImageTool && isCompleted && imageArtifact ? (
@@ -241,11 +467,12 @@ export const ToolBlockView = React.memo(function ToolBlockView({
             ...(imageArtifact.jobId !== undefined ? { jobId: imageArtifact.jobId } : {}),
           }}
           cardTitle={cardTitle}
-          modelName={modelName}
+          modelName={actualModelName}
+          routing={mediaRouting}
           hasDetails={!!hasDetails}
           onOpenPanel={handleOpenPanel}
         />
-      ) : showCard ? (
+      ) : showCard && !isMediaTool && !requiresApproval && !hideApprovalCard && !isLegacyVideoApproval && !lateSuccess && !backgroundPending ? (
         /* Layer 2: Generic output card (non-image tools) */
         <div className="rounded-xl border border-border/40 p-3">
           <div className="flex items-start gap-3">
@@ -306,6 +533,19 @@ export const ToolBlockView = React.memo(function ToolBlockView({
 });
 
 /* ------------------------------------------------------------------ */
+function JobTimeline({ events }: { events: Array<{ key: string; label: string; status: "done" | "active" | "failed" | "pending"; at?: string; id?: string; detail?: string }> }) {
+  return <div className="rounded-xl border border-border/40 bg-background/30 px-3 py-2">
+    <div className="mb-2 text-[11px] font-medium text-muted-foreground">Generation timeline</div>
+    <div className="grid gap-1.5 sm:grid-cols-2">
+      {events.map((event) => <div key={event.key} className="flex min-w-0 items-center gap-2 text-[11px]">
+        <span className={`size-2 shrink-0 rounded-full ${event.status === "done" ? "bg-emerald-500" : event.status === "failed" ? "bg-destructive" : event.status === "active" ? "animate-pulse bg-amber-500" : "bg-muted-foreground/30"}`} />
+        <span className="truncate text-foreground">{event.label}</span>
+        {event.detail ? <span className="truncate text-muted-foreground">{event.detail}</span> : null}
+      </div>)}
+    </div>
+  </div>;
+}
+
 /*  MediaShimmer — shimmer placeholder during media generation         */
 /* ------------------------------------------------------------------ */
 
@@ -313,11 +553,36 @@ const MediaShimmer = React.memo(function MediaShimmer({
   isVideoTool,
   aspectRatio,
   modelName,
+  job,
+  routing,
 }: {
   isVideoTool: boolean;
   aspectRatio: string;
   modelName: string | undefined;
+  job: GenerationJob | null;
+  routing: MediaRouting | null;
 }) {
+  const status = job?.status;
+  const isQueued = status === "queued";
+  const isFailed = status === "failed" || status === "dead_letter" || status === "canceled";
+  const isSucceeded = status === "succeeded";
+  const statusText = isFailed
+    ? "任务已失败"
+    : isSucceeded
+      ? "生成完成，画布已同步"
+    : isQueued
+      ? "已进入队列，等待工作线程"
+      : status === "running"
+        ? "模型正在生成"
+          : isVideoTool
+          ? "视频生成中..."
+          : "图片生成中...";
+  const progress = Math.max(0, Math.min(100, job?.progress ?? 0));
+  const lastUpdate = job?.updated_at
+    ? Math.max(0, Math.round((Date.now() - new Date(job.updated_at).getTime()) / 1000))
+    : null;
+  const isStale = lastUpdate !== null && lastUpdate >= 90 && !isFailed && !isSucceeded;
+
   return (
     <div className="rounded-xl border border-border/40 overflow-hidden">
       <div
@@ -357,13 +622,44 @@ const MediaShimmer = React.memo(function MediaShimmer({
         </div>
       </div>
       <div className="px-3 py-2">
-        <div className="text-[12px] font-medium text-muted-foreground/70">
-          {isVideoTool ? "\u89c6\u9891\u751f\u6210\u4e2d..." : "\u56fe\u7247\u751f\u6210\u4e2d..."}
+        <div className={`text-[12px] font-medium ${isFailed ? "text-destructive" : "text-muted-foreground/70"}`}>
+          {statusText}
         </div>
+        {job ? (
+          <div className="mt-1 space-y-1.5 text-[11px] text-muted-foreground">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate">{job.stage ?? `真实状态：${job.status}`}</span>
+              <span className="shrink-0 tabular-nums">{progress}%</span>
+            </div>
+            <div className="h-1 overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full rounded-full transition-[width] duration-500 ${isFailed ? "bg-destructive" : "bg-foreground/60"}`}
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span>{isStale ? "等待工作线程更新" : "实时状态已同步"}</span>
+              {job.attempt_count > 0 && <span>尝试 {job.attempt_count}/{job.max_attempts}</span>}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-1 space-y-1.5 text-[11px] text-muted-foreground">
+            <div>正在提交任务...</div>
+            <div className="h-1 overflow-hidden rounded-full bg-muted">
+              <div className="h-full w-1/3 animate-pulse rounded-full bg-foreground/50" />
+            </div>
+          </div>
+        )}
+        {isFailed && job?.error_message && (
+          <p className="mt-1 line-clamp-2 text-[11px] text-destructive/80">{job.error_message}</p>
+        )}
         {modelName && (
           <div className="mt-0.5 text-[11px] text-muted-foreground truncate">
             {formatModelDisplayName(modelName)}
           </div>
+        )}
+        {routing?.selectedModel && (
+          <RoutingNotice routing={routing} />
         )}
       </div>
     </div>
@@ -377,10 +673,46 @@ const MediaShimmer = React.memo(function MediaShimmer({
 const MediaErrorCard = React.memo(function MediaErrorCard({
   isVideoTool,
   error,
+  routing,
+  prompt,
+  canRetry,
+  errorCode,
 }: {
   isVideoTool: boolean;
   error: string;
+  routing: MediaRouting | null;
+  prompt?: string;
+  canRetry: boolean;
+  errorCode?: string;
 }) {
+  const mediaType = isVideoTool ? "video" : "image";
+  const retryAllowed = canRetryGeneration(errorCode, canRetry);
+  const visibleError = formatGenerationError(errorCode, error);
+  const showFailover = isVideoTool && (errorCode == null || shouldFailoverVideoError(errorCode));
+  const openModels = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("helstera:open-model-preference", { detail: { mediaType } }));
+  }, [mediaType]);
+  const openFailover = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("helstera:model-failover", { detail: { mediaType, prompt, currentModel: routing?.selectedModel } }));
+  }, [mediaType, prompt, routing?.selectedModel]);
+  const useAutoRouting = useCallback(() => {
+    const storageKey = isVideoTool
+      ? "helstera:video-model-preference"
+      : "helstera:image-model-preference";
+    let current: { models?: string[]; duration?: number } = {};
+    try {
+      current = JSON.parse(localStorage.getItem(storageKey) ?? "{}") as typeof current;
+    } catch {
+      localStorage.removeItem(storageKey);
+    }
+    localStorage.setItem(storageKey, JSON.stringify({ ...current, mode: "auto" }));
+    window.dispatchEvent(new CustomEvent("helstera:model-preference-changed"));
+    window.dispatchEvent(new CustomEvent("helstera:retry-generation", { detail: { prompt, submit: retryAllowed } }));
+  }, [isVideoTool, prompt, retryAllowed]);
+  const retry = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("helstera:retry-generation", { detail: { prompt, submit: true } }));
+  }, [prompt]);
+
   return (
     <div className="rounded-xl border border-destructive/30/30 bg-destructive/5 p-3">
       <div className="flex items-start gap-2.5">
@@ -400,9 +732,44 @@ const MediaErrorCard = React.memo(function MediaErrorCard({
             {isVideoTool ? "\u89c6\u9891\u751f\u6210\u5931\u8d25" : "\u56fe\u7247\u751f\u6210\u5931\u8d25"}
           </div>
           <div className="mt-0.5 text-[12px] text-muted-foreground line-clamp-2">
-            {error}
+            {visibleError}
           </div>
+          {routing?.selectedModel && <RoutingNotice routing={routing} />}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {showFailover && isVideoTool && <button type="button" onClick={openFailover} className="rounded-lg bg-foreground px-2.5 py-1.5 text-[11px] font-medium text-background hover:bg-foreground/85">智能容灾：选择下一个模型</button>}
+            <button type="button" onClick={openModels} className="rounded-lg border border-border/70 bg-background px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted">
+              重新选择可用模型
+            </button>
+            <button type="button" onClick={useAutoRouting} disabled={!retryAllowed} className="rounded-lg border border-border/70 bg-background px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted">
+              使用系统自动路由
+            </button>
+            <button type="button" onClick={retry} disabled={!retryAllowed || !prompt} title={retryAllowed ? "重新提交已明确失败的任务" : "任务状态尚未确认失败，已禁用以避免重复扣费"} className="rounded-lg bg-foreground px-2.5 py-1.5 text-[11px] font-medium text-background hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-40">
+              重新提交任务
+            </button>
+          </div>
+          {!canRetry && (
+            <p className="mt-2 text-[10px] leading-4 text-muted-foreground">任务尚未确认终止，为避免上游重复受理和重复扣费，暂不允许再次提交。</p>
+          )}
         </div>
+      </div>
+    </div>
+  );
+});
+
+const RoutingNotice = React.memo(function RoutingNotice({ routing }: { routing: MediaRouting }) {
+  const selected = routing.selectedModel ? formatModelDisplayName(routing.selectedModel) : "自动模型";
+  const preferred = routing.preferredModel ? formatModelDisplayName(routing.preferredModel) : null;
+  return (
+    <div className="mt-2 rounded-lg bg-muted/60 px-2.5 py-2 text-[11px] text-muted-foreground">
+      <div className="font-medium text-foreground">已使用：{selected}</div>
+      {routing.fallback && preferred && (
+        <div className="mt-0.5">自动切换：{preferred} → {selected}</div>
+      )}
+      {routing.reason && <div className="mt-0.5">原因：{routing.reason}</div>}
+      <div className="mt-0.5">
+        {routing.inputImage ? "参考图已注入" : "无参考图"}
+        {routing.duration ? ` · ${routing.duration}秒` : ""}
+        {routing.resolution ? ` · ${routing.resolution}` : ""}
       </div>
     </div>
   );
@@ -416,12 +783,14 @@ const ImageArtifactCard = React.memo(function ImageArtifactCard({
   artifact,
   cardTitle,
   modelName,
+  routing,
   hasDetails,
   onOpenPanel,
 }: {
   artifact: { url: string; title?: string; type: string; width?: number; height?: number; mimeType?: string; placement?: { x: number; y: number; width: number; height: number }; jobId?: string };
   cardTitle: string;
   modelName: string | undefined;
+  routing: MediaRouting | null;
   hasDetails: boolean;
   onOpenPanel: () => void;
 }) {
@@ -493,6 +862,7 @@ const ImageArtifactCard = React.memo(function ImageArtifactCard({
             </>
           )}
         </div>
+        {routing?.selectedModel && <RoutingNotice routing={routing} />}
       </div>
     </div>
   );
@@ -529,8 +899,9 @@ function ToolDetailPanel({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.15 }}
-      className="fixed inset-0 z-[1000]"
+      className="fixed inset-0 z-[1000] bg-black/15 backdrop-blur-[1px]"
       onClick={onClose}
+      role="presentation"
     >
       <motion.div
         initial={{ opacity: 0, x: 24, scale: 0.97 }}
@@ -539,7 +910,10 @@ function ToolDetailPanel({
           duration: 0.25,
           ease: [0.25, 0.46, 0.45, 0.94],
         }}
-        className="fixed top-1/2 -translate-y-1/2 w-[520px] max-h-[640px] min-h-[240px] rounded-2xl glass-strong shadow-card-hover overflow-hidden flex flex-col"
+        role="dialog"
+        aria-modal="false"
+        aria-label="工具详情"
+        className="fixed top-1/2 -translate-y-1/2 w-[min(520px,calc(100vw-1.5rem))] max-h-[calc(100dvh-1.5rem)] min-h-[240px] rounded-lg glass-strong shadow-card-hover overflow-hidden flex flex-col"
         style={{ right: rightOffset }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -557,6 +931,7 @@ function ToolDetailPanel({
           <button
             type="button"
             onClick={onClose}
+            aria-label="关闭工具详情"
             className="rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground transition-all duration-300 cursor-pointer"
           >
             <svg
@@ -662,6 +1037,9 @@ function ToolOutputRenderer({
   toolName: string;
   output: Record<string, unknown>;
 }) {
+  if (toolName === "prepare_douyin_publish" && isDouyinPublishDraft(output)) {
+    return <DouyinPublishDraftOutput data={output} />;
+  }
   if (toolName === "get_brand_kit" && isBrandKitOutput(output)) {
     return <BrandKitOutput data={output} />;
   }
@@ -708,6 +1086,36 @@ function ToolOutputRenderer({
           {JSON.stringify(output, null, 2)}
         </pre>
       </div>
+    </div>
+  );
+}
+
+type DouyinPublishDraft = {
+  status: "approval_required";
+  approvalRequired: true;
+  manualOnly: true;
+  title: string;
+  body: string;
+  hashtags: string[];
+  coverText: string;
+  handoffUrl: string;
+  instructions: string;
+};
+
+function isDouyinPublishDraft(output: Record<string, unknown>): output is DouyinPublishDraft {
+  return output.status === "approval_required" && output.approvalRequired === true && typeof output.handoffUrl === "string";
+}
+
+function DouyinPublishDraftOutput({ data }: { data: DouyinPublishDraft }) {
+  return (
+    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+      <div className="flex items-center justify-between gap-3"><p className="text-sm font-semibold">抖音发布草稿已准备</p><span className="rounded-full bg-amber-500/15 px-2 py-1 text-[10px] text-amber-800 dark:text-amber-200">需人工确认</span></div>
+      <p className="mt-3 text-sm font-medium">{data.title}</p>
+      <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">{data.body}</p>
+      {data.hashtags.length > 0 && <p className="mt-3 text-xs text-muted-foreground">标签：{data.hashtags.map((tag) => `#${tag}`).join(" ")}</p>}
+      {data.coverText && <p className="mt-2 text-xs text-muted-foreground">封面文案：{data.coverText}</p>}
+      <p className="mt-3 text-xs leading-5 text-amber-800 dark:text-amber-200">{data.instructions}</p>
+      <a href={data.handoffUrl} className="mt-4 inline-flex items-center rounded-md bg-foreground px-3 py-2 text-xs font-medium text-background hover:opacity-90">打开发布审批页</a>
     </div>
   );
 }

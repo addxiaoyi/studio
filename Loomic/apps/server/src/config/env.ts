@@ -25,8 +25,11 @@ export function resolveDefaultAgentModel(env: {
 export type AgentBackendMode = "filesystem" | "state";
 
 export type ServerEnv = {
-  authProvider?: "supabase" | "local";
+  authProvider: "local";
   databaseUrl?: string;
+  storageProvider: "local";
+  storageRoot?: string;
+  systemAdminEmails: string[];
   agentBackendMode: AgentBackendMode;
   agentFilesRoot?: string;
   agentModel: string;
@@ -42,12 +45,6 @@ export type ServerEnv = {
   openAIApiKey?: string;
   port: number;
   replicateApiToken?: string;
-  supabaseAnonKey?: string;
-  supabaseDbUrl?: string;
-  supabaseJwtSecret?: string;
-  supabaseProjectId?: string;
-  supabaseServiceRoleKey?: string;
-  supabaseUrl?: string;
   version: string;
   volcesApiKey?: string;
   volcesBaseUrl?: string;
@@ -83,6 +80,12 @@ export type ServerEnv = {
   epayPrivateKey?: string;
   epayPlatformPublicKey?: string;
   epaySignType?: "MD5" | "RSA";
+  alipayAppId?: string;
+  alipayAppPrivateKeyPath?: string;
+  alipayPlatformPublicKeyPath?: string;
+  lightpayBaseUrl?: string;
+  lightpayApiId?: string;
+  lightpayApiSecret?: string;
   skillsRoot?: string;
   webOrigin: string;
   workerConcurrency?: number;
@@ -91,6 +94,12 @@ export type ServerEnv = {
   workerId?: string;
   workerPollIntervalMs?: number;
   workerMaxBatchSize?: number;
+  douyinMcpServerUrl: string;
+  douyinMcpClientToken?: string;
+  douyinMcpToolGroupAid?: string;
+  douyinMcpAllowedTools: string[];
+  douyinClientKey?: string;
+  douyinClientSecret?: string;
 };
 
 export function loadServerEnv(
@@ -102,28 +111,20 @@ export function loadServerEnv(
     parseAgentFilesRoot(source.HELSTERA_AGENT_FILES_ROOT);
   const databaseUrl =
     overrides.databaseUrl ?? normalizeOptionalString(source.DATABASE_URL);
-  const authProvider =
-    overrides.authProvider ?? (source.AUTH_PROVIDER === "local" ? "local" : "supabase");
+  const authProvider = "local" as const;
+  const storageProvider = "local" as const;
+  const storageRoot =
+    overrides.storageRoot ?? normalizeOptionalString(source.STORAGE_ROOT) ?? "/www/helstera/uploads";
+  const systemAdminEmails =
+    overrides.systemAdminEmails ??
+    (source.SYSTEM_ADMIN_EMAILS ?? "")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean);
   const openAIApiBase =
     overrides.openAIApiBase ?? normalizeOptionalString(source.OPENAI_API_BASE);
   const openAIApiKey =
     overrides.openAIApiKey ?? normalizeOptionalString(source.OPENAI_API_KEY);
-  const supabaseUrl =
-    overrides.supabaseUrl ?? normalizeOptionalString(source.SUPABASE_URL);
-  const supabaseAnonKey =
-    overrides.supabaseAnonKey ??
-    normalizeOptionalString(source.SUPABASE_ANON_KEY);
-  const supabaseDbUrl =
-    overrides.supabaseDbUrl ?? normalizeOptionalString(source.SUPABASE_DB_URL);
-  const supabaseJwtSecret =
-    overrides.supabaseJwtSecret ??
-    normalizeOptionalString(source.SUPABASE_JWT_SECRET);
-  const supabaseServiceRoleKey =
-    overrides.supabaseServiceRoleKey ??
-    normalizeOptionalString(source.SUPABASE_SERVICE_ROLE_KEY);
-  const supabaseProjectId =
-    overrides.supabaseProjectId ??
-    normalizeOptionalString(source.SUPABASE_PROJECT_ID);
   const googleApiKey =
     overrides.googleApiKey ?? normalizeOptionalString(source.GOOGLE_API_KEY);
   const googleApplicationCredentials =
@@ -202,6 +203,12 @@ export function loadServerEnv(
   const epayPrivateKey = overrides.epayPrivateKey ?? normalizeOptionalString(source.EPAY_PRIVATE_KEY);
   const epayPlatformPublicKey = overrides.epayPlatformPublicKey ?? normalizeOptionalString(source.EPAY_PLATFORM_PUBLIC_KEY);
   const epaySignType = overrides.epaySignType ?? (source.EPAY_SIGN_TYPE === "RSA" ? "RSA" : source.EPAY_SIGN_TYPE === "MD5" ? "MD5" : undefined);
+  const alipayAppId = overrides.alipayAppId ?? normalizeOptionalString(source.ALIPAY_APP_ID);
+  const alipayAppPrivateKeyPath = overrides.alipayAppPrivateKeyPath ?? normalizeOptionalString(source.ALIPAY_APP_PRIVATE_KEY_PATH);
+  const alipayPlatformPublicKeyPath = overrides.alipayPlatformPublicKeyPath ?? normalizeOptionalString(source.ALIPAY_PLATFORM_PUBLIC_KEY_PATH);
+  const lightpayBaseUrl = overrides.lightpayBaseUrl ?? normalizeOptionalString(source.LIGHTPAY_BASE_URL);
+  const lightpayApiId = overrides.lightpayApiId ?? normalizeOptionalString(source.LIGHTPAY_API_ID);
+  const lightpayApiSecret = overrides.lightpayApiSecret ?? normalizeOptionalString(source.LIGHTPAY_API_SECRET);
   const workerConcurrency =
     overrides.workerConcurrency ??
     (source.WORKER_CONCURRENCY
@@ -229,6 +236,13 @@ export function loadServerEnv(
     (source.WORKER_MAX_BATCH_SIZE
       ? Number.parseInt(source.WORKER_MAX_BATCH_SIZE, 10)
       : undefined);
+  const douyinMcpServerUrl = overrides.douyinMcpServerUrl ?? source.DOUYIN_MCP_SERVER_URL ?? "https://open.douyin.com/sse";
+  const douyinMcpClientToken = overrides.douyinMcpClientToken ?? normalizeOptionalString(source.DOUYIN_MCP_CLIENT_TOKEN);
+  const douyinMcpToolGroupAid = overrides.douyinMcpToolGroupAid ?? normalizeOptionalString(source.DOUYIN_MCP_TOOL_GROUP_AID);
+  const douyinMcpAllowedTools = overrides.douyinMcpAllowedTools ?? (source.DOUYIN_MCP_ALLOWED_TOOLS ?? "")
+    .split(",").map((value) => value.trim()).filter(Boolean);
+  const douyinClientKey = overrides.douyinClientKey ?? normalizeOptionalString(source.DOUYIN_CLIENT_KEY);
+  const douyinClientSecret = overrides.douyinClientSecret ?? normalizeOptionalString(source.DOUYIN_CLIENT_SECRET);
 
   // Resolve default agent model based on available provider keys.
   // Explicit HELSTERA_AGENT_MODEL always takes precedence; otherwise fall back
@@ -245,6 +259,9 @@ export function loadServerEnv(
 
   return {
     authProvider,
+    storageProvider,
+    ...(storageRoot ? { storageRoot } : {}),
+    systemAdminEmails,
     ...(databaseUrl ? { databaseUrl } : {}),
     agentBackendMode:
       overrides.agentBackendMode ??
@@ -259,12 +276,6 @@ export function loadServerEnv(
     ...(googleApplicationCredentials ? { googleApplicationCredentials } : {}),
     ...(openAIApiBase ? { openAIApiBase } : {}),
     ...(openAIApiKey ? { openAIApiKey } : {}),
-    ...(supabaseUrl ? { supabaseUrl } : {}),
-    ...(supabaseAnonKey ? { supabaseAnonKey } : {}),
-    ...(supabaseDbUrl ? { supabaseDbUrl } : {}),
-    ...(supabaseJwtSecret ? { supabaseJwtSecret } : {}),
-    ...(supabaseServiceRoleKey ? { supabaseServiceRoleKey } : {}),
-    ...(supabaseProjectId ? { supabaseProjectId } : {}),
     ...(googleFontsApiKey ? { googleFontsApiKey } : {}),
     ...(googleVertexProject ? { googleVertexProject } : {}),
     ...(googleVertexLocation ? { googleVertexLocation } : {}),
@@ -313,12 +324,24 @@ export function loadServerEnv(
     ...(epayPrivateKey ? { epayPrivateKey } : {}),
     ...(epayPlatformPublicKey ? { epayPlatformPublicKey } : {}),
     ...(epaySignType ? { epaySignType } : {}),
+    ...(alipayAppId ? { alipayAppId } : {}),
+    ...(alipayAppPrivateKeyPath ? { alipayAppPrivateKeyPath } : {}),
+    ...(alipayPlatformPublicKeyPath ? { alipayPlatformPublicKeyPath } : {}),
+    ...(lightpayBaseUrl ? { lightpayBaseUrl } : {}),
+    ...(lightpayApiId ? { lightpayApiId } : {}),
+    ...(lightpayApiSecret ? { lightpayApiSecret } : {}),
     ...(workerConcurrency ? { workerConcurrency } : {}),
     ...(workerImageConcurrency ? { workerImageConcurrency } : {}),
     ...(workerVideoConcurrency ? { workerVideoConcurrency } : {}),
     ...(workerId ? { workerId } : {}),
     ...(workerPollIntervalMs ? { workerPollIntervalMs } : {}),
     ...(workerMaxBatchSize ? { workerMaxBatchSize } : {}),
+    douyinMcpServerUrl,
+    ...(douyinMcpClientToken ? { douyinMcpClientToken } : {}),
+    ...(douyinMcpToolGroupAid ? { douyinMcpToolGroupAid } : {}),
+    douyinMcpAllowedTools,
+    ...(douyinClientKey ? { douyinClientKey } : {}),
+    ...(douyinClientSecret ? { douyinClientSecret } : {}),
   };
 }
 

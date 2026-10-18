@@ -1,5 +1,6 @@
 // Viewer endpoint: returns balance and plan info
 import type { FastifyInstance, FastifyReply } from "fastify";
+import type { Pool } from "pg";
 
 import {
   applicationErrorResponseSchema,
@@ -17,14 +18,14 @@ import {
 import type { CreditService } from "../features/credits/credit-service.js";
 import type {
   RequestAuthenticator,
-  UserSupabaseClient,
-} from "../supabase/user.js";
+  DataClient,
+} from "../auth/types.js";
 
 export async function registerViewerRoutes(
   app: FastifyInstance,
   options: {
     auth: RequestAuthenticator;
-    createUserClient: (accessToken: string) => UserSupabaseClient;
+    localDb: Pool;
     creditService?: CreditService;
     viewerService: ViewerService;
   },
@@ -101,15 +102,12 @@ export async function registerViewerRoutes(
       }
 
       const payload = profileUpdateRequestSchema.parse(request.body);
-      const client = options.createUserClient(user.accessToken);
-      const { data, error } = await client
-        .from("profiles")
-        .update({ display_name: payload.displayName })
-        .eq("id", user.id)
-        .select("id, email, display_name, avatar_url")
-        .single();
-
-      if (error || !data) {
+      const { rows } = await options.localDb.query(
+        "update app_users set display_name = $1, updated_at = now() where id = $2 returning id, email, display_name, avatar_url",
+        [payload.displayName, user.id],
+      );
+      const data = rows[0];
+      if (!data) {
         return reply.code(500).send(
           applicationErrorResponseSchema.parse({
             error: {

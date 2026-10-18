@@ -1,7 +1,7 @@
 // Payment lifecycle: legacy Lemon Squeezy subscription flow (kept for backward compat; new purchases use topup)
 import type { BillingPeriod, SubscriptionPlan } from "@helstera/shared";
 
-import type { AdminSupabaseClient } from "../../supabase/admin.js";
+import type { DataAdminClient } from "../../auth/types.js";
 import type { LemonSqueezyClient } from "./lemon-squeezy-client.js";
 
 // ── Error ────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ export type WebhookPayload = {
 
 export function createPaymentService(options: {
   lemonSqueezy: LemonSqueezyClient;
-  getAdminClient: () => AdminSupabaseClient;
+  getAdminClient: () => DataAdminClient;
   variantMap: VariantMap;
   webOrigin: string;
 }): PaymentService {
@@ -434,7 +434,7 @@ export function createPaymentService(options: {
 // ── Helpers ──────────────────────────────────────────────────
 
 async function findWorkspaceByLsSubscription(
-  admin: AdminSupabaseClient,
+  admin: DataAdminClient,
   subscriptionId: string,
 ): Promise<string | null> {
   const { data } = await (admin as any)
@@ -447,7 +447,7 @@ async function findWorkspaceByLsSubscription(
 }
 
 async function grantMonthlyCredits(
-  admin: AdminSupabaseClient,
+  admin: DataAdminClient,
   workspaceId: string,
   plan: SubscriptionPlan,
 ): Promise<void> {

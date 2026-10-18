@@ -80,6 +80,9 @@ interface SkillDetailDialogProps {
   onInstall: (skillId: string) => Promise<void>;
   onUninstall: (skillId: string) => Promise<void>;
   onDelete?: (skillId: string) => Promise<void>;
+  versions?: Array<{ id: string; version: string; createdAt: string; securityAudit: { risk: "low" | "medium" | "high"; findings: string[] } }>;
+  onLockVersion?: (version: string | null) => Promise<void>;
+  onRollbackVersion?: (versionId: string) => Promise<void>;
 }
 
 export function SkillDetailDialog({
@@ -89,6 +92,9 @@ export function SkillDetailDialog({
   onInstall,
   onUninstall,
   onDelete,
+  versions,
+  onLockVersion,
+  onRollbackVersion,
 }: SkillDetailDialogProps) {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -199,6 +205,16 @@ export function SkillDetailDialog({
           </div>
         )}
 
+        {skill.securityAudit ? <div className="space-y-2 rounded-xl border border-border/40 bg-muted/20 p-3 text-xs">
+          <div className="flex items-center justify-between"><span className="font-medium">Script permission audit</span><span className={`rounded-full px-2 py-0.5 ${skill.securityAudit.risk === "high" ? "bg-destructive/10 text-destructive" : skill.securityAudit.risk === "medium" ? "bg-amber-500/10 text-amber-800" : "bg-emerald-500/10 text-emerald-700"}`}>{skill.securityAudit.risk} risk</span></div>
+          {skill.securityAudit.findings.length > 0 ? <ul className="space-y-1 text-muted-foreground">{skill.securityAudit.findings.map((finding) => <li key={finding}>• {finding}</li>)}</ul> : <p className="text-muted-foreground">No network, shell, filesystem, or secret access patterns detected.</p>}
+        </div> : null}
+
+        {isInstalled && versions && versions.length > 0 && onLockVersion && onRollbackVersion ? <div className="space-y-2 rounded-xl border border-border/40 p-3 text-xs">
+          <div className="flex items-center justify-between"><span className="font-medium">Version control</span><span className="text-muted-foreground">{skill.lockedVersion ? `locked: ${skill.lockedVersion}` : "tracks latest"}</span></div>
+          {versions.map((version) => <div key={version.id} className="flex items-center justify-between gap-2"><span>v{version.version}</span><div className="flex gap-2"><Button size="xs" variant="outline" disabled={actionLoading === `lock-${version.version}`} onClick={() => handleAction(() => onLockVersion(version.version), `lock-${version.version}`)}>{skill.lockedVersion === version.version ? "Locked" : "Lock"}</Button><Button size="xs" variant="ghost" disabled={actionLoading === `rollback-${version.id}`} onClick={() => handleAction(() => onRollbackVersion(version.id), `rollback-${version.id}`)}>Rollback</Button></div></div>)}
+          <Button size="xs" variant="ghost" onClick={() => handleAction(() => onLockVersion(null), "unlock")}>Use latest</Button>
+        </div> : null}
         {/* Footer actions */}
         <DialogFooter>
           {/* Delete (user skills only) */}

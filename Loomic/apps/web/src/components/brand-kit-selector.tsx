@@ -6,6 +6,7 @@ import { Check, ChevronDown } from "lucide-react";
 import type { BrandKitSummary } from "@helstera/shared";
 import { fetchBrandKits } from "@/lib/brand-kit-api";
 import { updateProject } from "@/lib/server-api";
+import { t, useLocale } from "@/lib/i18n";
 
 interface BrandKitSelectorProps {
   accessToken: string;
@@ -20,6 +21,7 @@ export function BrandKitSelector({
   currentBrandKitId,
   onBrandKitChange,
 }: BrandKitSelectorProps) {
+  const copy = t(useLocale()).brandKit;
   const [kits, setKits] = useState<BrandKitSummary[]>([]);
   const [open, setOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -60,7 +62,7 @@ export function BrandKitSelector({
   }, [open]);
 
   const currentKit = kits.find((k) => k.id === currentBrandKitId);
-  const label = currentKit ? currentKit.name : "品牌套件: 无";
+  const label = currentKit ? currentKit.name : `${copy.label}: ${copy.none}`;
 
   const handleSelect = useCallback(
     async (kitId: string | null) => {
@@ -114,7 +116,7 @@ export function BrandKitSelector({
                 <Check className="h-4 w-4 text-foreground" strokeWidth={1.5} />
               )}
             </span>
-            <span className="font-light text-foreground/80">无</span>
+            <span className="font-light text-foreground/80">{copy.none}</span>
           </button>
 
           {/* Kit list */}
@@ -141,7 +143,7 @@ export function BrandKitSelector({
 
           {kits.length === 0 && (
             <p className="px-3 py-2 text-sm text-muted-foreground font-light">
-              暂无品牌套件
+              {copy.empty}
             </p>
           )}
         </div>

@@ -37,6 +37,12 @@ export interface GeneratedImage {
   mimeType: string;
   width: number;
   height: number;
+  usage?: GenerationUsage;
+}
+
+export interface GenerationUsage {
+  inputTokens: number;
+  outputTokens: number;
 }
 
 export interface ImageProvider {
@@ -63,6 +69,7 @@ export interface GeneratedVideo {
   width: number;
   height: number;
   durationSeconds: number;
+  usage?: GenerationUsage;
 }
 
 export interface VideoProvider {

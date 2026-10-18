@@ -19,13 +19,6 @@ const OPENAI_IMAGE_MODELS: readonly ModelInfo[] = [
     iconUrl: ICON_OPENAI,
   })),
   {
-    id: "gpt-image-1.5",
-    displayName: "GPT Image 1.5",
-    description:
-      "OpenAI 最新的图像生成模型，最强指令遵循，支持编辑、多参考图、原生文字渲染。",
-    iconUrl: ICON_OPENAI,
-  },
-  {
     id: "gpt-image-1",
     displayName: "GPT Image 1",
     description:
@@ -51,13 +44,20 @@ const QUALITY_TO_SIZE: Record<string, "1024x1024" | "1024x1792" | "1792x1024"> =
 export class OpenAIImageProvider implements ImageProvider {
   readonly name = "openai";
   readonly models = OPENAI_IMAGE_MODELS;
-  private client: OpenAI;
+  private client: Pick<OpenAI, "images">;
 
-  constructor(apiKey: string, baseURL?: string) {
-    this.client = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
+  constructor(apiKey: string, baseURL?: string, client?: Pick<OpenAI, "images">) {
+    this.client = client ?? new OpenAI({ apiKey, timeout: 180_000, ...(baseURL ? { baseURL } : {}) });
   }
 
   async generate(params: ImageGenerateParams): Promise<GeneratedImage> {
+    if (params.inputImages?.length) {
+      throw new GenerationError(
+        "openai",
+        "invalid_input",
+        "The OpenAI image generation path does not support reference images.",
+      );
+    }
     const { width, height } = aspectRatioToDimensions(params.aspectRatio ?? "1:1");
     // OpenAI gpt-image-* supports auto-mapping; DALL·E 3 needs the fixed sizes
     const size = params.model.startsWith("gpt-image")

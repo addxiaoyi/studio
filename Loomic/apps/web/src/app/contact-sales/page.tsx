@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { HelsteraLogo } from "@/components/icons/helstera-logo";
 import { fadeUp } from "@/components/landing/motion";
 import { cn } from "@/lib/utils";
+import { StyledSelect } from "@/components/ui/styled-select";
 
 type SubmitState =
   | { kind: "idle" }
@@ -352,19 +353,12 @@ export default function ContactSalesPage() {
 
                       <div className="space-y-2.5">
                         <Label htmlFor="teamSize">团队规模</Label>
-                        <select
-                          id="teamSize"
+                        <StyledSelect
                           value={form.teamSize}
-                          onChange={update("teamSize")}
-                          className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1.5 text-sm transition-all duration-300 outline-none file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
-                        >
-                          <option value="">请选择</option>
-                          <option value="1-10">1-10 人</option>
-                          <option value="11-50">11-50 人</option>
-                          <option value="51-200">51-200 人</option>
-                          <option value="201-500">201-500 人</option>
-                          <option value="500+">500 人以上</option>
-                        </select>
+                          onChange={(value) => setForm((prev) => ({ ...prev, teamSize: value }))}
+                          aria-label="团队规模"
+                          options={[{ value: "", label: "请选择" }, { value: "1-10", label: "1-10 人" }, { value: "11-50", label: "11-50 人" }, { value: "51-200", label: "51-200 人" }, { value: "201-500", label: "201-500 人" }, { value: "500+", label: "500 人以上" }]}
+                        />
                       </div>
 
                       <div className="space-y-2.5">

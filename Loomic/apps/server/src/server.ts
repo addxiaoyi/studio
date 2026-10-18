@@ -15,6 +15,7 @@ import { loadServerEnv } from "./config/env.js";
 const env = loadServerEnv();
 const app = buildApp({
   env,
+  autoSyncOfficialPrices: true,
 });
 
 const host = process.env.HOST ?? "127.0.0.1";

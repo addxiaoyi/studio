@@ -32,6 +32,7 @@ import {
 import { deleteProject } from "@/lib/server-api";
 import { useToast } from "@/components/toast";
 import { useCreateProject } from "@/hooks/use-create-project";
+import { DeleteProjectDialog } from "@/components/delete-project-dialog";
 
 interface CanvasLogoMenuProps {
   accessToken: string;
@@ -77,6 +78,7 @@ export function CanvasLogoMenu({
   const { create: createNewProject } = useCreateProject();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const handleDuplicateElements = useCallback(() => {
     if (!excalidrawApi) return;
@@ -106,10 +108,7 @@ export function CanvasLogoMenu({
   }, [excalidrawApi]);
 
   const handleDeleteProject = useCallback(async () => {
-    if (!confirmingDelete) {
-      setConfirmingDelete(true);
-      return;
-    }
+    setDeleting(true);
     try {
       await deleteProject(accessToken, projectId);
       router.push("/projects");
@@ -117,9 +116,10 @@ export function CanvasLogoMenu({
       console.warn("Failed to delete project:", err);
       toastError("项目删除失败");
     } finally {
+      setDeleting(false);
       setConfirmingDelete(false);
     }
-  }, [accessToken, projectId, router, confirmingDelete, toastError]);
+  }, [accessToken, projectId, router, toastError]);
 
   const handleFileImport = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -174,9 +174,7 @@ export function CanvasLogoMenu({
   return (
     <>
       <DropdownMenu
-        onOpenChange={(open) => {
-          if (!open) setConfirmingDelete(false);
-        }}
+        onOpenChange={() => undefined}
       >
         <DropdownMenuTrigger
           className="flex items-center justify-center size-8 rounded-xl glass border border-border/40 hover:bg-foreground/[0.04] transition-all duration-300 duration-200 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-foreground/20"
@@ -208,10 +206,10 @@ export function CanvasLogoMenu({
             </DropdownMenuItem>
             <DropdownMenuItem
               variant="destructive"
-              onClick={handleDeleteProject}
+              onClick={() => setConfirmingDelete(true)}
             >
               <Trash2 className="size-4" />
-              {confirmingDelete ? "确认删除?" : "删除当前项目"}
+              删除当前项目
             </DropdownMenuItem>
           </DropdownMenuGroup>
 
@@ -266,6 +264,13 @@ export function CanvasLogoMenu({
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <DeleteProjectDialog
+        open={confirmingDelete}
+        deleting={deleting}
+        onConfirm={() => void handleDeleteProject()}
+        onCancel={() => { if (!deleting) setConfirmingDelete(false); }}
+      />
 
       <input
         ref={fileInputRef}

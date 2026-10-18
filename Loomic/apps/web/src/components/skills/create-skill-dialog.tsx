@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { StyledSelect } from "@/components/ui/styled-select";
 
 // ---------------------------------------------------------------------------
 // SKILL.md boilerplate template
@@ -188,18 +189,12 @@ export function CreateSkillDialog({
           {/* Category */}
           <div className="space-y-1.5">
             <Label htmlFor="skill-category">分类</Label>
-            <select
-              id="skill-category"
+            <StyledSelect
               value={category}
-              onChange={(e) => setCategory(e.target.value as SkillCategory)}
-              className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            >
-              {CATEGORY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              onChange={(value) => setCategory(value as SkillCategory)}
+              aria-label="技能分类"
+              options={CATEGORY_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
+            />
           </div>
 
           {/* Description */}

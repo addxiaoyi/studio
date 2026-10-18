@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/components/toast";
 import { ApiAuthError, deleteProject } from "@/lib/server-api";
+import { t, useLocale } from "@/lib/i18n";
 
 /**
  * Shared hook for deleting a project with confirmation dialog state.
@@ -14,6 +15,7 @@ export function useDeleteProject(opts?: {
 }) {
   const { session, signOut } = useAuth();
   const { success: toastSuccess, error: toastError } = useToast();
+  const copy = t(useLocale()).project;
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -33,19 +35,19 @@ export function useDeleteProject(opts?: {
     setDeleting(true);
     try {
       await deleteProject(token, pendingId);
-      toastSuccess("项目已删除");
+      toastSuccess(copy.deleted);
       opts?.onDeleted?.(pendingId);
     } catch (err) {
       if (err instanceof ApiAuthError) {
         await signOutRef.current();
         return;
       }
-      toastError("项目删除失败");
+      toastError(copy.deleteFailed);
     } finally {
       setDeleting(false);
       setPendingId(null);
     }
-  }, [session?.access_token, pendingId, toastSuccess, toastError, opts]);
+  }, [copy, session?.access_token, pendingId, toastSuccess, toastError, opts]);
 
   /** Step 3: user cancels */
   const cancelDelete = useCallback(() => {

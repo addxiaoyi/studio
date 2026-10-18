@@ -20,7 +20,7 @@ const REPLICATE_VIDEO_MODELS: readonly VideoModelInfo[] = [
     description: "Kling 3.0: T2V+I2V, native audio, multi-shot (up to 6 scenes), 3-15s, 1080p. Best for cinematic quality.",
     iconUrl: ICON_KLING,
     capabilities: { textToVideo: true, imageToVideo: true, videoToVideo: false, audio: true },
-    limits: { maxDuration: 15, allowedDurations: [5, 10, 15], maxResolution: "1080p", maxInputImages: 1 },
+    limits: { maxDuration: 15, allowedDurations: [3, 5, 10, 15], maxResolution: "1080p", maxInputImages: 1 },
   },
   {
     id: "kwaivgi/kling-v3-omni-video",
@@ -28,7 +28,7 @@ const REPLICATE_VIDEO_MODELS: readonly VideoModelInfo[] = [
     description: "Kling 3.0 Omni: T2V+I2V+V2V editing, up to 7 reference images, style transfer, 3-15s, 1080p.",
     iconUrl: ICON_KLING,
     capabilities: { textToVideo: true, imageToVideo: true, videoToVideo: true, audio: true },
-    limits: { maxDuration: 15, allowedDurations: [5, 10, 15], maxResolution: "1080p", maxInputImages: 7 },
+    limits: { maxDuration: 15, allowedDurations: [3, 5, 10, 15], maxResolution: "1080p", maxInputImages: 7 },
   },
   {
     id: "kwaivgi/kling-v2.6",
@@ -44,7 +44,7 @@ const REPLICATE_VIDEO_MODELS: readonly VideoModelInfo[] = [
     description: "Kling O1: V2V editing only — edit existing videos with natural language instructions. Up to 4K, 3-10s.",
     iconUrl: ICON_KLING,
     capabilities: { textToVideo: false, imageToVideo: false, videoToVideo: true, audio: true },
-    limits: { maxDuration: 10, allowedDurations: [3, 5, 10], maxResolution: "2160p", maxInputImages: 0 },
+    limits: { maxDuration: 10, allowedDurations: [3, 5, 10], maxResolution: "2160p", maxInputImages: 4 },
   },
   {
     id: "bytedance/seedance-1.5-pro",
@@ -119,10 +119,52 @@ function resolveWanEndpoint(hasImage: boolean): string {
   return hasImage ? "wan-video/wan-2.6-i2v" : "wan-video/wan-2.6-t2v";
 }
 
-function buildModelInput(
+export function buildReplicateVideoModelInput(
   params: VideoGenerateParams,
   model: VideoModelInfo,
 ): { endpoint: string; input: Record<string, unknown> } {
+  if (params.inputImages?.some((image) => /^data:/i.test(image))) {
+    throw new GenerationError(
+      "replicate",
+      "invalid_input",
+      "Reference images for Replicate must be public HTTP(S) URLs; inline data URI input is not supported",
+    );
+  }
+  const imageCount = params.inputImages?.length ?? 0;
+  if (imageCount && !model.capabilities.imageToVideo && !(params.inputVideo && model.capabilities.videoToVideo)) {
+    throw new GenerationError("replicate", "invalid_input", `${model.displayName} does not support image-to-video input`);
+  }
+  if (imageCount > model.limits.maxInputImages) {
+    throw new GenerationError("replicate", "invalid_input", `${model.displayName} accepts at most ${model.limits.maxInputImages} input image(s)`);
+  }
+  if (params.inputVideo && imageCount > 4) {
+    throw new GenerationError("replicate", "invalid_input", `${model.displayName} accepts at most 4 reference images with a reference video`);
+  }
+  if (params.inputVideo && !model.capabilities.videoToVideo) {
+    throw new GenerationError("replicate", "invalid_input", `${model.displayName} does not support reference-video input`);
+  }
+  if (!params.inputVideo && !params.inputImages?.length && !model.capabilities.textToVideo) {
+    throw new GenerationError("replicate", "invalid_input", `${model.displayName} does not support text-to-video input`);
+  }
+  if (params.duration != null && params.duration > model.limits.maxDuration) {
+    throw new GenerationError("replicate", "invalid_input", `${model.displayName} supports at most ${model.limits.maxDuration} seconds`);
+  }
+  if (model.limits.allowedDurations && params.duration != null && !model.limits.allowedDurations.includes(params.duration)) {
+    throw new GenerationError("replicate", "invalid_input", `${model.displayName} supports durations: ${model.limits.allowedDurations.join(", ")} seconds`);
+  }
+  if (params.enableAudio === true && !model.capabilities.audio) {
+    throw new GenerationError("replicate", "invalid_input", `${model.displayName} does not support generated audio`);
+  }
+  const allowedRatios = ["16:9", "9:16", "1:1"];
+  if (params.aspectRatio && !allowedRatios.includes(params.aspectRatio)) {
+    throw new GenerationError("replicate", "invalid_input", `${model.displayName} supports aspect ratios: ${allowedRatios.join(", ")}`);
+  }
+  const resolution = params.resolution;
+  const resolutionRank = { "480p": 0, "720p": 1, "1080p": 2, "2160p": 3 } as const;
+  if (resolution && resolutionRank[resolution] > resolutionRank[model.limits.maxResolution]) {
+    throw new GenerationError("replicate", "invalid_input", `${model.displayName} supports up to ${model.limits.maxResolution}`);
+  }
+
   const input: Record<string, unknown> = { prompt: params.prompt };
   let endpoint = params.model;
 
@@ -132,12 +174,35 @@ function buildModelInput(
 
   switch (params.model) {
     case "kwaivgi/kling-v3-video":
-    case "kwaivgi/kling-v3-omni-video":
     case "kwaivgi/kling-v2.6": {
       input.duration = String(duration);
       input.aspect_ratio = aspectRatio;
-      if (hasImage) input.image_url = params.inputImages![0];
-      if (params.enableAudio !== false) input.audio = true;
+      if (hasImage) input.start_image = params.inputImages![0];
+      if (params.model === "kwaivgi/kling-v3-video") {
+        input.mode = resolutionMode(params.resolution);
+        input.generate_audio = params.enableAudio !== false;
+      } else {
+        input.generate_audio = params.enableAudio !== false;
+      }
+      break;
+    }
+
+    case "kwaivgi/kling-v3-omni-video": {
+      input.duration = duration;
+      input.aspect_ratio = aspectRatio;
+      input.mode = resolutionMode(params.resolution);
+      if (hasImage) {
+        input.start_image = params.inputImages![0];
+        if (params.inputImages!.length > 1) input.reference_images = params.inputImages!.slice(1);
+      }
+      if (params.inputVideo) {
+        input.reference_video = params.inputVideo;
+        input.video_reference_type = "feature";
+        input.generate_audio = false;
+        input.keep_original_sound = true;
+      } else if (params.enableAudio !== false) {
+        input.generate_audio = true;
+      }
       break;
     }
 
@@ -145,8 +210,12 @@ function buildModelInput(
       if (!params.inputVideo) {
         throw new GenerationError("replicate", "invalid_input", "Kling O1 requires inputVideo for V2V editing");
       }
-      input.input_video = params.inputVideo;
+      input.reference_video = params.inputVideo;
+      input.video_reference_type = "feature";
       input.duration = String(duration);
+      input.aspect_ratio = aspectRatio;
+      input.mode = resolutionMode(params.resolution);
+      if (params.inputImages?.length) input.reference_images = params.inputImages;
       break;
     }
 
@@ -207,6 +276,10 @@ function buildModelInput(
   return { endpoint, input };
 }
 
+function resolutionMode(resolution: VideoGenerateParams["resolution"]): "standard" | "pro" {
+  return resolution === "1080p" ? "pro" : "standard";
+}
+
 // ── Resolution helpers ─────────────────────────────────────────────────────
 
 const RESOLUTION_DIMENSIONS: Record<string, { width: number; height: number }> = {
@@ -242,7 +315,7 @@ export class ReplicateVideoProvider implements VideoProvider {
       throw new GenerationError("replicate", "unknown_model", `Unknown video model: ${params.model}`);
     }
 
-    const { endpoint, input } = buildModelInput(params, modelInfo);
+    const { endpoint, input } = buildReplicateVideoModelInput(params, modelInfo);
     const resolution = params.resolution ?? "720p";
     const { width, height } = getVideoDimensions(resolution, params.aspectRatio ?? "16:9");
 
@@ -271,17 +344,21 @@ export class ReplicateVideoProvider implements VideoProvider {
       );
     }
 
-    const data = (await response.json()) as {
+    const data = await parseReplicateJson<{
       id: string;
       output: string | string[] | null;
       status: string;
+      error?: string;
       urls?: { get?: string };
-    };
+    }>(response, "prediction creation");
 
     // If prediction is still processing (Prefer: wait timed out), poll for result
     let output = data.output;
-    if (!output && data.status === "processing" && data.urls?.get) {
+    if (!output && (data.status === "starting" || data.status === "processing") && data.urls?.get) {
       output = await this.pollForResult(data.urls.get);
+    }
+    if (data.status === "failed" || data.status === "canceled") {
+      throw new GenerationError("replicate", "prediction_failed", `Video prediction failed: ${data.error ?? data.status}`);
     }
 
     const outputUrl = Array.isArray(output) ? output[0] : output;
@@ -311,11 +388,11 @@ export class ReplicateVideoProvider implements VideoProvider {
       });
       if (!res.ok) continue;
 
-      const pred = (await res.json()) as {
+      const pred = await parseReplicateJson<{
         output: string | string[] | null;
         status: string;
         error?: string;
-      };
+      }>(res, "prediction polling");
 
       if (pred.status === "succeeded" && pred.output) {
         return Array.isArray(pred.output) ? (pred.output[0] ?? null) : pred.output;
@@ -331,4 +408,21 @@ export class ReplicateVideoProvider implements VideoProvider {
 
     throw new GenerationError("replicate", "timeout", "Video generation timed out waiting for Replicate");
   }
+}
+
+async function parseReplicateJson<T extends object>(response: Response, phase: string): Promise<T> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    throw new GenerationError(
+      "replicate",
+      "invalid_provider_response",
+      `Replicate returned invalid JSON during ${phase}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new GenerationError("replicate", "invalid_provider_response", `Replicate returned an invalid response during ${phase}`);
+  }
+  return body as T;
 }

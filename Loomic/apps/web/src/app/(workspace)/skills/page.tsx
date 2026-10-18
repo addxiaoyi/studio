@@ -25,6 +25,9 @@ import {
   createSkill,
   deleteSkill,
   fetchSkillDetail,
+  fetchSkillVersions,
+  lockSkillVersion,
+  rollbackSkillVersion,
   fetchSkills,
   fetchWorkspaceSkills,
   installSkill,
@@ -38,6 +41,7 @@ import { cn } from "@/lib/utils";
 // ---------------------------------------------------------------------------
 
 type SkillsTab = "installed" | "marketplace" | "import";
+type SkillVersion = Awaited<ReturnType<typeof fetchSkillVersions>>["versions"][number];
 
 const TAB_LABELS: Record<SkillsTab, string> = {
   installed: "已安装",
@@ -107,6 +111,7 @@ export default function SkillsPage() {
   const [detailSkill, setDetailSkill] = useState<SkillDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [skillVersions, setSkillVersions] = useState<SkillVersion[]>([]);
 
   // ---------------------------------------------------------------------------
   // Data loading
@@ -236,6 +241,12 @@ export default function SkillsPage() {
       try {
         const result = await fetchSkillDetail(token, skill.id);
         setDetailSkill(result.skill);
+        if (skill.installed) {
+          const versionResult = await fetchSkillVersions(token, skill.id);
+          setSkillVersions(versionResult.versions);
+        } else {
+          setSkillVersions([]);
+        }
       } catch (err) {
         if (err instanceof ApiAuthError) return;
         // Fallback: display as much as we have
@@ -251,6 +262,24 @@ export default function SkillsPage() {
     },
     [getToken],
   );
+
+  const handleLockVersion = useCallback(async (version: string | null) => {
+    const token = getToken();
+    if (!token || !detailSkill) return;
+    await lockSkillVersion(token, detailSkill.id, version);
+    await loadSkills();
+    setDetailSkill((current) => current ? { ...current, lockedVersion: version } : current);
+  }, [detailSkill, getToken, loadSkills]);
+
+  const handleRollbackVersion = useCallback(async (versionId: string) => {
+    const token = getToken();
+    if (!token || !detailSkill) return;
+    await rollbackSkillVersion(token, detailSkill.id, versionId);
+    const [detail, versionResult] = await Promise.all([fetchSkillDetail(token, detailSkill.id), fetchSkillVersions(token, detailSkill.id)]);
+    setDetailSkill(detail.skill);
+    setSkillVersions(versionResult.versions);
+    await loadSkills();
+  }, [detailSkill, getToken, loadSkills]);
 
   const handleInstall = useCallback(
     async (skillId: string) => {
@@ -545,11 +574,14 @@ export default function SkillsPage() {
         open={detailOpen}
         onOpenChange={(open) => {
           setDetailOpen(open);
-          if (!open) setDetailSkill(null);
+           if (!open) { setDetailSkill(null); setSkillVersions([]); }
         }}
         onInstall={handleInstall}
         onUninstall={handleUninstall}
         onDelete={handleDelete}
+         versions={skillVersions}
+         onLockVersion={handleLockVersion}
+         onRollbackVersion={handleRollbackVersion}
       />
     </div>
   );

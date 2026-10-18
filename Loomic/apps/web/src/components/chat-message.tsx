@@ -7,11 +7,17 @@ import type { ContentBlock, ToolArtifact, ToolBlock } from "@helstera/shared";
 import { ImagePill } from "./chat/image-lightbox";
 import { MarkdownRenderer } from "./chat/markdown-renderer";
 import { MentionPill } from "./chat/mention-pill";
-import { ThinkingBlockView } from "./chat/thinking-block-view";
+import { collapseDuplicateImageReferences } from "./chat/utils";
+import LatticeLoader from "./ui/LatticeLoader";
 import { ToolBlockView } from "./chat/tool-block-view";
+import { ThinkingBlockView } from "./chat/thinking-block-view";
 
 // Re-export types for backward compatibility with existing consumers
 export type { ContentBlock, ToolArtifact };
+
+function sanitizeAssistantText(text: string): string {
+  return text.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "").replace(/<\/?think>/gi, "");
+}
 
 /** @deprecated Use ToolBlock from @helstera/shared instead */
 export type ToolActivity = ToolBlock;
@@ -23,7 +29,11 @@ export type ToolActivity = ToolBlock;
 type ChatMessageProps = {
   role: "user" | "assistant";
   contentBlocks: ContentBlock[];
+  hiddenApprovalToolCallIds?: ReadonlySet<string> | undefined;
+  hiddenJobToolCallIds?: ReadonlySet<string> | undefined;
   isStreaming?: boolean;
+  isRetrying?: boolean;
+  onRetry?: (() => void) | undefined;
 };
 
 /**
@@ -41,7 +51,11 @@ export const ChatMessage = React.memo(
   function ChatMessage({
     role,
     contentBlocks,
+    hiddenApprovalToolCallIds,
+    hiddenJobToolCallIds,
     isStreaming,
+    isRetrying,
+    onRetry,
   }: ChatMessageProps) {
     const isUser = role === "user";
 
@@ -52,7 +66,11 @@ export const ChatMessage = React.memo(
     return (
       <AssistantMessage
         contentBlocks={contentBlocks}
+        hiddenApprovalToolCallIds={hiddenApprovalToolCallIds}
+        hiddenJobToolCallIds={hiddenJobToolCallIds}
         isStreaming={isStreaming ?? false}
+        isRetrying={isRetrying ?? false}
+        onRetry={onRetry}
       />
     );
   },
@@ -62,7 +80,11 @@ export const ChatMessage = React.memo(
     return (
       prev.role === next.role &&
       prev.contentBlocks === next.contentBlocks &&
-      prev.isStreaming === next.isStreaming
+      prev.hiddenApprovalToolCallIds === next.hiddenApprovalToolCallIds &&
+      prev.hiddenJobToolCallIds === next.hiddenJobToolCallIds &&
+      prev.isStreaming === next.isStreaming &&
+      prev.isRetrying === next.isRetrying &&
+      prev.onRetry === next.onRetry
     );
   },
 );
@@ -79,7 +101,7 @@ const UserMessage = React.memo(function UserMessage({
   // Categorize blocks once per render
   const { text, imageBlocks, mentionBlocks } = useMemo(() => {
     const textParts: string[] = [];
-    const images: ContentBlock[] = [];
+    const images: Extract<ContentBlock, { type: "image" }>[] = [];
     const mentions: ContentBlock[] = [];
 
     for (const block of contentBlocks) {
@@ -98,6 +120,10 @@ const UserMessage = React.memo(function UserMessage({
       mentionBlocks: mentions,
     };
   }, [contentBlocks]);
+  const { images: uniqueImages, duplicateCount: duplicateImageCount } = useMemo(
+    () => collapseDuplicateImageReferences(imageBlocks),
+    [imageBlocks],
+  );
 
   return (
     <motion.div
@@ -128,23 +154,25 @@ const UserMessage = React.memo(function UserMessage({
               ))}
             </span>
           )}
-          {imageBlocks.length > 0 && (
+          {uniqueImages.length > 0 && (
             <span className="inline">
-              {imageBlocks.map((block, idx) => (
+              {uniqueImages.map((block, idx) => (
                 <ImagePill
                   key={idx}
-                  src={(block as { url: string }).url}
-                  name={
-                    (block as { name?: string }).name ??
-                    `image-${idx + 1}`
-                  }
+                  src={block.url}
+                  name={block.name ?? `image-${idx + 1}`}
                 />
               ))}
+              {duplicateImageCount > 0 && (
+                <span className="ml-2 text-[11px] text-muted-foreground" aria-label={`已折叠 ${duplicateImageCount} 张重复参考图`}>
+                  +{duplicateImageCount} 张重复引用已折叠
+                </span>
+              )}
             </span>
           )}
         </div>
       )}
-      {!text && (imageBlocks.length > 0 || mentionBlocks.length > 0) && (
+      {!text && (uniqueImages.length > 0 || mentionBlocks.length > 0) && (
         <div className="inline-block rounded-xl bg-muted px-3 py-2.5">
           {mentionBlocks.map((block, idx) => (
             <MentionPill
@@ -159,15 +187,18 @@ const UserMessage = React.memo(function UserMessage({
               }
             />
           ))}
-          {imageBlocks.map((block, idx) => (
+          {uniqueImages.map((block, idx) => (
             <ImagePill
               key={idx}
-              src={(block as { url: string }).url}
-              name={
-                (block as { name?: string }).name ?? `image-${idx + 1}`
-              }
+              src={block.url}
+              name={block.name ?? `image-${idx + 1}`}
             />
           ))}
+          {duplicateImageCount > 0 && (
+            <span className="ml-2 text-[11px] text-muted-foreground" aria-label={`已折叠 ${duplicateImageCount} 张重复参考图`}>
+              +{duplicateImageCount} 张重复引用已折叠
+            </span>
+          )}
         </div>
       )}
     </motion.div>
@@ -180,10 +211,18 @@ const UserMessage = React.memo(function UserMessage({
 
 const AssistantMessage = React.memo(function AssistantMessage({
   contentBlocks,
+  hiddenApprovalToolCallIds,
+  hiddenJobToolCallIds,
   isStreaming,
+  isRetrying,
+  onRetry,
 }: {
   contentBlocks: ContentBlock[];
+  hiddenApprovalToolCallIds?: ReadonlySet<string> | undefined;
+  hiddenJobToolCallIds?: ReadonlySet<string> | undefined;
   isStreaming: boolean;
+  isRetrying: boolean;
+  onRetry?: (() => void) | undefined;
 }) {
   // Find the last text block index for streaming cursor placement
   const lastTextIdx = useMemo(() => {
@@ -199,8 +238,7 @@ const AssistantMessage = React.memo(function AssistantMessage({
       contentBlocks.some(
         (b) =>
           (b.type === "text" && b.text.length > 0) ||
-          b.type === "tool" ||
-          b.type === "thinking",
+          b.type === "tool",
       ),
     [contentBlocks],
   );
@@ -215,31 +253,22 @@ const AssistantMessage = React.memo(function AssistantMessage({
       className="flex w-full flex-col gap-2 pr-10"
     >
       {showThinking && (
-        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-          <span>{"\u601d\u8003\u4e2d"}</span>
-          <span
-            className="inline-block h-1 w-1 rounded-full bg-muted-foreground animate-bounce-dot"
-            style={{ animationDelay: "0ms" }}
-          />
-          <span
-            className="inline-block h-1 w-1 rounded-full bg-muted-foreground animate-bounce-dot"
-            style={{ animationDelay: "150ms" }}
-          />
-          <span
-            className="inline-block h-1 w-1 rounded-full bg-muted-foreground animate-bounce-dot"
-            style={{ animationDelay: "300ms" }}
-          />
-        </div>
+        <LatticeLoader
+          label="思考中"
+          doneLabel="已完成"
+          errorLabel="未完成"
+          className="text-muted-foreground"
+          pattern="orbit"
+          fontSize={14}
+        />
       )}
       {contentBlocks.map((block, idx) => {
         if (block.type === "thinking") {
           return (
             <ThinkingBlockView
-              key={`thinking-${idx}`}
+              key={idx}
               thinking={block.thinking}
-              isStreaming={
-                isStreaming && idx === contentBlocks.length - 1
-              }
+              isStreaming={isStreaming}
             />
           );
         }
@@ -249,7 +278,7 @@ const AssistantMessage = React.memo(function AssistantMessage({
           return (
             <MarkdownRenderer
               key={idx}
-              text={block.text}
+              text={sanitizeAssistantText(block.text)}
               showCursor={showCursor}
             />
           );
@@ -257,13 +286,30 @@ const AssistantMessage = React.memo(function AssistantMessage({
 
         if (block.type === "tool") {
           return (
-            <ToolBlockView key={block.toolCallId} block={block} />
+            <ToolBlockView
+              key={block.toolCallId}
+              block={block}
+              hideApprovalCard={hiddenApprovalToolCallIds?.has(block.toolCallId)}
+              hideDuplicateJob={hiddenJobToolCallIds?.has(block.toolCallId)}
+            />
           );
         }
 
         // ImageBlock -- skip in assistant messages (user-side only)
         return null;
       })}
+      {onRetry && !isStreaming && contentBlocks.length > 0 && (
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={isRetrying}
+          aria-busy={isRetrying}
+          className="self-start rounded-lg border border-border/60 px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+          aria-label="重试上一条请求"
+        >
+          {isRetrying ? "重试中..." : "重试"}
+        </button>
+      )}
     </motion.div>
   );
 });

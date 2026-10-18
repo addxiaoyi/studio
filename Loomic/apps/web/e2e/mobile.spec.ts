@@ -39,7 +39,7 @@ test.describe("Mobile (iPhone 14)", () => {
     // Tap on China region
     const chinaBtn = page.getByRole("button", { name: /中国大陆.*CNY/ });
     if (await chinaBtn.count() > 0) {
-      await chinaBtn.first().tap();
+      await chinaBtn.first().click();
       // Packages remain visible
       await expect(page.getByText(/选择你的计划/)).toBeVisible();
     }
@@ -55,6 +55,7 @@ test.describe("Mobile (iPhone 14)", () => {
   });
 
   test("canvas page renders mobile bottom bar (workspace sidebar)", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     // Stub the Supabase session endpoint so AuthContext resolves with a user.
     // Without this, /home redirects to /login in dev (no real session).
     await page.route("**/auth/v1/**", (route) => {
@@ -85,6 +86,44 @@ test.describe("Mobile (iPhone 14)", () => {
         }),
       }),
     );
+    await page.route("**/api/local-auth/session", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ session: { access_token: mockToken, user: { id: "u", email: "u@x.com" } } }),
+      }),
+    );
+    await page.route("**/api/viewer", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          profile: { id: "u", email: "u@x.com", displayName: "Test User" },
+          workspace: { id: "w1", name: "Test", type: "personal", ownerUserId: "u" },
+          membership: { workspaceId: "w1", userId: "u", role: "owner" },
+          isSystemAdmin: false,
+        }),
+      }),
+    );
+    await page.route("**/api/local-auth/session", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ session: { access_token: mockToken, user: { id: "u", email: "u@x.com" } } }),
+      }),
+    );
+    await page.route("**/api/viewer", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          profile: { id: "u", email: "u@x.com", displayName: "Test User" },
+          workspace: { id: "w1", name: "Test", type: "personal", ownerUserId: "u" },
+          membership: { workspaceId: "w1", userId: "u", role: "owner" },
+          isSystemAdmin: false,
+        }),
+      }),
+    );
     await page.route("**/api/credits", (route) =>
       route.fulfill({
         status: 200,
@@ -100,25 +139,48 @@ test.describe("Mobile (iPhone 14)", () => {
       }),
     );
     // Seed the supabase auth cookie so the browser client thinks we're signed in
-    await page.context().addCookies([
-      {
-        name: "sb-localhost-auth-token",
-        value: JSON.stringify({
-          access_token: mockToken,
-          refresh_token: mockRefreshToken,
-          user: { id: "u", email: "u@x.com" },
-          expires_at: Math.floor(Date.now() / 1000) + 3600,
-        }),
-        domain: "localhost",
-        path: "/",
-      },
-    ]);
-
     await page.goto("/home");
     await page.waitForLoadState("networkidle");
 
     // Mobile bottom navigation exists
-    const bottomNav = page.locator("nav[aria-label='Main navigation']").first();
+    const bottomNav = page.locator("nav.fixed.bottom-0.z-40").first();
     await expect(bottomNav).toBeVisible();
+  });
+
+  test("creator workspace shell has no horizontal overflow from 320 to 768px and More closes with Escape", async ({ page }) => {
+    await page.route("**/api/local-auth/session", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ session: { access_token: mockToken, user: { id: "u", email: "u@x.com" } } }),
+    }));
+    await page.route("**/api/viewer", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        profile: { id: "u", email: "u@x.com", displayName: "Test User" },
+        workspace: { id: "w1", name: "Test", type: "personal", ownerUserId: "u" },
+        membership: { workspaceId: "w1", userId: "u", role: "owner" },
+        isSystemAdmin: false,
+      }),
+    }));
+    await page.route("**/api/credits", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ balance: 100, totalToppedUp: 100, totalSpent: 0 }) }));
+    await page.route("**/api/projects", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ projects: [] }) }));
+    await page.route("**/api/home/overview**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ periodDays: 14, activeProjects: 0, monthlyGenerations: 0, teamMembers: 1, daily: [] }) }));
+
+    await page.goto("/home");
+    await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+    for (const width of [320, 390, 768]) {
+      await page.setViewportSize({ width, height: 844 });
+      const dimensions = await page.locator("body").evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
+      expect(dimensions.scrollWidth, `no horizontal overflow at ${width}px`).toBeLessThanOrEqual(dimensions.clientWidth);
+      await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    const more = page.getByRole("button", { name: "更多工作区导航" });
+    await more.click();
+    await expect(page.locator("#workspace-more-navigation")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#workspace-more-navigation")).toHaveCount(0);
+    await expect(more).toBeFocused();
   });
 });

@@ -12,7 +12,7 @@ import {
   type UploadService,
 } from "../features/uploads/upload-service.js";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
-import type { RequestAuthenticator } from "../supabase/user.js";
+import type { RequestAuthenticator } from "../auth/types.js";
 
 const ALLOWED_MIME_TYPES = new Set([
   "image/png",
@@ -21,6 +21,16 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/gif",
   "image/svg+xml",
 ]);
+
+function inferMimeType(fileName: string): string | null {
+  const extension = fileName.toLowerCase().split(".").pop();
+  if (extension === "png") return "image/png";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "webp") return "image/webp";
+  if (extension === "gif") return "image/gif";
+  if (extension === "svg") return "image/svg+xml";
+  return null;
+}
 
 export async function registerUploadRoutes(
   app: FastifyInstance,
@@ -48,8 +58,10 @@ export async function registerUploadRoutes(
         );
       }
 
-      const mimeType = file.mimetype;
-      if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+      const mimeType = file.mimetype === "application/octet-stream" || !file.mimetype
+        ? inferMimeType(file.filename)
+        : file.mimetype;
+      if (!mimeType || !ALLOWED_MIME_TYPES.has(mimeType)) {
         return reply.code(400).send(
           applicationErrorResponseSchema.parse({
             error: {

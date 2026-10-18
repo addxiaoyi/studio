@@ -1,6 +1,8 @@
 // @payments-yeepay — YeePay (易支付) frontend API client
 // China market provider — Native/QR scan pay for credit top-ups
 
+import { getServerBaseUrl } from "./env";
+
 export type YeePayTopupResult = {
   outTradeNo: string;
   qrCodeUrl: string;
@@ -22,7 +24,7 @@ export async function createYeePayTopup(
   packageId: string,
 ): Promise<YeePayTopupResult> {
   const res = await fetch(
-    `${process.env.NEXT_PUBLIC_SERVER_BASE_URL ?? "http://localhost:3001"}/api/yeepay/topup`,
+    `${getServerBaseUrl()}/api/yeepay/topup`,
     {
       method: "POST",
       headers: {
@@ -54,7 +56,7 @@ export async function getYeePayOrderStatus(
   outTradeNo: string,
 ): Promise<YeePayOrderStatus> {
   const res = await fetch(
-    `${process.env.NEXT_PUBLIC_SERVER_BASE_URL ?? "http://localhost:3001"}/api/yeepay/orders/${encodeURIComponent(outTradeNo)}`,
+    `${getServerBaseUrl()}/api/yeepay/orders/${encodeURIComponent(outTradeNo)}`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
     },

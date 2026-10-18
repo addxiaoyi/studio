@@ -39,13 +39,6 @@ function DiscoveryTab({ active, label, onClick }: DiscoveryTabProps) {
   );
 }
 
-function formatMetric(value: number): string {
-  return new Intl.NumberFormat("zh-CN", {
-    notation: value >= 1000 ? "compact" : "standard",
-    maximumFractionDigits: 1,
-  }).format(value);
-}
-
 export function HomeDiscoveryGallery({
   categories,
   onCaseSelect,
@@ -179,10 +172,6 @@ export function HomeDiscoveryGallery({
                 </p>
               </div>
 
-              <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
-                <span>{formatMetric(item.viewCount)} 浏览</span>
-                <span>{formatMetric(item.likeCount)} 赞</span>
-              </div>
             </div>
           </button>
         ))}

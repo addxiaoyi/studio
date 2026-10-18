@@ -2,9 +2,10 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import type { ImageGenerationPreference } from "@helstera/shared";
+import { isNanoImageModelId } from "@helstera/shared";
 
 const STORAGE_KEY = "helstera:image-model-preference";
-const DEFAULT_MODEL = "google/nano-banana-2";
+const DEFAULT_MODEL = "gpt-image-2";
 
 export type ImageModelPreference = ImageGenerationPreference;
 
@@ -53,9 +54,9 @@ function normalizePreference(
   if (!preference) return defaultPreference;
 
   const models = Array.isArray(preference.models)
-    ? preference.models.filter(
+      ? preference.models.filter(
         (model): model is string => typeof model === "string" && model.length > 0,
-      )
+      ).filter((model) => !isNanoImageModelId(model))
     : typeof preference.model === "string" && preference.model.length > 0
       ? [preference.model]
       : defaultPreference.models;

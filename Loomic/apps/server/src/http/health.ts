@@ -30,7 +30,7 @@ export async function registerHealthRoutes(
 
     // Check env-level config presence
     checks.config = {
-      ok: !!(env.supabaseUrl && env.supabaseServiceRoleKey),
+      ok: Boolean(env.databaseUrl && env.storageRoot),
     };
 
     const allOk = Object.values(checks).every((c) => c.ok);

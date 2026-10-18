@@ -56,7 +56,7 @@ LLM Agent
 | `google/nano-banana-2` | Nano Banana 2 | Google | 最多 14 张 | N | 4K |
 | `google/nano-banana` | Nano Banana | Google | 最多 14 张 | N | 2K |
 | `google/imagen-4` | Imagen 4 | Google | **不支持** | Y | 2K |
-| `openai/gpt-image-1.5` | GPT Image 1.5 | OpenAI | 多张 | N | 2K |
+| `openai/gpt-image-1` | GPT Image 1 | OpenAI | 多张 | N | 2K |
 | `black-forest-labs/flux-kontext-max` | Flux Kontext Max | BFL | **仅 1 张** | N | 1K |
 | `black-forest-labs/flux-kontext-pro` | Flux Kontext Pro | BFL | **仅 1 张** | N | 1K |
 | `bytedance/seedream-5-lite` | Seedream 5.0 Lite | ByteDance | 多张 | N | 3K |
@@ -71,7 +71,7 @@ LLM Agent
 | 分组 | Replicate 参数名 | 模型 |
 |---|---|---|
 | **单图** | `input_image` (string) | Flux Kontext Pro/Max |
-| **多图(OpenAI)** | `input_images` (string[]) | GPT Image 1.5 |
+| **多图(OpenAI)** | `input_images` (string[]) | GPT Image 1 |
 | **多图(默认)** | `image_input` (string[]) | Nano Banana 全系列, Seedream 全系列 |
 | **纯文本** | (不传) | Imagen 4, Recraft V3 |
 
@@ -83,7 +83,7 @@ Tool 层的 `standard / hd / ultra` 被翻译为每个模型各自的分辨率�
 |---|---|---|---|---|
 | Nano Banana Pro / 2 | `resolution` | "1K" | "2K" | "4K" |
 | Imagen 4 | `image_size` | "1K" | "2K" | "2K" (封顶) |
-| GPT Image 1.5 | `quality` | "medium" | "high" | "high" (封顶) |
+| GPT Image 1 | `quality` | "medium" | "high" | "high" (封顶) |
 | Seedream 5 Lite | `size` | "2K" | "2K" | "3K" |
 | Seedream 4.5 | `size` | "2K" | "2K" | "4K" |
 | Seedream 4 | `size` | "1K" | "2K" | "4K" |
@@ -94,7 +94,7 @@ Tool 层的 `standard / hd / ultra` 被翻译为每个模型各自的分辨率�
 | 模型 | 处理方式 |
 |---|---|
 | Recraft V3 | 转为像素 `size`（如 `"1024x1024"`），不传 `aspect_ratio` |
-| GPT Image 1.5 | 限制为 `1:1, 3:2, 2:3`，其他比例自动归一化到最近 |
+| GPT Image 1 | 限制为 `1:1, 3:2, 2:3`，其他比例自动归一化到最近 |
 | 其他所有模型 | 直接传 `aspect_ratio` |
 
 #### Output Format 支持

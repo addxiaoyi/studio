@@ -28,11 +28,21 @@ export async function runProjectSearch(
   backend: BackendProtocol,
   input: ProjectSearchInput,
 ): Promise<ProjectSearchResult> {
-  const rawMatches = await backend.grepRaw(
-    input.query,
-    DEFAULT_SEARCH_ROOT,
-    input.glob ?? null,
-  );
+  let rawMatches: Awaited<ReturnType<BackendProtocol["grepRaw"]>>;
+  try {
+    rawMatches = await backend.grepRaw(
+      input.query,
+      DEFAULT_SEARCH_ROOT,
+      input.glob ?? null,
+    );
+  } catch (error) {
+    console.warn("[project-search] search failed; continuing without workspace results", error);
+    return {
+      matchCount: 0,
+      matches: [],
+      summary: "Workspace search is temporarily unavailable. Continue without search results.",
+    };
+  }
 
   if (typeof rawMatches === "string") {
     return {
@@ -61,7 +71,7 @@ export async function runProjectSearch(
     matches: limitedMatches.map((match) => ({
       line: match.line,
       path: match.path,
-      text: match.text,
+      text: match.text.length > 240 ? `${match.text.slice(0, 237)}...` : match.text,
     })),
     summary:
       matchCount === 0

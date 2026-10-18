@@ -7,6 +7,7 @@ import {
   Circle,
   Hand,
   ImageUp,
+  Layers3,
   Minus,
   MousePointer2,
   Pencil,
@@ -29,9 +30,12 @@ import {
   type VideoGeneratorData,
 } from "../lib/canvas-video-generator";
 import { isVideoUrl } from "../lib/canvas-elements";
+import { createExcalidrawImageElement } from "../lib/canvas-elements";
 import { ImageGeneratorPanel } from "./canvas/image-generator-panel";
 import { VideoGeneratorPanel } from "./canvas/video-generator-panel";
 import { VideoPlayerPanel } from "./canvas/video-player-panel";
+import { t, useLocale } from "../lib/i18n";
+import { useToast } from "./toast";
 
 type ToolType =
   | "hand"
@@ -58,7 +62,10 @@ const TOOL_GROUPS: (ToolType | null)[] = [
   "image",
 ];
 
-const TOOL_ICONS: Record<ToolType, React.ComponentType<{ className?: string }>> = {
+const TOOL_ICONS: Record<
+  ToolType,
+  React.ComponentType<{ className?: string }>
+> = {
   hand: Hand,
   selection: MousePointer2,
   rectangle: Square,
@@ -68,18 +75,6 @@ const TOOL_ICONS: Record<ToolType, React.ComponentType<{ className?: string }>> 
   freedraw: Pencil,
   text: Type,
   image: ImageUp,
-};
-
-const TOOL_LABELS: Record<ToolType, string> = {
-  hand: "拖拽画布 (H)",
-  selection: "选择 (V)",
-  rectangle: "矩形 (R)",
-  ellipse: "椭圆 (O)",
-  arrow: "箭头 (A)",
-  line: "直线 (L)",
-  freedraw: "画笔 (P)",
-  text: "文字 (T)",
-  image: "图片 (9)",
 };
 
 type CanvasToolMenuProps = {
@@ -126,7 +121,12 @@ const GeneratingOverlay = memo(function GeneratingOverlay({
         </svg>
         {model && (
           <span className="mt-2 rounded-full bg-foreground/5 px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-            {model.split("/").pop()?.split("-").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}
+            {model
+              .split("/")
+              .pop()
+              ?.split("-")
+              .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+              .join(" ")}
           </span>
         )}
         <span className="mt-1 text-[11px] text-muted-foreground">
@@ -146,12 +146,25 @@ const GeneratingOverlay = memo(function GeneratingOverlay({
   );
 });
 
-export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: CanvasToolMenuProps) {
+export function CanvasToolMenu({
+  accessToken,
+  excalidrawApi,
+  leftPanelOpen,
+}: CanvasToolMenuProps) {
+  const locale = useLocale();
+  const copy = t(locale).canvas;
+  const { success: toastSuccess } = useToast();
   const [activeTool, setActiveTool] = useState<string>("selection");
+  const [selectedGeneratedImage, setSelectedGeneratedImage] = useState<any>(null);
+  const [decomposing, setDecomposing] = useState(false);
 
   // Image generator state
-  const [activeGeneratorId, setActiveGeneratorId] = useState<string | null>(null);
-  const [generatorData, setGeneratorData] = useState<ImageGeneratorData | null>(null);
+  const [activeGeneratorId, setActiveGeneratorId] = useState<string | null>(
+    null,
+  );
+  const [generatorData, setGeneratorData] = useState<ImageGeneratorData | null>(
+    null,
+  );
   const [generatorBounds, setGeneratorBounds] = useState<{
     x: number;
     y: number;
@@ -161,7 +174,9 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
 
   // Video generator state
   const [activeVideoGenId, setActiveVideoGenId] = useState<string | null>(null);
-  const [videoGenData, setVideoGenData] = useState<VideoGeneratorData | null>(null);
+  const [videoGenData, setVideoGenData] = useState<VideoGeneratorData | null>(
+    null,
+  );
   const [videoGenBounds, setVideoGenBounds] = useState<{
     x: number;
     y: number;
@@ -170,7 +185,9 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
   } | null>(null);
 
   // Video player state (for completed video elements)
-  const [activeVideoPlayerId, setActiveVideoPlayerId] = useState<string | null>(null);
+  const [activeVideoPlayerId, setActiveVideoPlayerId] = useState<string | null>(
+    null,
+  );
   const [videoPlayerData, setVideoPlayerData] = useState<{
     videoUrl: string;
     mimeType: string;
@@ -178,7 +195,10 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
     title?: string;
   } | null>(null);
   const [videoPlayerBounds, setVideoPlayerBounds] = useState<{
-    x: number; y: number; width: number; height: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
   } | null>(null);
 
   const [canvasScrollZoom, setCanvasScrollZoom] = useState({
@@ -233,14 +253,20 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
       (elements: any[], appState: any) => {
         // --- Tool sync (cheap string comparison, skip if unchanged) ---
         const tool = appState?.activeTool?.type;
-        if (tool) setActiveTool((prev: string) => prev === tool ? prev : tool);
+        if (tool)
+          setActiveTool((prev: string) => (prev === tool ? prev : tool));
 
         const scrollX = appState?.scrollX ?? 0;
         const scrollY = appState?.scrollY ?? 0;
         const zoom = appState?.zoom?.value ?? 1;
         // Only update scroll/zoom state if values actually changed
         setCanvasScrollZoom((prev) => {
-          if (prev.scrollX === scrollX && prev.scrollY === scrollY && prev.zoom === zoom) return prev;
+          if (
+            prev.scrollX === scrollX &&
+            prev.scrollY === scrollY &&
+            prev.zoom === zoom
+          )
+            return prev;
           return { scrollX, scrollY, zoom };
         });
 
@@ -249,6 +275,8 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
         const selectedElements = elements.filter(
           (el: any) => selectedIds[el.id] && !el.isDeleted,
         );
+        const editableImage = selectedElements.length === 1 && selectedElements[0].type === "image" && selectedElements[0].customData?.source === "generated" ? selectedElements[0] : null;
+        setSelectedGeneratedImage((current: any) => current?.id === editableImage?.id ? current : editableImage);
 
         const currentId = activeGeneratorIdRef.current;
         const currentVideoId = activeVideoGenIdRef.current;
@@ -262,25 +290,45 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
               const data = getImageGeneratorData(sel);
               setActiveGeneratorId(sel.id as string);
               setGeneratorData(data);
-              if (currentVideoId) { setActiveVideoGenId(null); setVideoGenData(null); setVideoGenBounds(null); }
-              if (activeVideoPlayerIdRef.current) { setActiveVideoPlayerId(null); setVideoPlayerData(null); setVideoPlayerBounds(null); }
+              if (currentVideoId) {
+                setActiveVideoGenId(null);
+                setVideoGenData(null);
+                setVideoGenBounds(null);
+              }
+              if (activeVideoPlayerIdRef.current) {
+                setActiveVideoPlayerId(null);
+                setVideoPlayerData(null);
+                setVideoPlayerBounds(null);
+              }
             }
             // Always update bounds (element may have been moved/resized)
             setGeneratorBounds({
-              x: sel.x as number, y: sel.y as number,
-              width: sel.width as number, height: sel.height as number,
+              x: sel.x as number,
+              y: sel.y as number,
+              width: sel.width as number,
+              height: sel.height as number,
             });
           } else if (isVideoGeneratorElement(sel)) {
             if (currentVideoId !== sel.id) {
               const data = getVideoGeneratorData(sel);
               setActiveVideoGenId(sel.id as string);
               setVideoGenData(data);
-              if (currentId) { setActiveGeneratorId(null); setGeneratorData(null); setGeneratorBounds(null); }
-              if (activeVideoPlayerIdRef.current) { setActiveVideoPlayerId(null); setVideoPlayerData(null); setVideoPlayerBounds(null); }
+              if (currentId) {
+                setActiveGeneratorId(null);
+                setGeneratorData(null);
+                setGeneratorBounds(null);
+              }
+              if (activeVideoPlayerIdRef.current) {
+                setActiveVideoPlayerId(null);
+                setVideoPlayerData(null);
+                setVideoPlayerBounds(null);
+              }
             }
             setVideoGenBounds({
-              x: sel.x as number, y: sel.y as number,
-              width: sel.width as number, height: sel.height as number,
+              x: sel.x as number,
+              y: sel.y as number,
+              width: sel.width as number,
+              height: sel.height as number,
             });
           } else if (
             sel.type === "embeddable" &&
@@ -293,18 +341,30 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
                 videoUrl: videoLink,
                 mimeType: (sel.customData?.mimeType as string) ?? "video/mp4",
                 ...(sel.customData?.durationSeconds != null
-                  ? { durationSeconds: sel.customData.durationSeconds as number }
+                  ? {
+                      durationSeconds: sel.customData.durationSeconds as number,
+                    }
                   : {}),
                 ...(sel.customData?.title != null
                   ? { title: sel.customData.title as string }
                   : {}),
               });
-              if (currentId) { setActiveGeneratorId(null); setGeneratorData(null); setGeneratorBounds(null); }
-              if (currentVideoId) { setActiveVideoGenId(null); setVideoGenData(null); setVideoGenBounds(null); }
+              if (currentId) {
+                setActiveGeneratorId(null);
+                setGeneratorData(null);
+                setGeneratorBounds(null);
+              }
+              if (currentVideoId) {
+                setActiveVideoGenId(null);
+                setVideoGenData(null);
+                setVideoGenBounds(null);
+              }
             }
             setVideoPlayerBounds({
-              x: sel.x as number, y: sel.y as number,
-              width: sel.width as number, height: sel.height as number,
+              x: sel.x as number,
+              y: sel.y as number,
+              width: sel.width as number,
+              height: sel.height as number,
             });
           } else {
             // Neither generator nor video player -- close all if any was open
@@ -329,9 +389,9 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
         );
 
         // Quick identity check: IDs + positions as a serialized key
-        const genKey = generatingRaw.map((el: any) =>
-          `${el.id}:${el.x}:${el.y}:${el.width}:${el.height}`
-        ).join("|");
+        const genKey = generatingRaw
+          .map((el: any) => `${el.id}:${el.x}:${el.y}:${el.width}:${el.height}`)
+          .join("|");
 
         if (genKey !== prevGeneratingKeyRef.current) {
           prevGeneratingKeyRef.current = genKey;
@@ -341,7 +401,9 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
             screenY: ((el.y as number) + scrollY) * zoom,
             screenW: (el.width as number) * zoom,
             screenH: (el.height as number) * zoom,
-            ...(el.customData?.model ? { model: el.customData.model as string } : {}),
+            ...(el.customData?.model
+              ? { model: el.customData.model as string }
+              : {}),
           }));
           setGeneratingElements(generating);
         }
@@ -378,7 +440,8 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
         height: el.height as number,
       });
     }
-  }, [excalidrawApi]);
+    toastSuccess("已在画布中添加图片生成器");
+  }, [excalidrawApi, toastSuccess]);
 
   const handleCloseGenerator = useCallback(() => {
     setActiveGeneratorId(null);
@@ -407,7 +470,8 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
         height: el.height as number,
       });
     }
-  }, [excalidrawApi]);
+    toastSuccess("已在画布中添加视频生成器");
+  }, [excalidrawApi, toastSuccess]);
 
   const handleCloseVideoGenerator = useCallback(() => {
     setActiveVideoGenId(null);
@@ -420,6 +484,35 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
     setVideoPlayerData(null);
     setVideoPlayerBounds(null);
   }, []);
+
+  const handleDecompose = useCallback(async () => {
+    if (!selectedGeneratedImage || decomposing) return;
+    const file = excalidrawApi.getFiles?.()[selectedGeneratedImage.fileId];
+    if (!file?.dataURL) return;
+    setDecomposing(true);
+    try {
+      const response = await fetch("/api/canvas/decompose-image", { method: "POST", credentials: "include", headers: { "content-type": "application/json", Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ imageDataUrl: file.dataURL, width: selectedGeneratedImage.width, height: selectedGeneratedImage.height }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error?.message ?? "图片拆层失败");
+      const assets = Array.isArray(result.assets) ? result.assets : [];
+      if (!assets.length) throw new Error("没有识别到可拆分元素");
+      const image = new Image(); image.src = file.dataURL; await image.decode();
+      const additions: any[] = [];
+      const files: any[] = [];
+      for (const asset of assets) {
+        const box = asset.bbox ?? asset.placement;
+        if (!box?.width || !box?.height) continue;
+        const canvas = document.createElement("canvas"); canvas.width = box.width; canvas.height = box.height;
+        canvas.getContext("2d")?.drawImage(image, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
+        const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2,10)}`;
+        files.push({ id, dataURL: canvas.toDataURL("image/png"), mimeType: "image/png", created: Date.now() });
+        additions.push(createExcalidrawImageElement({ fileId: id, x: selectedGeneratedImage.x + box.x, y: selectedGeneratedImage.y + box.y, width: box.width, height: box.height, title: asset.name ?? "可编辑图层", source: "generated" }));
+      }
+      excalidrawApi.addFiles(files);
+      excalidrawApi.updateScene({ elements: excalidrawApi.getSceneElements().map((el:any)=>el.id===selectedGeneratedImage.id?{...el,locked:true}:el).concat(additions), appState: { selectedElementIds: Object.fromEntries(additions.map((el:any)=>[el.id,true])) }, captureUpdate: "IMMEDIATELY" });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "图片拆层失败"); }
+    finally { setDecomposing(false); }
+  }, [accessToken, decomposing, excalidrawApi, selectedGeneratedImage]);
 
   return (
     <>
@@ -434,22 +527,20 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
         {TOOL_GROUPS.map((tool, i) => {
           if (tool === null) {
             return (
-              <div
-                key={`sep-${i}`}
-                className="mx-0.5 h-6 w-px bg-border"
-              />
+              <div key={`sep-${i}`} className="mx-0.5 h-6 w-px bg-border" />
             );
           }
 
           const Icon = TOOL_ICONS[tool];
           const isActive = activeTool === tool;
 
+          const label = copy.tools[tool];
           return (
             <button
               key={tool}
               type="button"
-              title={TOOL_LABELS[tool]}
-              aria-label={TOOL_LABELS[tool]}
+              title={label}
+              aria-label={label}
               onMouseDown={(e) => {
                 e.preventDefault();
                 handleToolChange(tool);
@@ -471,8 +562,8 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
         {/* AI Image -- creates a placeholder on canvas */}
         <button
           type="button"
-          title="AI 生成图片"
-          aria-label="AI 生成图片"
+          title={copy.tools.imageAi}
+          aria-label={copy.tools.imageAi}
           onClick={handleCreateImageGenerator}
           className={`flex items-center justify-center h-8 w-8 rounded-lg transition-all duration-300 cursor-pointer focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 outline-none ${
             activeGeneratorId
@@ -483,11 +574,13 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
           <Sparkles className="size-[16px]" />
         </button>
 
+        {selectedGeneratedImage && <button type="button" title={copy.tools.decompose} aria-label={copy.tools.decompose} onClick={handleDecompose} disabled={decomposing} className="flex h-8 w-8 items-center justify-center rounded-lg text-foreground/70 hover:bg-foreground/[0.04] disabled:opacity-40"><Layers3 className="size-[16px]" /></button>}
+
         {/* AI Video -- creates a placeholder on canvas */}
         <button
           type="button"
-          title="AI 生成视频"
-          aria-label="AI 生成视频"
+          title={copy.tools.videoAi}
+          aria-label={copy.tools.videoAi}
           onClick={handleCreateVideoGenerator}
           className={`flex items-center justify-center h-8 w-8 rounded-lg transition-all duration-300 cursor-pointer focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 outline-none ${
             activeVideoGenId
@@ -532,8 +625,12 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
           elementBounds={videoPlayerBounds}
           videoUrl={videoPlayerData.videoUrl}
           mimeType={videoPlayerData.mimeType}
-          {...(videoPlayerData.durationSeconds != null ? { durationSeconds: videoPlayerData.durationSeconds } : {})}
-          {...(videoPlayerData.title != null ? { title: videoPlayerData.title } : {})}
+          {...(videoPlayerData.durationSeconds != null
+            ? { durationSeconds: videoPlayerData.durationSeconds }
+            : {})}
+          {...(videoPlayerData.title != null
+            ? { title: videoPlayerData.title }
+            : {})}
           canvasScrollZoom={canvasScrollZoom}
           onClose={handleCloseVideoPlayer}
         />
@@ -549,7 +646,6 @@ export function CanvasToolMenu({ accessToken, excalidrawApi, leftPanelOpen }: Ca
           </>,
           document.body,
         )}
-
     </>
   );
 }

@@ -6,6 +6,9 @@ const KNOWN_RATIOS: Record<string, { width: number; height: number }> = {
   "3:4": { width: 768, height: 1024 },
 };
 
+const INPUT_FETCH_TIMEOUT_MS = 30_000;
+const MAX_INPUT_BYTES = 25 * 1024 * 1024;
+
 function roundTo64(value: number): number {
   return Math.round(value / 64) * 64;
 }
@@ -54,7 +57,11 @@ export async function fetchAsBase64(
   // HTTP(S) URL — fetch and convert.
   let response: Response;
   try {
-    response = await fetch(url);
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("Reference image URL must use HTTP or HTTPS");
+    }
+    response = await fetch(url, { signal: AbortSignal.timeout(INPUT_FETCH_TIMEOUT_MS) });
   } catch (err) {
     throw new GenerationError(
       providerName,
@@ -71,7 +78,23 @@ export async function fetchAsBase64(
     );
   }
 
+  const contentLength = Number(response.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_INPUT_BYTES) {
+    throw new GenerationError(
+      providerName,
+      "input_fetch_error",
+      `Reference image exceeds the ${MAX_INPUT_BYTES} byte limit`,
+    );
+  }
+
   const buffer = await response.arrayBuffer();
+  if (buffer.byteLength > MAX_INPUT_BYTES) {
+    throw new GenerationError(
+      providerName,
+      "input_fetch_error",
+      `Reference image exceeds the ${MAX_INPUT_BYTES} byte limit`,
+    );
+  }
   const data = Buffer.from(buffer).toString("base64");
   const mimeType = response.headers.get("content-type") ?? "application/octet-stream";
 

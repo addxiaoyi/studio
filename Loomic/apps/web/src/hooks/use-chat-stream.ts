@@ -10,6 +10,12 @@ type MessageUpdater = (
   updater: (prev: Message[]) => Message[],
 ) => void;
 
+function hideRawThinkingTags(text: string): string {
+  return text.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "").replace(/<\/?think>/gi, "");
+}
+
+export { hideRawThinkingTags };
+
 /**
  * Extracts the stream event handling logic into a reusable hook.
  * Used by both the main send flow and the reconnection resume flow,
@@ -44,8 +50,8 @@ export function useChatStream(updateSessionMessages: MessageUpdater) {
       switch (event.type) {
         case "message.delta": {
           // Skip truly empty deltas -- they cause unnecessary re-renders
-          const delta = event.delta;
-          if (delta === undefined || delta === null) break;
+          const delta = hideRawThinkingTags(event.delta ?? "");
+          if (!delta) break;
 
           update((prev) =>
             prev.map((m) => {
@@ -155,16 +161,19 @@ export function useChatStream(updateSessionMessages: MessageUpdater) {
                   ? { ...block, status: "completed" as const, outputSummary: "\u5904\u7406\u5931\u8d25" }
                   : block,
               );
-              const hasText = blocks.some((b) => b.type === "text");
+              const failureText = `${event.error.message}${event.error.retryable ? "\n\n你可以点击“重试本次任务”，或稍后再试。" : "\n\n本次任务未完成，请检查参数后重新提交。"}`;
+              const hasFailureText = blocks.some(
+                (b) => b.type === "text" && b.text.includes(event.error.message),
+              );
               return {
                 ...m,
-                contentBlocks: hasText
+                contentBlocks: hasFailureText
                   ? blocks
                   : [
                       ...blocks,
                       {
                         type: "text" as const,
-                        text: "\u62b1\u6b49\uff0c\u5904\u7406\u8fc7\u7a0b\u4e2d\u9047\u5230\u95ee\u9898\uff0c\u8bf7\u91cd\u8bd5\u3002",
+                        text: failureText,
                       },
                     ],
               };
@@ -186,6 +195,29 @@ export function useChatStream(updateSessionMessages: MessageUpdater) {
                 contentBlocks: m.contentBlocks.map((block) =>
                   block.type === "tool" && block.status === "running"
                     ? { ...block, status: "completed" as const }
+                    : block,
+                ),
+              };
+            }),
+          );
+          break;
+
+        case "run.completed":
+          update((prev) =>
+            prev.map((m) => {
+              if (m.id !== assistantId) return m;
+              return {
+                ...m,
+                contentBlocks: m.contentBlocks.map((block) =>
+                  block.type === "tool" && block.status === "running"
+                    ? {
+                        ...block,
+                        status: "completed" as const,
+                        output: {
+                          error: "任务已结束，但未返回生成结果。请重新提交一次。",
+                        },
+                        outputSummary: "未返回结果",
+                      }
                     : block,
                 ),
               };

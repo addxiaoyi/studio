@@ -1,49 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
-import { Settings, Zap, Shield, Clock } from "lucide-react";
+import { ArrowUpRight, Settings, Zap, Shield, Clock } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 import { useCredits } from "@/hooks/use-credits";
 import { createEpayTopup, isEpayEnabled } from "@/lib/credits-api";
 import { TOPUP_PACKAGES, type TopupPackage } from "@helstera/shared";
-import { YeePayCheckoutDialog } from "@/components/yeepay-checkout-dialog";
 
 import { PricingNav } from "./components/pricing-nav";
 import { PricingHero } from "./components/pricing-hero";
 import { PricingFAQ } from "./components/pricing-faq";
 import { TopupPackages } from "./components/topup-packages";
 
-type PaymentRegion = "international" | "china";
-
-function detectRegion(): PaymentRegion {
-  if (typeof window === "undefined") return "international";
-  const lang = window.navigator?.language ?? "";
-  if (lang.toLowerCase().startsWith("zh")) return "china";
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (tz.toLowerCase().includes("shanghai") || tz === "Asia/Chongqing") {
-      return "china";
-    }
-  } catch {
-    // ignore
-  }
-  return "international";
-}
+type PaymentRegion = "china";
 
 export default function PricingPage() {
-  const [region, setRegion] = useState<PaymentRegion>("international");
-  const [yeepayOpen, setYeepayOpen] = useState(false);
-  const [activePackage, setActivePackage] = useState<TopupPackage | null>(null);
+  const region: PaymentRegion = "china";
   const [loadingPackageId, setLoadingPackageId] = useState<string | null>(null);
 
-  useEffect(() => {
-    setRegion(detectRegion());
-  }, []);
-
   const { session } = useAuth();
-  const { balance, refresh: refreshCredits } = useCredits();
+  const { balance } = useCredits();
 
   // Only the enabled CNY channel can create a real top-up order.
   const handleSelectPackage = useCallback(
@@ -55,19 +33,13 @@ export default function PricingPage() {
       }
 
       setLoadingPackageId(pkg.id);
-      setActivePackage(pkg);
 
       try {
-        if (region === "china") {
-          if (isEpayEnabled()) {
-            const { checkoutUrl } = await createEpayTopup(token, pkg.id);
-            window.location.assign(checkoutUrl);
-          } else {
-            setYeepayOpen(true);
-          }
+        if (region === "china" && isEpayEnabled()) {
+          const { checkoutUrl } = await createEpayTopup(token, pkg.id, "alipay");
+          window.location.assign(checkoutUrl);
         } else {
           alert("国际支付渠道正在接入中，请切换为中国大陆 (CNY)。");
-          setActivePackage(null);
         }
       } catch (err) {
         console.error("[pricing] Topup order failed:", err);
@@ -76,17 +48,8 @@ export default function PricingPage() {
         setLoadingPackageId(null);
       }
     },
-    [session?.access_token, region],
+    [session?.access_token],
   );
-
-  const handleYeePaySuccess = useCallback(() => {
-    refreshCredits();
-  }, [refreshCredits]);
-
-  const handleYeePayClose = useCallback(() => {
-    setYeepayOpen(false);
-    setActivePackage(null);
-  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -101,9 +64,9 @@ export default function PricingPage() {
             <div className="inline-flex items-center gap-1 rounded-full glass-soft border border-border/40 p-1 text-xs">
               <button
                 type="button"
-                onClick={() => setRegion("international")}
+                disabled
                 className={`rounded-full px-3 py-1.5 transition-all duration-200 ${
-                  region === "international"
+                  false
                     ? "bg-foreground text-background font-medium"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -112,7 +75,7 @@ export default function PricingPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setRegion("china")}
+                disabled
                 className={`rounded-full px-3 py-1.5 transition-all duration-200 ${
                   region === "china"
                     ? "bg-foreground text-background font-medium"
@@ -153,6 +116,20 @@ export default function PricingPage() {
             onSelect={handleSelectPackage}
             loadingPackageId={loadingPackageId}
           />
+        </section>
+
+        <section className="border-y border-border/60 px-6 py-8">
+          <div className="mx-auto flex max-w-6xl flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">PRICE TRANSPARENCY</p>
+              <h2 className="mt-2 text-xl font-medium tracking-tight">先对比模型，再决定怎么用</h2>
+              <p className="mt-1 text-sm text-muted-foreground">查看官方 API 计费单位、Helstera credits 参考和价格来源。</p>
+            </div>
+            <Link href="/model-pricing/" className="inline-flex h-10 w-fit items-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-muted">
+              查看模型价格
+              <ArrowUpRight className="size-4" aria-hidden="true" />
+            </Link>
+          </div>
         </section>
 
         {/* Trust pillars */}
@@ -202,21 +179,6 @@ export default function PricingPage() {
         <PricingFAQ />
       </main>
 
-      {/* YeePay dialog (China only) */}
-      {session?.access_token && activePackage && (
-        <YeePayCheckoutDialog
-          open={yeepayOpen}
-          onOpenChange={(open) => {
-            setYeepayOpen(open);
-            if (!open) handleYeePayClose();
-          }}
-          packageId={activePackage.id}
-          packageLabel={activePackage.name}
-          amountCnyFen={activePackage.priceCnyFen}
-          accessToken={session.access_token}
-          onSuccess={handleYeePaySuccess}
-        />
-      )}
     </div>
   );
 }

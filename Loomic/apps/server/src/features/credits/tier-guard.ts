@@ -9,9 +9,14 @@ import type {
 import {
   calculateImageCost,
   calculateVideoCost,
+  CONFIGURED_PRICE_MULTIPLIER,
+  calculateConfiguredVideoPricePerSecond,
+  getConfiguredBilling,
+  TOKEN_BILLING_RESERVE_CREDITS,
 } from "@helstera/shared";
 
-import type { AdminSupabaseClient } from "../../supabase/admin.js";
+import type { DataAdminClient } from "../../auth/types.js";
+import type { Pool } from "pg";
 
 /**
  * Default maximum concurrent jobs per workspace.
@@ -26,7 +31,7 @@ export type TierGuard = CostGuard;
 
 export type CostGuard = {
   /** No-op: all models are accessible in the top-up system. */
-  checkModelAccess(modelId: string): void;
+  checkModelAccess(modelId: string): Promise<void>;
   /** No-op: any quality is available. */
   checkResolution(quality: ImageQualityLevel): void;
   /** No-op: any video resolution is available. */
@@ -42,16 +47,16 @@ export type CostGuard = {
       duration?: number;
       resolution?: VideoResolution;
     },
-  ): number;
+  ): Promise<number>;
 };
 
 // ── Factory ──────────────────────────────────────────────────
 
 export function createCostGuard(options: {
-  getAdminClient: () => AdminSupabaseClient;
+  getAdminClient: () => DataAdminClient;
 }): CostGuard {
   return {
-    checkModelAccess() {
+    async checkModelAccess() {
       // No-op: all models are accessible in the top-up system
     },
 
@@ -87,7 +92,7 @@ export function createCostGuard(options: {
       }
     },
 
-    calculateCreditCost(modelId, jobType, params) {
+    async calculateCreditCost(modelId, jobType, params) {
       if (jobType === "image_generation") {
         const quality: ImageQualityLevel = params?.quality ?? "hd";
         return calculateImageCost(modelId, quality);
@@ -98,6 +103,43 @@ export function createCostGuard(options: {
         params?.resolution,
         params?.duration,
       );
+    },
+  };
+}
+
+export function createLocalCostGuard(db: Pool): CostGuard {
+  return {
+    async checkModelAccess() {
+      // Package/tier restrictions are removed. Provider health and balance
+      // checks remain enforced by the route and job executor.
+    },
+    checkResolution() {},
+    checkVideoResolution() {},
+    async checkConcurrency(workspaceId) {
+      const { rows } = await db.query<{ count: number }>(
+        `select count(*)::int as count from background_jobs
+          where workspace_id = $1 and status in ('queued', 'running')`,
+        [workspaceId],
+      );
+      const activeCount = rows[0]?.count ?? 0;
+      if (activeCount >= DEFAULT_MAX_CONCURRENT_JOBS) {
+        throw new TierGuardError(
+          "concurrency_limit",
+          `Concurrent job limit reached (${activeCount}/${DEFAULT_MAX_CONCURRENT_JOBS}). Please wait for a job to finish.`,
+          429,
+        );
+      }
+    },
+    async calculateCreditCost(modelId, jobType, params) {
+      const { rows } = await db.query<{ billing_unit: string; price_credits: number; input_token_price_cny: number | null; output_token_price_cny: number | null }>(
+        "select pm.billing_unit,pm.price_credits::float8,pm.input_token_price_cny::float8,pm.output_token_price_cny::float8 from provider_models pm join provider_configs pc on pc.id=pm.provider_id where pm.model_id=$1 and pm.enabled=true and pc.enabled=true and pc.health_status='healthy' order by pm.priority,pc.latency_ms nulls last limit 1",
+        [modelId],
+      );
+      const row = rows[0];
+      if (!row) return 1;
+      if (row.billing_unit === "per_million_tokens") return TOKEN_BILLING_RESERVE_CREDITS;
+      if (row.billing_unit === "per_second") return Number(row.price_credits) * (params?.duration ?? 1);
+      return Number(row.price_credits) * CONFIGURED_PRICE_MULTIPLIER;
     },
   };
 }

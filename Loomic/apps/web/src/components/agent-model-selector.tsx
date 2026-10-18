@@ -3,9 +3,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAgentModel } from "@/hooks/use-agent-model";
-import { fetchModels } from "@/lib/server-api";
+import { useAuth } from "@/lib/auth-context";
+import { fetchModels, fetchWorkspaceSettings } from "@/lib/server-api";
+import { getAgentMessagePrice } from "@helstera/shared";
 
 type ModelOption = { id: string; name: string; provider: string };
+const ALLOWED_MODEL_IDS = new Set(["hy4-preview-f", "hy3-x", "deepseek-v4-pro", "auto", "openai:hy4-preview-f", "openai:hy3-x", "openai:deepseek-v4-pro", "openai:auto"]);
+const DEFAULT_AGENT_MODEL = "openai:auto";
+const PUBLIC_AGENT_NAME = "HelsterAgent";
+
+function messagePriceLabel(modelId: string) {
+  return `¥${getAgentMessagePrice(modelId).toFixed(2)}/条消息`;
+}
 
 // Sparkle icon SVG path from design spec
 const SPARKLE_ICON_PATH =
@@ -34,17 +43,28 @@ function ProviderLogo({ provider }: { provider: string }) {
 
 export function AgentModelSelector({ compact }: { compact?: boolean } = {}) {
   const { model, setModel } = useAgentModel();
+  const { session } = useAuth();
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<ModelOption[]>([]);
+  const [workspaceModel, setWorkspaceModel] = useState<string | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   // Fetch available models
   useEffect(() => {
-    fetchModels()
-      .then((data) => setModels(data.models))
+    const token = session?.access_token;
+    Promise.all([fetchModels(), token ? fetchWorkspaceSettings(token) : Promise.resolve(null)])
+      .then(([data, settingsResponse]) => {
+        const visible = data.models.filter((item) => ALLOWED_MODEL_IDS.has(item.id));
+        const configured = settingsResponse?.settings.chatModel ?? settingsResponse?.settings.defaultModel ?? null;
+        setWorkspaceModel(configured);
+        if (configured && !visible.some((item) => item.id.replace(/^openai:/, "") === configured.replace(/^openai:/, ""))) {
+          visible.unshift({ id: configured.includes(":") ? configured : `openai:${configured}`, name: PUBLIC_AGENT_NAME, provider: "workspace" });
+        }
+        setModels(visible);
+      })
       .catch(() => {});
-  }, []);
+  }, [session?.access_token]);
 
   // Close on outside click
   useEffect(() => {
@@ -75,7 +95,11 @@ export function AgentModelSelector({ compact }: { compact?: boolean } = {}) {
 
   const isActive = model !== null;
   const selectedModel = models.find((m) => m.id === model);
-  const displayLabel = selectedModel ? selectedModel.name : "Agent";
+  const displayLabel = selectedModel
+    ? `${PUBLIC_AGENT_NAME} · ${messagePriceLabel(selectedModel.id)}`
+    : workspaceModel
+      ? `${PUBLIC_AGENT_NAME} · ${messagePriceLabel(workspaceModel)}`
+      : `${PUBLIC_AGENT_NAME} · ${messagePriceLabel(DEFAULT_AGENT_MODEL)}`;
 
   // Auto-positioning popover (above or below based on available space)
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
@@ -138,12 +162,12 @@ export function AgentModelSelector({ compact }: { compact?: boolean } = {}) {
           <div
             ref={popoverRef}
             style={popoverStyle}
-            className="w-56 rounded-2xl glass-strong border border-border/40 p-2 shadow-card-hover"
+            className="w-56 rounded-2xl border border-border/60 bg-background/95 p-2 shadow-2xl backdrop-blur-xl"
           >
             <div className="mb-2 px-2 text-xs font-medium text-muted-foreground">
               Agent Model
             </div>
-            {/* Auto option */}
+            {/* Auto keeps the workspace default within the allowed model set. */}
             <button
               type="button"
               onClick={() => {
@@ -156,9 +180,8 @@ export function AgentModelSelector({ compact }: { compact?: boolean } = {}) {
                   : "hover:bg-foreground/[0.04]"
               }`}
             >
-              <span className="flex-1 text-left">
-                Auto (workspace default)
-              </span>
+              <span className="flex-1 text-left">{PUBLIC_AGENT_NAME}</span>
+              <span className="text-[10px] text-muted-foreground">💬 {messagePriceLabel(DEFAULT_AGENT_MODEL)}</span>
               {!isActive && (
                 <svg
                   className="h-3 w-3 text-accent-foreground"
@@ -195,7 +218,10 @@ export function AgentModelSelector({ compact }: { compact?: boolean } = {}) {
                           : "hover:bg-foreground/[0.04]"
                       }`}
                     >
-                      <span className="flex-1 text-left">{m.name}</span>
+                      <span className="min-w-0 flex-1 text-left">
+                        <span className="block truncate">{PUBLIC_AGENT_NAME}</span>
+                      </span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">💬 {messagePriceLabel(m.id)}</span>
                       {model === m.id && (
                         <svg
                           className="h-3 w-3 text-accent-foreground"

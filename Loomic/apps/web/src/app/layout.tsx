@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import Script from "next/script";
 import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
+import { getServerPreconnectUrl } from "@/lib/env";
 
 import { Providers } from "../components/providers";
 import { PWAInstallPrompt } from "../components/pwa-install-prompt";
@@ -119,21 +120,12 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  const apiPreconnect = getServerPreconnectUrl();
   return (
     <html lang="zh-CN" className={cn(geist.variable, "scroll-smooth")} suppressHydrationWarning>
       <head>
-        {/* Performance: preconnect to API + Supabase origins */}
-        <link rel="preconnect" href={process.env.NEXT_PUBLIC_SERVER_BASE_URL ?? "http://localhost:3001"} />
-        <link rel="preconnect" href={process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://*.supabase.co"} />
+        {apiPreconnect ? <link rel="preconnect" href={apiPreconnect} /> : null}
         <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
-
-        {/* Performance: preload LCP image (Hero mockup) */}
-        <link
-          rel="preload"
-          as="image"
-          href="/images/showcase/showcase-12.jpg"
-          fetchPriority="high"
-        />
 
         {/* Theme color hint — must match <body> before paint */}
         <meta name="theme-color" content="#fbfaf8" media="(prefers-color-scheme: light)" />
@@ -203,15 +195,19 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           src="https://app.lemonsqueezy.com/js/lemon.js"
           strategy="lazyOnload"
         />
-        {/* Register Service Worker for PWA */}
-        <Script id="sw-register" strategy="lazyOnload">
+        {/* Remove the legacy worker without reloading. It cached build chunks
+            and auth APIs, which could trap deployed tabs in a reload loop. */}
+        <Script id="sw-cleanup" strategy="afterInteractive">
           {`
             if ('serviceWorker' in navigator) {
-              window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js').catch(err => {
-                  console.warn('SW registration failed:', err);
-                });
-              });
+              navigator.serviceWorker.getRegistrations()
+                .then(registrations => Promise.all(registrations.map(registration => registration.unregister())))
+                .catch(error => console.warn('SW cleanup failed:', error));
+            }
+            if ('caches' in window) {
+              caches.keys()
+                .then(keys => Promise.all(keys.filter(key => key.startsWith('helstera-')).map(key => caches.delete(key))))
+                .catch(error => console.warn('Cache cleanup failed:', error));
             }
           `}
         </Script>

@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, type GenerateContentParameters, type GenerateContentResponse } from "@google/genai";
 
 import type {
   GeneratedImage,
@@ -74,14 +74,16 @@ export interface GoogleVertexConfig {
   location: string;
 }
 
+type GoogleVertexImageClient = Pick<GoogleGenAI, "models">;
+
 export class GoogleVertexImageProvider implements ImageProvider {
   readonly name = PROVIDER_NAME;
   readonly models = GOOGLE_VERTEX_IMAGE_MODELS;
 
-  private client: GoogleGenAI;
+  private client: GoogleVertexImageClient;
 
-  constructor(config: GoogleVertexConfig) {
-    this.client = new GoogleGenAI({
+  constructor(config: GoogleVertexConfig, client?: GoogleVertexImageClient) {
+    this.client = client ?? new GoogleGenAI({
       vertexai: true,
       project: config.project,
       location: config.location,
@@ -122,7 +124,14 @@ export class GoogleVertexImageProvider implements ImageProvider {
     // 120s timeout — prevent Vertex AI from hanging indefinitely
     const VERTEX_IMAGE_TIMEOUT = 120_000;
     let response;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("Vertex AI image generation timed out after 120s")),
+          VERTEX_IMAGE_TIMEOUT,
+        );
+      });
       response = await Promise.race([
         this.client.models.generateContent({
           model: apiModel,
@@ -134,13 +143,8 @@ export class GoogleVertexImageProvider implements ImageProvider {
               imageSize,
             },
           },
-        }),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error("Vertex AI image generation timed out after 120s")),
-            VERTEX_IMAGE_TIMEOUT,
-          ),
-        ),
+        } satisfies GenerateContentParameters) as Promise<GenerateContentResponse>,
+        timeoutPromise,
       ]);
     } catch (err) {
       throw new GenerationError(
@@ -148,6 +152,8 @@ export class GoogleVertexImageProvider implements ImageProvider {
         "api_error",
         `Vertex AI Gemini API error: ${err instanceof Error ? err.message : String(err)}`,
       );
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
 
     // Check for safety blocks.

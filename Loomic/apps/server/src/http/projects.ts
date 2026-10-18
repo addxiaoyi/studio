@@ -13,7 +13,17 @@ import {
   ProjectServiceError,
   type ProjectService,
 } from "../features/projects/project-service.js";
-import type { RequestAuthenticator } from "../supabase/user.js";
+import type { RequestAuthenticator } from "../auth/types.js";
+
+const PROJECT_CREATE_KEY_TTL_MS = 10 * 60 * 1000;
+const createdProjects = new Map<
+  string,
+  { expiresAt: number; project: Awaited<ReturnType<ProjectService["createProject"]>> }
+>();
+const pendingProjects = new Map<
+  string,
+  Promise<Awaited<ReturnType<ProjectService["createProject"]>>>
+>();
 
 export async function registerProjectRoutes(
   app: FastifyInstance,
@@ -41,6 +51,7 @@ export async function registerProjectRoutes(
       const project = await options.projectService.getProject(user, projectId);
       return reply.code(200).send({ project });
     } catch (error) {
+      request.log.error({ err: error }, "project list failed");
       return sendProjectError(error, reply, "project_query_failed");
     }
   });
@@ -61,6 +72,17 @@ export async function registerProjectRoutes(
       }
 
       const projects = await options.projectService.listProjects(user);
+      return reply.code(200).send(projectListResponseSchema.parse({ projects }));
+    } catch (error) {
+      return sendProjectError(error, reply, "project_query_failed");
+    }
+  });
+
+  app.get("/api/projects/archived", async (request, reply) => {
+    try {
+      const user = await options.auth.authenticate(request);
+      if (!user) return reply.code(401).send(unauthenticatedErrorResponseSchema.parse({ error: { code: "unauthorized", message: "Missing or invalid bearer token." } }));
+      const projects = await options.projectService.listArchivedProjects(user);
       return reply.code(200).send(projectListResponseSchema.parse({ projects }));
     } catch (error) {
       return sendProjectError(error, reply, "project_query_failed");
@@ -90,6 +112,28 @@ export async function registerProjectRoutes(
     }
   });
 
+  app.delete<{ Params: { projectId: string } }>("/api/projects/:projectId/if-empty", async (request, reply) => {
+    try {
+      const user = await options.auth.authenticate(request);
+      if (!user) return reply.code(401).send(unauthenticatedErrorResponseSchema.parse({ error: { code: "unauthorized", message: "Missing or invalid bearer token." } }));
+      const deleted = await options.projectService.archiveEmptyProject(user, request.params.projectId);
+      return reply.code(200).send({ deleted });
+    } catch (error) {
+      return sendProjectError(error, reply, "application_error");
+    }
+  });
+
+  app.post<{ Params: { projectId: string } }>("/api/projects/:projectId/restore", async (request, reply) => {
+    try {
+      const user = await options.auth.authenticate(request);
+      if (!user) return reply.code(401).send(unauthenticatedErrorResponseSchema.parse({ error: { code: "unauthorized", message: "Missing or invalid bearer token." } }));
+      await options.projectService.restoreProject(user, request.params.projectId);
+      return reply.code(200).send({ restored: true });
+    } catch (error) {
+      return sendProjectError(error, reply, "project_update_failed");
+    }
+  });
+
   app.post("/api/projects", async (request, reply) => {
     try {
       const user = await options.auth.authenticate(request);
@@ -106,7 +150,47 @@ export async function registerProjectRoutes(
       }
 
       const payload = projectCreateRequestSchema.parse(request.body);
-      const project = await options.projectService.createProject(user, payload);
+      const rawKey = request.headers["idempotency-key"];
+      const requestKey = typeof rawKey === "string" ? rawKey.trim() : "";
+      if (requestKey.length > 128) {
+        return reply.code(400).send({
+          message: "Idempotency key is too long.",
+        });
+      }
+
+      const cacheKey = requestKey ? `${user.id}:${requestKey}` : "";
+      const cached = cacheKey ? createdProjects.get(cacheKey) : undefined;
+      if (cached && cached.expiresAt > Date.now()) {
+        return reply.code(200).send(
+          projectCreateResponseSchema.parse({ project: cached.project }),
+        );
+      }
+      if (cached) createdProjects.delete(cacheKey);
+
+      const pending = cacheKey ? pendingProjects.get(cacheKey) : undefined;
+      if (pending) {
+        const project = await pending;
+        return reply.code(200).send(
+          projectCreateResponseSchema.parse({ project }),
+        );
+      }
+
+      const createTask = options.projectService.createProject(user, payload);
+      if (cacheKey) pendingProjects.set(cacheKey, createTask);
+
+      let project: Awaited<ReturnType<ProjectService["createProject"]>>;
+      try {
+        project = await createTask;
+      } finally {
+        if (cacheKey) pendingProjects.delete(cacheKey);
+      }
+
+      if (cacheKey) {
+        createdProjects.set(cacheKey, {
+          expiresAt: Date.now() + PROJECT_CREATE_KEY_TTL_MS,
+          project,
+        });
+      }
 
       return reply.code(201).send(
         projectCreateResponseSchema.parse({
@@ -114,6 +198,7 @@ export async function registerProjectRoutes(
         }),
       );
     } catch (error) {
+      request.log.error({ err: error }, "project create failed");
       if (isZodError(error)) {
         return reply.code(400).send({
           issues: error.issues,

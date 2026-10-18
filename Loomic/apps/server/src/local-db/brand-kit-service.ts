@@ -1,12 +1,11 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import type { AuthenticatedUser } from "../supabase/user.js";
+import type { AuthenticatedUser } from "../auth/types.js";
 import type { BrandKitAsset, BrandKitAssetCreateRequest, BrandKitAssetUpdateRequest, BrandKitDetail, BrandKitSummary, BrandKitUpdateRequest } from "@helstera/shared";
 import { BrandKitServiceError, type BrandKitService } from "../features/brand-kit/brand-kit-service.js";
+import type { StorageProvider } from "../storage/storage-provider.js";
 
-export function createLocalBrandKitService(db: Pool, root = "/www/helstera/uploads") : BrandKitService {
+export function createLocalBrandKitService(db: Pool, storage: StorageProvider) : BrandKitService {
   return {
     async listKits(user) {
       const { rows } = await db.query("select id, name, is_default, cover_url, created_at, updated_at from brand_kits where user_id = $1 order by created_at", [user.id]);
@@ -29,7 +28,28 @@ export function createLocalBrandKitService(db: Pool, root = "/www/helstera/uploa
     async createAsset(user, kitId, input: BrandKitAssetCreateRequest) { await assertKit(db, user.id, kitId); const { rows } = await db.query("insert into brand_kit_assets (kit_id, asset_type, display_name, role, text_content, metadata) values ($1,$2,$3,$4,$5,$6) returning *", [kitId, input.asset_type, input.display_name, input.role ?? null, input.text_content ?? null, input.metadata ?? {}]); return mapAsset(rows[0]); },
     async updateAsset(user, kitId, assetId, input: BrandKitAssetUpdateRequest) { await assertAsset(db, user.id, kitId, assetId); const values: unknown[] = []; const fields: string[] = []; for (const [key, value] of Object.entries(input)) { fields.push(`${key} = $${values.length + 1}`); values.push(value); } if (fields.length) { values.push(assetId, kitId); await db.query(`update brand_kit_assets set ${fields.join(", ")}, updated_at = now() where id = $${values.length - 1} and kit_id = $${values.length}`, values); } const { rows } = await db.query("select * from brand_kit_assets where id = $1", [assetId]); return mapAsset(rows[0]); },
     async deleteAsset(user, kitId, assetId) { await assertAsset(db, user.id, kitId, assetId); await db.query("delete from brand_kit_assets where id = $1", [assetId]); },
-    async uploadAsset(user, kitId, assetType, fileName, buffer, mimeType) { await assertKit(db, user.id, kitId); const path = `brand-kits/${user.id}/${kitId}/${randomUUID()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`; await mkdir(join(root, path, ".."), { recursive: true }); await writeFile(join(root, path), buffer); return this.createAsset(user, kitId, { asset_type: assetType, display_name: fileName, text_content: null, role: null, metadata: { filePath: path, mimeType } }); },
+    async uploadAsset(user, kitId, assetType, fileName, buffer, mimeType) {
+      await assertKit(db, user.id, kitId);
+      const path = `brand-kits/${user.id}/${kitId}/${randomUUID()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+
+      const { error } = await storage.upload("helstera-assets", path, buffer, { contentType: mimeType, upsert: true });
+      if (error) {
+        throw new BrandKitServiceError("upload_failed", `Failed to upload asset: ${error.message}`, 500);
+      }
+
+      const urlResult = await storage.getPublicUrl("helstera-assets", path);
+      if (urlResult.error) {
+        throw new BrandKitServiceError("url_generation_failed", `Failed to generate URL: ${urlResult.error.message}`, 500);
+      }
+
+      return this.createAsset(user, kitId, {
+        asset_type: assetType,
+        display_name: fileName,
+        text_content: null,
+        role: null,
+        metadata: { filePath: path, mimeType, fileUrl: urlResult.data!.signedUrl }
+      });
+    },
     async duplicateKit(user, kitId) { const source = await loadKitForUser(db, user.id, kitId); const { rows } = await db.query("insert into brand_kits (user_id, name, guidance_text) values ($1,$2,$3) returning id", [user.id, `${source.name} Copy`, source.guidance_text]); for (const asset of source.assets) await db.query("insert into brand_kit_assets (kit_id, asset_type, display_name, role, sort_order, text_content, file_url, metadata) values ($1,$2,$3,$4,$5,$6,$7,$8)", [rows[0].id, asset.asset_type, asset.display_name, asset.role, asset.sort_order, asset.text_content, asset.file_url, asset.metadata]); return loadKit(db, rows[0].id); },
   };
 }

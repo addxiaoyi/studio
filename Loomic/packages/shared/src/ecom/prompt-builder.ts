@@ -9,13 +9,15 @@
 
 import type {
   CampaignStyleLock,
-  EcomPrompt,
-  EcomSceneTemplate,
-  EcomSceneTemplate as Template,
-  SceneVariant,
   ConversionDriver,
+  EcomPrompt,
+  EcomGenerationMode,
+  EcomFidelity,
+  EcomSceneTemplate,
+  SceneVariant,
+  EcomSceneTemplate as Template,
 } from "./index.js";
-import { IRON_RULES, HERO_SEQUENCES } from "./index.js";
+import { HERO_SEQUENCES, IRON_RULES } from "./index.js";
 
 export interface BuildPromptInput {
   /** The matched scene template. */
@@ -24,6 +26,8 @@ export interface BuildPromptInput {
   productName: string;
   /** Optional longer description. */
   productDescription?: string | undefined;
+  /** Optional user instruction that must be preserved in the final prompt. */
+  customPrompt?: string | undefined;
   /** Style variant override; defaults to template.variants.default. */
   variant?: SceneVariant | undefined;
   /** Optional campaign style lock (multi-image consistency). */
@@ -32,6 +36,38 @@ export interface BuildPromptInput {
   ratio?: EcomSceneTemplate["defaultRatio"] | undefined;
   /** Purpose of this specific image (e.g. "hero", "benefit-1", "cta"). */
   purpose?: string | undefined;
+  /** A user-supplied image is the source of truth for the product identity. */
+  hasReferenceImage?: boolean | undefined;
+  mode?: EcomGenerationMode | undefined;
+  fidelity?: EcomFidelity | undefined;
+}
+
+const MODE_DIRECTIONS: Record<EcomGenerationMode, string> = {
+  hero: "Create a focused ecommerce hero image with one clear product presentation, restrained styling, and purposeful whitespace.",
+  scene: "Create a natural lifestyle product photograph with believable human context, layered depth, candid details, and physically plausible interaction.",
+  "detail-poster": "Create a polished vertical ecommerce detail poster with a strong editorial hierarchy and a rich but coherent visual story. Build distinct sections for the headline, real-use hero scene, key benefits, close-up evidence, product variants, and packaging. Use varied scale, overlapping paper or photo layers, small supporting illustrations, and intentional visual rhythm. The result must feel art-directed, premium, natural, and information-rich rather than sparse or template-like. Repeating the product in different detail views is allowed when it explains features. Keep Chinese copy concise, legible, and faithful to supplied facts; omit uncertain claims instead of inventing them.",
+  social: "Create an authentic social-commerce image with an immediate visual hook, natural light, lived-in details, concise readable copy, and a clear but non-intrusive call to action.",
+  retouch: "Perform a conservative photographic retouch. Preserve the original composition and product pixels while improving exposure, color balance, clarity, background cleanliness, and material realism.",
+};
+
+const FIDELITY_DIRECTIONS: Record<EcomFidelity, string> = {
+  strict: "STRICT FIDELITY: preserve product artwork, printed text, logo, shape, materials, colors, count, and packaging exactly. Do not redraw the product. Compose with faithful views from the references.",
+  balanced: "BALANCED FIDELITY: preserve identity, artwork, text, shape, colors, and packaging; camera angle and lighting may change naturally.",
+  creative: "CREATIVE FIDELITY: preserve brand and product category, but allow broader art direction and presentation changes requested by the user.",
+};
+
+function detailPosterBlueprint(input: BuildPromptInput): string {
+  const facts = input.productDescription?.trim()
+    ? `Verified product facts: ${input.productDescription.trim()}`
+    : "No verified selling points were supplied. Use visual descriptions only and do not invent claims.";
+  const direction = input.customPrompt?.trim()
+    ? `USER'S PRIMARY CREATIVE DIRECTION: ${input.customPrompt.trim()}`
+    : "Art direction: natural daylight, warm tactile materials, candid use, and polished editorial photography.";
+
+  return `${direction}
+Create one cohesive, premium vertical 2:3 Chinese ecommerce poster for ${input.productName}. Treat the references as visual source material and art-direct the entire image yourself: naturally integrate the real product, lifestyle environment, supporting details, decorative elements, and concise copy into one believable image. Use a clear visual hierarchy, varied scale, natural photographic lighting, authentic materials, coherent perspective, and organic transitions between image areas. Make it feel like a professionally art-directed campaign, not a collage assembled from separate crops or a rigid grid.
+${facts}
+Keep product artwork, readable labels, colors, shape, and distinctive details faithful to the references. You may show multiple product views only when they integrate naturally. Use only supplied or visually verifiable facts; do not invent benefits, certifications, prices, reviews, or claims. Let the model choose the precise layout and visual rhythm. Avoid fixed section percentages, pasted-on overlays, boxed UI cards, repeated tiled crops, awkwardly embedded duplicate objects, huge blank areas, and sterile stock compositions.`;
 }
 
 /**
@@ -41,6 +77,8 @@ export interface BuildPromptInput {
  */
 export function buildPrompt(input: BuildPromptInput): EcomPrompt {
   const { template } = input;
+  const mode = input.mode ?? "hero";
+  const fidelity = input.fidelity ?? "strict";
   const variant = input.variant ?? "default";
   let body = template.promptTemplate
     .replace(/\{\{product\}\}/g, input.productName)
@@ -48,6 +86,8 @@ export function buildPrompt(input: BuildPromptInput): EcomPrompt {
       /\{\{product_description\}\}/g,
       input.productDescription ?? input.productName,
     );
+
+  if (mode === "detail-poster") body = detailPosterBlueprint(input);
 
   // Apply the variant overlay if available
   const variantOverlay = template.variants[variant];
@@ -59,7 +99,7 @@ export function buildPrompt(input: BuildPromptInput): EcomPrompt {
   // opening paragraph for visual consistency.
   let prefix = "";
   if (input.styleLock) {
-    prefix = formatStyleLock(input.styleLock) + " ";
+    prefix = `${formatStyleLock(input.styleLock)} `;
   }
 
   // Add the purpose if provided (e.g. "benefit-1", "pain-amplification").
@@ -67,9 +107,23 @@ export function buildPrompt(input: BuildPromptInput): EcomPrompt {
     body = `${body} Purpose: ${input.purpose}.`;
   }
 
+  if (mode !== "detail-poster" && input.customPrompt?.trim()) {
+    body = `USER'S PRIMARY CREATIVE DIRECTION — User direction: ${input.customPrompt.trim()} Supporting scene guidance: ${body}`;
+  }
+
+  const referenceAnchor = input.hasReferenceImage
+    ? `IMAGE 1 IS THE ONLY SOURCE OF TRUTH FOR PRODUCT IDENTITY. This is a product-preserving composition, not a product redesign. Preserve its artwork, silhouette, geometry, proportions, colors, materials, texture, typography, readable text, logo, edges, and visual hierarchy. A logo or flat graphic must remain that exact logo or flat graphic. ${mode === "detail-poster" ? "The same faithful product may appear in multiple panels or views; every appearance must preserve the reference identity." : "Keep one exact product instance unless the user explicitly requests multiple views."} Do not reinterpret, redesign, rebrand, redraw, rename, replace, reshape, or convert it into another object. If scene guidance conflicts with product identity, preserve the product and adapt the scene around it. `
+    : "";
+
+  const compositionRules = mode === "detail-poster"
+    ? "Let the image model make an organic full-canvas composition with natural transitions and consistent perspective; do not manually tile or paste reference images."
+    : mode === "retouch"
+      ? "Do not add promotional copy, badges, props, or new product instances unless explicitly requested."
+      : "Product occupies 30-45% of frame with clean breathing room and a deliberate focal point.";
+
   return {
     sceneId: template.id,
-    text: `${prefix}${body}`.trim(),
+    text: `${mode === "detail-poster" ? `${body} ${referenceAnchor}` : `${referenceAnchor}${prefix}${body}`} ${FIDELITY_DIRECTIONS[fidelity]} ${MODE_DIRECTIONS[mode]} ${compositionRules} Use physically plausible lighting, contact shadows, reflections, perspective, hands, and material texture. Preserve the exact product identity, silhouette, proportions, materials, colors, labels, logo placement, and packaging from the references. Do not invent specifications, certifications, prices, reviews, endorsements, accessories, brand marks, packaging text, or product features. No unresolved template placeholders, watermarks, malformed text, distorted geometry, floating objects, extra limbs, or accidental clutter.`.trim(),
     negatives: template.negativeConstraints,
     ratio: input.ratio ?? template.defaultRatio,
     styleLock: input.styleLock,
@@ -124,7 +178,7 @@ export interface DetailPackScreen {
   prompt: EcomPrompt;
 }
 
-import { PDP_DETAIL_SEQUENCE, PDP_BACKGROUNDS } from "./index.js";
+import { PDP_BACKGROUNDS, PDP_DETAIL_SEQUENCE } from "./index.js";
 
 export function buildDetailPack(input: DetailPackInput): DetailPackScreen[] {
   const screenType = input.screenType ?? "screen";
@@ -154,18 +208,7 @@ export function buildDetailPack(input: DetailPackInput): DetailPackScreen[] {
 /** Format a Campaign Style Lock as a consistent opening paragraph. */
 function formatStyleLock(lock: CampaignStyleLock): string {
   const palette = lock.palette.join(", ");
-  return (
-    `Consistent premium ecommerce visual system. ` +
-    `Fixed palette: ${palette}, accent ${lock.accent}. ` +
-    `Color temperature: ${lock.colorTemperature}. ` +
-    `Light direction: ${lock.lightDirection}. ` +
-    `Font system: ${lock.fontSystem}. ` +
-    `Background: ${lock.background}. ` +
-    `Layout: ${lock.layout}. ` +
-    `Icon style: ${lock.iconStyle}. ` +
-    `Product rules: ${lock.productRules}. ` +
-    `Forbidden: ${lock.forbiddenDrift.join(", ")}.`
-  );
+  return `Consistent premium ecommerce visual system. Fixed palette: ${palette}, accent ${lock.accent}. Color temperature: ${lock.colorTemperature}. Light direction: ${lock.lightDirection}. Font system: ${lock.fontSystem}. Background: ${lock.background}. Layout: ${lock.layout}. Icon style: ${lock.iconStyle}. Product rules: ${lock.productRules}. Forbidden: ${lock.forbiddenDrift.join(", ")}.`;
 }
 
 /** Diagnose the conversion driver from a free-text product description. */
@@ -248,12 +291,8 @@ export function defaultStyleLock(
       background: "#FFFFFF with subtle gradient",
       layout: "centered, diagrammatic",
       iconStyle: "filled flat 1px stroke",
-      productRules:
-        "occupies 35% of frame, sharp, mid-action when applicable",
-      forbiddenDrift: [
-        "no fake data charts",
-        "no aggressive health claims",
-      ],
+      productRules: "occupies 35% of frame, sharp, mid-action when applicable",
+      forbiddenDrift: ["no fake data charts", "no aggressive health claims"],
     };
   }
   // visual + fresh + minimal → default
@@ -267,10 +306,7 @@ export function defaultStyleLock(
     layout: "centered with light rule-of-thirds offset",
     iconStyle: "rounded soft 2px stroke",
     productRules: "occupies 35% of frame, natural light shadow",
-    forbiddenDrift: [
-      "no clutter",
-      "no fake endorsement text",
-    ],
+    forbiddenDrift: ["no clutter", "no fake endorsement text"],
   };
 }
 
@@ -300,7 +336,9 @@ export function validateIronRules(prompt: string): string[] {
   }
 
   // 4. Must contain negative constraints
-  if (!/no\s+(hands|logos|watermarks|props|text|gradients|fake)/i.test(prompt)) {
+  if (
+    !/no\s+(hands|logos|watermarks|props|text|gradients|fake)/i.test(prompt)
+  ) {
     violations.push(
       "Prompt should include negative constraints (e.g. 'no fake logos, no watermarks').",
     );
@@ -315,7 +353,7 @@ export function validateIronRules(prompt: string): string[] {
 
   // 6. Min whitespace threshold
   const wsMatch = prompt.match(/whitespace\s+(at\s+least\s+)?(\d+)\s*%?/i);
-  if (wsMatch && wsMatch[2]) {
+  if (wsMatch?.[2]) {
     const pct = Number.parseInt(wsMatch[2], 10);
     if (!Number.isNaN(pct) && pct < IRON_RULES.minWhitespace * 100) {
       violations.push(

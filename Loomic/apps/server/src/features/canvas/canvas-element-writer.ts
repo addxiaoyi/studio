@@ -1,6 +1,7 @@
 // apps/server/src/features/canvas/canvas-element-writer.ts
 
 import type { CanvasContent, Json } from "@helstera/shared";
+import type { Pool } from "pg";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -15,6 +16,8 @@ type ImageInsertOpts = {
   height: number;
   mimeType: string;
   title?: string;
+  assetId?: string;
+  jobId?: string;
 };
 
 type VideoInsertOpts = {
@@ -26,6 +29,8 @@ type VideoInsertOpts = {
   durationSeconds?: number;
   title?: string;
   prompt?: string;
+  assetId?: string;
+  jobId?: string;
 };
 
 type Placement = { x: number; y: number; width: number; height: number };
@@ -133,7 +138,9 @@ function buildImageElement(
     crop: null,
     customData: {
       ...(opts.title ? { title: opts.title } : {}),
+      ...(opts.assetId ? { assetId: opts.assetId } : {}),
       source: "generated" as const,
+      ...(opts.jobId ? { jobId: opts.jobId } : {}),
     },
   };
 }
@@ -168,6 +175,8 @@ function buildVideoElement(
     isDeleted: false,
     updated: Date.now(),
     link: opts.signedUrl,
+    scale: [1, 1],
+    status: "saved",
     locked: false,
     customData: {
       isVideo: true,
@@ -175,6 +184,8 @@ function buildVideoElement(
       ...(opts.durationSeconds != null ? { durationSeconds: opts.durationSeconds } : {}),
       ...(opts.title ? { title: opts.title } : {}),
       ...(opts.prompt ? { prompt: opts.prompt } : {}),
+      ...(opts.assetId ? { assetId: opts.assetId } : {}),
+      ...(opts.jobId ? { jobId: opts.jobId } : {}),
     },
   };
 }
@@ -191,25 +202,26 @@ const VIDEO_MAX_SIZE = 800;
  * Insert an image element into a canvas. Reads current content, appends element
  * with auto-placement (or explicit placement), writes it back.
  *
- * The image file is already in Supabase Storage (uploaded by worker executor).
+ * The image file is already in Storage (uploaded by worker executor).
  * We download it and embed as base64 dataURL in the canvas files map so
  * Excalidraw can render it natively (consistent with frontend-inserted images).
  */
 export async function insertImageElement(
-  client: { from: (table: string) => any; storage: { from: (bucket: string) => any } },
+  client: { from: (table: string) => any },
+  storage: { download: (bucket: string, path: string) => Promise<{ data: Buffer | null; error: Error | null }> },
   opts: ImageInsertOpts,
   explicitPlacement?: Placement,
 ): Promise<InsertResult> {
   // 1. Download image from storage and convert to base64 dataURL
-  const { data: blob, error: dlError } = await client
-    .storage.from(CANVAS_FILES_BUCKET)
-    .download(opts.objectPath);
+  const { data: buffer, error: dlError } = await storage.download(
+    CANVAS_FILES_BUCKET,
+    opts.objectPath
+  );
 
-  if (dlError || !blob) {
+  if (dlError || !buffer) {
     throw new Error(`Failed to download image from storage: ${dlError?.message ?? "no data"}`);
   }
 
-  const buffer = Buffer.from(await blob.arrayBuffer());
   const base64 = buffer.toString("base64");
   const dataURL = `data:${opts.mimeType};base64,${base64}`;
 
@@ -262,9 +274,72 @@ export async function insertImageElement(
   if (writeError) {
     throw new Error(`Failed to write canvas: ${writeError.message}`);
   }
-
   console.log(`[canvas-element-writer] image inserted canvasId=${opts.canvasId} elementId=${element.id}`);
   return { elementId: element.id as string };
+}
+
+export async function insertLocalImageElement(
+  db: Pool,
+  storage: { download: (bucket: string, path: string) => Promise<{ data: Buffer | null; error: Error | null }> },
+  opts: ImageInsertOpts,
+  explicitPlacement?: Placement,
+): Promise<InsertResult> {
+  const { data: buffer, error } = await storage.download(
+    CANVAS_FILES_BUCKET,
+    opts.objectPath,
+  );
+  if (error || !buffer) {
+    throw new Error(`Failed to download image from storage: ${error?.message ?? "no data"}`);
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query("begin");
+    const { rows } = await client.query<{ content: CanvasContent }>(
+      "select content from canvases where id = $1 for update",
+      [opts.canvasId],
+    );
+    if (!rows[0]) throw new Error(`Canvas not found: ${opts.canvasId}`);
+
+    const content = rows[0].content ?? { elements: [], appState: {} };
+    const elements = (content.elements as CanvasElement[]) ?? [];
+    const existing = opts.jobId
+      ? elements.find((element) => (element.customData as { jobId?: string } | undefined)?.jobId === opts.jobId)
+      : undefined;
+    if (existing?.id) {
+      await client.query("commit");
+      return { elementId: String(existing.id) };
+    }
+    const files = ((content as any).files as Record<string, Record<string, unknown>>) ?? {};
+    const placement = explicitPlacement ?? calculateAutoPlacement(
+      elements,
+      opts.width,
+      opts.height,
+      IMAGE_MAX_SIZE,
+    );
+    const fileId = generateId();
+    const element = buildImageElement(fileId, placement, opts);
+    const dataURL = `data:${opts.mimeType};base64,${buffer.toString("base64")}`;
+    const updatedContent = {
+      ...content,
+      elements: [...elements, element],
+      files: {
+        ...files,
+        [fileId]: { id: fileId, dataURL, mimeType: opts.mimeType, created: Date.now() },
+      },
+    };
+    await client.query(
+      "update canvases set content = $1::jsonb, updated_at = now() where id = $2",
+      [JSON.stringify(updatedContent), opts.canvasId],
+    );
+    await client.query("commit");
+    return { elementId: element.id as string };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -272,7 +347,7 @@ export async function insertImageElement(
  * type with a link URL — no files map entry needed.
  */
 export async function insertVideoElement(
-  client: { from: (table: string) => any; storage: { from: (bucket: string) => any } },
+  client: { from: (table: string) => any },
   opts: VideoInsertOpts,
   explicitPlacement?: Placement,
 ): Promise<InsertResult> {
@@ -304,15 +379,83 @@ export async function insertVideoElement(
     elements: [...elements, element],
   };
 
-  const { error: writeError } = await client
+  let updateQuery = client
     .from("canvases")
     .update({ content: updatedContent as unknown as Json })
     .eq("id", opts.canvasId);
+  if (opts.jobId) {
+    const encodedJobId = JSON.stringify(opts.jobId).slice(1, -1);
+    updateQuery = updateQuery.filter("content->elements", "not.cs", `[{"customData":{"jobId":"${encodedJobId}"}}]`);
+  }
+  const { data: writeData, error: writeError } = await updateQuery.select("content").maybeSingle();
 
   if (writeError) {
     throw new Error(`Failed to write canvas: ${writeError.message}`);
   }
+  if (!writeData) {
+    if (opts.jobId) {
+      const { data: latest, error: latestError } = await client
+        .from("canvases")
+        .select("content")
+        .eq("id", opts.canvasId)
+        .single();
+      if (latestError) throw new Error(`Failed to verify video job ${opts.jobId} on canvas: ${latestError.message}`);
+      const currentElements = ((latest?.content as CanvasContent | null)?.elements ?? []) as CanvasElement[];
+      const duplicate = currentElements.find((element) => (element.customData as { jobId?: string } | undefined)?.jobId === opts.jobId);
+      if (duplicate?.id) return { elementId: String(duplicate.id) };
+    }
+    throw new Error(`Canvas ${opts.canvasId} changed while inserting video job ${opts.jobId ?? ""}`);
+  }
 
   console.log(`[canvas-element-writer] video inserted canvasId=${opts.canvasId} elementId=${element.id}`);
   return { elementId: element.id as string };
+}
+
+export async function insertLocalVideoElement(
+  db: Pool,
+  opts: VideoInsertOpts,
+  explicitPlacement?: Placement,
+): Promise<InsertResult> {
+  const client = await db.connect();
+  try {
+    await client.query("begin");
+    const { rows } = await client.query<{ content: CanvasContent }>(
+      "select content from canvases where id = $1 for update",
+      [opts.canvasId],
+    );
+    if (!rows[0]) throw new Error(`Canvas not found: ${opts.canvasId}`);
+
+    const content = rows[0].content ?? { elements: [], appState: {} };
+    const elements = (content.elements as CanvasElement[]) ?? [];
+    const existing = opts.jobId
+      ? elements.find((element) => (element.customData as { jobId?: string } | undefined)?.jobId === opts.jobId)
+      : undefined;
+    if (existing?.id) {
+      await client.query("commit");
+      return { elementId: String(existing.id) };
+    }
+    const placement = explicitPlacement ?? calculateAutoPlacement(
+      elements,
+      opts.width,
+      opts.height,
+      VIDEO_MAX_SIZE,
+    );
+    const element = buildVideoElement(placement, opts);
+    const updatedContent = {
+      ...content,
+      elements: [...elements, element],
+    };
+    await client.query(
+      "update canvases set content = $1::jsonb, updated_at = now() where id = $2",
+      [JSON.stringify(updatedContent), opts.canvasId],
+    );
+    await client.query("commit");
+    console.log(`[canvas-element-writer] local video inserted canvasId=${opts.canvasId} elementId=${element.id}`);
+    return { elementId: element.id as string };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }

@@ -5,6 +5,14 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
+
+vi.mock("../src/lib/auth-context", () => ({
+  useAuth: () => ({ session: { access_token: "session-token" } }),
+}));
+
 const mockToken = "session-token";
 
 import type { WebSocketHandle } from "../src/hooks/use-websocket";
@@ -20,6 +28,7 @@ const {
   saveMessageMock,
   updateSessionTitleMock,
   fetchModelsMock,
+  fetchWorkspaceSettingsMock,
   fetchImageModelsMock,
   fetchVideoModelsMock,
   fetchWorkspaceSkillsMock,
@@ -33,6 +42,7 @@ const {
   saveMessageMock: vi.fn(),
   updateSessionTitleMock: vi.fn(),
   fetchModelsMock: vi.fn(),
+  fetchWorkspaceSettingsMock: vi.fn(),
   fetchImageModelsMock: vi.fn(),
   fetchVideoModelsMock: vi.fn(),
   fetchWorkspaceSkillsMock: vi.fn(),
@@ -48,6 +58,7 @@ vi.mock("../src/lib/server-api", () => ({
   saveMessage: saveMessageMock,
   updateSessionTitle: updateSessionTitleMock,
   fetchModels: fetchModelsMock,
+  fetchWorkspaceSettings: fetchWorkspaceSettingsMock,
   fetchImageModels: fetchImageModelsMock,
   fetchVideoModels: fetchVideoModelsMock,
   fetchWorkspaceSkills: fetchWorkspaceSkillsMock,
@@ -112,6 +123,7 @@ describe("ChatSidebar", () => {
       saveMessageMock,
       updateSessionTitleMock,
       fetchModelsMock,
+      fetchWorkspaceSettingsMock,
       fetchImageModelsMock,
       fetchVideoModelsMock,
       fetchWorkspaceSkillsMock,
@@ -138,6 +150,7 @@ describe("ChatSidebar", () => {
       ],
     });
     fetchModelsMock.mockResolvedValue({ models: [] });
+    fetchWorkspaceSettingsMock.mockResolvedValue({ settings: { defaultModel: "openai:auto", chatModel: "openai:auto" } });
     fetchImageModelsMock.mockResolvedValue({ models: [] });
     fetchVideoModelsMock.mockResolvedValue({ models: [] });
     fetchWorkspaceSkillsMock.mockResolvedValue({ skills: [] });
@@ -166,7 +179,7 @@ describe("ChatSidebar", () => {
     );
 
     // Basic render check - input should be available
-    const input = await screen.findByPlaceholderText(/start with an idea/i);
+    const input = await screen.findByPlaceholderText(/输入需求|start with an idea/i);
     expect(input).toBeInTheDocument();
   });
 });

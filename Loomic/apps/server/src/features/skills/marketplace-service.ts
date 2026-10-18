@@ -33,6 +33,15 @@ const SKILL_KEYWORD = "agent-skill";
 const USER_AGENT = "Helstera-Marketplace/1.0";
 const MAX_PAGE_SIZE = 50;
 const FETCH_TIMEOUT_MS = 15_000;
+const GITHUB_API_BASE = "https://api.github.com";
+const SKILLS_SH_DISCOVERY_QUERIES = ["ai", "image", "video", "design", "code"];
+
+const FEATURED_SKILLS: MarketplaceSkill[] = [
+  { packageName: "https://github.com/YouMind-OpenLab/awesome-gpt-image-2-prompts", name: "awesome-gpt-image-2-prompts", description: "GPT Image 电商、海报、产品摄影与 UI 提示词库", author: "YouMind-OpenLab", version: "main", downloads: 8500, keywords: ["image", "prompt", "ecommerce"], homepage: "https://github.com/YouMind-OpenLab/awesome-gpt-image-2-prompts", repository: "https://github.com/YouMind-OpenLab/awesome-gpt-image-2-prompts", license: "CC-BY-4.0" },
+  { packageName: "https://github.com/YouMind-OpenLab/awesome-seedance-2-prompts", name: "awesome-seedance-2-prompts", description: "Seedance、Kling、Sora、Veo 视频提示词与镜头运动模板", author: "YouMind-OpenLab", version: "main", downloads: 2000, keywords: ["video", "seedance", "sora"], homepage: "https://github.com/YouMind-OpenLab/awesome-seedance-2-prompts", repository: "https://github.com/YouMind-OpenLab/awesome-seedance-2-prompts" },
+  { packageName: "https://github.com/AITOOLS101/ai-image-prompt-cookbook", name: "ai-image-prompt-cookbook", description: "中文电商图片提示词模板，支持变量化复用", author: "AITOOLS101", version: "main", downloads: 1000, keywords: ["image", "ecommerce", "中文"], homepage: "https://github.com/AITOOLS101/ai-image-prompt-cookbook", repository: "https://github.com/AITOOLS101/ai-image-prompt-cookbook" },
+  { packageName: "https://github.com/willwulfken/MidJourney-Styles-and-Keywords-Reference", name: "MidJourney Styles Reference", description: "镜头、光影、材质和艺术风格关键词参考库", author: "willwulfken", version: "main", downloads: 4000, keywords: ["style", "lighting", "camera"], homepage: "https://github.com/willwulfken/MidJourney-Styles-and-Keywords-Reference", repository: "https://github.com/willwulfken/MidJourney-Styles-and-Keywords-Reference" },
+];
 
 // ── Error Class ────────────────────────────────────────────────────────────
 
@@ -141,58 +150,72 @@ export async function searchMarketplace(
 ): Promise<MarketplaceSearchResult> {
   const safePage = Math.max(1, Math.min(page, 100));
   const safeLimit = Math.max(1, Math.min(limit, MAX_PAGE_SIZE));
-  const offset = (safePage - 1) * safeLimit;
+  const search = query.trim();
+  if (!search) return searchSkillsSh(safeLimit);
+  const params = new URLSearchParams({ q: `${search} SKILL.md in:readme,description`, sort: "stars", order: "desc", page: String(safePage), per_page: String(Math.min(safeLimit * 3, 100)) });
+  const response = await fetch(`${GITHUB_API_BASE}/search/repositories?${params}`, { headers: { Accept: "application/vnd.github+json", "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  if (!response.ok) {
+    const fallback = FEATURED_SKILLS.filter((skill) => `${skill.name} ${skill.description} ${skill.keywords.join(" ")}`.toLowerCase().includes(search.toLowerCase()));
+    if (fallback.length) return { skills: fallback.slice(0, safeLimit), total: fallback.length };
+    throw new MarketplaceError("search_failed", `GitHub search failed: ${response.status}`);
+  }
+  const data = await response.json() as { items: Array<{ name:string; full_name:string; html_url:string; description:string|null; stargazers_count:number; topics?:string[]; license?:{spdx_id?:string}; owner:{login:string}; default_branch:string }> };
+  const candidates = await Promise.all(data.items.map(async (repo) => {
+    const skillMd = await fetch(`${GITHUB_API_BASE}/repos/${repo.full_name}/contents/SKILL.md`, { headers: { Accept: "application/vnd.github+json", "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }).catch(() => null);
+    if (!skillMd?.ok) return null;
+    return { packageName: repo.html_url, name: repo.name, description: repo.description ?? "GitHub Agent Skill", author: repo.owner.login, version: repo.default_branch, downloads: repo.stargazers_count, keywords: repo.topics ?? [], homepage: repo.html_url, repository: repo.html_url, ...(repo.license?.spdx_id ? { license: repo.license.spdx_id } : {}) } satisfies MarketplaceSkill;
+  }));
+  const skills: MarketplaceSkill[] = [];
+  for (const item of candidates) {
+    if (item) skills.push(item);
+    if (skills.length === safeLimit) break;
+  }
+  return { skills, total: skills.length };
+}
 
-  const searchText = query.trim()
-    ? `keywords:${SKILL_KEYWORD} ${query.trim()}`
-    : `keywords:${SKILL_KEYWORD}`;
+async function searchSkillsSh(limit: number): Promise<MarketplaceSearchResult> {
+  const responses = await Promise.all(
+    SKILLS_SH_DISCOVERY_QUERIES.map(async (query) => {
+      try {
+        const response = await fetch(`${SKILLS_SH_BASE}/api/search?q=${encodeURIComponent(query)}`, {
+          headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        });
+        if (!response.ok) return [];
+        const data = (await response.json()) as { skills?: Array<{ id: string; source: string; skillId: string; name: string; installs?: number }> };
+        return data.skills ?? [];
+      } catch {
+        return [];
+      }
+    }),
+  );
 
-  const params = new URLSearchParams({
-    text: searchText,
-    size: String(safeLimit),
-    from: String(offset),
-  });
+  const unique = new Map<string, { id: string; source: string; skillId: string; name: string; installs?: number }>();
+  for (const skills of responses) {
+    for (const skill of skills) unique.set(skill.id, skill);
+  }
 
-  console.log(`[marketplace] Searching: query="${query}" page=${safePage} limit=${safeLimit} offset=${offset}`);
+  const skills = [...unique.values()]
+    .sort((left, right) => (right.installs ?? 0) - (left.installs ?? 0))
+    .slice(0, limit)
+    .map((skill) => {
+      const [owner, repo] = skill.source.split("/");
+      const packageName = `https://github.com/${skill.source}/tree/HEAD/${skill.skillId}`;
+      return {
+        packageName,
+        name: skill.name || skill.skillId,
+        description: `社区 Agent Skill · ${skill.skillId}`,
+        author: owner ?? skill.source,
+        version: "HEAD",
+        downloads: skill.installs ?? 0,
+        keywords: [skill.skillId],
+        homepage: packageName,
+        repository: owner && repo ? `https://github.com/${owner}/${repo}` : packageName,
+      } satisfies MarketplaceSkill;
+    });
 
-  const response = await registryFetch(`${NPM_REGISTRY_BASE}/-/v1/search?${params}`);
-  const data = (await response.json()) as {
-    objects: Array<{
-      package: {
-        name: string;
-        version: string;
-        description?: string;
-        keywords?: string[];
-        author?: { name?: string } | string;
-        links?: { npm?: string; homepage?: string; repository?: string };
-      };
-      score?: { detail?: { popularity?: number } };
-    }>;
-    total: number;
-  };
-
-  const skills: MarketplaceSkill[] = data.objects.map((obj) => {
-    const pkg = obj.package;
-    const authorName = typeof pkg.author === "string"
-      ? pkg.author
-      : pkg.author?.name ?? "unknown";
-
-    const result: MarketplaceSkill = {
-      packageName: pkg.name,
-      name: pkg.name,
-      description: pkg.description ?? "",
-      author: authorName,
-      version: pkg.version,
-      downloads: Math.round((obj.score?.detail?.popularity ?? 0) * 20000),
-      keywords: pkg.keywords ?? [],
-    };
-    if (pkg.links?.homepage) result.homepage = pkg.links.homepage;
-    if (pkg.links?.repository) result.repository = pkg.links.repository;
-    return result;
-  });
-
-  console.log(`[marketplace] Search returned ${skills.length} results (total: ${data.total})`);
-  return { skills, total: data.total };
+  if (skills.length > 0) return { skills, total: unique.size };
+  return { skills: FEATURED_SKILLS.slice(0, limit), total: FEATURED_SKILLS.length };
 }
 
 // ── Detail ─────────────────────────────────────────────────────────────────
@@ -203,6 +226,49 @@ export async function searchMarketplace(
 export async function getMarketplaceDetail(
   packageName: string,
 ): Promise<MarketplaceSkillDetail> {
+  if (packageName.startsWith("https://github.com/")) {
+    const match = packageName.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)(?:\/tree\/([^/]+)\/(.+))?/);
+    if (!match) throw new MarketplaceError("package_not_found", "Invalid GitHub repository URL");
+    const fullName = `${match[1]}/${match[2]}`;
+    const ref = match[3] ?? "HEAD";
+    const skillPath = match[4];
+    if (skillPath) {
+      const slug = skillPath.split("/").filter(Boolean).at(-1) ?? skillPath;
+      const response = await fetch(`${SKILLS_SH_BASE}/api/download/${match[1]}/${match[2]}/${encodeURIComponent(slug)}`, {
+        headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (response.ok) {
+        const data = (await response.json()) as { files?: Array<{ path: string; contents: string }> };
+        const skillMd = data.files?.find((file) => file.path.toUpperCase() === "SKILL.MD");
+        if (skillMd) {
+          const manifest = parseSkillManifest(skillMd.contents);
+          return {
+            packageName,
+            name: manifest.name || slug,
+            description: manifest.description || `社区 Agent Skill · ${slug}`,
+            author: match[1]!,
+            version: ref,
+            downloads: 0,
+            keywords: [slug],
+            homepage: packageName,
+            repository: `https://github.com/${fullName}`,
+            readme: skillMd.contents,
+            versions: [ref],
+            tarballUrl: "",
+            repoUrl: packageName,
+          };
+        }
+      }
+    }
+    const repoResponse = await fetch(`${GITHUB_API_BASE}/repos/${fullName}`, { headers: { Accept: "application/vnd.github+json", "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!repoResponse.ok) throw new MarketplaceError("package_not_found", "GitHub skill repository is unavailable");
+    const repo = await repoResponse.json() as { name:string; description:string|null; stargazers_count:number; topics?:string[]; default_branch:string; owner:{login:string}; html_url:string; license?:{spdx_id?:string} };
+    const resolvedRef = ref === "HEAD" ? repo.default_branch : ref;
+    const skillResponse = await fetch(`https://raw.githubusercontent.com/${fullName}/${resolvedRef}/${skillPath ? `${skillPath}/` : ""}SKILL.md`, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!skillResponse.ok) throw new MarketplaceError("package_not_found", "GitHub skill repository is unavailable");
+    return { packageName, name: repo.name, description: repo.description ?? "GitHub Agent Skill", author: repo.owner.login, version: resolvedRef, downloads: repo.stargazers_count, keywords: repo.topics ?? [], homepage: repo.html_url, repository: repo.html_url, ...(repo.license?.spdx_id ? { license: repo.license.spdx_id } : {}), readme: await skillResponse.text(), versions: [resolvedRef], tarballUrl: "", repoUrl: packageName };
+  }
   console.log(`[marketplace] Fetching detail for package: ${packageName}`);
 
   const encoded = encodeURIComponent(packageName).replace("%40", "@");
@@ -265,6 +331,19 @@ export async function getMarketplaceDetail(
 export async function installFromMarketplace(
   packageName: string,
 ): Promise<{ imported: ImportedSkill; packageName: string }> {
+  if (packageName.startsWith("https://github.com/")) {
+    try {
+      const imported = await trySkillsShDownload(packageName);
+      if (imported) return { imported, packageName };
+    } catch (error) {
+      console.log("[marketplace] direct skills.sh install failed, trying GitHub import:", error);
+    }
+    try {
+      return { imported: await importFromGitHub(packageName), packageName };
+    } catch (error) {
+      throw new MarketplaceError("install_failed", error instanceof Error ? error.message : "GitHub skill import failed");
+    }
+  }
   console.log(`[marketplace] Installing skill from package: ${packageName}`);
 
   const detail = await getMarketplaceDetail(packageName);
@@ -319,17 +398,14 @@ export async function installFromMarketplace(
  */
 async function trySkillsShDownload(repoUrl: string): Promise<ImportedSkill | null> {
   // Parse GitHub URL: https://github.com/owner/repo → owner, repo
-  const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
-  if (!match) return null;
-
-  const owner = match[1];
-  const repo = match[2];
-
-  // Try to discover skills in the repo via skills.sh
-  // skills.sh API: GET /api/download/{owner}/{repo}/{slug}
-  // But we don't know the slug yet. Try the repo name as slug first.
-  const slug = repo?.replace(/[^a-z0-9-]/gi, "-").toLowerCase() ?? "";
-
+  const parsed = new URL(repoUrl);
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  if (segments.length < 2) return null;
+  const owner = segments[0]!;
+  const repo = segments[1]!;
+  const treeIndex = segments.indexOf("tree");
+  const skillPath = treeIndex >= 0 ? segments.slice(treeIndex + 2).join("/") : "";
+  const slug = (skillPath.split("/").filter(Boolean).at(-1) ?? repo).replace(/[^a-z0-9-]/gi, "-").toLowerCase();
   const downloadUrl = `${SKILLS_SH_BASE}/api/download/${owner}/${repo}/${slug}`;
   console.log(`[marketplace] Trying skills.sh download: ${downloadUrl}`);
 

@@ -2,13 +2,13 @@ import type { FastifyInstance } from "fastify";
 import nodemailer from "nodemailer";
 
 import type { ServerEnv } from "../config/env.js";
-import type { AdminSupabaseClient } from "../supabase/admin.js";
+import type { DataAdminClient } from "../auth/types.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function registerAuthRoutes(
   app: FastifyInstance,
-  options: { env: ServerEnv; getAdminClient: () => AdminSupabaseClient },
+  options: { env: ServerEnv; getAdminClient: () => DataAdminClient },
 ) {
   app.post<{ Body: { email?: string } }>("/api/auth/magic-link", async (request, reply) => {
     const email = request.body?.email?.trim().toLowerCase();

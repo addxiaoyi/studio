@@ -33,6 +33,31 @@
 </p>
 
 ---
+> Runtime note: the active deployment is local-only. Use local PostgreSQL (`DATABASE_URL`), local filesystem Storage (`STORAGE_ROOT`), local sessions, and the local Worker queue. Supabase migrations and the old mock are historical reference material and are not loaded by the application.
+
+## Current implementation status
+
+The current GitHub snapshot includes the creator-workspace UX pass and the
+reliability work that is present in this checkout. The detailed 100-item
+acceptance matrix is tracked in
+[`docs/CREATOR-WORKSPACE-UX-100.md`](docs/CREATOR-WORKSPACE-UX-100.md).
+
+- 30 UX items are implemented and covered by focused checks.
+- 67 items are locally improved but still require browser or manual evidence.
+- 3 items remain explicitly open: breadcrumbs, 200% zoom verification, and
+  rendered contrast verification.
+- Verified locally: Web typecheck, 53 Web Vitest files / 201 tests, Server
+  typecheck, 87 Server Vitest files / 468 tests, Web production build, and
+  signed-in workspace viewport checks at 320/390/768px including Chromium and
+  iPhone Safari.
+- The broader browser suite still contains unrelated legacy assumptions; its
+  known failures are recorded in the release-status document.
+- This snapshot is not a production deployment. Runtime and provider behavior
+  must be rechecked in the target environment before release.
+
+See [`docs/RELEASE-STATUS-2026-10-18.md`](docs/RELEASE-STATUS-2026-10-18.md)
+for the publication boundary, verification evidence, and remaining work.
+
 
 ## 💡 Helstera 是什么
 
@@ -435,7 +460,7 @@ Helstera/
 |----------|--------|
 | Google (API Key) | Imagen 4, Gemini 2.5 Flash Image, Gemini 3 Pro Image |
 | Google (Vertex AI) | Gemini 3 Pro Image, Gemini 3.1 Flash Image, Gemini 2.5 Flash Image |
-| OpenAI | DALL-E 3, GPT Image 1.5 |
+| OpenAI | DALL-E 3, GPT Image 1 |
 | Replicate | Flux Kontext Pro/Max, SDXL, Recraft V3, Seedream, and more |
 
 ### Video Generation

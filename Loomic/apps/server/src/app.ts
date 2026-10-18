@@ -46,13 +46,19 @@ import {
   createUploadService,
   type UploadService,
 } from "./features/uploads/upload-service.js";
-import { type ServerEnv, loadServerEnv, resolveDefaultAgentModel } from "./config/env.js";
+import {
+  type ServerEnv,
+  loadServerEnv,
+  resolveDefaultAgentModel,
+} from "./config/env.js";
 import { createPgmqClient } from "./queue/pgmq-client.js";
+import { createLocalJobQueue } from "./queue/local-job-queue.js";
 import {
   createCreditService,
   type CreditService,
 } from "./features/credits/credit-service.js";
 import {
+  createLocalCostGuard,
   createTierGuard,
   type TierGuard,
 } from "./features/credits/tier-guard.js";
@@ -69,27 +75,35 @@ import {
 import { registerPaymentRoutes } from "./http/payments.js";
 import { registerPaymentWebhookRoute } from "./http/payments-webhook.js";
 import { registerContactSalesRoutes } from "./http/contact-sales.js";
-import { registerEcomRoutes } from "./http/ecom-image.js";
+import { registerLocalContactSalesRoutes } from "./http/local-contact-sales.js";
 import { registerLocalEcomRoutes } from "./http/local-ecom-image.js";
 import { registerLocalTeamRoutes } from "./http/local-team.js";
+import { registerLocalGrowthRoutes, registerPublicGrowthRoutes } from "./http/local-growth.js";
+import { registerOfficialModelPriceRoutes } from "./http/official-model-prices.js";
+import { registerFeedOperationRoutes } from "./http/feed-operations.js";
+import { configureFeedRenderQueue } from "./features/jobs/executors/feed-render.js";
 import { registerEpayRoutes } from "./http/epay.js";
-import { createEcomService } from "./features/ecom-image/ecom-service.js";
-import { createYeePayClient, type YeePayClient } from "./features/payments/yeepay-client.js";
-import { YeePayService } from "./features/payments/yeepay-service.js";
-import { registerYeePayRoutes, registerYeePayWebhookRoute } from "./http/yeepay.js";
+import { registerAlipayRoutes, registerUnavailableAlipayRoutes } from "./http/alipay.js";
+import { registerLightPayRoutes } from "./http/lightpay.js";
+import { createLightPayClient } from "./features/payments/lightpay-client.js";
 import { registerCreditRoutes } from "./http/credits.js";
 import { registerFontsRoutes } from "./http/fonts.js";
 import { registerJobRoutes } from "./http/jobs.js";
+import { registerGenerationApprovalRoutes } from "./http/generation-approvals.js";
+import { createGenerationApprovalService } from "./features/generation/generation-approval-service.js";
 import { registerBrandKitRoutes } from "./http/brand-kits.js";
 import { registerCanvasRoutes } from "./http/canvases.js";
+import { registerCanvasDecomposeRoutes } from "./http/canvas-decompose.js";
 import { registerChatRoutes } from "./http/chat.js";
 import { registerGenerateRoutes } from "./http/generate.js";
 import { registerHealthRoutes } from "./http/health.js";
 import { registerMetricsRoutes } from "./http/metrics.js";
+import { registerErrorRoutes } from "./http/errors.js";
 import { registerLocalAuthRoutes } from "./http/local-auth.js";
 import { createLocalDbPool } from "./local-db/client.js";
 import { createLocalRequestAuthenticator } from "./local-db/auth.js";
 import { createLocalProjectService } from "./local-db/project-service.js";
+import { createLocalStoryboardService } from "./local-db/storyboard-service.js";
 import { createLocalViewerService } from "./local-db/viewer-service.js";
 import { createLocalCanvasService } from "./local-db/canvas-service.js";
 import { createLocalChatService } from "./local-db/chat-service.js";
@@ -107,22 +121,31 @@ import { registerModelRoutes } from "./http/models.js";
 import { registerImageModelRoutes } from "./http/image-models.js";
 import { registerVideoModelRoutes } from "./http/video-models.js";
 import { registerProjectRoutes } from "./http/projects.js";
+import { registerStoryboardRoutes } from "./http/storyboard.js";
 import { registerRunRoutes } from "./http/runs.js";
+import { registerAgentWorkflowRoutes } from "./http/agent-workflows.js";
 import { registerSettingsRoutes } from "./http/settings.js";
+import { registerAdminProviderRoutes } from "./http/admin-providers.js";
+import { createProviderConfigService } from "./local-db/provider-config-service.js";
 import { registerUploadRoutes } from "./http/uploads.js";
 import { registerSkillRoutes } from "./http/skills.js";
 import { registerLocalSkillRoutes } from "./http/local-skills.js";
 import { registerMarketplaceRoutes } from "./http/skills-marketplace.js";
 import { registerViewerRoutes } from "./http/viewer.js";
+import { registerDouyinMcpRoutes } from "./http/douyin-mcp.js";
+import { registerDouyinWebhookRoutes } from "./http/douyin-webhook.js";
+import { registerDouyinOAuthRoutes } from "./http/douyin-oauth.js";
+import { DouyinCredentialManager } from "./features/douyin/douyin-credentials.js";
+import { registerStorageRoutes } from "./http/storage.js";
 import { CanvasEventBuffer } from "./ws/event-buffer.js";
 import { ConnectionManager } from "./ws/connection-manager.js";
 import { registerWsRoute } from "./ws/handler.js";
-import { createAdminSupabaseClient } from "./supabase/admin.js";
 import {
-  createSupabaseRequestAuthenticator,
-  createUserSupabaseClientFactory,
-  type RequestAuthenticator,
-} from "./supabase/user.js";
+  createStorageProvider,
+  type StorageProvider,
+} from "./storage/index.js";
+import { cleanExpiredGeneratedAssets } from "./features/assets/asset-retention.js";
+import type { RequestAuthenticator } from "./auth/types.js";
 
 export type BuildAppOptions = {
   agentFactory?: HelsteraAgentFactory;
@@ -138,6 +161,7 @@ export type BuildAppOptions = {
   env?: Partial<ServerEnv>;
   jobService?: JobService;
   paymentService?: PaymentService;
+  storageProvider?: StorageProvider;
   tierGuard?: TierGuard;
   uploadService?: UploadService;
   mockEventDelayMs?: number;
@@ -145,19 +169,32 @@ export type BuildAppOptions = {
   settingsService?: SettingsService;
   threadService?: ThreadService;
   viewerService?: ViewerService;
+  autoSyncOfficialPrices?: boolean;
 };
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
-  const env = loadServerEnv(options.env);
+  const env = loadServerEnv({ ...options.env, authProvider: "local", storageProvider: "local" });
+  if (!env.databaseUrl) throw new Error("DATABASE_URL is required; Supabase runtime support has been removed.");
 
   // Register generation providers (shared with worker.ts)
   registerAllProviders(env);
 
   const app = Fastify({
     logger: { level: "info" },
+    bodyLimit: 50 * 1024 * 1024,
+  });
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
+    const rawBody = typeof body === "string" ? body : body.toString("utf8");
+    (request as any).rawBody = rawBody;
+    try {
+      done(null, JSON.parse(rawBody));
+    } catch (error) {
+      done(error as Error, undefined);
+    }
   });
   void app.register(multipart, {
-    limits: { fileSize: 10 * 1024 * 1024 },
+    limits: { fileSize: 25 * 1024 * 1024 },
   });
   void app.register(async (instance) => {
     await instance.register(websocket);
@@ -166,6 +203,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       agentRunMetadataService,
       auth,
       chatService,
+      creditService,
       connectionManager,
       eventBuffer,
       settingsService,
@@ -173,129 +211,103 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       viewerService,
     });
   });
-  let localDb: ReturnType<typeof createLocalDbPool> | undefined;
-  if (env.databaseUrl) {
-    localDb = createLocalDbPool(env.databaseUrl);
+  const localDb = createLocalDbPool(env.databaseUrl);
+  {
+    void localDb.query(
+      `update agent_runs
+       set status = 'failed', completed_at = now(), error_code = 'stale_run',
+           error_message = '生成任务因服务重启中断，请重新提交'
+       where status in ('accepted', 'running')
+         and created_at < now() - interval '15 minutes'`,
+    ).catch((error) => {
+      console.error('[agent-runs] stale-run recovery failed:', error);
+    });
   }
-  const auth =
-    options.auth ??
-    (env.authProvider === "local" && localDb
-      ? createLocalRequestAuthenticator(localDb)
-      : createSupabaseRequestAuthenticator(env));
-  const createUserClient = createUserSupabaseClientFactory(env);
-  let adminClient:
-    | ReturnType<typeof createAdminSupabaseClient>
-    | undefined;
-  const getAdminClient = () => {
-    adminClient ??= createAdminSupabaseClient(env);
-    return adminClient;
-  };
-  const viewerService =
-    options.viewerService ??
-    (env.authProvider === "local" && localDb
-      ? createLocalViewerService(localDb)
-      : createViewerService({ getAdminClient }));
-  console.log(`[auth] provider=${env.authProvider} localDb=${Boolean(localDb)} viewer=${env.authProvider === "local" && localDb ? "local" : "supabase"}`);
+  const auth = options.auth ?? createLocalRequestAuthenticator(localDb);
+  const viewerService = options.viewerService ?? createLocalViewerService(localDb, env.systemAdminEmails);
+  console.log(
+    "[auth] provider=local database=postgres",
+  );
+
+  // Storage provider setup
+  const storageProvider = options.storageProvider ?? createStorageProvider({
+    provider: "local",
+    root: env.storageRoot ?? "/www/helstera/uploads",
+    baseUrl: env.webOrigin,
+  });
+  console.log(
+    `[storage] provider=local root=${env.storageRoot ?? "/www/helstera/uploads"}`,
+  );
+
   const projectService =
     options.projectService ??
-    (env.authProvider === "local" && localDb
-      ? createLocalProjectService(localDb)
-      : createProjectService({ createUserClient, viewerService }));
-  const brandKitService =
-    options.brandKitService ??
-    (env.authProvider === "local" && localDb
-      ? createLocalBrandKitService(localDb)
-      : createBrandKitService({ createUserClient }));
-  const canvasService =
-    options.canvasService ??
-    (env.authProvider === "local" && localDb
-      ? createLocalCanvasService(localDb)
-      : createCanvasService({ createUserClient }));
-  const threadService =
-    options.threadService ??
-    (env.authProvider === "local" && localDb
-      ? createLocalThreadService(localDb)
-      : createThreadService({ createUserClient }));
-  const chatService =
-    options.chatService ??
-    (env.authProvider === "local" && localDb
-      ? createLocalChatService(localDb)
-      : createChatService({ createUserClient, threadService }));
-  const agentRunMetadataService =
-    options.agentRunMetadataService ??
-    (env.authProvider === "local" && localDb
-      ? createLocalAgentRunMetadataService(localDb)
-      : createAgentRunMetadataService({ getAdminClient }));
+    createLocalProjectService(localDb, env.storageRoot ?? "/www/helstera/uploads");
+  const brandKitService = options.brandKitService ?? createLocalBrandKitService(localDb, storageProvider);
+  const canvasService = options.canvasService ?? createLocalCanvasService(localDb);
+  const threadService = options.threadService ?? createLocalThreadService(localDb);
+  const chatService = options.chatService ?? createLocalChatService(localDb);
+  const agentRunMetadataService = options.agentRunMetadataService ?? createLocalAgentRunMetadataService(localDb);
   const agentPersistenceService =
     options.agentPersistenceService ?? createAgentPersistenceService(env);
-  const settingsService =
-    options.settingsService ??
-      (env.authProvider === "local" && localDb
-        ? createLocalSettingsService(localDb)
-        : createSettingsService({
-        createUserClient,
-        defaultModel: resolveDefaultAgentModel(env),
-      }));
-  const uploadService =
-    options.uploadService ??
-    (env.authProvider === "local" && localDb
-      ? createLocalUploadService(localDb)
-      : createUploadService({ createUserClient }));
-  const pgmq = env.supabaseDbUrl
-    ? createPgmqClient(env.supabaseDbUrl)
-    : undefined;
-  const jobService =
-    options.jobService ??
-    (env.authProvider === "local" && localDb
-      ? createLocalJobService(localDb)
-      : pgmq
-      ? createJobService({ createUserClient, getAdminClient, pgmq })
-      : undefined);
-  const creditService =
-    options.creditService ??
-    (env.authProvider === "local" && localDb
-      ? createLocalCreditService(localDb)
-      : createCreditService({ getAdminClient }));
-  const tierGuard =
-    options.tierGuard ?? createTierGuard({ getAdminClient });
+  const settingsService = options.settingsService ?? createLocalSettingsService(localDb);
+  const uploadService = options.uploadService ?? createLocalUploadService(localDb);
+  const feedDb = localDb;
+  configureFeedRenderQueue("local");
+  const jobService = options.jobService ?? createLocalJobService(localDb, createLocalJobQueue(localDb));
+  const creditService = options.creditService ?? createLocalCreditService(localDb);
+  const tierGuard = options.tierGuard ?? createLocalCostGuard(localDb);
 
   // Payment service — only created when Lemon Squeezy is configured
-  let paymentService: PaymentService | undefined = options.paymentService;
-  if (!paymentService && env.lemonSqueezyApiKey && env.lemonSqueezyStoreId) {
-    const lsClient = createLemonSqueezyClient({
-      apiKey: env.lemonSqueezyApiKey,
-      storeId: env.lemonSqueezyStoreId,
-    });
-    paymentService = createPaymentService({
-      lemonSqueezy: lsClient,
-      getAdminClient,
-      variantMap: buildVariantMap(env),
-      webOrigin: env.webOrigin,
-    });
-  }
+  const paymentService = options.paymentService;
 
-  const connectionManager = options.connectionManager ?? new ConnectionManager();
+  const connectionManager =
+    options.connectionManager ?? new ConnectionManager();
   const eventBuffer = new CanvasEventBuffer();
   setInterval(() => eventBuffer.cleanup(), 5 * 60 * 1000);
+  if (localDb) {
+    let isAssetRetentionRunning = false;
+    const runAssetRetention = async () => {
+      if (isAssetRetentionRunning) return;
+      isAssetRetentionRunning = true;
+      try {
+        await cleanExpiredGeneratedAssets({ db: localDb, storage: storageProvider });
+      } catch (error) {
+        console.error("[asset-retention] cleanup failed:", error);
+      } finally {
+        isAssetRetentionRunning = false;
+      }
+    };
+    void runAssetRetention();
+    setInterval(() => void runAssetRetention(), 24 * 60 * 60 * 1000);
+  }
   const agentRuns = createAgentRunService({
     agentPersistenceService,
     ...(options.agentFactory ? { agentFactory: options.agentFactory } : {}),
     agentRunMetadataService,
     connectionManager,
-    createUserClient,
     ...(options.agentModel ? { model: options.agentModel } : {}),
     ...(options.mockEventDelayMs === undefined
       ? {}
       : { eventDelayMs: options.mockEventDelayMs }),
     env,
     ...(localDb ? { localDb } : {}),
+    ...(localDb ? { generationApprovalService: createGenerationApprovalService(localDb) } : {}),
     ...(jobService ? { jobService } : {}),
     creditService,
     tierGuard,
     viewerService,
+    storage: storageProvider,
   });
 
   app.addHook("onRequest", async (request, reply) => {
+    reply.header("x-content-type-options", "nosniff");
+    reply.header("x-frame-options", "DENY");
+    reply.header("referrer-policy", "strict-origin-when-cross-origin");
+    reply.header("permissions-policy", "camera=(), microphone=(), geolocation=()");
+    if (env.webOrigin.startsWith("https://")) {
+      reply.header("strict-transport-security", "max-age=31536000; includeSubDomains");
+    }
+
     const corsResult = evaluateCors(request, env.webOrigin);
 
     if (!corsResult.allowed) {
@@ -309,8 +321,15 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       reply.header("vary", "Origin");
     }
 
+    if (corsResult.allowCredentials) {
+      reply.header("access-control-allow-credentials", "true");
+    }
+
     if (corsResult.isBrowserRequest) {
-      reply.header("access-control-allow-methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+      reply.header(
+        "access-control-allow-methods",
+        "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+      );
       reply.header(
         "access-control-allow-headers",
         resolveAllowedHeaders(
@@ -326,11 +345,27 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   void registerHealthRoutes(app, env);
   void registerMetricsRoutes(app);
-  if (localDb) {
-    void registerLocalAuthRoutes(app, { db: localDb, env });
-    void registerLocalAssetRoutes(app, { db: localDb, auth, root: "/www/helstera/uploads" });
-    void registerLocalEcomRoutes(app, { db: localDb, auth });
-    void registerLocalTeamRoutes(app, { db: localDb, auth, viewerService });
+  void registerErrorRoutes(app);
+  void registerLocalAuthRoutes(app, { db: localDb, env });
+  void registerLocalAssetRoutes(app, { db: localDb, auth, root: env.storageRoot ?? "/www/helstera/uploads" });
+  void registerLocalEcomRoutes(app, { db: localDb, auth, creditService });
+  void registerLocalTeamRoutes(app, { db: localDb, auth, viewerService });
+  void registerLocalGrowthRoutes(app, { db: localDb, auth, viewerService });
+  registerOfficialModelPriceRoutes(app, {
+    db: localDb,
+    autoSync: options.autoSyncOfficialPrices ?? false,
+    auth,
+    viewerService,
+  });
+  if (feedDb) {
+    registerFeedOperationRoutes(app, { db: feedDb, auth, viewerService, storage: storageProvider });
+    if (feedDb !== localDb) {
+      app.addHook("onClose", async () => {
+        await feedDb.end();
+      });
+    }
+  } else {
+    console.warn("[feed] disabled: DATABASE_URL is not configured");
   }
   if (localDb && env.epayBaseUrl && env.epayMerchantId && env.epayMd5Key) {
     void registerEpayRoutes(app, {
@@ -343,22 +378,61 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       notifyUrl: `${env.webOrigin}/api/epay/notify`,
     });
   }
-  void registerAuthRoutes(app, { env, getAdminClient });
+  if (localDb && env.lightpayBaseUrl && env.lightpayApiId && env.lightpayApiSecret) {
+    void app.register(async (lightpayScope) => {
+      lightpayScope.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => done(null, body));
+      registerLightPayRoutes(lightpayScope, {
+        auth,
+        creditService,
+        viewerService,
+        client: createLightPayClient({ baseUrl: env.lightpayBaseUrl!, apiId: env.lightpayApiId!, apiSecret: env.lightpayApiSecret! }),
+      });
+    });
+  }
+  if (env.alipayAppId && env.alipayAppPrivateKeyPath && env.alipayPlatformPublicKeyPath) {
+    try {
+      registerAlipayRoutes(app, {
+        appId: env.alipayAppId,
+        appPrivateKeyPath: env.alipayAppPrivateKeyPath,
+        auth,
+        creditService,
+        notifyUrl: `${env.webOrigin}/api/payment/alipay/notify`,
+        platformPublicKeyPath: env.alipayPlatformPublicKeyPath,
+        viewerService,
+        webOrigin: env.webOrigin,
+      });
+    } catch (error) {
+      console.error("[alipay] disabled: could not load certificate files", error);
+      registerUnavailableAlipayRoutes(app);
+    }
+  } else {
+    registerUnavailableAlipayRoutes(app);
+  }
   void registerFontsRoutes(app, { env });
   void registerImageProxyRoute(app);
   void registerRunRoutes(app, agentRuns, {
     agentRunMetadataService,
     auth,
+    creditService,
     settingsService,
     threadService,
     viewerService,
   });
-  void registerViewerRoutes(app, {
+  registerAgentWorkflowRoutes(app, {
+    db: localDb,
     auth,
-    createUserClient,
-    creditService,
     viewerService,
+    jobService,
+    creditService,
+    tierGuard,
   });
+  void registerViewerRoutes(app, { auth, creditService, viewerService, localDb });
+  const douyinCredentials = DouyinCredentialManager.fromEnv(env);
+  douyinCredentials.start();
+  app.addHook("onClose", async () => douyinCredentials.stop());
+  registerDouyinMcpRoutes(app, { auth, db: localDb, env, viewerService, credentials: douyinCredentials });
+  registerDouyinWebhookRoutes(app, { db: localDb, env });
+  registerDouyinOAuthRoutes(app, { auth, db: localDb, env, viewerService });
   void registerBrandKitRoutes(app, {
     auth,
     brandKitService,
@@ -367,18 +441,35 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     auth,
     projectService,
   });
+  if (localDb) {
+    void registerStoryboardRoutes(app, {
+      auth,
+      service: createLocalStoryboardService(localDb),
+    });
+  }
   void registerCanvasRoutes(app, {
     auth,
     canvasService,
   });
+  void registerCanvasDecomposeRoutes(app, { auth });
   void registerSettingsRoutes(app, {
     auth,
     settingsService,
     viewerService,
   });
   void registerModelRoutes(app, env);
-  void registerImageModelRoutes(app, { auth, creditService, viewerService });
-  void registerVideoModelRoutes(app, { auth, creditService, viewerService });
+  void registerImageModelRoutes(app, {
+    auth,
+    creditService,
+    viewerService,
+    ...(localDb ? { localDb } : {}),
+  });
+  void registerVideoModelRoutes(app, {
+    auth,
+    creditService,
+    viewerService,
+    ...(localDb ? { localDb } : {}),
+  });
   void registerChatRoutes(app, {
     auth,
     chatService,
@@ -395,6 +486,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     viewerService,
     ...(jobService ? { jobService } : {}),
     ...(tierGuard ? { tierGuard } : {}),
+    ...(localDb ? { localDb } : {}),
   });
   void registerCreditRoutes(app, {
     auth,
@@ -403,71 +495,55 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     viewerService,
   });
   if (jobService) {
-    void registerJobRoutes(app, { auth, creditService, jobService, tierGuard, viewerService });
+    void registerJobRoutes(app, {
+      auth,
+      creditService,
+      jobService,
+      tierGuard,
+      viewerService,
+      ...(localDb ? { localDb } : {}),
+      storage: storageProvider,
+    });
   }
-  if (env.authProvider === "local" && localDb) {
-    void registerLocalSkillRoutes(app, { auth, db: localDb, viewerService });
+  if (localDb) {
+    registerGenerationApprovalRoutes(app, {
+      auth,
+      db: localDb,
+      viewerService,
+      ...(jobService ? { jobService } : {}),
+      creditService,
+    });
+  }
+
+  // Storage routes - serve local files when using local storage provider
+  void registerStorageRoutes(app, { storageProvider, ...(env.storageRoot ? { storageRoot: env.storageRoot } : {}) });
+
+  void registerLocalSkillRoutes(app, { auth, db: localDb, viewerService });
+  const encryptionKey = process.env.PROVIDER_CONFIG_ENCRYPTION_KEY;
+  if (encryptionKey) {
+    void registerAdminProviderRoutes(app, {
+      auth,
+      db: localDb,
+      viewerService,
+      service: createProviderConfigService(localDb, encryptionKey),
+    });
   } else {
-    void registerSkillRoutes(app, { auth, createUserClient, viewerService });
+    console.warn("[admin-providers] disabled: PROVIDER_CONFIG_ENCRYPTION_KEY is not configured");
   }
-  void registerMarketplaceRoutes(app, { auth, createUserClient, viewerService });
+  void registerMarketplaceRoutes(app, {
+    auth,
+    viewerService,
+    localDb,
+  });
 
   // Contact sales — public endpoint, no auth required
-  void registerContactSalesRoutes(app, { getAdminClient });
+  void registerLocalContactSalesRoutes(app, { db: localDb });
 
-  // E-commerce image generation — requires Supabase admin client.
-  const ecomService = createEcomService({
-    SUPABASE_URL: env.supabaseUrl,
-    SUPABASE_SERVICE_ROLE_KEY: env.supabaseServiceRoleKey,
-  });
-  if (ecomService) {
-    void registerEcomRoutes(app, { auth, ecomService });
-  }
+  // Supabase-backed ecommerce routes are disabled in local-only mode.
 
   // Payment routes — only registered when Lemon Squeezy is configured
-  if (paymentService) {
-    void registerPaymentRoutes(app, { auth, paymentService, viewerService });
+  // Supabase-backed payment routes are disabled in local-only mode.
 
-    if (env.lemonSqueezyWebhookSecret) {
-      // Webhook route is registered in an encapsulated plugin so the custom
-      // content-type parser (needed for raw body access) does not leak to
-      // other routes.
-      void app.register(async (webhookScope) => {
-        await registerPaymentWebhookRoute(webhookScope, {
-          getAdminClient,
-          paymentService: paymentService!,
-          webhookSecret: env.lemonSqueezyWebhookSecret!,
-        });
-      });
-    }
-  }
-
-  // YeePay (易支付) — China market provider
-  const yeepayClient = createYeePayClient(env);
-  if (yeepayClient) {
-    const yeepayService = new YeePayService({
-      client: yeepayClient,
-      getAdminClient,
-      notifyUrl:
-        env.yeepayNotifyUrl ?? `${env.webOrigin}/api/yeepay/webhook`,
-    });
-
-    void registerYeePayRoutes(app, {
-      auth,
-      yeepayService,
-      yeepayClient,
-      viewerService,
-    });
-
-    if (env.yeepayWebhookSecret) {
-      void app.register(async (webhookScope) => {
-        await registerYeePayWebhookRoute(webhookScope, {
-          yeepayService,
-          yeepayClient,
-        });
-      });
-    }
-  }
 
   return app;
 }
@@ -475,11 +551,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 type CorsResult = {
   allowed: boolean;
   allowOrigin: string | null;
+  allowCredentials: boolean;
   isBrowserRequest: boolean;
   isPreflight: boolean;
 };
 
-function evaluateCors(request: FastifyRequest, webOrigin: string): CorsResult {
+export function evaluateCors(request: FastifyRequest, webOrigin: string): CorsResult {
   const origin = request.headers.origin;
   const isPreflight =
     request.method === "OPTIONS" &&
@@ -489,15 +566,23 @@ function evaluateCors(request: FastifyRequest, webOrigin: string): CorsResult {
     return {
       allowed: true,
       allowOrigin: null,
+      allowCredentials: false,
       isBrowserRequest: false,
       isPreflight,
     };
   }
 
-  if (origin === webOrigin) {
+  const forwardedProto = firstHeaderValue(request.headers["x-forwarded-proto"]);
+  const forwardedHost = firstHeaderValue(request.headers["x-forwarded-host"]);
+  const requestHost = forwardedHost ?? request.headers.host;
+  const requestOrigin =
+    forwardedProto && requestHost ? `${forwardedProto}://${requestHost}` : null;
+
+  if (origin === webOrigin || origin === requestOrigin) {
     return {
       allowed: true,
       allowOrigin: origin,
+      allowCredentials: true,
       isBrowserRequest: true,
       isPreflight,
     };
@@ -507,6 +592,7 @@ function evaluateCors(request: FastifyRequest, webOrigin: string): CorsResult {
     return {
       allowed: true,
       allowOrigin: origin,
+      allowCredentials: true,
       isBrowserRequest: true,
       isPreflight,
     };
@@ -515,9 +601,15 @@ function evaluateCors(request: FastifyRequest, webOrigin: string): CorsResult {
   return {
     allowed: false,
     allowOrigin: null,
+    allowCredentials: false,
     isBrowserRequest: true,
     isPreflight,
   };
+}
+
+function firstHeaderValue(value: string | string[] | undefined) {
+  const first = Array.isArray(value) ? value[0] : value?.split(",", 1)[0];
+  return first?.trim().toLowerCase() || null;
 }
 
 function resolveAllowedHeaders(requestHeaders: string | undefined) {

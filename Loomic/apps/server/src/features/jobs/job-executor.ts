@@ -1,15 +1,16 @@
-import type { BackgroundJobType } from "@helstera/shared";
+import type { AnyBackgroundJobType } from "@helstera/shared";
 import type { Pool } from "pg";
 
 import type { JobService } from "./job-service.js";
 import type { PgmqClient } from "../../queue/pgmq-client.js";
-import type { AdminSupabaseClient } from "../../supabase/admin.js";
+import type { DataAdminClient } from "../../auth/types.js";
 import type { ServerEnv } from "../../config/env.js";
+import type { StorageProvider } from "../../storage/index.js";
 
 export type ExecutorContext = {
   jobService: JobService;
   pgmq: PgmqClient;
-  getAdminClient: () => AdminSupabaseClient;
+  getAdminClient: () => DataAdminClient;
   env: ServerEnv;
   /** PGMQ queue name for the current job (set per-message by the worker). */
   queue: string;
@@ -21,7 +22,10 @@ export type ExecutorContext = {
    * Never throws; logs on failure.
    */
   renewVt: (vtSeconds: number) => Promise<void>;
+  /** Persist a stage heartbeat while a provider call is still running. */
+  heartbeat: (progress: number, stage: string) => Promise<void>;
   localDb?: Pool;
+  storage: StorageProvider;
 };
 
 export type JobExecutor = (
@@ -30,12 +34,12 @@ export type JobExecutor = (
   ctx: ExecutorContext,
 ) => Promise<Record<string, unknown>>;
 
-const executors = new Map<BackgroundJobType, JobExecutor>();
+const executors = new Map<AnyBackgroundJobType, JobExecutor>();
 
-export function registerExecutor(jobType: BackgroundJobType, executor: JobExecutor): void {
+export function registerExecutor(jobType: AnyBackgroundJobType, executor: JobExecutor): void {
   executors.set(jobType, executor);
 }
 
-export function getExecutor(jobType: BackgroundJobType): JobExecutor | undefined {
+export function getExecutor(jobType: AnyBackgroundJobType): JobExecutor | undefined {
   return executors.get(jobType);
 }

@@ -57,6 +57,18 @@ export function getViewportCenter(appState: {
   };
 }
 
+export function viewportPointToScene(
+  point: { clientX: number; clientY: number },
+  bounds: Pick<DOMRect, "left" | "top">,
+  appState: { scrollX: number; scrollY: number; zoom?: { value?: number } },
+) {
+  const zoom = appState.zoom?.value ?? 1;
+  return {
+    x: (point.clientX - bounds.left) / zoom - appState.scrollX,
+    y: (point.clientY - bounds.top) / zoom - appState.scrollY,
+  };
+}
+
 /**
  * Create an Excalidraw image element with all required fields.
  */
@@ -69,6 +81,7 @@ export function createExcalidrawImageElement(opts: {
   title?: string;
   source?: "generated" | "uploaded";
   storageUrl?: string;
+  assetId?: string;
 }): Record<string, unknown> {
   const element: Record<string, unknown> = {
     type: "image",
@@ -102,11 +115,12 @@ export function createExcalidrawImageElement(opts: {
     scale: [1, 1],
     crop: null,
   };
-  if (opts.title || opts.source || opts.storageUrl) {
+  if (opts.title || opts.source || opts.storageUrl || opts.assetId) {
     element.customData = {
       ...(opts.title ? { title: opts.title } : {}),
       ...(opts.source ? { source: opts.source } : {}),
       ...(opts.storageUrl ? { storageUrl: opts.storageUrl } : {}),
+      ...(opts.assetId ? { assetId: opts.assetId } : {}),
     };
   }
   return element;
@@ -215,6 +229,9 @@ export async function insertImageOnCanvas(
     ...(artifact.title ? { title: artifact.title } : {}),
     source: "generated",
     storageUrl: artifact.url,
+    ...((artifact as ImageArtifact & { assetId?: string }).assetId
+      ? { assetId: (artifact as ImageArtifact & { assetId?: string }).assetId }
+      : {}),
   });
 
   api.updateScene({

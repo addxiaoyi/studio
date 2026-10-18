@@ -5,6 +5,8 @@ import type {
   VideoProvider,
 } from "../types.js";
 import { GenerationError } from "../utils.js";
+import { isRemovedImageModelId, isRemovedModelId } from "../removed-models.js";
+import { getConfiguredBilling, getImageCreditCost, isNanoImageModelId, isWithinPublicUnitPriceLimit } from "@helstera/shared";
 
 const imageProviders = new Map<string, ImageProvider>();
 const videoProviders = new Map<string, VideoProvider>();
@@ -50,22 +52,47 @@ export interface AvailableVideoModel extends VideoModelInfo {
   provider: string;
 }
 
+function isWithinConfiguredPrice(modelId: string, mediaType: "image" | "video"): boolean {
+  const billing = getConfiguredBilling(modelId);
+  if (billing) {
+    if (mediaType === "video" && billing.billingUnit === "per_million_tokens") return false;
+    return billing.billingUnit === "per_million_tokens" || isWithinPublicUnitPriceLimit(billing.billingUnit, billing.creditCost);
+  }
+  try {
+    return isWithinPublicUnitPriceLimit("per_generation", getImageCreditCost(modelId, "hd"));
+  } catch {
+    return true;
+  }
+}
+
 /** Returns all image models from all registered providers. */
 export function getAvailableImageModels(): AvailableModel[] {
   return [...imageProviders.values()].flatMap((p) =>
-    p.models.map((m) => ({ ...m, provider: p.name })),
+    p.models
+      .filter((m) => {
+        const id = m.id.toLowerCase();
+        return !isNanoImageModelId(id)
+          && !m.displayName.toLowerCase().includes("nano banana")
+          && !isRemovedImageModelId(id)
+          && !id.includes("4k-超分");
+      })
+      .filter((m) => isWithinConfiguredPrice(m.id, "image"))
+      .map((m) => ({ ...m, provider: p.name })),
   );
 }
 
 /** Returns all video models from all registered providers. */
 export function getAvailableVideoModels(): AvailableVideoModel[] {
   return [...videoProviders.values()].flatMap((p) =>
-    p.models.map((m) => ({ ...m, provider: p.name })),
+    p.models.filter((m) => !isRemovedModelId(m.id) && isWithinConfiguredPrice(m.id, "video")).map((m) => ({ ...m, provider: p.name })),
   );
 }
 
 /** Resolves the provider name that handles a given image model ID. */
 export function resolveImageProviderName(modelId: string): string {
+  if (isRemovedImageModelId(modelId)) {
+    throw new GenerationError("disabled", "model_not_found", `Retired image model: ${modelId}`);
+  }
   for (const provider of imageProviders.values()) {
     if (provider.models.some((m) => m.id === modelId)) {
       return provider.name;
@@ -80,6 +107,9 @@ export function resolveImageProviderName(modelId: string): string {
 
 /** Resolves the provider name that handles a given video model ID. */
 export function resolveVideoProviderName(modelId: string): string {
+  if (isRemovedModelId(modelId) || !isWithinConfiguredPrice(modelId, "video")) {
+    throw new GenerationError("disabled", "model_not_found", `Retired video model: ${modelId}`);
+  }
   for (const provider of videoProviders.values()) {
     if (provider.models.some((m) => m.id === modelId)) {
       return provider.name;

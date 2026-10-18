@@ -1,118 +1,48 @@
--- dev:seed-test-accounts — Create test accounts via raw SQL.
--- =============================================================
--- The supabase-mock doesn't implement /auth/v1/admin/users, so the
--- regular pnpm seed script fails. This SQL bypasses the admin API and
--- creates users directly in PostgreSQL — same data the real seed would
--- produce, just via a different transport.
---
--- Password (all four accounts): "Helstera-Test-2026"
--- Pre-computed bcryptjs hash (cost=10):
---   $2a$10$KIxqCqPqg.6YEh8yfVQi3eEH9XhC0YQUwL7vJLHXKCx1jBdOm1GC
---
--- Usage:
---   bash scripts/dev-local.sh   (runs automatically if pnpm seed fails)
---   # or:
---   docker exec -i docker-db_postgres-1 psql -U postgres -d helstera \
---     -f scripts/dev-seed-accounts.sql
--- =============================================================
+-- Seed four local PostgreSQL test accounts. Safe to re-run.
+-- Password for every account: Helstera-Test-2026
 
--- Pre-computed bcryptjs hash for "Helstera-Test-2026" (cost 10)
--- (Generated with: node -e 'console.log(require("bcryptjs").hashSync("Helstera-Test-2026", 10))')
 do $$
 declare
-  v_pw_hash text := '$2a$10$bBd4yikYKM3sWpxVOy3Uye1hVaLbKRhBcr1bzmn.SkrlV7mAx/9Xu';
-  v_uid      uuid;
-  v_ws_id    uuid;
-  v_now      timestamptz := now();
-  v_period_end timestamptz;
+  pw_hash text := '8db030ca05f2286f09834ed7f9df586c:24a98eec40acdaeba9e75b1b50d2b114f37083e107892470122391ab3ddddfe6ddeb1ae1cd8c84f656a23d638cea21bef0cf36f7e7feffafa57357381268435e';
+  account record;
+  v_user_id uuid;
+  v_workspace_id uuid;
 begin
-  -- ── Loop over the 4 test accounts ──
-  for i in 1..4 loop
-    declare
-      v_email   text;
-      v_plan    text;
-      v_credits bigint;
-      v_name    text;
-    begin
-      if i = 1 then v_email := 'free@test.helstera.com';    v_plan := 'free';    v_credits := 50;     v_name := 'Free Workspace';    v_period_end := v_now + interval '30 days';
-      elsif i = 2 then v_email := 'starter@test.helstera.com'; v_plan := 'starter'; v_credits := 1200;  v_name := 'Starter Workspace'; v_period_end := v_now + interval '30 days';
-      elsif i = 3 then v_email := 'pro@test.helstera.com';     v_plan := 'pro';     v_credits := 5000;  v_name := 'Pro Workspace';     v_period_end := v_now + interval '30 days';
-      else                v_email := 'ultra@test.helstera.com';   v_plan := 'ultra';   v_credits := 15000; v_name := 'Ultra Workspace';   v_period_end := v_now + interval '30 days';
-      end if;
+  for account in
+    select * from (values
+      ('free@test.helstera.com', 'Free Workspace', 50::numeric),
+      ('starter@test.helstera.com', 'Starter Workspace', 1200::numeric),
+      ('pro@test.helstera.com', 'Pro Workspace', 5000::numeric),
+      ('ultra@test.helstera.com', 'Ultra Workspace', 15000::numeric)
+    ) as seed(email, workspace_name, credits)
+  loop
+    insert into app_users(email, display_name, password_hash)
+    values (account.email, account.workspace_name, pw_hash)
+    on conflict (email) do update set
+      display_name = excluded.display_name,
+      password_hash = excluded.password_hash,
+      updated_at = now()
+    returning id into v_user_id;
 
-      -- 1. Create auth user (idempotent)
-      select id into v_uid from auth.users where email = v_email;
-      if v_uid is null then
-        v_uid := gen_random_uuid();
-        insert into auth.users (
-          id, instance_id, email, encrypted_password, role,
-          created_at, updated_at, email_confirmed_at,
-          raw_user_meta_data, raw_app_meta_data
-        ) values (
-          v_uid, '00000000-0000-0000-0000-000000000000', v_email,
-          v_pw_hash, 'authenticated', v_now, v_now, v_now,
-          jsonb_build_object('display_name', v_name), '{}'::jsonb
-        );
-      end if;
+    select id into v_workspace_id from workspaces where owner_user_id = v_user_id;
+    if v_workspace_id is null then
+      insert into workspaces(owner_user_id, name) values (v_user_id, account.workspace_name)
+      returning id into v_workspace_id;
+    else
+      update workspaces set name = account.workspace_name, updated_at = now() where id = v_workspace_id;
+    end if;
 
-      -- 2. Create or update personal workspace (idempotent: check first)
-      select id into v_ws_id from public.workspaces
-        where owner_user_id = v_uid and type = 'personal' limit 1;
+    insert into workspace_members(workspace_id, user_id, role)
+    values (v_workspace_id, v_user_id, 'owner')
+    on conflict (workspace_id, user_id) do update set role = 'owner';
 
-      if v_ws_id is null then
-        v_ws_id := gen_random_uuid();
-        insert into public.workspaces (id, name, owner_user_id, type, created_at, updated_at)
-        values (v_ws_id, v_name, v_uid, 'personal', v_now, v_now)
-        returning id into v_ws_id;
-      else
-        update public.workspaces set name = v_name, updated_at = v_now
-        where id = v_ws_id;
-      end if;
+    insert into credit_balances(workspace_id, balance)
+    values (v_workspace_id, account.credits)
+    on conflict (workspace_id) do update set balance = excluded.balance, updated_at = now();
 
-      -- 3. Profile + workspace_members
-      insert into public.profiles (id, display_name, email, created_at, updated_at)
-      values (v_uid, v_name, split_part(v_email, '@', 1), v_now, v_now)
-      on conflict (id) do nothing;
-
-      insert into public.workspace_members (workspace_id, user_id, role, created_at)
-      values (v_ws_id, v_uid, 'owner', v_now)
-      on conflict (workspace_id, user_id) do nothing;
-
-      -- 4. Subscription (upsert by workspace_id)
-      insert into public.subscriptions (
-        workspace_id, plan, billing_period, current_period_end, created_at, updated_at
-      ) values (
-        v_ws_id, v_plan::subscription_plan, 'monthly'::billing_period,
-        v_period_end, v_now, v_now
-      )
-      on conflict (workspace_id) do update set
-        plan = excluded.plan,
-        billing_period = excluded.billing_period,
-        current_period_end = excluded.current_period_end,
-        updated_at = excluded.updated_at;
-
-      -- 5. Credit balance (upsert, increment version)
-      insert into public.credit_balances (workspace_id, balance, version, updated_at)
-      values (v_ws_id, v_credits, 1, v_now)
-      on conflict (workspace_id) do update set
-        balance = v_credits,
-        version = public.credit_balances.version + 1,
-        updated_at = v_now;
-
-      -- 6. Credit transaction (audit log)
-      insert into public.credit_transactions (
-        workspace_id, user_id, transaction_type, amount,
-        description, balance_after, created_at
-      ) values (
-        v_ws_id, v_uid, 'admin_adjustment', v_credits,
-        'Seed: initial ' || v_plan || ' credits', v_credits, v_now
-      );
-
-      raise notice 'Seeded % (% plan, % credits)', v_email, v_plan, v_credits;
-    end;
+    insert into workspace_settings(workspace_id, default_model, auto_approve_paid_generation)
+    values (v_workspace_id, 'agnes-3.0-flash', false)
+    on conflict (workspace_id) do nothing;
   end loop;
-
-  raise notice '';
-  raise notice '✅ All 4 test accounts ready. Login password: Helstera-Test-2026';
 end
 $$;

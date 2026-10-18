@@ -19,7 +19,9 @@ import {
   type ThreadService,
 } from "../features/chat/thread-service.js";
 import type { SettingsService } from "../features/settings/settings-service.js";
-import type { RequestAuthenticator } from "../supabase/user.js";
+import type { CreditService } from "../features/credits/credit-service.js";
+import { chargeAgentMessage, refundAgentMessage } from "../agent/message-billing.js";
+import type { RequestAuthenticator } from "../auth/types.js";
 
 export async function registerRunRoutes(
   app: FastifyInstance,
@@ -27,6 +29,7 @@ export async function registerRunRoutes(
   options: {
     agentRunMetadataService?: AgentRunMetadataService;
     auth?: RequestAuthenticator;
+    creditService?: CreditService;
     settingsService?: SettingsService;
     threadService?: ThreadService;
     viewerService?: ViewerService;
@@ -46,6 +49,9 @@ export async function registerRunRoutes(
       if (hasAuthorization && !authenticatedUser) {
         return sendUnauthorized(reply);
       }
+      if (options.creditService && options.viewerService && !authenticatedUser) {
+        return sendUnauthorized(reply);
+      }
 
       const sessionThread =
         authenticatedUser && options?.threadService
@@ -57,6 +63,8 @@ export async function registerRunRoutes(
 
       // Resolve per-workspace model if auth context is available
       let model: string | undefined;
+      let modelApiBase: string | undefined;
+      let modelApiKey: string | undefined;
       if (
         authenticatedUser &&
         options.settingsService &&
@@ -69,7 +77,11 @@ export async function registerRunRoutes(
             authenticatedUser,
             viewer.workspace.id,
           );
-          model = settings.defaultModel;
+          model = settings.chatModel;
+          const chatConfig = await options.settingsService.getChatModelConfig(authenticatedUser, viewer.workspace.id);
+          model = chatConfig.model;
+          modelApiBase = chatConfig.baseUrl;
+          modelApiKey = chatConfig.apiKey;
         } catch {
           // Fall through to server default model if settings lookup fails
         }
@@ -79,9 +91,35 @@ export async function registerRunRoutes(
         agentRuns.createRun(payload, {
           ...(authenticatedUser ? { accessToken: authenticatedUser.accessToken, userId: authenticatedUser.id } : {}),
           ...(model ? { model } : {}),
+          ...(modelApiBase ? { modelApiBase } : {}),
+          ...(modelApiKey ? { modelApiKey } : {}),
           ...(sessionThread ? { threadId: sessionThread.threadId } : {}),
         }),
       );
+
+      let charge;
+      if (authenticatedUser && options.creditService && options.viewerService) {
+        try {
+          charge = await chargeAgentMessage({
+            user: authenticatedUser,
+            modelId: model,
+            viewerService: options.viewerService,
+            creditService: options.creditService,
+            runId: response.runId,
+          });
+        } catch (error) {
+          agentRuns.cancelRun(response.runId);
+          const statusCode = error instanceof Error && "statusCode" in error
+            ? Number((error as { statusCode?: number }).statusCode) || 500
+            : 500;
+          return reply.code(statusCode).send({
+            error: {
+              code: statusCode === 402 ? "insufficient_credits" : "message_charge_failed",
+              message: statusCode === 402 ? "余额不足，请先充值后再发送消息。" : "消息计费失败，请稍后重试。",
+            },
+          });
+        }
+      }
 
       if (sessionThread && options.agentRunMetadataService) {
         await options.agentRunMetadataService.createAcceptedRun({

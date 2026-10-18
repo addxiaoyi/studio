@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, type GenerateContentParameters, type GenerateContentResponse } from "@google/genai";
 
 import type {
   GeneratedImage,
@@ -74,10 +74,10 @@ export class GoogleImageProvider implements ImageProvider {
   readonly name = PROVIDER_NAME;
   readonly models = GOOGLE_IMAGE_MODELS;
 
-  private client: GoogleGenAI;
+  private client: Pick<GoogleGenAI, "models">;
 
-  constructor(apiKey: string) {
-    this.client = new GoogleGenAI({ apiKey });
+  constructor(apiKey: string, client?: Pick<GoogleGenAI, "models">) {
+    this.client = client ?? new GoogleGenAI({ apiKey });
   }
 
   async generate(params: ImageGenerateParams): Promise<GeneratedImage> {
@@ -124,7 +124,7 @@ export class GoogleImageProvider implements ImageProvider {
             imageSize,
           },
         },
-      });
+      } satisfies GenerateContentParameters) as GenerateContentResponse;
     } catch (err) {
       throw new GenerationError(
         PROVIDER_NAME,

@@ -6,7 +6,7 @@ import type {
   Json,
 } from "@helstera/shared";
 
-import type { AuthenticatedUser, UserSupabaseClient } from "../../supabase/user.js";
+import type { AuthenticatedUser, DataClient } from "../../auth/types.js";
 import type { ThreadService } from "./thread-service.js";
 
 export class ChatServiceError extends Error {
@@ -75,7 +75,7 @@ function synthesizeLegacyBlocks(
 }
 
 export function createChatService(options: {
-  createUserClient: (accessToken: string) => UserSupabaseClient;
+  createUserClient: (accessToken: string) => DataClient;
   threadService: Pick<ThreadService, "createThreadId">;
 }): ChatService {
   return {

@@ -1,6 +1,7 @@
 "use client";
 
 import { ThemeProvider } from "next-themes";
+import { MotionConfig } from "framer-motion";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 
@@ -21,12 +22,14 @@ function ClientInstrumentation() {
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-      <ClientInstrumentation />
-      <AuthProvider>
-        <ToastProvider>
-          <TierLimitToastProvider>{children}</TierLimitToastProvider>
-        </ToastProvider>
-      </AuthProvider>
+      <MotionConfig reducedMotion="user">
+        <ClientInstrumentation />
+        <AuthProvider>
+          <ToastProvider>
+            <TierLimitToastProvider>{children}</TierLimitToastProvider>
+          </ToastProvider>
+        </AuthProvider>
+      </MotionConfig>
     </ThemeProvider>
   );
 }

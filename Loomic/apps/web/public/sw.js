@@ -2,12 +2,13 @@
  * Helstera Service Worker
  *
  * Caching strategy:
- * - App shell: stale-while-revalidate (best UX, fast loads)
- * - Static assets (images, fonts): cache-first (immutable)
+ * - Navigation and JavaScript: network-first so deployments take effect
+ * - Images and fonts: cache-first
  * - API: network-first with cache fallback
  */
 
-const CACHE_VERSION = "helstera-v2";
+const DISABLE_SERVICE_WORKER = true;
+const CACHE_VERSION = "helstera-v6";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const API_CACHE = `${CACHE_VERSION}-api`;
@@ -20,6 +21,10 @@ const SHELL_URLS = [
 ];
 
 self.addEventListener("install", (event) => {
+  if (DISABLE_SERVICE_WORKER) {
+    self.skipWaiting();
+    return;
+  }
   event.waitUntil(
     caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL_URLS)),
   );
@@ -27,6 +32,16 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
+  if (DISABLE_SERVICE_WORKER) {
+    event.waitUntil(
+      Promise.all([
+        self.registration.unregister(),
+        caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))),
+        self.clients.claim(),
+      ]),
+    );
+    return;
+  }
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
@@ -40,6 +55,7 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  if (DISABLE_SERVICE_WORKER) return;
   const { request } = event;
   const url = new URL(request.url);
 
@@ -52,9 +68,13 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static assets: cache-first
+  if (url.pathname.startsWith("/_next/static/") && url.pathname.endsWith(".js")) {
+    event.respondWith(networkFirst(request, STATIC_CACHE));
+    return;
+  }
+
+  // Images and fonts are content-addressed or long-lived.
   if (
-    url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/icons/") ||
     /\.(png|jpg|jpeg|svg|webp|woff2?|ttf)$/.test(url.pathname)
   ) {
@@ -62,10 +82,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Navigation requests: stale-while-revalidate, fallback to offline.html
+  // Navigation requests must observe the latest deployment.
   if (request.mode === "navigate") {
     event.respondWith(
-      staleWhileRevalidate(request, SHELL_CACHE).catch(async () => {
+      networkFirst(request, SHELL_CACHE).catch(async () => {
         const offline = await caches.match("/offline.html");
         return (
           offline ??

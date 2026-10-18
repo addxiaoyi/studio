@@ -6,7 +6,7 @@ import {
   getTopupPackage,
 } from "@helstera/shared";
 
-import type { AdminSupabaseClient } from "../../supabase/admin.js";
+import type { DataAdminClient } from "../../auth/types.js";
 
 // ── Error ────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ export type TopupOrder = {
   amountUsdCents: number;
   creditsGranted: number;
   status: "pending" | "paid" | "failed" | "refunded" | "expired";
-  provider: "yeepay" | "epay" | "lemonsqueezy" | "manual";
+  provider: "alipay" | "lightpay" | "yeepay" | "epay" | "lemonsqueezy" | "manual";
   qrCodeUrl: string | null;
   expiredAt: number;
   paidAt: number | null;
@@ -78,7 +78,7 @@ export type CreditService = {
     workspaceId: string,
     userId: string,
     amount: number,
-    jobId: string,
+    jobId?: string | null,
     description?: string,
   ): Promise<string>;
   getTransactions(
@@ -91,9 +91,13 @@ export type CreditService = {
   createTopupOrder(
     workspaceId: string,
     packageId: string,
-    provider: "yeepay" | "epay" | "lemonsqueezy",
+    provider: "alipay" | "lightpay" | "yeepay" | "epay" | "lemonsqueezy",
   ): Promise<TopupOrder>;
-  getTopupOrder(outTradeNo: string): Promise<TopupOrder | null>;
+  createCustomTopupOrder?: (workspaceId: string, amountCnyFen: number, provider: "epay") => Promise<TopupOrder>;
+  getTopupOrder(
+    outTradeNo: string,
+    workspaceId?: string,
+  ): Promise<TopupOrder | null>;
   activateTopup(
     outTradeNo: string,
     providerTradeNo: string | null,
@@ -111,7 +115,7 @@ function generateOutTradeNo(): string {
 // ── Factory ──────────────────────────────────────────────────
 
 export function createCreditService(options: {
-  getAdminClient: () => AdminSupabaseClient;
+  getAdminClient: () => DataAdminClient;
 }): CreditService {
   return {
     async getBalance(workspaceId) {
@@ -238,7 +242,9 @@ export function createCreditService(options: {
     // ── Top-up methods ─────────────────────────────────────
 
     listTopupPackages() {
-      return applyTopupVariants(process.env as unknown as Record<string, string | undefined>);
+      return applyTopupVariants(
+        process.env as unknown as Record<string, string | undefined>,
+      );
     },
 
     async createTopupOrder(workspaceId, packageId, provider) {
@@ -255,7 +261,7 @@ export function createCreditService(options: {
       const outTradeNo = generateOutTradeNo();
       const now = Date.now();
       const expiredAt = now + 30 * 60 * 1000; // 30 min expiry
-      const totalCredits = pkg.credits + (pkg.bonusCredits ?? 0);
+      const totalCredits = pkg.priceCnyFen / 100;
 
       const { error: insertError } = await (admin as any)
         .from("credit_topups")
@@ -296,13 +302,14 @@ export function createCreditService(options: {
       };
     },
 
-    async getTopupOrder(outTradeNo) {
+    async getTopupOrder(outTradeNo, workspaceId) {
       const admin = options.getAdminClient();
-      const { data } = await (admin as any)
+      let query = (admin as any)
         .from("credit_topups")
         .select("*")
-        .eq("out_trade_no", outTradeNo)
-        .maybeSingle();
+        .eq("out_trade_no", outTradeNo);
+      if (workspaceId) query = query.eq("workspace_id", workspaceId);
+      const { data } = await query.maybeSingle();
 
       if (!data) return null;
 

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import type { AuthenticatedUser } from "../supabase/user.js";
+import type { AuthenticatedUser } from "../auth/types.js";
 import { ThreadServiceError, type ThreadService } from "../features/chat/thread-service.js";
 
 export function createLocalThreadService(db: Pool): ThreadService {

@@ -75,6 +75,7 @@ export const videoGenerationPreferenceSchema = z.object({
 
 export const runCreateRequestSchema = z.object({
   sessionId: sessionIdSchema,
+  requestId: z.string().min(1).max(128).optional(),
   conversationId: conversationIdSchema,
   prompt: z.string(),
   canvasId: canvasIdSchema.optional(),
@@ -150,6 +151,9 @@ export const profileUpdateRequestSchema = z.object({
 
 export const workspaceSettingsSchema = z.object({
   defaultModel: z.string().min(1),
+  chatModel: z.string().min(1).optional(),
+  autoApprovePaidGeneration: z.boolean().default(false),
+  autoDeleteEmptyCanvas: z.boolean().default(false),
 });
 
 export const modelInfoSchema = z.object({

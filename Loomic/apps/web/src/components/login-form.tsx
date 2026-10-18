@@ -3,15 +3,18 @@
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { requestMagicLink, fetchViewer } from "../lib/server-api";
-import { requestLocalMagicLink, signInLocalWithPassword } from "../lib/local-auth";
-import { isLocalAuth } from "../lib/env";
-import { getSupabaseBrowserClient } from "../lib/supabase-browser";
+import {
+  requestLocalCode,
+  resetLocalPassword,
+  signInLocalWithPassword,
+  verifyLocalCode,
+} from "../lib/local-auth";
+import { t, useLocale } from "@/lib/i18n";
 
 const stagger = {
   hidden: {},
@@ -28,24 +31,23 @@ interface LoginFormProps {
 }
 
 export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
+  const copy = t(useLocale()).authForm;
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"otp" | "password">("otp");
+  const [mode, setMode] = useState<"code" | "password" | "reset">("code");
   const [loading, setLoading] = useState(false);
-  const [linkSent, setLinkSent] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(initialErrorMessage);
 
-  async function bootstrapWorkspace(accessToken: string) {
-    try {
-      await fetchViewer(accessToken);
-      router.replace("/home");
-    } catch {
-      setError("Could not load your workspace. Please try again.");
+  useEffect(() => {
+    if (mode === "code" && error?.includes("请刷新页面后使用邮箱验证码登录")) {
+      setError(null);
     }
-  }
+  }, [error, mode]);
 
-  async function handleMagicLink(e: FormEvent<HTMLFormElement>) {
+  async function handleCode(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const trimmed = email.trim();
     if (!trimmed) return;
@@ -54,11 +56,30 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
     setError(null);
 
     try {
-      if (isLocalAuth()) await requestLocalMagicLink(trimmed);
-      else await requestMagicLink(trimmed);
-      setLinkSent(true);
+      if (codeSent) {
+        await verifyLocalCode(trimmed, code);
+        router.replace("/home");
+      } else {
+        await requestLocalCode(trimmed);
+        setCodeSent(true);
+      }
     } catch (authError) {
-      setError(authError instanceof Error ? authError.message : "登录邮件发送失败，请稍后重试");
+      setError(authError instanceof Error ? authError.message : copy.mailError);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function verifyCode() {
+    const trimmed = email.trim();
+    if (!trimmed || code.length !== 6) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await verifyLocalCode(trimmed, code);
+      router.replace("/home");
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : copy.codeError);
     } finally {
       setLoading(false);
     }
@@ -71,33 +92,35 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
     setLoading(true);
     setError(null);
 
-    if (isLocalAuth()) {
-      try {
-        await signInLocalWithPassword(trimmed, password);
-        window.location.replace("/home");
-      } catch (authError) {
-        setError(authError instanceof Error ? authError.message : "邮箱或密码不正确");
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-
-    const supabase = getSupabaseBrowserClient();
-    const { data, error: authError } = await supabase.auth.signInWithPassword({ email: trimmed, password });
-
-    if (authError) {
+    try {
+      await signInLocalWithPassword(trimmed, password);
+      router.replace("/home");
+    } catch (authError) {
+      setError(
+        authError instanceof Error ? authError.message : copy.passwordError,
+      );
+    } finally {
       setLoading(false);
-      setError(authError.message);
-    } else {
-      const accessToken = data.session?.access_token;
-      if (!accessToken) {
-        setLoading(false);
-        setError("Could not finish signing in. Please try again.");
-        return;
-      }
+    }
+  }
 
-      await bootstrapWorkspace(accessToken);
+  async function handleReset(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const trimmed = email.trim();
+    if (!trimmed) return;
+    setLoading(true);
+    setError(null);
+    try {
+      if (!codeSent) {
+        await requestLocalCode(trimmed);
+        setCodeSent(true);
+      } else {
+        await resetLocalPassword(trimmed, code, password);
+        router.replace("/home");
+      }
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "密码重置失败，请重试");
+    } finally {
       setLoading(false);
     }
   }
@@ -105,7 +128,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
   return (
     <div className="w-full max-w-sm">
       <AnimatePresence mode="wait">
-              {linkSent && mode === "otp" ? (
+        {codeSent && mode === "code" ? (
           <motion.div
             key="sent"
             initial={{ opacity: 0, scale: 0.95 }}
@@ -117,10 +140,21 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
             <motion.div
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
-              transition={{ delay: 0.2, type: "spring", stiffness: 200, damping: 15 }}
+              transition={{
+                delay: 0.2,
+                type: "spring",
+                stiffness: 200,
+                damping: 15,
+              }}
               className="flex h-14 w-14 items-center justify-center rounded-full bg-foreground"
             >
-              <svg viewBox="0 0 24 24" className="h-6 w-6 text-background" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <svg
+                viewBox="0 0 24 24"
+                className="h-6 w-6 text-background"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.5}
+              >
                 <motion.path
                   d="M5 13l4 4L19 7"
                   initial={{ pathLength: 0 }}
@@ -131,17 +165,61 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
                 />
               </svg>
             </motion.div>
-            <h2 className="text-lg font-medium">Check your email</h2>
+            <h2 className="text-lg font-medium">{copy.codeTitle}</h2>
             <p className="text-sm text-muted-foreground">
-              We sent a login link to <strong>{email}</strong>
+              {copy.codeSent} <strong>{email}</strong>
             </p>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void verifyCode();
+              }}
+              className="w-full space-y-3"
+            >
+              <Input
+                value={code}
+                onChange={(event) =>
+                  setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                }
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder={copy.codePlaceholder}
+                className="text-center text-lg tracking-[0.4em]"
+              />
+              <Button
+                type="button"
+                onClick={() => void verifyCode()}
+                className="w-full"
+                disabled={loading || code.length !== 6}
+              >
+                {loading ? copy.verifying : copy.verifyLogin}
+              </Button>
+            </form>
+            {error && (
+              <p className="text-sm text-destructive" role="alert">
+                {error}
+              </p>
+            )}
+            <Button
+              type="button"
+              onClick={() => {
+                setCodeSent(false);
+                setCode("");
+              }}
+              variant="ghost"
+              className="text-xs"
+            >
+              {copy.resend}
+            </Button>
           </motion.div>
         ) : (
           <div key="form" className="space-y-6">
             <motion.div variants={fadeIn} className="space-y-2 text-center">
-              <h2 className="text-2xl font-medium tracking-tight">Welcome back</h2>
+              <h2 className="text-2xl font-medium tracking-tight">
+                {copy.welcome}
+              </h2>
               <p className="text-sm text-muted-foreground">
-                Sign in to your workspace
+                {copy.signInWorkspace}
               </p>
             </motion.div>
 
@@ -161,23 +239,23 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
             </AnimatePresence>
 
             <form
-              onSubmit={mode === "password" ? handlePassword : handleMagicLink}
+              onSubmit={mode === "password" ? handlePassword : mode === "reset" ? handleReset : handleCode}
               className="space-y-4"
             >
               <div className="space-y-2.5">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{copy.email}</Label>
                 <Input
                   id="email"
                   type="email"
-                  placeholder="you@example.com"
+                  placeholder={copy.emailPlaceholder}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
                 />
               </div>
-              {mode === "password" && (
+              {(mode === "password" || mode === "reset") && (
                 <div className="space-y-2.5">
-                  <Label htmlFor="password">Password</Label>
+                  <Label htmlFor="password">{copy.password}</Label>
                   <Input
                     id="password"
                     type="password"
@@ -188,36 +266,75 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
                   />
                 </div>
               )}
+              {mode === "reset" && codeSent && (
+                <div className="space-y-2.5">
+                  <Label htmlFor="reset-code">验证码</Label>
+                  <Input id="reset-code" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6 位验证码" required />
+                </div>
+              )}
               <Button
                 type="submit"
                 className="w-full"
                 disabled={loading}
                 aria-label={
                   loading
-                    ? mode === "password" ? "正在登录" : "正在发送登录链接"
-                    : mode === "password" ? "登录" : "发送登录链接"
+                    ? mode === "password"
+                      ? copy.loggingIn
+                      : mode === "reset"
+                        ? codeSent ? "正在设置密码..." : copy.sending
+                        : codeSent
+                        ? copy.verifying
+                        : copy.sending
+                    : mode === "password"
+                      ? copy.login
+                      : mode === "reset"
+                        ? codeSent ? "设置新密码" : copy.sendCode
+                        : codeSent
+                        ? copy.verifyLogin
+                        : copy.sendCode
                 }
               >
                 {loading
-                  ? mode === "password" ? "正在登录..." : "正在发送登录链接..."
-                  : mode === "password" ? "登录" : "发送登录链接"}
+                  ? mode === "password"
+                    ? copy.loggingIn
+                    : mode === "reset"
+                      ? codeSent ? "正在设置密码..." : copy.sending
+                      : codeSent
+                      ? copy.verifying
+                      : copy.sending
+                  : mode === "password"
+                    ? copy.login
+                    : mode === "reset"
+                      ? codeSent ? "设置新密码" : copy.sendCode
+                      : codeSent
+                      ? copy.verifyLogin
+                      : copy.sendCode}
               </Button>
               <button
                 type="button"
                 onClick={() => {
-                  setMode(mode === "password" ? "otp" : "password");
+                  setMode(mode === "password" || mode === "reset" ? "code" : "password");
+                  setCodeSent(false);
+                  setCode("");
                   setError(null);
                 }}
                 className="w-full text-xs text-muted-foreground hover:text-foreground transition-all duration-300"
               >
-                {mode === "password" ? "使用验证码登录" : "使用密码登录"}
+                {mode === "password" || mode === "reset" ? copy.useCode : copy.usePassword}
               </button>
             </form>
+            {mode === "password" && <button type="button" onClick={() => { setMode("reset"); setCodeSent(false); setCode(""); setError(null); }} className="w-full text-xs text-muted-foreground hover:text-foreground">忘记密码？通过验证码重置</button>}
 
-            <motion.p variants={fadeIn} className="text-center text-sm text-muted-foreground">
-              Need an account?{" "}
-              <Link href="/register" className="font-medium text-foreground underline underline-offset-4">
-                Create one
+            <motion.p
+              variants={fadeIn}
+              className="text-center text-sm text-muted-foreground"
+            >
+              {copy.needAccount}{" "}
+              <Link
+                href="/register"
+                className="font-medium text-foreground underline underline-offset-4"
+              >
+                {copy.createOne}
               </Link>
             </motion.p>
           </div>

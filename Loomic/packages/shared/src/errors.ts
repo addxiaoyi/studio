@@ -6,6 +6,12 @@ export const errorCodeValues = [
   "run_conflict",
   "run_failed",
   "tool_failed",
+  "provider_unavailable",
+  "provider_auth_failed",
+  "model_disabled",
+  "model_selection_required",
+  "upstream_timeout",
+  "upstream_rate_limited",
 ] as const;
 
 export const errorCodeSchema = z.enum(errorCodeValues);
@@ -13,6 +19,7 @@ export const errorCodeSchema = z.enum(errorCodeValues);
 export const helsteraErrorSchema = z.object({
   code: errorCodeSchema,
   message: z.string().min(1),
+  retryable: z.boolean().optional(),
   details: z.record(z.string(), z.unknown()).optional(),
 });
 

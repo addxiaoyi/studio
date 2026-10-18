@@ -1,8 +1,8 @@
 import type { BaseCheckpointSaver, BaseStore } from "@langchain/langgraph-checkpoint";
 
 import type { ServerEnv } from "../../config/env.js";
-import { createSupabaseCheckpointer } from "./supabase-checkpointer.js";
-import { createSupabaseStore } from "./supabase-store.js";
+import { createPostgresCheckpointer } from "./postgres-checkpointer.js";
+import { createPostgresStore } from "./postgres-store.js";
 
 export type AgentPersistence = {
   checkpointer: BaseCheckpointSaver;
@@ -14,32 +14,33 @@ export type AgentPersistenceService = {
 };
 
 export function createAgentPersistenceService(
-  env: Pick<ServerEnv, "supabaseDbUrl" | "databaseUrl" | "authProvider">,
+  env: Pick<ServerEnv, "databaseUrl">,
   overrides?: {
-    createCheckpointer?: typeof createSupabaseCheckpointer;
-    createStore?: typeof createSupabaseStore;
+    createCheckpointer?: typeof createPostgresCheckpointer;
+    createStore?: typeof createPostgresStore;
   },
 ): AgentPersistenceService {
   let pendingPersistence: Promise<AgentPersistence> | null = null;
 
   return {
     async getPersistence() {
-      const connectionString =
-        env.authProvider === "local" ? env.databaseUrl : env.supabaseDbUrl;
+      const connectionString = env.databaseUrl;
       if (!connectionString) {
         return null;
       }
 
       if (!pendingPersistence) {
-        pendingPersistence = Promise.all([
-            (overrides?.createCheckpointer ?? createSupabaseCheckpointer)({
-              connectionString,
-          }),
-            (overrides?.createStore ?? createSupabaseStore)({
-              connectionString,
-          }),
-        ])
-          .then(([checkpointer, store]) => ({ checkpointer, store }))
+        // Both setup routines create the same schema. Run them sequentially to
+        // avoid a PostgreSQL CREATE SCHEMA race on first use.
+        pendingPersistence = (async () => {
+          const checkpointer = await (
+            overrides?.createCheckpointer ?? createPostgresCheckpointer
+          )({ connectionString });
+          const store = await (overrides?.createStore ?? createPostgresStore)({
+            connectionString,
+          });
+          return { checkpointer, store };
+        })()
           .catch((error) => {
             pendingPersistence = null;
             throw error;

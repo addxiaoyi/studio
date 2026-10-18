@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { HexColorPicker } from "react-colorful";
 
 import { cn } from "../../lib/utils";
+import { t, useLocale } from "../../lib/i18n";
 
 interface ColorPickerPopoverProps {
   open: boolean;
@@ -32,6 +33,7 @@ export function ColorPickerPopover({
   mode,
   anchorRef,
 }: ColorPickerPopoverProps) {
+  const copy = t(useLocale()).brandKit;
   const [name, setName] = useState(initialName);
   const [hex, setHex] = useState(initialHex);
   const [hexInput, setHexInput] = useState(initialHex.replace("#", ""));
@@ -136,14 +138,14 @@ export function ColorPickerPopover({
           onClick={onClose}
           className="rounded-full px-3 py-1.5 text-sm text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground transition-all duration-200 cursor-pointer"
         >
-          取消
+          {copy.cancel}
         </button>
         <button
           type="button"
           onClick={handleSave}
           className="rounded-full bg-foreground text-background px-3 py-1.5 text-sm font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.99] cursor-pointer"
         >
-          {mode === "create" ? "添加" : "保存"}
+          {mode === "create" ? copy.add : copy.save}
         </button>
       </div>
     </div>

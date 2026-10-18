@@ -3,15 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GoogleFontItem } from "../../lib/font-api";
 import { fetchGoogleFonts } from "../../lib/font-api";
+import { t, useLocale } from "../../lib/i18n";
+import { StyledSelect } from "../ui/styled-select";
 
 interface FontPickerDialogProps {
   open: boolean;
   onClose: () => void;
-  onSelect: (font: { family: string; variant: string; category: string }) => void;
+  onSelect: (font: {
+    family: string;
+    variant: string;
+    category: string;
+  }) => void;
 }
 
 const CATEGORIES = [
-  { value: "", label: "全部字体" },
+  { value: "", label: "all" },
   { value: "sans-serif", label: "Sans-serif" },
   { value: "serif", label: "Serif" },
   { value: "display", label: "Display" },
@@ -26,34 +32,45 @@ export function FontPickerDialog({
   onClose,
   onSelect,
 }: FontPickerDialogProps) {
+  const copy = t(useLocale()).brandKit;
   const [fonts, setFonts] = useState<GoogleFontItem[]>([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [selected, setSelected] = useState<GoogleFontItem | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const loadedRef = useRef<Set<string>>(new Set());
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   const listRef = useRef<HTMLDivElement>(null);
 
   // Fetch fonts on open / search / category change
   useEffect(() => {
     if (!open) return;
     clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(async () => {
-      try {
-        const result = await fetchGoogleFonts(search || undefined, category || undefined);
-        setFonts(result);
-        setVisibleCount(PAGE_SIZE);
-      } catch {
-        // API failure — keep current list or show empty
-        setFonts([]);
-      }
-    }, search ? 300 : 0);
+    searchTimer.current = setTimeout(
+      async () => {
+        try {
+          const result = await fetchGoogleFonts(
+            search || undefined,
+            category || undefined,
+          );
+          setFonts(result);
+          setVisibleCount(PAGE_SIZE);
+        } catch {
+          // API failure — keep current list or show empty
+          setFonts([]);
+        }
+      },
+      search ? 300 : 0,
+    );
     return () => clearTimeout(searchTimer.current);
   }, [open, search, category]);
 
   // Load Google Fonts CSS for visible items (side-effect in useEffect, not during render)
-  const visibleFamilies = open ? fonts.slice(0, visibleCount).map((f) => f.family) : [];
+  const visibleFamilies = open
+    ? fonts.slice(0, visibleCount).map((f) => f.family)
+    : [];
   useEffect(() => {
     for (const family of visibleFamilies) {
       if (loadedRef.current.has(family)) continue;
@@ -78,7 +95,9 @@ export function FontPickerDialog({
     if (!selected) return;
     onSelect({
       family: selected.family,
-      variant: selected.variants.includes("regular") ? "regular" : selected.variants[0] ?? "400",
+      variant: selected.variants.includes("regular")
+        ? "regular"
+        : (selected.variants[0] ?? "400"),
       category: selected.category,
     });
     onClose();
@@ -90,7 +109,10 @@ export function FontPickerDialog({
   // Font CSS is loaded via useEffect above (visibleFamilies), not during render
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+      onClick={onClose}
+    >
       <div
         className="w-[420px] max-h-[520px] glass-strong rounded-2xl shadow-card-hover border border-border/40 flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -99,7 +121,7 @@ export function FontPickerDialog({
         <div className="p-3 border-b">
           <input
             type="text"
-            placeholder="搜索字体..."
+            placeholder={copy.searchFonts}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full px-3 py-1.5 text-sm border rounded-lg outline-none focus:ring-1 focus:ring-black/10"
@@ -108,15 +130,15 @@ export function FontPickerDialog({
 
         {/* Category filter */}
         <div className="px-3 py-2 border-b">
-          <select
+          <StyledSelect
             value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="text-sm bg-transparent outline-none cursor-pointer"
-          >
-            {CATEGORIES.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
+            onChange={setCategory}
+            aria-label={copy.allFonts}
+            options={CATEGORIES.map((c) => ({
+              value: c.value,
+              label: c.value === "" ? copy.allFonts : c.label,
+            }))}
+          />
         </div>
 
         {/* Font list */}
@@ -126,23 +148,23 @@ export function FontPickerDialog({
           className="flex-1 overflow-y-auto min-h-0"
         >
           {visibleFonts.map((font) => (
-              <button
-                key={font.family}
-                type="button"
-                onClick={() => setSelected(font)}
-                className={`w-full px-4 py-2 text-left text-base hover:bg-foreground/[0.04] transition-all duration-300 duration-150 cursor-pointer ${
-                  selected?.family === font.family
-                    ? "bg-foreground/[0.05] text-foreground"
-                    : ""
-                }`}
-                style={{ fontFamily: `"${font.family}", sans-serif` }}
-              >
-                {font.family}
-              </button>
+            <button
+              key={font.family}
+              type="button"
+              onClick={() => setSelected(font)}
+              className={`w-full px-4 py-2 text-left text-base hover:bg-foreground/[0.04] transition-all duration-300 duration-150 cursor-pointer ${
+                selected?.family === font.family
+                  ? "bg-foreground/[0.05] text-foreground"
+                  : ""
+              }`}
+              style={{ fontFamily: `"${font.family}", sans-serif` }}
+            >
+              {font.family}
+            </button>
           ))}
           {fonts.length === 0 && (
             <p className="p-4 text-sm text-muted-foreground text-center">
-              {search ? "未找到匹配字体" : "加载中..."}
+              {search ? copy.noFonts : copy.loading}
             </p>
           )}
         </div>
@@ -154,7 +176,7 @@ export function FontPickerDialog({
             onClick={onClose}
             className="px-4 py-1.5 text-sm border rounded-lg hover:bg-foreground/[0.04] cursor-pointer"
           >
-            取消
+            {copy.cancel}
           </button>
           <button
             type="button"
@@ -162,7 +184,7 @@ export function FontPickerDialog({
             disabled={!selected}
             className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 cursor-pointer"
           >
-            添加
+            {copy.add}
           </button>
         </div>
       </div>

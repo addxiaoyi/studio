@@ -1,60 +1,38 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockToken = "session" + "-token";
 const mockPassword = "MOCK" + "_PASSWORD";
 
 const {
-  mockFetchViewer,
-  mockRequestMagicLink,
-  mockGetSession,
-  mockOnAuthStateChange,
-  mockSignInWithOtp,
-  mockSignInWithPassword,
-  mockSignInWithOAuth,
+  mockFetchLocalSession,
+  mockRequestLocalCode,
+  mockVerifyLocalCode,
+  mockSignInLocalWithPassword,
   mockReplace,
   mockSearchParams,
 } = vi.hoisted(() => ({
-  mockFetchViewer: vi.fn().mockResolvedValue({
-    workspace: { id: "w1" },
-    profile: { id: "u1" },
-    membership: { workspaceId: "w1", userId: "u1", role: "owner" },
-  }),
-  mockRequestMagicLink: vi.fn().mockResolvedValue(undefined),
-  mockGetSession: vi.fn(),
-  mockOnAuthStateChange: vi.fn(),
-  mockSignInWithOtp: vi.fn().mockResolvedValue({ error: null }),
-  mockSignInWithPassword: vi.fn().mockResolvedValue({
-    data: {
-      session: {
-        access_token: "session-token",
-        user: { id: "u1", email: "user@example.com" },
-      },
-    },
-    error: null,
-  }),
-  mockSignInWithOAuth: vi.fn().mockResolvedValue({ error: null }),
+  mockFetchLocalSession: vi.fn().mockResolvedValue({ session: null }),
+  mockRequestLocalCode: vi.fn().mockResolvedValue(undefined),
+  mockVerifyLocalCode: vi.fn().mockResolvedValue({ access_token: "session-token" }),
+  mockSignInLocalWithPassword: vi.fn().mockResolvedValue({ access_token: "session-token" }),
   mockReplace: vi.fn(),
   mockSearchParams: vi.fn(() => new URLSearchParams()),
 }));
 
-vi.mock("../src/lib/server-api", () => ({
-  fetchViewer: mockFetchViewer,
-  requestMagicLink: mockRequestMagicLink,
-}));
-
-vi.mock("../src/lib/supabase-browser", () => ({
-  getSupabaseBrowserClient: vi.fn(() => ({
-    auth: {
-      signInWithOtp: mockSignInWithOtp,
-      signInWithPassword: mockSignInWithPassword,
-      signInWithOAuth: mockSignInWithOAuth,
-      onAuthStateChange: mockOnAuthStateChange,
-      getSession: mockGetSession,
-    },
-  })),
+vi.mock("../src/lib/local-auth", () => ({
+  fetchLocalSession: mockFetchLocalSession,
+  requestLocalCode: mockRequestLocalCode,
+  verifyLocalCode: mockVerifyLocalCode,
+  signInLocalWithPassword: mockSignInLocalWithPassword,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -68,10 +46,6 @@ import { AuthProvider } from "../src/lib/auth-context";
 describe("Login page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetSession.mockResolvedValue({ data: { session: null }, error: null });
-    mockOnAuthStateChange.mockReturnValue({
-      data: { subscription: { unsubscribe: vi.fn() } },
-    });
     mockSearchParams.mockReturnValue(new URLSearchParams());
   });
 
@@ -86,13 +60,21 @@ describe("Login page", () => {
       </AuthProvider>,
     );
     expect((await screen.findByText("Helstera")).textContent).toBe("Helstera");
-    expect(screen.getByText(/Send login link|发送登录链接/i).textContent).toContain("发送登录链接");
+    expect(
+      screen.getByRole("button", { name: /send code|发送验证码/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Continue with Google/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /create one/i }).getAttribute("href")).toBe("/register");
+    expect(
+      screen
+        .getByRole("link", { name: /create one|创建账户/i })
+        .getAttribute("href"),
+    ).toBe("/register");
   });
 
   it("shows callback errors from the query string as a banner", async () => {
-    mockSearchParams.mockReturnValue(new URLSearchParams("error=auth_exchange_failed"));
+    mockSearchParams.mockReturnValue(
+      new URLSearchParams("error=auth_exchange_failed"),
+    );
 
     render(
       <AuthProvider>
@@ -105,7 +87,7 @@ describe("Login page", () => {
     );
   });
 
-  it("sends a login-only magic link", async () => {
+  it("sends a local verification code", async () => {
     render(
       <AuthProvider>
         <LoginPage />
@@ -115,21 +97,27 @@ describe("Login page", () => {
     fireEvent.change(await screen.findByLabelText(/email/i), {
       target: { value: "user@example.com" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /send login link|发送登录链接/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /send code|发送验证码/i }),
+    );
 
     await waitFor(() => {
-      expect(mockRequestMagicLink).toHaveBeenCalledWith("user@example.com");
+      expect(mockRequestLocalCode).toHaveBeenCalledWith("user@example.com");
     });
   });
 
-  it("bootstraps the viewer before redirecting after password sign-in", async () => {
+  it("redirects after local password sign-in", async () => {
     render(
       <AuthProvider>
         <LoginPage />
       </AuthProvider>,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: /use password instead|使用密码登录/i }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /use password instead|使用密码登录/i,
+      }),
+    );
     fireEvent.change(screen.getByLabelText(/email/i), {
       target: { value: "user@example.com" },
     });
@@ -139,11 +127,7 @@ describe("Login page", () => {
     fireEvent.click(screen.getByRole("button", { name: /^(sign in|登录)$/i }));
 
     await waitFor(() => {
-      expect(mockSignInWithPassword).toHaveBeenCalledWith({
-        email: "user@example.com",
-        password: mockPassword,
-      });
-      expect(mockFetchViewer).toHaveBeenCalledWith("session-token");
+      expect(mockSignInLocalWithPassword).toHaveBeenCalledWith("user@example.com", mockPassword);
       expect(mockReplace).toHaveBeenCalledWith("/home");
     });
   });

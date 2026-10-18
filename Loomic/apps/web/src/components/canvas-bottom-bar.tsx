@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HexColorPicker } from "react-colorful";
+import { Film, Shapes, WandSparkles } from "lucide-react";
 
 /* ── Preset color swatches for background picker ── */
 const BG_PRESETS = ["transparent","#000000","#FFFFFF","#d3f256","#6C5CE7","#00B894","#FD79A8","#0984E3"] as const;
@@ -20,6 +21,8 @@ interface CanvasBottomBarProps {
   onToggleLayers: () => void;
   filesOpen: boolean;
   onToggleFiles: () => void;
+  timelineOpen: boolean;
+  onToggleTimeline: () => void;
   /** Whether any left panel (layers/files) is open — shifts the bar right */
   leftPanelOpen: boolean;
 }
@@ -127,7 +130,7 @@ function ElementRow({ el, onSelect }: { el: ExcalidrawEl; onSelect: (id: string)
 /* ================================================================
    Main component
    ================================================================ */
-export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, filesOpen, onToggleFiles, leftPanelOpen }: CanvasBottomBarProps) {
+export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, filesOpen, onToggleFiles, timelineOpen, onToggleTimeline, leftPanelOpen }: CanvasBottomBarProps) {
   /* ── Zoom state ── */
   const [zoom, setZoom] = useState(1);
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
@@ -138,6 +141,8 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, fil
   const [bgPickerOpen, setBgPickerOpen] = useState(false);
   const [hexInput, setHexInput] = useState("FFFFFF");
   const bgBtnRef = useRef<HTMLButtonElement>(null);
+  const [standardShapes, setStandardShapes] = useState(true);
+  const [selectedShapeCount, setSelectedShapeCount] = useState(0);
 
   /* ── Files panel is controlled by parent ── */
 
@@ -149,13 +154,37 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, fil
     const initBg = state.viewBackgroundColor ?? "#FFFFFF";
     setBgColor(initBg);
     setHexInput(initBg.replace(/^#/, "").toUpperCase());
+    // Start new shapes in the clean geometric style without altering existing work.
+    excalidrawApi.updateScene({ appState: { currentItemRoughness: 0 } });
+    setStandardShapes(true);
 
     const unsubscribe = excalidrawApi.onChange(() => {
       const s = excalidrawApi.getAppState();
       setZoom(s.zoom.value);
       setBgColor(s.viewBackgroundColor ?? "#FFFFFF");
+      setStandardShapes(Number(s.currentItemRoughness ?? 0) === 0);
+      const selectedIds = s.selectedElementIds ?? {};
+      const count = (excalidrawApi.getSceneElements?.() ?? []).filter((element: any) => selectedIds[element.id] && ["rectangle", "ellipse", "diamond", "line", "arrow"].includes(element.type)).length;
+      setSelectedShapeCount(count);
     });
     return () => { if (typeof unsubscribe === "function") unsubscribe(); };
+  }, [excalidrawApi]);
+
+  const toggleShapeStyle = useCallback(() => {
+    if (!excalidrawApi) return;
+    const nextStandard = !standardShapes;
+    excalidrawApi.updateScene({ appState: { currentItemRoughness: nextStandard ? 0 : 1 } });
+    setStandardShapes(nextStandard);
+  }, [excalidrawApi, standardShapes]);
+
+  const standardizeSelectedShapes = useCallback(() => {
+    if (!excalidrawApi) return;
+    const selectedIds = excalidrawApi.getAppState().selectedElementIds ?? {};
+    const elements = excalidrawApi.getSceneElements().map((element: any) => {
+      if (!selectedIds[element.id] || !["rectangle", "ellipse", "diamond", "line", "arrow"].includes(element.type)) return element;
+      return { ...element, roughness: 0 };
+    });
+    excalidrawApi.updateScene({ elements, captureUpdate: "IMMEDIATELY" });
   }, [excalidrawApi]);
 
   /* ── Zoom helpers ── */
@@ -207,33 +236,40 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, fil
       onKeyDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center gap-0.5 rounded-full glass-soft border border-border/40 px-1 py-1 shadow-soft">
+      <div className="flex flex-col items-center gap-0.5 rounded-2xl glass-soft border border-border/40 px-1 py-1 shadow-soft">
         {/* ── Background color button ── */}
-        <button ref={bgBtnRef} type="button" className={btnClass} onClick={toggleBgPicker} aria-label="Background color">
+        <button ref={bgBtnRef} type="button" className={btnClass} onClick={toggleBgPicker} aria-label="画布背景色" title="画布背景色">
           {bgColor === "transparent"
             ? <CheckerIcon className="h-4 w-4 rounded-full" />
             : <span className="block h-4 w-4 rounded-full border border-border" style={{ backgroundColor: bgColor }} />}
         </button>
 
         {/* ── Layers button ── */}
-        <button type="button" className={`${btnClass} ${layersOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleLayers} aria-label="Layers">
+        <button type="button" className={`${btnClass} ${layersOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleLayers} aria-label="图层" title="图层">
           <LayersIcon className="h-4 w-4" />
         </button>
 
         {/* ── Files button ── */}
-        <button type="button" className={`${btnClass} ${filesOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleFiles} aria-label="Generated files">
+        <button type="button" className={`${btnClass} ${filesOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleFiles} aria-label="素材文件" title="素材文件">
           <FileIcon className="h-3.5 w-3.5" />
         </button>
+        <button type="button" className={`${btnClass} ${timelineOpen ? "bg-muted text-foreground" : ""}`} onClick={onToggleTimeline} aria-label="媒体时间线" title="媒体时间线">
+          <Film className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" className={`${btnClass} ${standardShapes ? "bg-muted text-foreground" : ""}`} onClick={toggleShapeStyle} aria-label={standardShapes ? "标准图形已开启" : "手绘图形已开启"} title={standardShapes ? "标准图形已开启" : "手绘图形已开启"}>
+          <Shapes className="h-3.5 w-3.5" />
+        </button>
+        {selectedShapeCount > 0 && <button type="button" className={btnClass} onClick={standardizeSelectedShapes} aria-label="将选中图形转换为标准图形" title="将选中图形转换为标准图形"><WandSparkles className="h-3.5 w-3.5" /></button>}
 
         {/* ── Divider ── */}
-        <span className="mx-1 h-3 w-px bg-border" />
+        <span className="my-1 h-px w-3 bg-border" />
 
         {/* ── Zoom controls ── */}
-        <button type="button" className={btnClass} onClick={handleZoomOut} aria-label="Zoom out"><MinusIcon className="h-3.5 w-3.5" /></button>
-        <button ref={zoomBtnRef} type="button" className="min-w-[40px] text-center text-xs text-muted-foreground select-none cursor-pointer hover:text-foreground transition-all duration-300" onClick={toggleZoomMenu}>
+        <button type="button" className={btnClass} onClick={handleZoomOut} aria-label="缩小" title="缩小"><MinusIcon className="h-3.5 w-3.5" /></button>
+        <button ref={zoomBtnRef} type="button" title="缩放比例" className="min-h-7 text-center text-xs text-muted-foreground select-none cursor-pointer hover:text-foreground transition-all duration-300" onClick={toggleZoomMenu}>
           {Math.round(zoom * 100)}%
         </button>
-        <button type="button" className={btnClass} onClick={handleZoomIn} aria-label="Zoom in"><PlusIcon className="h-3.5 w-3.5" /></button>
+        <button type="button" className={btnClass} onClick={handleZoomIn} aria-label="放大" title="放大"><PlusIcon className="h-3.5 w-3.5" /></button>
       </div>
 
       {/* ── Zoom preset popover ── */}

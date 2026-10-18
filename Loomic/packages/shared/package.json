@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "tsc --build tsconfig.json --force",
-    "test": "vitest run src/contracts.test.ts src/credits.test.ts test/ecom-prompt-builder.test.ts test/ecom-templates.test.ts",
+    "test": "vitest run src/contracts.test.ts src/credits.test.ts src/growth-contracts.test.ts test/ecom-prompt-builder.test.ts test/ecom-templates.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }

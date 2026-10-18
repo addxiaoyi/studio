@@ -1,42 +1,29 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockToken = "session" + "-token";
 const mockPassword = "MOCK" + "_PASSWORD";
 
 const {
-  mockFetchViewer,
-  mockGetSession,
-  mockOnAuthStateChange,
+  mockFetchLocalSession,
+  mockRegisterLocal,
   mockReplace,
-  mockSignUp,
 } = vi.hoisted(() => ({
-  mockFetchViewer: vi.fn().mockResolvedValue({
-    workspace: { id: "w1" },
-    profile: { id: "u1" },
-    membership: { workspaceId: "w1", userId: "u1", role: "owner" },
-  }),
-  mockGetSession: vi.fn(),
-  mockOnAuthStateChange: vi.fn(),
+  mockFetchLocalSession: vi.fn().mockResolvedValue({ session: null }),
+  mockRegisterLocal: vi.fn().mockResolvedValue({ access_token: "session-token" }),
   mockReplace: vi.fn(),
-  mockSignUp: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
 }));
 
-vi.mock("../src/lib/server-api", () => ({
-  fetchViewer: mockFetchViewer,
-}));
-
-vi.mock("../src/lib/supabase-browser", () => ({
-  getSupabaseBrowserClient: vi.fn(() => ({
-    auth: {
-      signUp: mockSignUp,
-      onAuthStateChange: mockOnAuthStateChange,
-      getSession: mockGetSession,
-      signOut: vi.fn(),
-    },
-  })),
+vi.mock("../src/lib/local-auth", () => ({
+  fetchLocalSession: mockFetchLocalSession,
+  registerLocal: mockRegisterLocal,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -49,17 +36,13 @@ import { AuthProvider } from "../src/lib/auth-context";
 describe("Register page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetSession.mockResolvedValue({ data: { session: null }, error: null });
-    mockOnAuthStateChange.mockReturnValue({
-      data: { subscription: { unsubscribe: vi.fn() } },
-    });
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it("creates an account and shows the confirmation state", async () => {
+  it("creates a local account and redirects", async () => {
     render(
       <AuthProvider>
         <RegisterPage />
@@ -75,33 +58,18 @@ describe("Register page", () => {
     fireEvent.change(screen.getByLabelText(/confirm password|确认密码/i), {
       target: { value: "MOCK_PASSWORD" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /create account|创建账号/i }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(
+      screen.getByRole("button", { name: /create( your)? account|创建账号/i }),
+    );
 
     await waitFor(() => {
-      expect(mockSignUp).toHaveBeenCalledWith({
-        email: "new-user@example.com",
-        password: mockPassword,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
+      expect(mockRegisterLocal).toHaveBeenCalledWith("new-user@example.com", mockPassword);
     });
-
-    expect((await screen.findByText(/check your email/i)).textContent).toContain("Check your email");
-    expect(screen.getByRole("link", { name: /sign in/i }).getAttribute("href")).toBe("/login");
+    expect(mockReplace).toHaveBeenCalledWith("/home");
   });
 
-  it("bootstraps the viewer when sign-up returns an active session", async () => {
-    mockSignUp.mockResolvedValueOnce({
-      data: {
-        session: {
-          access_token: mockToken,
-          user: { id: "u1", email: "new-user@example.com" },
-        },
-      },
-      error: null,
-    });
-
+  it("keeps the local session flow independent from viewer bootstrap", async () => {
     render(
       <AuthProvider>
         <RegisterPage />
@@ -117,10 +85,13 @@ describe("Register page", () => {
     fireEvent.change(screen.getByLabelText(/confirm password|确认密码/i), {
       target: { value: "MOCK_PASSWORD" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /create account|创建账号/i }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(
+      screen.getByRole("button", { name: /create( your)? account|创建账号/i }),
+    );
 
     await waitFor(() => {
-      expect(mockFetchViewer).toHaveBeenCalledWith(mockToken);
+      expect(mockRegisterLocal).toHaveBeenCalledWith("new-user@example.com", mockPassword);
       expect(mockReplace).toHaveBeenCalledWith("/home");
     });
   });

@@ -10,8 +10,9 @@ import type {
 
 import type {
   AuthenticatedUser,
-  UserSupabaseClient,
-} from "../../supabase/user.js";
+  DataClient,
+} from "../../auth/types.js";
+import type { StorageProvider } from "../../storage/index.js";
 
 const BRAND_KIT_BUCKET = "brand-kit-assets";
 const SIGNED_URL_EXPIRY_SECONDS = 3600;
@@ -31,7 +32,9 @@ type BrandKitServiceErrorCode =
   | "brand_kit_delete_failed"
   | "brand_kit_query_failed"
   | "brand_kit_asset_not_found"
-  | "brand_kit_asset_create_failed";
+  | "brand_kit_asset_create_failed"
+  | "upload_failed"
+  | "url_generation_failed";
 
 export class BrandKitServiceError extends Error {
   readonly statusCode: number;
@@ -92,10 +95,11 @@ export type BrandKitService = {
 };
 
 export function createBrandKitService(options: {
-  createUserClient: (accessToken: string) => UserSupabaseClient;
+  createUserClient: (accessToken: string) => DataClient;
+  storage: StorageProvider;
 }): BrandKitService {
   async function fetchKitDetail(
-    client: UserSupabaseClient,
+    client: DataClient,
     kitId: string,
   ): Promise<BrandKitDetail> {
     const { data: kit, error: kitError } = await client
@@ -143,9 +147,11 @@ export function createBrandKitService(options: {
     const fileAssets = mappedAssets.filter((a) => a.file_url);
     if (fileAssets.length > 0) {
       const paths = fileAssets.map((a) => a.file_url!);
-      const { data: signedData } = await client.storage
-        .from(BRAND_KIT_BUCKET)
-        .createSignedUrls(paths, SIGNED_URL_EXPIRY_SECONDS);
+      const { data: signedData } = await options.storage.createSignedUrls(
+        BRAND_KIT_BUCKET,
+        paths,
+        SIGNED_URL_EXPIRY_SECONDS
+      );
 
       if (signedData) {
         const urlByPath = new Map(
@@ -221,7 +227,8 @@ export function createBrandKitService(options: {
           counts = { color: 0, font: 0, logo: 0, image: 0 };
           countsByKit.set(asset.kit_id, counts);
         }
-        counts[asset.asset_type] += 1;
+        const assetType = asset.asset_type as keyof typeof counts;
+        if (assetType in counts) counts[assetType] += 1;
       }
 
       return kits.map((kit): BrandKitSummary => ({
@@ -355,7 +362,7 @@ export function createBrandKitService(options: {
           .map((a) => a.file_url)
           .filter((p): p is string => !!p);
         if (paths.length > 0) {
-          await client.storage.from(BRAND_KIT_BUCKET).remove(paths);
+          await options.storage.remove(BRAND_KIT_BUCKET, paths);
         }
       }
 
@@ -519,7 +526,7 @@ export function createBrandKitService(options: {
 
       // Clean up storage object if this asset has a file
       if (existing.file_url) {
-        await client.storage.from(BRAND_KIT_BUCKET).remove([existing.file_url]);
+        await options.storage.remove(BRAND_KIT_BUCKET, [existing.file_url]);
       }
 
       const { error: deleteError } = await client
@@ -560,12 +567,15 @@ export function createBrandKitService(options: {
       const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
       const objectPath = `${user.id}/${kitId}/${timestamp}-${safeName}`;
 
-      const { error: uploadError } = await client.storage
-        .from(BRAND_KIT_BUCKET)
-        .upload(objectPath, fileBuffer, {
+      const { error: uploadError } = await options.storage.upload(
+        BRAND_KIT_BUCKET,
+        objectPath,
+        fileBuffer,
+        {
           contentType: mimeType,
           upsert: false,
-        });
+        }
+      );
 
       if (uploadError) {
         throw new BrandKitServiceError(
@@ -605,7 +615,7 @@ export function createBrandKitService(options: {
 
       if (insertError || !asset) {
         // Clean up uploaded file on DB failure
-        await client.storage.from(BRAND_KIT_BUCKET).remove([objectPath]);
+        await options.storage.remove(BRAND_KIT_BUCKET, [objectPath]);
         throw new BrandKitServiceError(
           "brand_kit_asset_create_failed",
           ASSET_CREATE_FAILED_MESSAGE,
@@ -614,9 +624,11 @@ export function createBrandKitService(options: {
       }
 
       // Generate signed URL for the response
-      const { data: urlData } = await client.storage
-        .from(BRAND_KIT_BUCKET)
-        .createSignedUrl(objectPath, SIGNED_URL_EXPIRY_SECONDS);
+      const { data: urlData } = await options.storage.getPublicUrl(
+        BRAND_KIT_BUCKET,
+        objectPath,
+        SIGNED_URL_EXPIRY_SECONDS
+      );
 
       const mapped = mapAssetRow(asset);
       if (urlData?.signedUrl) {
@@ -678,9 +690,11 @@ export function createBrandKitService(options: {
           if (asset.file_url) {
             const ext = asset.file_url.split(".").pop() ?? "bin";
             const newPath = `${user.id}/${newKit.id}/${Date.now()}-copy.${ext}`;
-            const { error: copyError } = await client.storage
-              .from(BRAND_KIT_BUCKET)
-              .copy(asset.file_url, newPath);
+            const { error: copyError } = await options.storage.copy(
+              BRAND_KIT_BUCKET,
+              asset.file_url,
+              newPath
+            );
             if (!copyError) {
               newFileUrl = newPath;
             }

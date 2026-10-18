@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import type { CanvasContent, CanvasDetail } from "@helstera/shared";
-import type { AuthenticatedUser } from "../supabase/user.js";
+import type { AuthenticatedUser } from "../auth/types.js";
 import { CanvasServiceError, type CanvasService } from "../features/canvas/canvas-service.js";
 
 export function createLocalCanvasService(db: Pool): CanvasService {

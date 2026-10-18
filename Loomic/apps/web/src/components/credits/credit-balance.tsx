@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, ChevronRight, Zap, Plus } from "lucide-react";
+import { Sparkles, ChevronRight, Zap, Plus, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useCredits } from "@/hooks/use-credits";
 
@@ -40,7 +40,7 @@ function AnimatedBalance({ value }: { value: number }) {
 }
 
 export function CreditBalance() {
-  const { balance, totalToppedUp, totalSpent, loading } = useCredits();
+  const { balance, totalToppedUp, totalSpent, loading, error, refresh } = useCredits();
 
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -91,12 +91,23 @@ export function CreditBalance() {
     );
   }
 
+  if (error) {
+    return (
+      <button type="button" onClick={() => void refresh()} aria-label="积分加载失败，重新加载" title="积分加载失败，点击重试" className="flex h-9 w-9 items-center justify-center rounded-full border border-destructive/30 text-destructive hover:bg-destructive/5">
+        <RefreshCw className="size-4" />
+      </button>
+    );
+  }
+
   return (
     <>
       <button
         ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-label={`积分余额 ${balance}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         title={`${balance} credits`}
         className="relative flex h-9 w-9 flex-col items-center justify-center gap-0.5 rounded-full glass-soft border border-border/40 transition-all duration-300 hover:glass"
       >
@@ -112,6 +123,8 @@ export function CreditBalance() {
           <AnimatePresence>
             <div ref={popoverRef} style={popoverStyle}>
               <motion.div
+                role="dialog"
+                aria-label="积分余额与使用情况"
                 initial={{ opacity: 0, x: -8 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -8 }}

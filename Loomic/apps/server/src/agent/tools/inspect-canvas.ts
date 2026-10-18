@@ -1,4 +1,5 @@
 import { tool } from "langchain";
+import type { Pool } from "pg";
 import { z } from "zod";
 
 const inspectCanvasSchema = z.object({
@@ -126,8 +127,8 @@ export function buildCanvasSummaryForContext(
     `Canvas: ${visible.length} elements, bounds (${Math.round(bbox.minX)},${Math.round(bbox.minY)})→(${Math.round(bbox.maxX)},${Math.round(bbox.maxY)})`,
   ];
 
-  // Cap at 30 elements to avoid bloating the context window
-  const toShow = summaries.slice(0, 30);
+  // Keep the automatically injected context small; full inspection remains an explicit tool call.
+  const toShow = summaries.slice(0, 20);
   for (const s of toShow) {
     const parts = [`${s.type}#${s.id}`];
     parts.push(`@(${Math.round(s.x as number)},${Math.round(s.y as number)})`);
@@ -136,28 +137,29 @@ export function buildCanvasSummaryForContext(
     if (s.title) parts.push(`title="${s.title}"`);
     if (s.type === "video") {
       if (s.durationSeconds) parts.push(`${s.durationSeconds}s`);
-      if (s.prompt) parts.push(`prompt="${(s.prompt as string).slice(0, 120)}"`);
+      if (s.prompt) parts.push(`prompt="${(s.prompt as string).slice(0, 80)}"`);
     }
     if (s.strokeColor) parts.push(`stroke=${s.strokeColor}`);
     if (s.backgroundColor) parts.push(`fill=${s.backgroundColor}`);
     lines.push(`  ${parts.join(" ")}`);
   }
-  if (summaries.length > 30) {
-    lines.push(`  ... and ${summaries.length - 30} more elements`);
+  if (summaries.length > 20) {
+    lines.push(`  ... and ${summaries.length - 20} more elements`);
   }
 
   return lines.join("\n");
 }
 
 export function createInspectCanvasTool(deps: {
-  createUserClient: (accessToken: string) => any;
+  createUserClient?: (accessToken: string) => any;
+  localDb?: Pool;
 }) {
   return tool(
     async (input, config) => {
       const canvasId = (config as any)?.configurable?.canvas_id;
       const accessToken = (config as any)?.configurable?.access_token;
 
-      if (!canvasId || !accessToken) {
+      if (!canvasId || (!deps.localDb && !accessToken)) {
         return JSON.stringify({
           error: "no_canvas_context",
           message:
@@ -165,12 +167,27 @@ export function createInspectCanvasTool(deps: {
         });
       }
 
-      const client = deps.createUserClient(accessToken);
-      const { data, error } = await client
-        .from("canvases")
-        .select("content")
-        .eq("id", canvasId)
-        .single();
+      let data: { content: unknown } | null = null;
+      let error: unknown = null;
+      if (deps.localDb) {
+        const result = await deps.localDb.query(
+          "select content from canvases where id = $1",
+          [canvasId],
+        );
+        data = result.rows[0] ?? null;
+      } else {
+        if (!deps.createUserClient) {
+          return JSON.stringify({ error: "storage_unavailable", message: "Canvas storage is unavailable." });
+        }
+        const client = deps.createUserClient(accessToken);
+        const result = await client
+          .from("canvases")
+          .select("content")
+          .eq("id", canvasId)
+          .single();
+        data = result.data;
+        error = result.error;
+      }
 
       if (error || !data) {
         return JSON.stringify({

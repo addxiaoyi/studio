@@ -3,11 +3,9 @@
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 
-import {
-  Dialog,
-  DialogContent,
-} from "./ui/dialog";
+import { Dialog, DialogContent } from "./ui/dialog";
 import { Button } from "./ui/button";
+import { t, useLocale } from "@/lib/i18n";
 
 interface DeleteProjectDialogProps {
   open: boolean;
@@ -22,11 +20,17 @@ export function DeleteProjectDialog({
   onConfirm,
   onCancel,
 }: DeleteProjectDialogProps) {
+  const copy = t(useLocale()).project;
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onCancel(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onCancel();
+      }}
+    >
       <DialogContent className="sm:max-w-sm" showCloseButton={false}>
         <p className="text-sm font-medium text-foreground">
-          确定删除此项目？此操作无法撤销。
+          {copy.deleteConfirm}
         </p>
         <div className="mt-4 flex items-center justify-end gap-3">
           <Button
@@ -35,7 +39,7 @@ export function DeleteProjectDialog({
             disabled={deleting}
             className="rounded-xl"
           >
-            取消
+            {copy.cancel}
           </Button>
           <Button
             onClick={onConfirm}
@@ -50,7 +54,9 @@ export function DeleteProjectDialog({
               >
                 <Loader2 size={16} />
               </motion.span>
-            ) : "永久删除"}
+            ) : (
+              copy.permanentDelete
+            )}
           </Button>
         </div>
       </DialogContent>

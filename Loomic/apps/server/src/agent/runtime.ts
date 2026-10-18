@@ -1,5 +1,5 @@
 // @credits-system — Agent tool runtime with credit checks before image/video generation
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -22,11 +22,13 @@ import { createPipelineLogger } from "../ws/logger.js";
 import type { AgentRunMetadataService } from "../features/agent-runs/agent-run-service.js";
 import type { JobService } from "../features/jobs/job-service.js";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
-import type { AuthenticatedUser, UserSupabaseClient } from "../supabase/user.js";
+import type { AuthenticatedUser, DataClient } from "../auth/types.js";
 import type { ConnectionManager } from "../ws/connection-manager.js";
 // execute 工具由 deepagents 内置提供（LocalShellBackend 作为 sandbox backend）
 // 不需要自定义代码执行工具
 import type { SubmitImageJobFn } from "./tools/image-generate.js";
+import { singleImageSubmission } from "./image-submission.js";
+import { resolveImageReferences } from "./image-references.js";
 import type { SubmitVideoJobFn } from "./tools/video-generate.js";
 import type { CreditService } from "../features/credits/credit-service.js";
 import { TierGuardError, type TierGuard } from "../features/credits/tier-guard.js";
@@ -40,12 +42,45 @@ import {
 } from "./deep-agent.js";
 import type { AgentPersistenceService } from "./persistence/index.js";
 import { adaptDeepAgentStream } from "./stream-adapter.js";
-import { sanitizeErrorForClient } from "../utils/error-sanitizer.js";
-import { loadWorkspaceSkills, type WorkspaceSkillEntry } from "./workspace-skills.js";
+import { classifyErrorForClient } from "../utils/error-sanitizer.js";
+import { loadLocalWorkspaceSkills, loadWorkspaceSkills, type WorkspaceSkillEntry } from "./workspace-skills.js";
 import { buildCanvasSummaryForContext } from "./tools/inspect-canvas.js";
-import { insertImageElement, insertLocalImageElement, insertVideoElement } from "../features/canvas/canvas-element-writer.js";
+import { insertImageElement, insertLocalImageElement, insertLocalVideoElement, insertVideoElement } from "../features/canvas/canvas-element-writer.js";
 import type { StorageProvider } from "../storage/index.js";
 import { resolveConfiguredModel } from "../http/model-availability.js";
+import { buildMediaRoute } from "../features/media/media-routing.js";
+import { isRemovedModelId } from "../generation/removed-models.js";
+import { getModelCallProfile } from "../local-db/model-call-profiles.js";
+import type { createGenerationApprovalService } from "../features/generation/generation-approval-service.js";
+
+const MAX_PERSISTED_IMAGE_BYTES = 25 * 1024 * 1024;
+const PERSIST_IMAGE_TIMEOUT_MS = 30_000;
+
+async function readImageResponse(response: Response): Promise<Buffer> {
+  const declaredLength = Number(response.headers.get("content-length") ?? "0");
+  if (declaredLength > MAX_PERSISTED_IMAGE_BYTES) {
+    throw new Error("Generated image exceeds the 25MB persistence limit");
+  }
+  if (!response.body) return Buffer.alloc(0);
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      total += part.value.byteLength;
+      if (total > MAX_PERSISTED_IMAGE_BYTES) {
+        throw new Error("Generated image exceeds the 25MB persistence limit");
+      }
+      chunks.push(part.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, total);
+}
 
 /**
  * Build the text portion of a user message, appending <input_images> XML
@@ -102,7 +137,8 @@ function buildInputImagesXml(attachments: ImageAttachment[]): string | null {
 }
 
 function supportsVisionInput(model: unknown): boolean {
-  return typeof model === "string" && model.replace(/^openai:/, "") === "grok-4.6";
+  if (typeof model !== "string") return false;
+  return false;
 }
 
 function buildImageGenerationPreferenceXml(
@@ -122,18 +158,13 @@ function buildImageGenerationPreferenceXml(
     )
     .join("\n  ");
 
-  return `<human_image_generation_preference mode="manual" count="${imageGenerationPreference.models.length}">\n  ${modelXml}\n</human_image_generation_preference>`;
+  return `<human_image_generation_preference mode="manual" strict="true" count="${imageGenerationPreference.models.length}">\n  ${modelXml}\n  <instruction>优先且只能使用用户选择的模型；不可擅自切换、回退或使用选择范围之外的模型。若所选模型不可用，停止并提示用户更换模型。</instruction>\n</human_image_generation_preference>`;
 }
 
 function buildVideoGenerationPreferenceXml(
   videoGenerationPreference?: VideoGenerationPreference,
 ): string | null {
-  if (
-    videoGenerationPreference?.mode !== "manual" ||
-    videoGenerationPreference.models.length === 0
-  ) {
-    return null;
-  }
+  if (!videoGenerationPreference) return null;
 
   const modelXml = videoGenerationPreference.models
     .map(
@@ -142,7 +173,20 @@ function buildVideoGenerationPreferenceXml(
     )
     .join("\n  ");
 
-  return `<human_video_generation_preference mode="manual" count="${videoGenerationPreference.models.length}">\n  ${modelXml}\n</human_video_generation_preference>`;
+  const durationXml = videoGenerationPreference.duration == null
+    ? ""
+    : ` duration="${videoGenerationPreference.duration}"`;
+  const body = modelXml ? `\n  ${modelXml}\n` : "";
+  const strictXml = videoGenerationPreference.mode === "manual"
+    ? "\n  <instruction>优先且只能使用用户选择的视频模型；不可擅自切换、回退或使用选择范围之外的模型。若所选模型不可用，停止并提示用户更换模型。</instruction>"
+    : "";
+  return `<human_video_generation_preference mode="${videoGenerationPreference.mode}" count="${videoGenerationPreference.models.length}"${durationXml}>${body}${strictXml}\n</human_video_generation_preference>`;
+}
+
+function explicitVideoDuration(prompt: string): number | undefined {
+  const match = prompt.match(/(?:^|\s)(\d{1,2})\s*(?:s|sec(?:onds)?|秒)(?:\s|$)/i);
+  const seconds = match ? Number(match[1]) : NaN;
+  return Number.isInteger(seconds) && seconds >= 3 && seconds <= 30 ? seconds : undefined;
 }
 
 function buildMentionXmlBlocks(mentions: MessageMention[]): string[] {
@@ -330,6 +374,8 @@ type RuntimeRunRecord = RunCreateRequest & {
   consumed: boolean;
   controller: AbortController;
   modelOverride?: string;
+  modelApiBase?: string;
+  modelApiKey?: string;
   runId: string;
   status: RuntimeRunStatus;
   threadId?: string;
@@ -344,6 +390,7 @@ type CreateAgentRuntimeOptions = {
   connectionManager?: ConnectionManager;
   createUserClient?: (accessToken: string) => unknown;
   creditService?: CreditService;
+  generationApprovalService?: ReturnType<typeof createGenerationApprovalService>;
   env: ServerEnv;
   eventDelayMs?: number;
   jobService?: JobService;
@@ -426,7 +473,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
 
     createRun(
       input: RunCreateRequest,
-      runOptions?: { accessToken?: string; model?: string; threadId?: string; userId?: string },
+    runOptions?: { accessToken?: string; model?: string; modelApiBase?: string; modelApiKey?: string; threadId?: string; userId?: string },
     ): RunCreateResponse {
       const runId = runIdFactory();
       const { accessToken: _ignoredAccessToken, ...runInput } = input;
@@ -437,6 +484,8 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         consumed: false,
         controller: new AbortController(),
         ...(runOptions?.model ? { modelOverride: runOptions.model } : {}),
+        ...(runOptions?.modelApiBase ? { modelApiBase: runOptions.modelApiBase } : {}),
+        ...(runOptions?.modelApiKey ? { modelApiKey: runOptions.modelApiKey } : {}),
         ...(runOptions?.threadId ? { threadId: runOptions.threadId } : {}),
         ...(runOptions?.userId ? { userId: runOptions.userId } : {}),
         runId,
@@ -465,6 +514,14 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         return;
       }
 
+      if (run.controller.signal.aborted || run.status === "canceled") {
+        run.consumed = true;
+        run.status = "canceled";
+        await updatePersistedRunCanceled(options.agentRunMetadataService, run, now);
+        yield { runId, timestamp: now(), type: "run.canceled" };
+        return;
+      }
+
       run.consumed = true;
       run.status = "running";
 
@@ -487,10 +544,12 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         ReturnType<NonNullable<AgentPersistenceService["getPersistence"]>>
       > | null = null;
       try {
-        persistence =
-          run.threadId && options.agentPersistenceService
-            ? await options.agentPersistenceService.getPersistence()
-            : null;
+        // Production backends persist /workspace and /memories through the
+        // Store even for canvas-only runs. Checkpointing still requires a
+        // thread id, but Store availability must not depend on one.
+        persistence = options.agentPersistenceService
+          ? await options.agentPersistenceService.getPersistence()
+          : null;
         rlog.lap("persistence_init");
       } catch (error) {
         const failedEvent = toFailedEvent(runId, now, error);
@@ -509,14 +568,14 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         const failedEvent = toFailedEvent(
           runId,
           now,
-          new Error("SUPABASE_DB_URL is required for persisted agent threads."),
+          new Error("DATABASE_URL is required for persisted agent threads."),
         );
         run.status = "failed";
         await updatePersistedRunFailure(
           options.agentRunMetadataService,
           run,
           now,
-          new Error("SUPABASE_DB_URL is required for persisted agent threads."),
+          new Error("DATABASE_URL is required for persisted agent threads."),
         );
         yield failedEvent;
         return;
@@ -535,7 +594,14 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         const sessionId = run.sessionId;
         const runId = run.runId;
 
-        submitImageJob = async (input) => {
+        const submitImageJobOnce: SubmitImageJobFn = async (input) => {
+          if (!input.inputImages?.length && run.attachments?.length && referenceImages.length) {
+            input = {
+              ...input,
+              inputImages: [...new Set(referenceImages)],
+              inputAssetIds: run.attachments.map((attachment) => attachment.assetId),
+            };
+          }
           const jobT0 = Date.now();
           const jobLap = (label: string, extra?: Record<string, unknown>) => {
             console.log(`[submitImageJob] ${label} +${Date.now() - jobT0}ms`, extra ? JSON.stringify(extra) : "");
@@ -549,33 +615,61 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
 
           jobLap("submission_started", { model: input.model });
 
-          const selectedModels =
-            run.imageGenerationPreference?.mode === "manual"
-              ? run.imageGenerationPreference.models
-              : [];
+          const isManualImageSelection = run.imageGenerationPreference?.mode === "manual";
+          const selectedModels = isManualImageSelection
+            ? [...(run.imageGenerationPreference?.models ?? [])]
+            : [];
           const requestedModel = input.model;
-          const selectedModel = selectedModels.includes(requestedModel)
-            ? requestedModel
-            : selectedModels[0];
-          if (selectedModel && requestedModel !== selectedModel) {
-            input = { ...input, model: selectedModel };
-            jobLap("model_preference_enforced", {
-              requestedModel,
-              selectedModel,
-            });
+          if (isManualImageSelection && selectedModels.length > 0 && !selectedModels.includes(input.model)) {
+            throw new Error(`MODEL_SELECTION_REQUIRED:你已手动选择图片模型「${selectedModels.join("、")}」，本次请求指定了「${input.model}」。请切换用户选择，或将图片模型设为自动路由。`);
           }
 
           const legacyImageModels: Record<string, string> = {
             "google/nano-banana-2": "nano-banana-2-1k",
             "nano-banana-2": "nano-banana-2-1k",
           };
-          const normalizedModel = legacyImageModels[input.model] ?? input.model;
+          const normalizedModel = isManualImageSelection
+            ? input.model
+            : input.model.toLowerCase().includes("nano-banana")
+              ? "gpt-image-2"
+              : legacyImageModels[input.model] ?? input.model;
           if (normalizedModel !== input.model) {
             jobLap("legacy_model_normalized", {
               requestedModel: input.model,
               selectedModel: normalizedModel,
             });
             input = { ...input, model: normalizedModel };
+          }
+
+          if (options.localDb) {
+            const isManual = isManualImageSelection;
+            const routed = await resolveConfiguredModel(
+              options.localDb,
+              "image",
+              input.model,
+              {
+                requiresInputImage: Boolean(input.inputImages?.length),
+                allowUnverified: isManual,
+                strictRequested: isManualImageSelection,
+                excludeModelIds: ["nano-banana-2-1k", "nano-banana-2-2k"],
+                ...(selectedModels.length ? { allowedModelIds: selectedModels } : {}),
+              },
+            );
+            if (!routed) {
+              throw new Error(isManual
+                ? `MODEL_SELECTION_REQUIRED:你选择的图片模型「${input.model}」当前不可用。系统不会自动切换，请在模型选择器中更换模型或改为自动路由。`
+                : "当前没有可用的图片模型，请稍后重试。" );
+            }
+            if (routed.model_id !== input.model) {
+              jobLap("model_auto_selected", {
+                requestedModel: input.model,
+                selectedModel: routed.model_id,
+                reason: isManual && selectedModels.length
+                  ? "手动候选不可用，自动回退到健康兼容模型"
+                  : "自动路由",
+              });
+              input = { ...input, model: routed.model_id };
+            }
           }
 
           // Look up personal workspace directly — the viewer is already
@@ -596,7 +690,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             workspaceId = rows[0]?.workspace_id;
             jobLap("workspace_lookup_done", { found: Boolean(workspaceId) });
           } else if (createClient) {
-            const client = createClient(accessToken) as UserSupabaseClient;
+            const client = createClient(accessToken) as DataClient;
             const { data: ws } = await client
               .from("workspaces")
               .select("id")
@@ -648,23 +742,72 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             }
           }
 
+          if (options.generationApprovalService && creditsCost > 0) {
+            const gate = await options.generationApprovalService.gate({
+              workspaceId,
+              userId,
+              jobType: "image_generation",
+              model: input.model,
+              payload: {
+                prompt: input.prompt,
+                title: input.title,
+                model: input.model,
+                aspect_ratio: input.aspectRatio,
+                quality: input.quality ?? null,
+                routing: {
+                  requestedModels: selectedModels,
+                  preferredModel: requestedModel,
+                  selectedModel: input.model,
+                  fallback: Boolean(requestedModel && requestedModel !== input.model),
+                  inputImage: Boolean(input.inputImages?.length),
+                  aspectRatio: input.aspectRatio,
+                  quality: input.quality ?? null,
+                },
+                ...(input.inputImages ? { input_images: input.inputImages } : {}),
+              },
+              estimatedCredits: creditsCost,
+              context: {
+                ...(canvasId ? { canvasId } : {}),
+                ...(sessionId ? { sessionId } : {}),
+                ...(run.threadId ? { threadId: run.threadId } : {}),
+              },
+            });
+            if (gate.state === "confirmation_required") {
+              throw new Error(`GENERATION_CONFIRMATION_REQUIRED:${JSON.stringify(gate.request)}`);
+            }
+          }
+
           jobLap("job_create_started");
           const job = await withSubmitTimeout("Job creation", jobSvc.createJob(user, {
             workspaceId,
             ...(canvasId ? { canvasId } : {}),
             ...(sessionId ? { sessionId } : {}),
+            idempotencyKey: buildAgentJobIdempotencyKey(run.requestId ?? runId, "image", input),
             jobType: "image_generation",
             payload: {
               prompt: input.prompt,
               title: input.title,
               model: input.model,
               aspect_ratio: input.aspectRatio,
+              routing: {
+                requestedModels: selectedModels,
+                preferredModel: requestedModel,
+                selectedModel: input.model,
+                fallback: Boolean(requestedModel && requestedModel !== input.model),
+                reason: requestedModel && requestedModel !== input.model
+                  ? "按当前模型偏好和可用渠道重新选模；不代表输入不兼容"
+                  : null,
+                inputImage: Boolean(input.inputImages?.length),
+                aspectRatio: input.aspectRatio,
+                quality: input.quality ?? null,
+              },
               ...(input.inputImages ? { input_images: input.inputImages } : {}),
+              ...(input.inputAssetIds?.length ? { input_asset_ids: input.inputAssetIds } : {}),
             },
           }));
 
           // Deduct credits after job creation
-          if (options.creditService && creditsCost > 0) {
+          if ((!job.reused || job.reactivated) && options.creditService && creditsCost > 0) {
             try {
               const txId = await options.creditService.deductCredits(
                 workspaceId, userId, creditsCost, job.id,
@@ -690,6 +833,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             pollCount++;
 
             if (run.controller.signal.aborted) {
+              await jobSvc.cancelJob(user, job.id).catch(() => {});
               throw new Error("Run was canceled");
             }
 
@@ -702,6 +846,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                 width?: number;
                 height?: number;
                 mime_type?: string;
+                asset_id?: string;
               };
               jobLap("job_poll_done", { pollCount, status: "succeeded" });
 
@@ -725,6 +870,8 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                       height: result.height ?? 1024,
                       mimeType: result.mime_type ?? "image/png",
                       title: input.title,
+                      ...(result.asset_id ? { assetId: result.asset_id } : {}),
+                      jobId: job.id,
                     };
                   const insertResult = options.localDb
                     ? await insertLocalImageElement(
@@ -734,7 +881,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                         explicitPlacement,
                       )
                     : await insertImageElement(
-                        createClient!(accessToken) as UserSupabaseClient,
+                        createClient!(accessToken) as DataClient,
                         options.storage,
                         insertOptions,
                         explicitPlacement,
@@ -788,30 +935,34 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           jobLap("job_poll_done", { pollCount, status: "timeout" });
           return {
             jobId: job.id,
-            error: `Job timed out after ${MAX_WAIT / 1000}s`,
+            pending: true,
           };
         };
+        submitImageJob = singleImageSubmission(submitImageJobOnce);
 
         submitVideoJob = async (input) => {
           const jobT0 = Date.now();
+          let videoRouting: Record<string, unknown> | undefined;
           const jobLap = (label: string, extra?: Record<string, unknown>) => {
             console.log(`[submitVideoJob] ${label} +${Date.now() - jobT0}ms`, extra ? JSON.stringify(extra) : "");
           };
 
           let workspaceId: string | undefined;
           if (!input.inputImages?.length && referenceImages.length > 0) {
-            input = { ...input, inputImages: [referenceImages[0]!] };
+            input = {
+              ...input,
+              inputImages: [referenceImages[0]!],
+              ...(run.attachments?.[0]?.assetId ? { inputAssetIds: [run.attachments[0].assetId] } : {}),
+            };
           }
 
-          const selectedModels =
-            run.videoGenerationPreference?.mode === "manual"
-              ? run.videoGenerationPreference.models
-              : [];
-          const selectedModel = selectedModels.includes(input.model)
-            ? input.model
-            : selectedModels[0];
-          if (selectedModel) input = { ...input, model: selectedModel };
-          const selectedDuration = run.videoGenerationPreference?.duration;
+          const isManualVideoSelection = run.videoGenerationPreference?.mode === "manual";
+          const selectedModels = isManualVideoSelection
+            ? [...(run.videoGenerationPreference?.models ?? [])].filter((model) => !isRemovedModelId(model))
+            : [];
+          let effectiveManualVideoSelection = isManualVideoSelection && selectedModels.length > 0;
+          const selectedModel = input.model;
+          const selectedDuration = explicitVideoDuration(run.prompt) ?? run.videoGenerationPreference?.duration;
           if (selectedDuration != null) {
             input = { ...input, duration: selectedDuration };
           }
@@ -828,7 +979,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                 );
             workspaceId = rows[0]?.workspace_id;
           } else if (createClient) {
-            const client = createClient(accessToken) as UserSupabaseClient;
+            const client = createClient(accessToken) as DataClient;
             const { data: ws } = await client
               .from("workspaces")
               .select("id")
@@ -838,15 +989,114 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             workspaceId = ws?.id;
           }
           if (!workspaceId) throw new Error("No workspace found");
+          if (options.localDb && effectiveManualVideoSelection) {
+            const usable = await options.localDb.query(
+              `select count(*)::int as count
+               from provider_models pm
+               join provider_configs pc on pc.id = pm.provider_id
+               where pm.model_id = any($1::text[])
+                 and pm.media_type = 'video'
+                 and pm.enabled = true
+                 and pm.health_status <> 'unhealthy' and pm.failure_count < 3
+                 and pm.billing_unit = 'per_second'
+                 and pm.price_credits > 0
+                 and pc.enabled = true
+                 and pc.health_status = 'healthy'
+                 and (pm.cooldown_until is null or pm.cooldown_until <= now())`,
+              [selectedModels],
+            );
+            if (Number(usable.rows[0]?.count ?? 0) === 0) {
+              effectiveManualVideoSelection = false;
+              jobLap("stale_video_preference_ignored", { selectedModels });
+            }
+          }
+
+          if (effectiveManualVideoSelection && !selectedModels.includes(input.model)) {
+            throw new Error(`MODEL_SELECTION_REQUIRED:当前手动选择的视频模型不可用：${selectedModels.join("、")}。请切换模型，或将视频模型改为自动路由。`);
+          }
 
           if (options.localDb) {
-            const model = await resolveConfiguredModel(options.localDb, "video", input.model, {
-              requiresInputImage: Boolean(input.inputImages?.length),
-            });
+            const hasFirstFrame = Boolean(input.inputImages?.length);
+            // Only an explicit user selection may lock routing to one model.
+            // In an empty manual state, ignore model names invented by the agent.
+            const requestedVideoModel = selectedModel;
+            const allowedVideoModels = effectiveManualVideoSelection && selectedModels.length > 0 ? selectedModels : undefined;
+            const excludedModelIds = ["nano-banana-2-1k", "nano-banana-2-2k", ];
+            const model = await resolveConfiguredModel(
+              options.localDb,
+              "video",
+              requestedVideoModel,
+              {
+                requiresInputImage: Boolean(input.inputImages?.length),
+                allowUnverified: effectiveManualVideoSelection,
+                strictRequested: effectiveManualVideoSelection,
+                excludeModelIds: excludedModelIds,
+                ...(input.duration != null ? { requiredDuration: input.duration } : {}),
+                ...(allowedVideoModels ? { allowedModelIds: allowedVideoModels } : {}),
+              },
+            );
             if (!model) {
-              throw new Error("当前没有可用且已配置计费的视频模型。");
+              throw new Error(isManualVideoSelection
+                ? `MODEL_SELECTION_REQUIRED:你选择的视频模型「${input.model}」当前不可用或不支持本次首帧/时长参数。系统不会自动切换，请在模型选择器中更换模型或改为自动路由。`
+                : "当前没有兼容本次输入的可用视频模型，请重新选择模型。" );
             }
+            if (input.enableAudio === true && model.supports_audio === false) {
+              throw Object.assign(
+                new Error("The selected video model does not support generated audio."),
+                { code: "invalid_input" },
+              );
+            }
+            const videoProfile = getModelCallProfile(model.model_id, "lingke_media");
+            const maxInputImages = videoProfile.maxInputImages;
+            const requestedImageCount = input.inputImages?.length ?? 0;
+            const truncatedReferenceImages = maxInputImages != null && requestedImageCount > maxInputImages;
+            if (truncatedReferenceImages) {
+              input = {
+                ...input,
+                inputImages: input.inputImages!.slice(0, maxInputImages),
+              };
+              jobLap("reference_images_truncated", {
+                requestedImageCount,
+                acceptedImageCount: maxInputImages,
+                model: model.model_id,
+              });
+            }
+            const preferredModel = requestedVideoModel ?? input.model;
+            videoRouting = {
+              requestedModels: selectedModels,
+              preferredModel,
+              selectedModel: model.model_id,
+              fallback: Boolean(preferredModel && preferredModel !== model.model_id),
+              reason: preferredModel && preferredModel !== model.model_id
+                ? hasFirstFrame
+                  ? "首帧、时长或模型健康状态不兼容，已切换到可用模型"
+                  : "模型健康状态或时长不兼容，已切换到可用模型"
+                : truncatedReferenceImages
+                  ? `reference images exceeded ${maxInputImages}; kept the first ${maxInputImages}`
+                  : null,
+              inputImage: hasFirstFrame,
+              ...(input.duration != null ? { duration: input.duration } : {}),
+              ...(input.resolution ? { resolution: input.resolution } : {}),
+              ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
+            };
             input = { ...input, model: model.model_id };
+            const route = buildMediaRoute({
+              intent: {
+                mediaType: "video",
+                inputImageCount: input.inputImages?.length ?? 0,
+                inputVideo: Boolean(input.inputVideo),
+                enableAudio: input.enableAudio === true,
+                ...(input.duration != null ? { durationSeconds: input.duration } : {}),
+                ...(input.resolution ? { resolution: input.resolution } : {}),
+                ...(requestedVideoModel ? { requestedModel: requestedVideoModel } : {}),
+                selectionMode: effectiveManualVideoSelection ? "manual" : "auto",
+              },
+              selected: model,
+              candidates: selectedModels,
+              reason: requestedVideoModel && requestedVideoModel !== model.model_id ? "requested model unavailable" : null,
+            });
+            videoRouting = route;
+            input = { ...input, enableAudio: route.normalized.enableAudio };
           }
 
           jobLap("input_resolved", {
@@ -903,25 +1153,57 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             }
           }
 
+          if (options.generationApprovalService && creditsCost > 0) {
+            const gate = await options.generationApprovalService.gate({
+              workspaceId,
+              userId,
+              jobType: "video_generation",
+              model: input.model,
+              payload: {
+                prompt: input.prompt,
+                model: input.model,
+                ...(input.duration != null ? { duration: input.duration } : {}),
+                ...(input.resolution ? { resolution: input.resolution } : {}),
+                ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}),
+                ...(input.inputImages ? { input_images: input.inputImages } : {}),
+                ...(input.inputAssetIds?.length ? { input_asset_ids: input.inputAssetIds } : {}),
+                ...(input.inputVideo ? { input_video: input.inputVideo } : {}),
+                ...(input.enableAudio != null ? { enable_audio: input.enableAudio } : {}),
+              },
+              estimatedCredits: creditsCost,
+              context: {
+                ...(canvasId ? { canvasId } : {}),
+                ...(sessionId ? { sessionId } : {}),
+                ...(run.threadId ? { threadId: run.threadId } : {}),
+              },
+            });
+            if (gate.state === "confirmation_required") {
+              throw new Error(`GENERATION_CONFIRMATION_REQUIRED:${JSON.stringify(gate.request)}`);
+            }
+          }
+
           const job = await jobSvc.createJob(user, {
             workspaceId,
             ...(canvasId ? { canvasId } : {}),
             ...(sessionId ? { sessionId } : {}),
+            idempotencyKey: buildAgentJobIdempotencyKey(run.requestId ?? runId, "video", input),
             jobType: "video_generation",
             payload: {
               prompt: input.prompt,
               model: input.model,
+              ...(videoRouting ? { routing: videoRouting } : {}),
               ...(input.duration != null ? { duration: input.duration } : {}),
               ...(input.resolution ? { resolution: input.resolution } : {}),
               ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}),
               ...(input.inputImages ? { input_images: input.inputImages } : {}),
+              ...(input.inputAssetIds?.length ? { input_asset_ids: input.inputAssetIds } : {}),
               ...(input.inputVideo ? { input_video: input.inputVideo } : {}),
               ...(input.enableAudio != null ? { enable_audio: input.enableAudio } : {}),
             },
           });
 
           // Deduct credits after job creation
-          if (options.creditService && creditsCost > 0) {
+          if ((!job.reused || job.reactivated) && options.creditService && creditsCost > 0) {
             try {
               const txId = await options.creditService.deductCredits(
                 workspaceId, userId, creditsCost, job.id,
@@ -939,7 +1221,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           // Google Vertex Veo can take 300-500s; 600s gives enough headroom
           // to avoid poll timeout while worker is still processing.
           const POLL_INTERVAL = 3000;
-          const MAX_WAIT = 600_000; // 10 minutes
+          const MAX_WAIT = 900_000; // Some upstream video jobs take 10-12 minutes.
           const start = Date.now();
           let pollCount = 0;
 
@@ -948,6 +1230,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             pollCount++;
 
             if (run.controller.signal.aborted) {
+              await jobSvc.cancelJob(user, job.id).catch(() => {});
               throw new Error("Run was canceled");
             }
 
@@ -960,14 +1243,14 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                 width?: number;
                 height?: number;
                 mime_type?: string;
+                asset_id?: string;
               };
               jobLap("job_poll_done", { pollCount, status: "succeeded" });
 
               // Write element directly to canvas (backend-driven insertion)
               let elementId: string | undefined;
-              if (!options.localDb && createClient && canvasId && result.signed_url) {
+              if (canvasId && result.signed_url && (options.localDb || createClient)) {
                 try {
-                  const writerClient = createClient(accessToken) as UserSupabaseClient;
                   const explicitPlacement = (input as any).placementX != null && (input as any).placementY != null
                     ? {
                         x: (input as any).placementX,
@@ -977,9 +1260,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                       }
                     : undefined;
 
-                  const insertResult = await insertVideoElement(
-                    writerClient,
-                    {
+                  const insertOptions = {
                       canvasId,
                       signedUrl: result.signed_url,
                       width: result.width ?? 1280,
@@ -988,9 +1269,20 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                       ...(result.duration_seconds != null ? { durationSeconds: result.duration_seconds } : {}),
                       title: (input as any).title,
                       prompt: input.prompt,
-                    },
-                    explicitPlacement,
-                  );
+                       ...(result.asset_id ? { assetId: result.asset_id } : {}),
+                       jobId: job.id,
+                    };
+                  const insertResult = options.localDb
+                    ? await insertLocalVideoElement(
+                        options.localDb,
+                        insertOptions,
+                        explicitPlacement,
+                      )
+                    : await insertVideoElement(
+                        createClient!(accessToken) as DataClient,
+                        insertOptions,
+                        explicitPlacement,
+                      );
                   elementId = insertResult.elementId;
 
                   // Notify connected frontends to refresh canvas
@@ -1040,7 +1332,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           jobLap("job_poll_done", { pollCount, status: "timeout" });
           return {
             jobId: job.id,
-            error: `Job timed out after ${MAX_WAIT / 1000}s`,
+            pending: true,
           };
         };
 
@@ -1050,9 +1342,16 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
       // Done before backend creation so we know whether to add the
       // /workspace-skills/ Store route.
       let workspaceSkills: WorkspaceSkillEntry[] = [];
-      if (!options.localDb && run.canvasId && run.accessToken && options.createUserClient) {
+      if (options.localDb && run.canvasId) {
         try {
-          const wsClient = options.createUserClient(run.accessToken) as UserSupabaseClient;
+          workspaceSkills = await loadLocalWorkspaceSkills(options.localDb, run.canvasId);
+          rlog.lap("workspace_skills_loaded", { count: workspaceSkills.length });
+        } catch (err) {
+          console.warn("[runtime] Failed to load local workspace skills:", err);
+        }
+      } else if (run.canvasId && run.accessToken && options.createUserClient) {
+        try {
+          const wsClient = options.createUserClient(run.accessToken) as DataClient;
           workspaceSkills = await loadWorkspaceSkills(wsClient, run.canvasId);
           rlog.lap("workspace_skills_loaded", { count: workspaceSkills.length });
         } catch (err) {
@@ -1086,9 +1385,11 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           const createClient = options.createUserClient;
           const accessToken = run.accessToken;
           persistImage = async (sourceUrl, mimeType, prompt) => {
-            const response = await fetch(sourceUrl);
+            const response = await fetch(sourceUrl, {
+              signal: AbortSignal.timeout(PERSIST_IMAGE_TIMEOUT_MS),
+            });
             if (!response.ok) throw new Error(`Download failed: ${response.status}`);
-            const buffer = Buffer.from(await response.arrayBuffer());
+            const buffer = await readImageResponse(response);
             const ext = mimeType === "image/webp" ? "webp" : "png";
             const slug = prompt.slice(0, 40).replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "");
             const fileName = `gen-${slug}-${Date.now()}.${ext}`;
@@ -1110,7 +1411,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             if (!createClient || !accessToken) {
               throw new Error("No user storage client available");
             }
-            const client = createClient(accessToken) as UserSupabaseClient;
+            const client = createClient(accessToken) as DataClient;
 
             const { data: ws } = await client
               .from("workspaces")
@@ -1216,11 +1517,17 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           backendResult,
           ...(brandKitId ? { brandKitId } : {}),
           ...(run.canvasId ? { canvasId: run.canvasId } : {}),
-          ...(persistence ? { checkpointer: persistence.checkpointer } : {}),
+          ...(run.threadId && persistence
+            ? { checkpointer: persistence.checkpointer }
+            : {}),
           ...(options.connectionManager ? { connectionManager: options.connectionManager } : {}),
           env: options.env,
           ...(options.localDb ? { localDb: options.localDb } : {}),
           ...(resolvedModel ? { model: resolvedModel } : {}),
+          ...(run.modelApiBase ? { modelApiBase: run.modelApiBase } : {}),
+          ...(run.modelApiKey ? { modelApiKey: run.modelApiKey } : {}),
+          // Stable across runs so the fixed system/tool prefix can be reused.
+          promptCacheKey: "helstera-agent-v2",
           ...(persistImage ? { persistImage } : {}),
           // execute 工具由 LocalShellBackend 自动提供，无需手动传递
           ...(submitImageJob ? { submitImageJob } : {}),
@@ -1374,16 +1681,9 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
 
           // Build assetId → data URI map for tool-level resolution
           attachmentDataMap = buildAttachmentDataMap(downloaded);
-          referenceImages = [
-            ...Object.values(attachmentDataMap),
-            // Keep a fetch failure from silently dropping a selected canvas image.
-            // Providers that support URLs can still retrieve the original source.
-            ...run.attachments!
-              .map((attachment) => attachment.url)
-              .filter((url) => /^(https?:|data:image\/)/.test(url)),
-          ];
+          referenceImages = resolveImageReferences(run.attachments!, attachmentDataMap);
 
-          // Grok accepts the OpenAI image_url content format. Other gateways
+          // Configured gateways accept the OpenAI image_url content format. Other gateways
           // retain the text-only path because their compatibility behavior is
           // inconsistent for private, uploaded assets.
           const activeModel = run.modelOverride ?? (
@@ -1447,27 +1747,46 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         return;
       }
 
-      const MAX_AGENT_SILENCE_MS = 90_000;
+      // Media tools can legitimately wait several minutes for an upstream
+      // result while the job heartbeat is persisted separately. The old
+      // 90-second global watchdog aborted those valid runs and surfaced a
+      // misleading generic run_failed event.
+      const INITIAL_MODEL_RESPONSE_TIMEOUT_MS = 90_000;
+      const MAX_AGENT_SILENCE_MS = 20 * 60_000;
+      let receivedProgress = false;
       let timedOut = false;
       let silenceTimer: ReturnType<typeof setTimeout> | undefined;
       const resetSilenceTimer = () => {
         if (silenceTimer) clearTimeout(silenceTimer);
+        const timeoutMs = receivedProgress
+          ? MAX_AGENT_SILENCE_MS
+          : INITIAL_MODEL_RESPONSE_TIMEOUT_MS;
         silenceTimer = setTimeout(() => {
           timedOut = true;
           run.controller.abort(new Error("Agent response timed out"));
-        }, MAX_AGENT_SILENCE_MS);
+        }, timeoutMs);
       };
 
       resetSilenceTimer();
       try {
       for await (const event of adaptDeepAgentStream({
         conversationId: run.conversationId,
+        singleImageTask: Boolean(options.jobService && (options.localDb || options.createUserClient) && run.accessToken && run.userId),
         now,
         runId,
         sessionId: run.sessionId,
         signal: run.controller.signal,
         stream,
+        onModelUsage: (usage) => {
+          rlog.lap("model_usage", {
+            inputTokens: usage.inputTokens ?? null,
+            outputTokens: usage.outputTokens ?? null,
+            cacheReadTokens: usage.cacheReadTokens ?? 0,
+            cacheHit: (usage.cacheReadTokens ?? 0) > 0,
+          });
+        },
       })) {
+        receivedProgress = true;
         resetSilenceTimer();
         run.status = mapEventToStatus(event);
         try {
@@ -1502,7 +1821,11 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         }
       }
       if (timedOut) {
-        const timeoutError = new Error("模型在 90 秒内未返回响应，已停止本次请求。");
+const timeoutError = new Error(
+          receivedProgress
+            ? "Agent 任务长时间没有完成，已停止等待；可以稍后查看后台结果或点击重试。"
+            : "模型在 90 秒内没有返回响应，已停止等待；请检查模型可用性后点击重试。",
+        );
         run.status = "failed";
         await updatePersistedRunFailure(options.agentRunMetadataService, run, now, timeoutError).catch(
           (persistErr) => console.error("[agent-runtime] Failed to persist timed out run:", persistErr),
@@ -1545,6 +1868,27 @@ function isTerminalEvent(event: StreamEvent) {
   );
 }
 
+function buildAgentJobIdempotencyKey(
+  requestIdentity: string,
+  kind: "image" | "video",
+  input: Record<string, unknown>,
+): string {
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify(sortRecord(input)))
+    .digest("hex");
+  return `agent:${requestIdentity}:${kind}:${fingerprint}`.slice(0, 160);
+}
+
+function sortRecord(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortRecord);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, sortRecord(entry)]),
+  );
+}
+
 function mapEventToStatus(event: StreamEvent): RuntimeRunStatus {
   switch (event.type) {
     case "run.canceled":
@@ -1567,10 +1911,7 @@ function toFailedEvent(
   console.error(`[runtime] Agent run failed for run ${runId}:`, error);
 
   return {
-    error: {
-      code: "run_failed",
-      message: sanitizeErrorForClient(error),
-    },
+    error: classifyErrorForClient(error),
     runId,
     timestamp: now(),
     type: "run.failed",
@@ -1636,5 +1977,28 @@ async function syncPersistedRunFromEvent(
       now,
       new Error(event.error.message),
     );
+    return;
   }
+
+  if (event.type === "run.canceled") {
+    await updatePersistedRunCanceled(agentRunMetadataService, run, now);
+  }
+}
+
+async function updatePersistedRunCanceled(
+  agentRunMetadataService: AgentRunMetadataService | undefined,
+  run: RuntimeRunRecord,
+  now: () => string,
+) {
+  if (!agentRunMetadataService || !run.threadId) return;
+
+  // The persisted schema only has accepted/running/completed/failed. Keep the
+  // cancellation reason explicit without inventing a second incompatible state.
+  await agentRunMetadataService.updateRun({
+    completedAt: now(),
+    errorCode: "run_canceled",
+    errorMessage: "Run canceled by the user.",
+    runId: run.runId,
+    status: "failed",
+  });
 }

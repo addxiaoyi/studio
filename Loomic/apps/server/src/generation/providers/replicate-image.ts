@@ -19,7 +19,6 @@ const SINGLE_IMAGE_INPUT_MODELS = new Set([
 ]);
 
 const INPUT_IMAGES_MODELS = new Set([
-  "openai/gpt-image-1.5",
   "openai/gpt-image-1",
 ]);
 
@@ -70,12 +69,6 @@ const REPLICATE_IMAGE_MODELS: readonly ModelInfo[] = [
     iconUrl: ICON_GOOGLE,
   },
   // OpenAI
-  {
-    id: "openai/gpt-image-1.5",
-    displayName: "GPT Image 1.5",
-    description: "OpenAI's latest image model with better instruction following. Image input: multiple images. Supports background transparency.",
-    iconUrl: ICON_OPENAI,
-  },
   // Black Forest Labs
   {
     id: "black-forest-labs/flux-kontext-max",
@@ -163,7 +156,7 @@ const QUALITY_MAP: QualityMap = {
   },
 };
 
-/** GPT Image 1.5 quality mapping (native `quality` param) */
+/** GPT Image 1 quality mapping (native `quality` param) */
 const GPT_IMAGE_QUALITY: Record<string, string> = {
   standard: "medium",
   hd: "high",
@@ -201,7 +194,6 @@ function applyQuality(
  * Models NOT listed here accept all ratios the tool exposes.
  */
 const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
-  "openai/gpt-image-1.5": ["1:1", "3:2", "2:3"],
   "openai/gpt-image-1":   ["1:1", "3:2", "2:3"],
 };
 
@@ -250,6 +242,38 @@ function applyOutputFormat(
   input.output_format = format;
 }
 
+export function buildReplicateImageInput(params: ImageGenerateParams): { input: Record<string, unknown>; width: number; height: number } {
+  if (params.inputImages?.some((image) => /^data:/i.test(image))) {
+    throw new GenerationError(
+      "replicate",
+      "invalid_input",
+      "Reference images for Replicate must be public HTTP(S) URLs; inline data URI input is not supported",
+    );
+  }
+  if (params.inputImages?.length && TEXT_ONLY_MODELS.has(params.model)) {
+    throw new GenerationError(
+      "replicate",
+      "invalid_input",
+      `${params.model} does not support reference-image input`,
+    );
+  }
+  const aspectRatio = normalizeAspectRatio(params.model, params.aspectRatio ?? "1:1");
+  const { width, height } = aspectRatioToDimensions(aspectRatio);
+  const input: Record<string, unknown> = { prompt: params.prompt };
+
+  if (RECRAFT_MODELS.has(params.model)) input.size = `${width}x${height}`;
+  else input.aspect_ratio = aspectRatio;
+
+  if (params.inputImages?.length) {
+    if (SINGLE_IMAGE_INPUT_MODELS.has(params.model)) input.input_image = params.inputImages[0];
+    else if (INPUT_IMAGES_MODELS.has(params.model)) input.input_images = params.inputImages;
+    else input.image_input = params.inputImages;
+  }
+  applyQuality(input, params.model, params.quality);
+  applyOutputFormat(input, params.model, params.outputFormat);
+  return { input, width, height };
+}
+
 // ── Provider implementation ──────────────────────────────────────────────
 
 export class ReplicateImageProvider implements ImageProvider {
@@ -262,35 +286,7 @@ export class ReplicateImageProvider implements ImageProvider {
   }
 
   async generate(params: ImageGenerateParams): Promise<GeneratedImage> {
-    const rawRatio = params.aspectRatio ?? "1:1";
-    const aspectRatio = normalizeAspectRatio(params.model, rawRatio);
-    const { width, height } = aspectRatioToDimensions(aspectRatio);
-
-    const input: Record<string, unknown> = {
-      prompt: params.prompt,
-    };
-
-    // Aspect ratio / size — Recraft uses pixel `size`, others use `aspect_ratio`
-    if (RECRAFT_MODELS.has(params.model)) {
-      input.size = `${width}x${height}`;
-    } else {
-      input.aspect_ratio = aspectRatio;
-    }
-
-    // Image input — parameter name varies by model
-    if (params.inputImages?.length && !TEXT_ONLY_MODELS.has(params.model)) {
-      if (SINGLE_IMAGE_INPUT_MODELS.has(params.model)) {
-        input.input_image = params.inputImages[0];
-      } else if (INPUT_IMAGES_MODELS.has(params.model)) {
-        input.input_images = params.inputImages;
-      } else {
-        input.image_input = params.inputImages;
-      }
-    }
-
-    // Semantic params → model-specific translation
-    applyQuality(input, params.model, params.quality);
-    applyOutputFormat(input, params.model, params.outputFormat);
+    const { input, width, height } = buildReplicateImageInput(params);
 
     const response = await fetch(
       `${REPLICATE_API_BASE}/models/${params.model}/predictions`,
@@ -315,10 +311,20 @@ export class ReplicateImageProvider implements ImageProvider {
       );
     }
 
-    const data = (await response.json()) as {
-      output: string[] | string;
-      status: string;
-    };
+    let data: { output?: string[] | string | null; status?: string };
+    try {
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error("response body must be an object");
+      }
+      data = payload as { output?: string[] | string | null; status?: string };
+    } catch (error) {
+      throw new GenerationError(
+        "replicate",
+        "invalid_provider_response",
+        `Replicate returned an invalid image response: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     const outputUrl = Array.isArray(data.output) ? data.output[0] : data.output;
 
     if (!outputUrl) {

@@ -1,6 +1,6 @@
 import type { CanvasContent, CanvasDetail, Json } from "@helstera/shared";
 
-import type { AuthenticatedUser, UserSupabaseClient } from "../../supabase/user.js";
+import type { AuthenticatedUser, DataClient } from "../../auth/types.js";
 
 export class CanvasServiceError extends Error {
   readonly statusCode: number;
@@ -34,7 +34,7 @@ const OSS_MARKER_PREFIX = "oss://";
 const CANVAS_FILES_BUCKET = "project-assets";
 
 export function createCanvasService(options: {
-  createUserClient: (accessToken: string) => UserSupabaseClient;
+  createUserClient: (accessToken: string) => DataClient;
 }): CanvasService {
   return {
     async getCanvas(user, canvasId) {
@@ -87,7 +87,7 @@ export function createCanvasService(options: {
 type CanvasFileRecord = Record<string, Record<string, unknown>>;
 
 async function extractFilesToStorage(
-  client: UserSupabaseClient,
+  client: DataClient,
   canvasId: string,
   content: CanvasContent,
 ): Promise<CanvasContent> {
@@ -152,7 +152,7 @@ async function extractFilesToStorage(
 // ---------------------------------------------------------------------------
 
 async function resolveFilesFromStorage(
-  client: UserSupabaseClient,
+  client: DataClient,
   content: CanvasContent,
 ): Promise<CanvasContent> {
   const files = (content as { files?: CanvasFileRecord }).files;

@@ -4,14 +4,15 @@ import { useCallback, useEffect, useRef } from "react";
 
 import type { StreamEvent } from "@helstera/shared";
 
-import { fetchJob } from "../lib/server-api";
+import { fetchJob, fetchJobs } from "../lib/server-api";
 
 // --- Constants ---
 
 /** Interval between polling attempts (ms) */
 const POLL_INTERVAL_MS = 5_000;
+const MAX_ERROR_INTERVAL_MS = 30_000;
 /** Maximum total polling duration before giving up (ms) */
-const MAX_POLL_DURATION_MS = 10 * 60 * 1_000; // 10 minutes
+const MAX_POLL_DURATION_MS = 20 * 60 * 1_000; // Video jobs may legitimately take 10-15 minutes.
 /** Terminal job statuses that should stop polling */
 const TERMINAL_FAILURE_STATUSES = new Set(["failed", "dead_letter", "canceled"]);
 
@@ -25,9 +26,10 @@ type UseJobFallbackPollingOptions = {
 };
 
 type ActivePoll = {
-  intervalId: ReturnType<typeof setInterval>;
+  timerId: ReturnType<typeof setTimeout> | null;
   startedAt: number;
   jobType: string;
+  errorCount: number;
 };
 
 // --- Hook ---
@@ -61,7 +63,7 @@ export function useJobFallbackPolling({
   useEffect(() => {
     return () => {
       for (const [jobId, poll] of activePollsRef.current.entries()) {
-        clearInterval(poll.intervalId);
+        if (poll.timerId) clearTimeout(poll.timerId);
         console.log(`[job-fallback] Cleanup: stopped polling for job ${jobId}`);
       }
       activePollsRef.current.clear();
@@ -74,7 +76,7 @@ export function useJobFallbackPolling({
   const stopPolling = useCallback((jobId: string) => {
     const poll = activePollsRef.current.get(jobId);
     if (poll) {
-      clearInterval(poll.intervalId);
+      if (poll.timerId) clearTimeout(poll.timerId);
       activePollsRef.current.delete(jobId);
     }
   }, []);
@@ -97,7 +99,8 @@ export function useJobFallbackPolling({
         `[job-fallback] Starting fallback polling for ${jobType} job ${jobId}`,
       );
 
-      const intervalId = setInterval(async () => {
+      const poll: ActivePoll = { timerId: null, startedAt, jobType, errorCount: 0 };
+      const tick = async () => {
         // Safety: check max duration
         const elapsed = Date.now() - startedAt;
         if (elapsed > MAX_POLL_DURATION_MS) {
@@ -120,6 +123,7 @@ export function useJobFallbackPolling({
 
         try {
           const { job } = await fetchJob(token, jobId);
+          poll.errorCount = 0;
 
           if (job.status === "succeeded" && job.result) {
             console.log(
@@ -142,23 +146,49 @@ export function useJobFallbackPolling({
 
           // Still running — continue polling
         } catch (err) {
-          // Network error or API error — log but continue polling
-          // (transient errors should not stop the recovery mechanism)
+          poll.errorCount += 1;
           console.warn(
             `[job-fallback] Poll error for job ${jobId}:`,
             err,
           );
         }
-      }, POLL_INTERVAL_MS);
+        if (activePollsRef.current.get(jobId) === poll) {
+          const delay = Math.min(POLL_INTERVAL_MS * 2 ** poll.errorCount, MAX_ERROR_INTERVAL_MS);
+          poll.timerId = setTimeout(() => void tick(), delay);
+        }
+      };
 
-      activePollsRef.current.set(jobId, {
-        intervalId,
-        startedAt,
-        jobType,
-      });
+      activePollsRef.current.set(jobId, poll);
+      poll.timerId = setTimeout(() => void tick(), POLL_INTERVAL_MS);
     },
     [accessTokenRef, stopPolling],
   );
+
+  // Recover jobs after a refresh or WebSocket reconnect. The stream event that
+  // originally carried the job id is not available in a new browser session.
+  useEffect(() => {
+    const token = accessTokenRef.current;
+    if (!token) return;
+    let stopped = false;
+    void fetchJobs(token)
+      .then(({ jobs }) => {
+        if (stopped) return;
+        for (const job of jobs) {
+          if (
+            (job.job_type === "video_generation" || job.job_type === "image_generation") &&
+            (job.status === "queued" || job.status === "running")
+          ) {
+            startPolling(job.id, job.job_type);
+          }
+        }
+      })
+      .catch((error) => {
+        console.warn("[job-fallback] Failed to recover active jobs:", error);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [accessTokenRef, startPolling]);
 
   /**
    * Check a stream event for timed-out generation jobs.
@@ -175,10 +205,9 @@ export function useJobFallbackPolling({
       const jobId = output.jobId;
       const jobType = output.jobType;
 
-      // Only trigger fallback for timeout errors with a valid jobId
+      // Any tool error with a jobId may be a late server result.
       if (
-        typeof error !== "string" ||
-        !error.toLowerCase().includes("timed out") ||
+        (typeof error !== "string" && output.pending !== true) ||
         typeof jobId !== "string" ||
         !jobId
       ) {

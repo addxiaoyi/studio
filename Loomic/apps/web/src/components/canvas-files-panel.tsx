@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, memo } from "react";
+import Link from "next/link";
 
 // biome-ignore lint/suspicious/noExplicitAny: Excalidraw API/element has no public type
 type ExcalidrawEl = any;
@@ -151,14 +152,18 @@ export function CanvasFilesPanel({ excalidrawApi, open, onClose }: CanvasFilesPa
       {/* Title bar */}
       <div className="flex h-[50px] shrink-0 items-center justify-between px-4">
         <span className="text-base font-medium text-foreground">已生成文件列表</span>
-        <button
+        <div className="flex items-center gap-2">
+          <Link href="/gallery" className="text-xs text-muted-foreground hover:text-foreground" title="打开素材库">素材库</Link>
+          <Link href="/ecom-images/history" className="text-xs text-muted-foreground hover:text-foreground" title="打开生成历史">历史</Link>
+          <button
           type="button"
           className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground transition-all duration-300"
           onClick={onClose}
           aria-label="Close files panel"
         >
           <CloseIcon className="h-3.5 w-3.5" />
-        </button>
+          </button>
+        </div>
       </div>
 
       {/* File list -- uses content-visibility and memoized rows for performance */}

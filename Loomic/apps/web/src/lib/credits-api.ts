@@ -13,7 +13,8 @@ export type CreditBalance = {
 };
 
 export function isEpayEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_PAYMENT_PROVIDER === "epay";
+  // Epay is the single checkout path; availability is still enforced by the server.
+  return true;
 }
 
 export type CreditTransaction = {
@@ -125,6 +126,12 @@ export async function createEpayTopup(
     credentials: "include",
     body: JSON.stringify({ packageId, type }),
   });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json()) as { order: TopupOrder; checkoutUrl: string };
+}
+
+export async function createEpayCustomTopup(accessToken: string, amountCnyFen: number, type: "alipay" | "wxpay" | "qqpay" = "alipay") {
+  const response = await fetch(`${getServerBaseUrl()}/api/epay/topup`, { method: "POST", headers: authJsonHeaders(accessToken), credentials: "include", body: JSON.stringify({ amountCnyFen, type }) });
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json()) as { order: TopupOrder; checkoutUrl: string };
 }

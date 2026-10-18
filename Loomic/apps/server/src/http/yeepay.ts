@@ -1,15 +1,18 @@
-// @payments-yeepay — YeePay Native/QR API routes: create topup, query status, webhook
-import type { FastifyInstance, FastifyReply } from "fastify";
 import {
   applicationErrorResponseSchema,
   unauthenticatedErrorResponseSchema,
 } from "@helstera/shared";
 import { TOPUP_PACKAGES } from "@helstera/shared";
+// @payments-yeepay — YeePay Native/QR API routes: create topup, query status, webhook
+import type { FastifyInstance, FastifyReply } from "fastify";
 
-import type { YeePayService } from "../features/payments/yeepay-service.js";
-import type { YeePayClient, YeePayWebhookPayload } from "../features/payments/yeepay-client.js";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
-import type { RequestAuthenticator } from "../supabase/user.js";
+import type {
+  YeePayClient,
+  YeePayWebhookPayload,
+} from "../features/payments/yeepay-client.js";
+import type { YeePayService } from "../features/payments/yeepay-service.js";
+import type { RequestAuthenticator } from "../auth/types.js";
 
 export async function registerYeePayRoutes(
   app: FastifyInstance,
@@ -71,7 +74,11 @@ export async function registerYeePayRoutes(
         if (!user) return sendUnauthenticated(reply);
 
         const { outTradeNo } = request.params;
-        const status = await options.yeepayService.getOrderStatus(outTradeNo);
+        const viewer = await options.viewerService.ensureViewer(user);
+        const status = await options.yeepayService.getOrderStatus(
+          outTradeNo,
+          viewer.workspace.id,
+        );
 
         return reply.code(200).send(status);
       } catch (error) {
@@ -118,7 +125,9 @@ export async function registerYeePayWebhookRoute(
       return reply.code(200).send({ received: true, ...result });
     } catch (error) {
       console.error("[YeePayWebhook] Processing error:", error);
-      return reply.code(200).send({ received: true, error: "processing_failed" });
+      return reply
+        .code(200)
+        .send({ received: true, error: "processing_failed" });
     }
   });
 }
@@ -136,13 +145,20 @@ function sendUnauthenticated(reply: FastifyReply) {
   );
 }
 
-function sendYeePayError(error: unknown, reply: FastifyReply, fallbackCode: string) {
+function sendYeePayError(
+  error: unknown,
+  reply: FastifyReply,
+  fallbackCode: string,
+) {
   console.error("[YeePayRoutes] Unexpected error:", error);
   return reply.code(500).send(
     applicationErrorResponseSchema.parse({
       error: {
         code: fallbackCode,
-        message: error instanceof Error ? error.message : "An unexpected error occurred.",
+        message:
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred.",
       },
     }),
   );

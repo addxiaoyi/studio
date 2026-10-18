@@ -1,9 +1,9 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type { AssetBucket, AssetObject } from "@helstera/shared";
-import type { AuthenticatedUser } from "../supabase/user.js";
+import type { AuthenticatedUser } from "../auth/types.js";
 import { UploadServiceError, type UploadFileInput, type UploadService } from "../features/uploads/upload-service.js";
 
 export function createLocalUploadService(db: Pool, root = "/www/helstera/uploads"): UploadService {
@@ -11,8 +11,8 @@ export function createLocalUploadService(db: Pool, root = "/www/helstera/uploads
     async uploadFile(user, input) {
   const scope = /^[0-9a-f-]{36}$/i.test(input.projectId ?? "") ? input.projectId! : "workspace";
   const path = `${input.workspaceId}/${scope}/${randomUUID()}-${safeName(input.fileName)}`;
-      const absolute = join(root, path);
-      await mkdir(join(root, input.workspaceId, scope), { recursive: true });
+      const absolute = join(root, input.bucket, path);
+      await mkdir(dirname(absolute), { recursive: true });
       await writeFile(absolute, input.fileBuffer, { flag: "wx" });
       try {
         const { rows } = await db.query(`insert into asset_objects (workspace_id, project_id, bucket, object_path, mime_type, byte_size, created_by) values ($1,$2,$3,$4,$5,$6,$7) returning id, bucket, object_path, mime_type, byte_size, workspace_id, project_id, created_at`, [input.workspaceId, input.projectId ?? null, input.bucket, path, input.mimeType, input.fileBuffer.length, user.id]);
@@ -28,7 +28,7 @@ export function createLocalUploadService(db: Pool, root = "/www/helstera/uploads
     },
     async deleteAsset(user, assetId) {
       const row = await findAsset(db, user.id, assetId);
-      await unlink(join(root, row.object_path)).catch(() => undefined);
+      await unlink(join(root, row.bucket, row.object_path)).catch(() => undefined);
       await db.query("delete from asset_objects where id = $1", [row.id]);
     },
   };
@@ -40,5 +40,5 @@ async function findAsset(db: Pool, userId: string, assetId: string) {
   return rows[0];
 }
 
-function mapAsset(row: any): AssetObject { return { id: row.id, bucket: row.bucket as AssetBucket, objectPath: row.object_path, mimeType: row.mime_type, byteSize: row.byte_size, workspaceId: row.workspace_id, projectId: row.project_id, createdAt: row.created_at.toISOString() }; }
+function mapAsset(row: any): AssetObject { return { id: row.id, bucket: row.bucket as AssetBucket, objectPath: row.object_path, mimeType: row.mime_type, byteSize: row.byte_size == null ? null : Number(row.byte_size), workspaceId: row.workspace_id, projectId: row.project_id, createdAt: row.created_at.toISOString() }; }
 function safeName(name: string) { return name.replace(/[^a-zA-Z0-9._-]/g, "_"); }

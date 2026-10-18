@@ -28,7 +28,6 @@ stop_service() {
 step "Stopping Helstera dev services"
 stop_service "web"
 stop_service "backend"
-stop_service "supabase-mock"
 
 # Stop helstera-postgres container only if we created it (not reused docker-db_postgres-1)
 if [ -f "$PID_DIR/postgres-created" ]; then
@@ -39,7 +38,7 @@ fi
 
 # Also kill any stray next dev / node processes that were spawned
 if command -v lsof >/dev/null 2>&1; then
-  for port in 3000 3001 54321; do
+  for port in 3000 3001; do
     pids=$(lsof -ti ":$port" 2>/dev/null || true)
     for pid in $pids; do
       kill "$pid" 2>/dev/null && ok "Killed stray process on :$port (pid $pid)" || true

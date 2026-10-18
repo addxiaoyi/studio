@@ -1,29 +1,40 @@
 import type { Pool } from "pg";
 import type { ViewerResponse } from "@helstera/shared";
-import type { AuthenticatedUser } from "../supabase/user.js";
+import type { AuthenticatedUser } from "../auth/types.js";
 import { BootstrapError, type ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
 
-export function createLocalViewerService(db: Pool): ViewerService {
+export function createLocalViewerService(
+  db: Pool,
+  systemAdminEmails: readonly string[] = [],
+): ViewerService {
   return {
     async ensureViewer(user: AuthenticatedUser): Promise<ViewerResponse> {
       try {
         const client = await db.connect();
         try {
           await client.query("begin");
-          const profile = await client.query(
+          await client.query("select pg_advisory_xact_lock(hashtext($1))", [user.id]);
+          await client.query(
             `insert into app_users (id, email) values ($1, $2)
              on conflict (id) do update set email = excluded.email, updated_at = now()
-             returning id, email, display_name, avatar_url`,
+             returning id`,
             [user.id, user.email],
           );
-          const workspace = await client.query(
-            `insert into workspaces (owner_user_id, name) values ($1, $2)
-             on conflict do nothing returning id, name`,
-            [user.id, "Personal Workspace"],
-          );
-          const workspaceRow = workspace.rows[0] ?? (await client.query(
-            "select id, name from workspaces where owner_user_id = $1 order by created_at limit 1",
+          if (systemAdminEmails.includes(user.email.toLowerCase())) {
+            await client.query(
+              "update app_users set system_role = 'admin', updated_at = now() where id = $1",
+              [user.id],
+            );
+          }
+          const profile = await client.query(
+            "select id, email, display_name, avatar_url, system_role from app_users where id = $1",
             [user.id],
+          );
+          const workspaceRow = (await client.query(
+            `insert into workspaces (owner_user_id, name) values ($1, $2)
+             on conflict (owner_user_id) do update set owner_user_id = excluded.owner_user_id
+             returning id, name`,
+            [user.id, "Personal Workspace"],
           )).rows[0];
           if (!workspaceRow) throw new Error("personal workspace was not created");
           await client.query(
@@ -42,6 +53,7 @@ export function createLocalViewerService(db: Pool): ViewerService {
             },
             workspace: { id: workspaceRow.id, name: workspaceRow.name, ownerUserId: user.id, type: "personal" },
             membership: { workspaceId: workspaceRow.id, userId: user.id, role: "owner" },
+            isSystemAdmin: row.system_role === "admin",
           };
         } catch (error) {
           await client.query("rollback");

@@ -10,8 +10,8 @@ import {
 } from "../bootstrap/ensure-user-foundation.js";
 import type {
   AuthenticatedUser,
-  UserSupabaseClient,
-} from "../../supabase/user.js";
+  DataClient,
+} from "../../auth/types.js";
 
 const THUMBNAIL_BUCKET = "project-assets";
 const PROJECT_QUERY_FAILED_MESSAGE = "Unable to load projects.";
@@ -27,6 +27,11 @@ export type ProjectService = {
     user: AuthenticatedUser,
     projectId: string,
   ): Promise<void>;
+  archiveEmptyProject(
+    user: AuthenticatedUser,
+    projectId: string,
+  ): Promise<boolean>;
+  listArchivedProjects(user: AuthenticatedUser): Promise<ProjectSummary[]>;
   createProject(
     user: AuthenticatedUser,
     input: ProjectCreateRequest,
@@ -51,6 +56,7 @@ export type ProjectService = {
     buffer: Buffer,
     mimeType: string,
   ): Promise<{ thumbnailUrl: string }>;
+  restoreProject(user: AuthenticatedUser, projectId: string): Promise<void>;
   updateProject(
     user: AuthenticatedUser,
     projectId: string,
@@ -86,10 +92,13 @@ export class ProjectServiceError extends Error {
 }
 
 export function createProjectService(options: {
-  createUserClient: (accessToken: string) => UserSupabaseClient;
+  createUserClient: (accessToken: string) => DataClient;
   viewerService: ViewerService;
 }): ProjectService {
   return {
+    async archiveEmptyProject() {
+      return false;
+    },
     async archiveProject(user, projectId) {
       const client = options.createUserClient(user.accessToken);
 
@@ -128,6 +137,37 @@ export function createProjectService(options: {
           500,
         );
       }
+    },
+    async listArchivedProjects(user) {
+      const client = options.createUserClient(user.accessToken);
+      const workspace = await resolvePersonalWorkspace(client, user.id, "project_query_failed");
+      const { data: projects, error } = await client
+        .from("projects")
+        .select("id, name, slug, description, created_at, updated_at, workspace_id, thumbnail_path")
+        .eq("workspace_id", workspace.id)
+        .not("archived_at", "is", null)
+        .order("updated_at", { ascending: false });
+      if (error) throw new ProjectServiceError("project_query_failed", PROJECT_QUERY_FAILED_MESSAGE, 500);
+      if (!projects.length) return [];
+      const { data: canvases, error: canvasError } = await client
+        .from("canvases")
+        .select("id, name, is_primary, project_id")
+        .in("project_id", projects.map((project) => project.id))
+        .eq("is_primary", true);
+      if (canvasError) throw new ProjectServiceError("project_query_failed", PROJECT_QUERY_FAILED_MESSAGE, 500);
+      const canvasByProject = new Map(canvases.map((canvas) => [canvas.project_id, canvas]));
+      const thumbnailUrls = generateThumbnailUrls(client, projects.filter((project) => project.thumbnail_path));
+      return projects.map((project) => {
+        const canvas = canvasByProject.get(project.id);
+        if (!canvas) throw new ProjectServiceError("project_query_failed", PROJECT_QUERY_FAILED_MESSAGE, 500);
+        return mapProjectSummary({ canvas, project, thumbnailUrl: thumbnailUrls.get(project.id) ?? null, workspace });
+      });
+    },
+    async restoreProject(user, projectId) {
+      const client = options.createUserClient(user.accessToken);
+      const result = await client.from("projects").update({ archived_at: null }).eq("id", projectId);
+      if (result.error) throw new ProjectServiceError("project_update_failed", PROJECT_UPDATE_FAILED_MESSAGE, 500);
+      if (result.count === 0) throw new ProjectServiceError("project_not_found", PROJECT_NOT_FOUND_MESSAGE, 404);
     },
     async getProject(user, projectId) {
       const client = options.createUserClient(user.accessToken);
@@ -382,7 +422,7 @@ async function ensureFoundation(
 }
 
 async function resolvePersonalWorkspace(
-  client: UserSupabaseClient,
+  client: DataClient,
   userId: string,
   errorCode: "project_create_failed" | "project_query_failed",
 ) {
@@ -490,7 +530,7 @@ function slugify(value: string) {
 }
 
 function generateThumbnailUrls(
-  client: UserSupabaseClient,
+  client: DataClient,
   projects: Array<{ id: string; thumbnail_path: string | null }>,
 ): Map<string, string> {
   const urlMap = new Map<string, string>();

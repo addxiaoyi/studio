@@ -7,6 +7,7 @@ const bundleAnalyzer = withBundleAnalyzer({
 });
 
 const nextConfig: NextConfig = {
+  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
   output: "export",
   trailingSlash: true,
   typescript: {
@@ -14,10 +15,7 @@ const nextConfig: NextConfig = {
   },
   env: {
     NEXT_PUBLIC_SERVER_BASE_URL: process.env.NEXT_PUBLIC_SERVER_BASE_URL,
-    NEXT_PUBLIC_AUTH_PROVIDER: process.env.NEXT_PUBLIC_AUTH_PROVIDER,
     NEXT_PUBLIC_PAYMENT_PROVIDER: process.env.NEXT_PUBLIC_PAYMENT_PROVIDER,
-    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   },
   images: {
     formats: ["image/avif", "image/webp"],
@@ -25,7 +23,6 @@ const nextConfig: NextConfig = {
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
     remotePatterns: [
-      { protocol: "https", hostname: "**.supabase.co" },
       { protocol: "https", hostname: "cdn.jsdelivr.net" },
       { protocol: "https", hostname: "helstera.com" },
     ],

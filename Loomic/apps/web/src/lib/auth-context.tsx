@@ -1,6 +1,5 @@
 "use client";
 
-import type { Session, User } from "@supabase/supabase-js";
 import {
   createContext,
   useContext,
@@ -9,13 +8,22 @@ import {
   type ReactNode,
 } from "react";
 
-import { getSupabaseBrowserClient } from "./supabase-browser";
 import { fetchLocalSession, signOutLocal } from "./local-auth";
-import { isLocalAuth } from "./env";
+
+export type LocalUser = {
+  id: string;
+  email: string;
+  user_metadata?: Record<string, unknown>;
+};
+
+export type LocalSession = {
+  access_token: string;
+  user: LocalUser;
+};
 
 interface AuthContextValue {
-  user: User | null;
-  session: Session | null;
+  user: LocalUser | null;
+  session: LocalSession | null;
   loading: boolean;
   signOut: () => Promise<void>;
 }
@@ -23,48 +31,20 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<LocalSession | null>(null);
+  const [user, setUser] = useState<LocalUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (isLocalAuth()) {
-      void fetchLocalSession().then(({ session: localSession }) => {
-        const nextSession = localSession as unknown as Session | null;
-        setSession(nextSession);
-        setUser(localSession?.user as User | undefined ?? null);
-        setLoading(false);
-      }).catch(() => setLoading(false));
-      return;
-    }
-    const supabase = getSupabaseBrowserClient();
-
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
+    void fetchLocalSession().then(({ session: localSession }) => {
+      setSession(localSession);
+      setUser(localSession?.user ?? null);
       setLoading(false);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-      setUser(newSession?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    }).catch(() => setLoading(false));
   }, []);
 
   async function signOut() {
-    if (isLocalAuth()) {
-      await signOutLocal();
-      setSession(null);
-      setUser(null);
-      return;
-    }
-    const supabase = getSupabaseBrowserClient();
-    await supabase.auth.signOut();
+    await signOutLocal();
     setSession(null);
     setUser(null);
   }

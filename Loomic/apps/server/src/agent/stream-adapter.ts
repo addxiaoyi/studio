@@ -12,7 +12,7 @@ import {
 import { imageArtifactSchema, videoArtifactSchema } from "@helstera/shared";
 import type { StreamEvent, ToolArtifact } from "@helstera/shared";
 
-import { sanitizeErrorForClient } from "../utils/error-sanitizer.js";
+import { classifyErrorForClient } from "../utils/error-sanitizer.js";
 
 /**
  * Shape of a LangChain v2 stream event from `streamEvents()`.
@@ -31,8 +31,10 @@ type AdaptDeepAgentStreamOptions = {
   now?: () => string;
   runId: string;
   sessionId: string;
+  singleImageTask?: boolean;
   signal?: AbortSignal;
   stream: AsyncIterable<LangChainStreamEvent | unknown>;
+  onModelUsage?: (usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number }) => void;
 };
 
 /**
@@ -49,6 +51,7 @@ export async function* adaptDeepAgentStream(
   const now = options.now ?? (() => new Date().toISOString());
   const seenCompletedToolCalls = new Set<string>();
   const seenStreamedMessageIds = new Set<string>();
+  let streamedVisibleText = false;
   const seenStartedToolCalls = new Set<string>();
   /** Tracks active sub-agent parent runs so we can detect nested inner tools. */
   const activeSubAgentRuns = new Set<string>();
@@ -129,6 +132,7 @@ export async function* adaptDeepAgentStream(
                     : "";
               if (text) {
                 seenStreamedMessageIds.add(messageId);
+                streamedVisibleText = true;
                 yield {
                   type: "message.delta" as const,
                   runId: options.runId,
@@ -144,9 +148,20 @@ export async function* adaptDeepAgentStream(
 
         // String content (normal text)
         const delta = extractChunkText(chunk);
+        const reasoning = extractReasoningText(chunk);
+        if (reasoning) {
+          yield {
+            type: "thinking.delta" as const,
+            runId: options.runId,
+            messageId,
+            delta: reasoning,
+            timestamp: now(),
+          };
+        }
         if (!delta) continue;
 
         seenStreamedMessageIds.add(messageId);
+        streamedVisibleText = true;
         yield {
           delta,
           messageId,
@@ -162,6 +177,21 @@ export async function* adaptDeepAgentStream(
         const output = evt.data?.output;
         if (!output) continue;
 
+        const usage = (output as { usage_metadata?: {
+          input_tokens?: number;
+          output_tokens?: number;
+          input_token_details?: { cache_read?: number };
+        } }).usage_metadata;
+        if (usage && options.onModelUsage) {
+          options.onModelUsage({
+            ...(usage.input_tokens != null ? { inputTokens: usage.input_tokens } : {}),
+            ...(usage.output_tokens != null ? { outputTokens: usage.output_tokens } : {}),
+            ...(usage.input_token_details?.cache_read != null
+              ? { cacheReadTokens: usage.input_token_details.cache_read }
+              : {}),
+          });
+        }
+
         if (
           AIMessageClass.isInstance(output) ||
           AIMessageChunkClass.isInstance(output)
@@ -171,7 +201,9 @@ export async function* adaptDeepAgentStream(
 
           // Skip if this was a tool call message (tool lifecycle via on_tool_*)
           if ((msg.tool_calls?.length ?? 0) > 0) continue;
-          if (seenStreamedMessageIds.has(messageId)) continue;
+          // Some compatible gateways assign a new id to the final message.
+          // Once visible text was streamed, the final event is only a duplicate.
+          if (streamedVisibleText || seenStreamedMessageIds.has(messageId)) continue;
 
           const delta = extractChunkText(msg);
           if (!delta) continue;
@@ -198,10 +230,19 @@ export async function* adaptDeepAgentStream(
 
         // Extract tool input arguments for frontend display
         const rawInput = evt.data?.input;
-        const toolInput =
+        let toolInput =
           rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
             ? (rawInput as Record<string, unknown>)
             : undefined;
+
+        // LangChain also emits image arguments inside a serialized `input` field.
+        if (toolName === "generate_image") {
+          const serialized = typeof rawInput === "string" ? rawInput : toolInput?.input;
+          const parsed = typeof serialized === "string" ? tryParseJson(serialized) : undefined;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            toolInput = parsed as Record<string, unknown>;
+          }
+        }
 
         // Track sub-agent parent tools so we can detect nested inner calls.
         if (SUB_AGENT_PARENT_TOOLS.has(toolName)) {
@@ -229,6 +270,19 @@ export async function* adaptDeepAgentStream(
         seenCompletedToolCalls.add(toolCallId);
 
         const output = evt.data?.output;
+
+        // Some gateways omit on_tool_start after a resumed stream. Persist a
+        // complete lifecycle instead of losing the tool result in chat history.
+        if (!seenStartedToolCalls.has(toolCallId)) {
+          seenStartedToolCalls.add(toolCallId);
+          yield {
+            runId: options.runId,
+            timestamp: now(),
+            toolCallId,
+            toolName,
+            type: "tool.started",
+          };
+        }
 
         // When an inner tool runs inside an active sub-agent parent,
         // suppress its artifacts because the parent will re-emit them.
@@ -261,6 +315,62 @@ export async function* adaptDeepAgentStream(
         }
         continue;
       }
+
+      if (evt.event === "on_tool_error") {
+        const toolName = evt.name ?? "unknown_tool";
+        const toolCallId = readString(evt.run_id) ?? `tool_${Date.now()}`;
+        if (seenCompletedToolCalls.has(toolCallId)) continue;
+        seenCompletedToolCalls.add(toolCallId);
+        activeSubAgentRuns.delete(toolCallId);
+
+        const rawError = evt.data?.error;
+        const rawMessage = rawError instanceof Error
+          ? rawError.message
+          : typeof rawError === "string"
+            ? rawError
+            : rawError && typeof rawError === "object" && "message" in rawError
+              ? String((rawError as { message?: unknown }).message ?? "")
+            : "";
+        const failure = classifyErrorForClient(rawError ?? "Tool execution failed");
+        const message = failure.message;
+        const approval = parseApprovalRequired(rawMessage) ?? parseApprovalRequired(message);
+        if (!seenStartedToolCalls.has(toolCallId)) {
+          seenStartedToolCalls.add(toolCallId);
+          yield {
+            runId: options.runId,
+            timestamp: now(),
+            toolCallId,
+            toolName,
+            type: "tool.started",
+          };
+        }
+        yield {
+          output: approval ?? {
+            status: "job_failed",
+            error: message,
+            ...(failure.code !== "run_failed" ? { errorCode: failure.code } : {}),
+          },
+          outputSummary: approval
+            ? "Confirmation required before credits are charged."
+            : message,
+          runId: options.runId,
+          timestamp: now(),
+          toolCallId,
+          toolName,
+          type: "tool.completed",
+        };
+        if (approval) continue;
+        if (failure.code !== "run_failed") {
+          yield {
+            error: failure,
+            runId: options.runId,
+            timestamp: now(),
+            type: "run.failed",
+          };
+          return;
+        }
+        continue;
+      }
     }
   } catch (error) {
     if (isAbortError(error) || options.signal?.aborted) {
@@ -274,10 +384,10 @@ export async function* adaptDeepAgentStream(
       error,
     );
 
+    const failure = classifyErrorForClient(error);
     yield {
       error: {
-        code: "run_failed",
-        message: sanitizeErrorForClient(error),
+        ...failure,
       },
       runId: options.runId,
       timestamp: now(),
@@ -291,6 +401,18 @@ export async function* adaptDeepAgentStream(
     timestamp: now(),
     type: "run.completed",
   };
+}
+
+function parseApprovalRequired(message: string): Record<string, unknown> | null {
+  const prefix = "GENERATION_CONFIRMATION_REQUIRED:";
+  if (!message.startsWith(prefix)) return null;
+  try {
+    const request = JSON.parse(message.slice(prefix.length)) as Record<string, unknown>;
+    if (typeof request.approvalId !== "string") return null;
+    return { status: "confirmation_required", ...request };
+  } catch {
+    return null;
+  }
 }
 
 function canceledEvent(runId: string, now: () => string): StreamEvent {
@@ -340,6 +462,13 @@ function extractOutput(
   output: unknown,
   hasArtifacts: boolean,
 ): Record<string, unknown> | undefined {
+  if (output && typeof output === "object" && !Array.isArray(output)) {
+    const direct = output as Record<string, unknown>;
+    if (direct.status === "confirmation_required" && typeof direct.approvalId === "string") {
+      return { ...direct };
+    }
+  }
+
   let text = "";
   if (ToolMessageClass.isInstance(output)) {
     text = extractChunkText(output);
@@ -511,6 +640,29 @@ function extractChunkText(chunk: unknown): string {
   }
 
   return "";
+}
+
+function extractReasoningText(chunk: unknown): string {
+  if (!chunk || typeof chunk !== "object") return "";
+
+  const record = chunk as Record<string, unknown>;
+  const additional = record.additional_kwargs;
+  const responseMetadata = record.response_metadata;
+  const candidates = [
+    record.reasoning_content,
+    record.reasoning,
+    additional && typeof additional === "object"
+      ? (additional as Record<string, unknown>).reasoning_content
+      : undefined,
+    additional && typeof additional === "object"
+      ? (additional as Record<string, unknown>).reasoning
+      : undefined,
+    responseMetadata && typeof responseMetadata === "object"
+      ? (responseMetadata as Record<string, unknown>).reasoning_content
+      : undefined,
+  ];
+
+  return candidates.find((value): value is string => typeof value === "string") ?? "";
 }
 
 function summarizeOutput(output: unknown): string | undefined {

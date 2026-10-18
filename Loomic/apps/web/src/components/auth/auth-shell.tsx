@@ -4,20 +4,25 @@ import { motion } from "framer-motion";
 import type { ReactNode } from "react";
 
 import { HelsteraLogo } from "@/components/icons/helstera-logo";
+import { t } from "@/lib/i18n";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
   visible: (i: number) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: i * 0.12, duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] },
+    transition: {
+      delay: i * 0.12,
+      duration: 0.5,
+      ease: [0.25, 0.46, 0.45, 0.94],
+    },
   }),
 } as any;
 
 interface AuthShellProps {
   title: string;
   description: string;
-  features: string[];
+  features: readonly string[];
   children: ReactNode;
 }
 
@@ -27,11 +32,12 @@ export function AuthShell({
   features,
   children,
 }: AuthShellProps) {
+  const copy = t("zh-CN").authShell;
   return (
     <div className="flex min-h-screen bg-background">
       {/* Brand panel — dark glass */}
       <aside
-        aria-label="品牌介绍"
+        aria-label={copy.brand}
         className="relative hidden overflow-hidden bg-foreground px-16 text-background lg:flex lg:w-1/2 lg:flex-col lg:justify-center"
       >
         <div
@@ -47,14 +53,20 @@ export function AuthShell({
           }}
         />
 
-        <motion.div initial="hidden" animate="visible" className="relative z-10 max-w-md">
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          className="relative z-10 max-w-md"
+        >
           <motion.div
             variants={fadeUp}
             custom={0}
             className="mb-10 flex items-center gap-3"
           >
             <HelsteraLogo className="size-12 rounded" />
-            <span className="text-2xl font-medium tracking-tight">Helstera</span>
+            <span className="text-2xl font-medium tracking-tight">
+              Helstera
+            </span>
           </motion.div>
 
           <motion.h1
@@ -91,9 +103,7 @@ export function AuthShell({
 
       {/* Form panel — wrapped in <main> for landmark structure */}
       <main className="flex w-full items-center justify-center px-6 py-12 lg:w-1/2">
-        <div className="w-full max-w-sm">
-          {children}
-        </div>
+        <div className="w-full max-w-sm">{children}</div>
       </main>
     </div>
   );

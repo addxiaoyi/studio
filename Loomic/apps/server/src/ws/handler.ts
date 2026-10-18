@@ -15,10 +15,12 @@ import type { ViewerService } from "../features/bootstrap/ensure-user-foundation
 import type {
   AuthenticatedUser,
   RequestAuthenticator,
-} from "../supabase/user.js";
+} from "../auth/types.js";
 import type { ConnectionManager } from "./connection-manager.js";
 import type { CanvasEventBuffer } from "./event-buffer.js";
 import type { ChatService } from "../features/chat/chat-service.js";
+import type { CreditService } from "../features/credits/credit-service.js";
+import { chargeAgentMessage, refundAgentMessage, type AgentMessageCharge } from "../agent/message-billing.js";
 import type { ContentBlock, ToolBlock } from "@helstera/shared";
 import { createPipelineLogger } from "./logger.js";
 
@@ -27,6 +29,7 @@ type RegisterWsOptions = {
   agentRunMetadataService?: AgentRunMetadataService;
   auth?: RequestAuthenticator;
   chatService?: ChatService;
+  creditService?: CreditService;
   connectionManager: ConnectionManager;
   eventBuffer?: CanvasEventBuffer;
   settingsService?: SettingsService;
@@ -40,17 +43,28 @@ export async function registerWsRoute(
 ) {
   const { agentRuns, connectionManager } = options;
 
-  app.get("/api/ws", { websocket: true }, (socket: WebSocket, request: FastifyRequest) => {
-    const url = new URL(request.url, `http://${request.headers.host}`);
-    const token = url.searchParams.get("token");
+  app.get(
+    "/api/ws",
+    { websocket: true },
+    (socket: WebSocket, request: FastifyRequest) => {
+      const url = new URL(request.url, `http://${request.headers.host}`);
+      const token = url.searchParams.get("token");
 
-    if (!token || !options.auth) {
-      socket.close(4001, "Unauthorized");
-      return;
-    }
+      if (!token || !options.auth) {
+        socket.close(4001, "Unauthorized");
+        return;
+      }
 
-    void authenticateAndBind(socket, token, request, options, agentRuns, connectionManager);
-  });
+      void authenticateAndBind(
+        socket,
+        token,
+        request,
+        options,
+        agentRuns,
+        connectionManager,
+      );
+    },
+  );
 }
 
 async function authenticateAndBind(
@@ -66,9 +80,12 @@ async function authenticateAndBind(
   let authenticatedUser: AuthenticatedUser;
   try {
     const fakeRequest = {
-      headers: { authorization: `Bearer ${token}` },
+      headers: {
+        authorization: `Bearer ${token}`,
+        cookie: _request.headers.cookie ?? "",
+      },
     } as unknown as FastifyRequest;
-    const user = await options.auth!.authenticate(fakeRequest);
+    const user = await options.auth?.authenticate(fakeRequest);
     if (!user) {
       log.warn("auth_rejected", { reason: "invalid_token" });
       socket.close(4001, "Unauthorized");
@@ -77,7 +94,9 @@ async function authenticateAndBind(
     authenticatedUser = user;
     log.info("connected", { userId: user.id });
   } catch (err) {
-    log.warn("auth_error", { error: err instanceof Error ? err.message : String(err) });
+    log.warn("auth_error", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     socket.close(4001, "Unauthorized");
     return;
   }
@@ -86,19 +105,22 @@ async function authenticateAndBind(
 
   // Use client-provided connectionId for reconnect identity; fallback to server UUID
   const urlForParams = new URL(_request.url, `http://${_request.headers.host}`);
-  const connectionId = urlForParams.searchParams.get("connectionId") || randomUUID();
+  const connectionId =
+    urlForParams.searchParams.get("connectionId") || randomUUID();
   connectionManager.register(connectionId, authenticatedUser.id, socket);
 
   // Heartbeat with pong timeout (spec §1.3: 60s no-pong → disconnect)
   let lastPong = Date.now();
-  socket.on("pong", () => { lastPong = Date.now(); });
+  socket.on("pong", () => {
+    lastPong = Date.now();
+  });
 
   const pingInterval = setInterval(() => {
-      if (Date.now() - lastPong > 60_000) {
-        log.warn("pong_timeout", { userId: authenticatedUser.id });
-        socket.terminate();
-        return;
-      }
+    if (Date.now() - lastPong > 60_000) {
+      log.warn("pong_timeout", { userId: authenticatedUser.id });
+      socket.terminate();
+      return;
+    }
     if (socket.readyState === 1) {
       socket.ping();
     }
@@ -107,7 +129,9 @@ async function authenticateAndBind(
   socket.on("message", (raw: Buffer | string) => {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf-8"));
+      parsed = JSON.parse(
+        typeof raw === "string" ? raw : raw.toString("utf-8"),
+      );
     } catch {
       socket.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
       return;
@@ -121,8 +145,12 @@ async function authenticateAndBind(
         connectionManager.handleRpcResponse(connectionId, {
           type: rpcResponse.type,
           id: rpcResponse.id,
-          ...(rpcResponse.result !== undefined ? { result: rpcResponse.result } : {}),
-          ...(rpcResponse.error !== undefined ? { error: rpcResponse.error } : {}),
+          ...(rpcResponse.result !== undefined
+            ? { result: rpcResponse.result }
+            : {}),
+          ...(rpcResponse.error !== undefined
+            ? { error: rpcResponse.error }
+            : {}),
         });
       } catch {
         // Ignore malformed RPC responses
@@ -135,7 +163,9 @@ async function authenticateAndBind(
       try {
         msg = wsCommandSchema.parse(parsed);
       } catch {
-        socket.send(JSON.stringify({ type: "error", message: "Invalid command format" }));
+        socket.send(
+          JSON.stringify({ type: "error", message: "Invalid command format" }),
+        );
         return;
       }
 
@@ -149,38 +179,53 @@ async function authenticateAndBind(
           },
           connectionId,
           {
-          sessionId: p.sessionId,
-          conversationId: p.conversationId,
-          prompt: p.prompt,
-          ...(p.canvasId !== undefined ? { canvasId: p.canvasId } : {}),
-          ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
-          ...(p.imageGenerationPreference !== undefined
-            ? { imageGenerationPreference: p.imageGenerationPreference }
-            : {}),
-          ...(p.videoGenerationPreference !== undefined
-            ? { videoGenerationPreference: p.videoGenerationPreference }
-            : {}),
-          ...(p.mentions !== undefined ? { mentions: p.mentions } : {}),
-          ...(p.model !== undefined ? { model: p.model } : {}),
+            sessionId: p.sessionId,
+            conversationId: p.conversationId,
+            prompt: p.prompt,
+            ...(p.canvasId !== undefined ? { canvasId: p.canvasId } : {}),
+            ...(p.attachments !== undefined
+              ? { attachments: p.attachments }
+              : {}),
+            ...(p.imageGenerationPreference !== undefined
+              ? { imageGenerationPreference: p.imageGenerationPreference }
+              : {}),
+            ...(p.videoGenerationPreference !== undefined
+              ? { videoGenerationPreference: p.videoGenerationPreference }
+              : {}),
+            ...(p.mentions !== undefined ? { mentions: p.mentions } : {}),
+            ...(p.model !== undefined ? { model: p.model } : {}),
           },
           agentRuns,
           connectionManager,
           options,
         );
       } else if (msg.action === "agent.cancel") {
-        log.info("run_cancel", { userId: authenticatedUser.id, runId: msg.payload.runId });
+        log.info("run_cancel", {
+          userId: authenticatedUser.id,
+          runId: msg.payload.runId,
+        });
         const cancelResult = agentRuns.cancelRun(msg.payload.runId);
         if (!cancelResult) {
-          socket.send(JSON.stringify({ type: "error", message: `Run not found: ${msg.payload.runId}` }));
+          socket.send(
+            JSON.stringify({
+              type: "error",
+              message: `Run not found: ${msg.payload.runId}`,
+            }),
+          );
         }
       } else if (msg.action === "canvas.resume") {
         const p = msg.payload;
-        log.info("canvas_resume", { userId: authenticatedUser.id, canvasId: p.canvasId, lastSeq: p.lastSeq });
+        log.info("canvas_resume", {
+          userId: authenticatedUser.id,
+          canvasId: p.canvasId,
+          lastSeq: p.lastSeq,
+        });
 
         // Re-bind this connection to the canvas
         connectionManager.bindCanvas(connectionId, p.canvasId);
 
-        const missed = options.eventBuffer?.getAfter(p.canvasId, p.lastSeq) ?? [];
+        const missed =
+          options.eventBuffer?.getAfter(p.canvasId, p.lastSeq) ?? [];
         const activeRun = connectionManager.getActiveRun(p.canvasId);
 
         // IMPORTANT: Send ACK FIRST so client registers event listener
@@ -235,14 +280,15 @@ async function handleRunCommand(
   log.info("started", { prompt: payload.prompt.slice(0, 80) });
 
   // Resolve thread + model in parallel
-  const [threadId, model] = await Promise.all([
+  const [threadId, chatConfig] = await Promise.all([
     (async (): Promise<string | undefined> => {
       if (!services.threadService) return undefined;
       try {
-        const sessionThread = await services.threadService.resolveOwnedSessionThread(
-          authenticatedUser,
-          payload.sessionId,
-        );
+        const sessionThread =
+          await services.threadService.resolveOwnedSessionThread(
+            authenticatedUser,
+            payload.sessionId,
+          );
         return sessionThread.threadId;
       } catch (error) {
         log.warn("thread_resolve_failed", {
@@ -251,35 +297,71 @@ async function handleRunCommand(
         return undefined;
       }
     })(),
-    (async (): Promise<string | undefined> => {
-      if (!services.settingsService || !services.viewerService) return undefined;
+    (async (): Promise<{ model?: string; baseUrl?: string; apiKey?: string }> => {
+      if (!services.settingsService || !services.viewerService)
+        return {};
       try {
-        const viewer = await services.viewerService.ensureViewer(authenticatedUser);
-        const settings = await services.settingsService.getWorkspaceSettings(
-          authenticatedUser,
-          viewer.workspace.id,
-        );
-        return settings.defaultModel;
+        const viewer =
+          await services.viewerService.ensureViewer(authenticatedUser);
+        return services.settingsService.getChatModelConfig(authenticatedUser, viewer.workspace.id);
       } catch (error) {
         log.warn("model_resolve_failed", {
           error: error instanceof Error ? error.message : String(error),
         });
-        return undefined;
+        return {};
       }
     })(),
   ]);
-  // Client-provided model takes priority over workspace default
-  const resolvedModel = payload.model ?? model;
+  // The authenticated workspace policy takes precedence over stale client
+  // selections retained in local storage after an administrator changes it.
+  const resolvedModel = chatConfig.model ?? payload.model;
   log.lap("resolve", { threadId: !!threadId, model: resolvedModel });
 
-  const response = agentRuns.createRun(payload, {
-    accessToken: authenticatedUser.accessToken,
-    userId: authenticatedUser.id,
-    ...(resolvedModel ? { model: resolvedModel } : {}),
-    ...(threadId ? { threadId } : {}),
-  });
+  let charge: AgentMessageCharge | undefined;
+  let response;
+  try {
+    response = agentRuns.createRun(payload, {
+      accessToken: authenticatedUser.accessToken,
+      userId: authenticatedUser.id,
+      ...(resolvedModel ? { model: resolvedModel } : {}),
+      ...(chatConfig.baseUrl ? { modelApiBase: chatConfig.baseUrl } : {}),
+      ...(chatConfig.apiKey ? { modelApiKey: chatConfig.apiKey } : {}),
+      ...(threadId ? { threadId } : {}),
+    });
+  } catch (error) {
+    if (charge && services.creditService) {
+      await refundAgentMessage({ user: authenticatedUser, charge, creditService: services.creditService }).catch((refundError) =>
+        log.error("message_charge_refund_failed", { error: refundError instanceof Error ? refundError.message : String(refundError) }),
+      );
+    }
+    throw error;
+  }
   const runId = response.runId;
   log.lap("run_created", { runId });
+
+  if (services.creditService && services.viewerService) {
+    try {
+      charge = await chargeAgentMessage({
+        user: authenticatedUser,
+        modelId: resolvedModel,
+        viewerService: services.viewerService,
+        creditService: services.creditService,
+        runId,
+      });
+    } catch (error) {
+      agentRuns.cancelRun(runId);
+      log.warn("message_charge_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      connectionManager.sendTo(connectionId, {
+        type: "error",
+        message: error instanceof Error && "statusCode" in error && (error as { statusCode?: number }).statusCode === 402
+          ? "余额不足，请先充值后再发送消息。"
+          : "消息计费失败，请稍后重试。",
+      });
+      return;
+    }
+  }
 
   // Persist run metadata
   if (threadId && services.agentRunMetadataService) {
@@ -361,14 +443,18 @@ async function handleRunCommand(
         });
       } else if (event.type === "tool.completed") {
         const idx = assistantBlocks.findIndex(
-          (b) => b.type === "tool" && (b as ToolBlock).toolCallId === event.toolCallId,
+          (b) =>
+            b.type === "tool" &&
+            (b as ToolBlock).toolCallId === event.toolCallId,
         );
         if (idx >= 0) {
           assistantBlocks[idx] = {
             ...(assistantBlocks[idx] as ToolBlock),
             status: "completed" as const,
             ...(event.output ? { output: event.output } : {}),
-            ...(event.outputSummary ? { outputSummary: event.outputSummary } : {}),
+            ...(event.outputSummary
+              ? { outputSummary: event.outputSummary }
+              : {}),
             ...(event.artifacts ? { artifacts: event.artifacts } : {}),
           };
         }
@@ -377,7 +463,10 @@ async function handleRunCommand(
     log.lap("stream_done", { runId });
 
     // ── Server-side assistant message persistence ──
-    if (services.chatService && (assistantText.length > 0 || assistantBlocks.length > 0)) {
+    if (
+      services.chatService &&
+      (assistantText.length > 0 || assistantBlocks.length > 0)
+    ) {
       try {
         await services.chatService.createMessage(
           authenticatedUser,
@@ -397,7 +486,10 @@ async function handleRunCommand(
       }
     }
   } catch (error) {
-    log.error("stream_error", { runId, error: error instanceof Error ? error.message : "unknown" });
+    log.error("stream_error", {
+      runId,
+      error: error instanceof Error ? error.message : "unknown",
+    });
     const failedEvent = {
       type: "run.failed" as const,
       runId,
@@ -409,6 +501,11 @@ async function handleRunCommand(
     };
     services.eventBuffer?.push(canvasId, failedEvent);
     connectionManager.pushToCanvas(canvasId, failedEvent);
+    if (charge && services.creditService) {
+      await refundAgentMessage({ user: authenticatedUser, charge, creditService: services.creditService }).catch((refundError) =>
+        log.error("message_charge_refund_failed", { error: refundError instanceof Error ? refundError.message : String(refundError) }),
+      );
+    }
   } finally {
     clearInterval(keepAlive);
     connectionManager.clearActiveRun(canvasId);

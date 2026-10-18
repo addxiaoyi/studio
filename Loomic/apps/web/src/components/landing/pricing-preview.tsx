@@ -1,171 +1,111 @@
 "use client";
 
-import { Check } from "lucide-react";
-import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
-import { SectionHeader } from "@/components/landing/section-header";
-import { StaggerContainer, scaleUp } from "@/components/landing/motion";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { ArrowUpRight, Image, RefreshCw, Video } from "lucide-react";
+import type { OfficialModelPrice, OfficialModelPriceCatalog, OfficialPriceMediaType } from "@helstera/shared";
+import { USD_CNY_RATE } from "@helstera/shared";
+import { fetchImageModels, fetchVideoModels, type ImageModelInfo, type VideoModelInfo } from "@/lib/server-api";
+import { fetchOfficialModelPrices } from "@/lib/model-pricing-api";
+import { compareRuntimePrice, findRuntimePriceModel } from "@/lib/model-pricing";
 
-interface PricingPlan {
-  name: string;
-  badge?: string;
-  price: string;
-  period: string;
-  features: string[];
-  cta: string;
-  highlighted: boolean;
-}
-
-const PLANS: PricingPlan[] = [
-  {
-    name: "免费版",
-    price: "¥50",
-    period: "永久免费",
-    features: [
-      "500 积分额度",
-      "基础设计模板",
-      "单项目空间",
-      "社区支持",
-    ],
-    cta: "免费开始",
-    highlighted: false,
-  },
-  {
-    name: "标准包",
-    badge: "最受欢迎",
-    price: "¥200",
-    period: "一次付费",
-    features: [
-      "无限 AI 生成",
-      "全部 AI 模型",
-      "无限项目空间",
-      "品牌工具包",
-      "优先支持",
-      "高清导出",
-    ],
-    cta: "升级 Pro",
-    highlighted: true,
-  },
-  {
-    name: "专业包",
-    price: "¥500",
-    period: "一次付费",
-    features: [
-      "Pro 全部功能",
-      "团队协作空间",
-      "共享资源库",
-      "管理控制台",
-      "API 接入",
-      "专属客户经理",
-    ],
-    cta: "联系我们",
-    highlighted: false,
-  },
-];
-
-function PricingCard({ plan }: { plan: PricingPlan }) {
-  return (
-    <motion.div
-      variants={scaleUp}
-      className={cn(
-        "relative flex flex-col rounded-[1.5rem] border border-border/60 p-7 md:p-8",
-        "transition-all duration-300 hover:-translate-y-1",
-        plan.highlighted && "glass shadow-soft",
-        !plan.highlighted && "glass-soft hover:glass",
-      )}
-    >
-      {/* Badge */}
-      {plan.badge && (
-        <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium tracking-wide bg-primary text-primary-foreground">
-            {plan.badge}
-          </span>
-        </div>
-      )}
-
-      {/* Plan name */}
-      <p className="text-base font-medium text-foreground">{plan.name}</p>
-
-      {/* Price */}
-      <div className="mt-5">
-        <span className="text-4xl font-medium text-foreground tabular-nums tracking-tight">
-          {plan.price}
-        </span>
-        <span className="ml-2 text-sm text-muted-foreground">
-          {plan.period}
-        </span>
-      </div>
-
-      {/* Divider */}
-      <div className="mt-7 h-px bg-border/60" />
-
-      {/* Features */}
-      <ul className="mt-7 space-y-3.5 flex-1">
-        {plan.features.map((feature) => (
-          <li key={feature} className="flex items-start gap-3">
-            <div className="size-4.5 rounded-full flex items-center justify-center shrink-0 mt-0.5 bg-primary/10">
-              <Check className="size-2.5 text-primary" strokeWidth={2.5} />
-            </div>
-            <span className="text-sm text-muted-foreground leading-relaxed">{feature}</span>
-          </li>
-        ))}
-      </ul>
-
-      {/* CTA */}
-      <div className="mt-8">
-        {plan.highlighted ? (
-          <button
-            className={cn(
-              "w-full rounded-full py-3 text-sm font-medium",
-              "bg-foreground text-background",
-              "transition-all duration-300 hover:scale-[1.02] active:scale-[0.99]",
-            )}
-          >
-            {plan.cta}
-          </button>
-        ) : (
-          <button
-            className={cn(
-              "w-full rounded-full py-3 text-sm font-medium",
-              "glass-soft hover:glass text-foreground",
-              "transition-all duration-300",
-            )}
-          >
-            {plan.cta}
-          </button>
-        )}
-      </div>
-    </motion.div>
-  );
-}
+type RuntimeModel = (ImageModelInfo | VideoModelInfo) & { mediaType: OfficialPriceMediaType };
+type PriceRow = { model: RuntimeModel; officialCny: number; runtimeCny: number; savedPercent: number };
+const MAX_ROWS = 12;
 
 export function PricingPreview() {
+  const [catalog, setCatalog] = useState<OfficialModelPriceCatalog | null>(null);
+  const [models, setModels] = useState<RuntimeModel[] | null>(null);
+  const [error, setError] = useState(false);
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(false);
+    void Promise.all([fetchOfficialModelPrices(), fetchImageModels(), fetchVideoModels()])
+      .then(([prices, images, videos]) => {
+        if (cancelled) return;
+        setCatalog(prices);
+        setModels([
+          ...images.models.map((model) => ({ ...model, mediaType: "image" as const })),
+          ...videos.models.map((model) => ({ ...model, mediaType: "video" as const })),
+        ]);
+      })
+      .catch(() => { if (!cancelled) setError(true); });
+    return () => { cancelled = true; };
+  }, [retry]);
+
+  const rows = useMemo(() => buildRows(catalog, models), [catalog, models]);
+
   return (
-    <section id="pricing" className="py-32 md:py-40 relative overflow-hidden">
-      {/* Subtle dots grid background */}
-      <div
-        className="absolute inset-0 opacity-[0.035] pointer-events-none"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle, oklch(0.556 0 0) 1px, transparent 1px)",
-          backgroundSize: "24px 24px",
-        }}
-      />
+    <section id="pricing" className="relative overflow-hidden border-y border-border/70 bg-muted/20 py-20 md:py-28">
+      <div className="mx-auto max-w-6xl px-6">
+        <header className="flex flex-col gap-5 border-b border-border/70 pb-8 md:flex-row md:items-end md:justify-between">
+          <div className="max-w-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">MODEL PRICING</p>
+            <h2 className="mt-3 text-3xl font-medium tracking-tight md:text-4xl">低于官方价格的模型</h2>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground md:text-base">只展示当前可调用且 Helstera 低于官方最高 API 单价的模型，并说明每个模型的用途和计费单位。</p>
+          </div>
+          <Link href="/model-pricing/" className="inline-flex h-10 w-fit items-center gap-2 rounded-md border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-muted">
+            查看完整价格表 <ArrowUpRight className="size-4" aria-hidden="true" />
+          </Link>
+        </header>
 
-      <div className="relative max-w-6xl mx-auto px-6">
-        <div className="mb-24 md:mb-32">
-          <SectionHeader
-            title="按需充值额度"
-            subtitle="一次购买，永久有效"
-          />
-        </div>
-
-        <StaggerContainer className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-          {PLANS.map((plan) => (
-            <PricingCard key={plan.name} plan={plan} />
-          ))}
-        </StaggerContainer>
+        {error ? (
+          <div className="flex min-h-48 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+            <p>模型价格暂时无法加载</p>
+            <button type="button" onClick={() => setRetry((value) => value + 1)} className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-muted"><RefreshCw className="size-3.5" aria-hidden="true" />重试</button>
+          </div>
+        ) : models === null || catalog === null ? (
+          <div className="grid min-h-48 place-items-center text-sm text-muted-foreground">正在读取模型价格…</div>
+        ) : rows.length === 0 ? (
+          <div className="grid min-h-48 place-items-center text-sm text-muted-foreground">当前没有低于官方价格的可调用模型</div>
+        ) : (
+          <div className="mt-6 overflow-hidden rounded-lg border border-border bg-background">
+            <div className="hidden grid-cols-[1.5fr_0.8fr_0.8fr_0.7fr] border-b border-border bg-muted/40 px-5 py-3 text-xs font-medium text-muted-foreground md:grid"><span>模型与用途</span><span>官方最高价</span><span>Helstera 价格</span><span>节省</span></div>
+            <div className="divide-y divide-border/70">{rows.slice(0, MAX_ROWS).map((row) => <PriceRowView key={`${row.model.mediaType}:${row.model.id}`} row={row} />)}</div>
+          </div>
+        )}
+        {rows.length > MAX_ROWS && <p className="mt-4 text-center text-xs text-muted-foreground">还有 {rows.length - MAX_ROWS} 个低于官方价格的模型，详见完整价格表。</p>}
       </div>
     </section>
   );
+}
+
+function buildRows(catalog: OfficialModelPriceCatalog | null, models: RuntimeModel[] | null): PriceRow[] {
+  if (!catalog || !models) return [];
+  return models.flatMap((model) => {
+    const runtimeCny = model.providerPriceCny ?? model.creditCost;
+    if (runtimeCny == null || model.billingUnit === "per_million_tokens") return [];
+    const unit = model.billingUnit === "per_second" ? "per_second" : "per_image";
+    const official = catalog.prices
+      .filter((price) => price.mediaType === model.mediaType && price.unit === unit)
+      .filter((price) => findRuntimePriceModel(price.modelId, price.mediaType, [model]) !== null)
+      .sort((left, right) => right.officialMax - left.officialMax)[0];
+    if (!official) return [];
+    const comparison = compareRuntimePrice(runtimeCny, official.officialMax * (catalog.usdCnyRate || USD_CNY_RATE));
+    if (comparison.relation !== "below") return [];
+    return [{ model, officialCny: comparison.officialMaxCny, runtimeCny, savedPercent: Math.round(Math.abs(comparison.deltaCny) / comparison.officialMaxCny * 100) }];
+  }).sort((left, right) => right.savedPercent - left.savedPercent || left.model.displayName.localeCompare(right.model.displayName));
+}
+
+function PriceRowView({ row }: { row: PriceRow }) {
+  const Icon = row.model.mediaType === "image" ? Image : Video;
+  const unit = row.model.billingUnit === "per_second" ? "秒" : "张";
+  return (
+    <article className="grid gap-3 px-5 py-4 md:grid-cols-[1.5fr_0.8fr_0.8fr_0.7fr] md:items-center">
+      <div className="flex min-w-0 items-start gap-3"><Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" /><div className="min-w-0"><p className="font-medium">{row.model.displayName}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{row.model.description || "可用于 Helstera 创作工作流"}</p><p className="mt-1 truncate text-[11px] text-muted-foreground">{row.model.id} · 按{unit}计费</p></div></div>
+      <div className="flex items-start justify-between gap-3 text-sm md:block"><div><span className="text-xs text-muted-foreground md:hidden">官方最高价</span><p className="tabular-nums">{formatCny(row.officialCny)} / {unit}</p>{isOpenAiTokenEstimate(row.model.id) && <p className="mt-1 max-w-56 text-[11px] leading-4 text-muted-foreground">OpenAI 官方 Token 计费换算估算，非固定按张价</p>}</div></div>
+      <div className="flex items-baseline justify-between gap-3 text-sm md:block"><span className="text-xs text-muted-foreground md:hidden">Helstera</span><span className="font-medium tabular-nums">{formatCny(row.runtimeCny)} / {unit}</span></div>
+      <p className="text-right text-sm font-medium text-emerald-700 md:text-left">低 {row.savedPercent}%</p>
+    </article>
+  );
+}
+
+function isOpenAiTokenEstimate(modelId: string) {
+  return /^gpt-image-2(?:\.5)?(?:-|$)/i.test(modelId);
+}
+
+function formatCny(value: number) {
+  return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY", maximumFractionDigits: 2 }).format(value);
 }

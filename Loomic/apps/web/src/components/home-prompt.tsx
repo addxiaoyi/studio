@@ -50,7 +50,7 @@ const toolbarButtons = [
     path: "M16 1.1A4.9 4.9 0 0 1 20.9 6a4.9 4.9 0 0 1-1.429 3.457h.001l-8.414 8.587-.007.006a2.9 2.9 0 0 1-3.887.193l-.213-.192a2.9 2.9 0 0 1-.007-4.095l8.414-8.586a.9.9 0 0 1 1.286 1.26L8.23 15.216l-.007.006a1.1 1.1 0 0 0 1.556 1.555l8.407-8.579.007-.007a3.1 3.1 0 0 0 .105-4.271l-.105-.112a3.1 3.1 0 0 0-4.384 0L5.4 12.387l-.007.006a5.1 5.1 0 0 0 7.214 7.213l7.749-7.934a.9.9 0 0 1 1.288 1.256l-7.753 7.938q-.005.007-.012.014a6.9 6.9 0 0 1-9.758-9.76l8.408-8.578.007-.007A4.9 4.9 0 0 1 16 1.1",
   },
   {
-    name: "Agent",
+    name: "生成模型",
     viewBox: "0 0 24 24",
     path: "M10.8 1.307a2.33 2.33 0 0 1 2.4 0l7.67 4.602A2.33 2.33 0 0 1 22 7.907v8.361a2.33 2.33 0 0 1-1.13 1.998l-7.67 4.602-.141.078a2.33 2.33 0 0 1-2.258-.078l-7.67-4.602A2.33 2.33 0 0 1 2 16.268V7.907a2.33 2.33 0 0 1 1.003-1.915l.128-.083z",
   },
@@ -310,14 +310,15 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
             <AgentModelSelector />
             <div className="flex items-center gap-0.5">
               {toolbarButtons.slice(1).map((btn) => {
-                if (btn.name === "Agent") {
+                if (btn.name === "生成模型") {
                   return (
                     <div key={btn.name} className="relative">
                       <button
                         ref={agentBtnRef}
                         type="button"
                         onClick={() => setModelPopoverOpen((prev) => !prev)}
-                        title={btn.name}
+                        title="选择图片或视频模型"
+                        aria-label="选择图片或视频模型"
                         className={`flex h-10 w-10 items-center justify-center rounded-full border transition-all duration-200 focus-visible:ring-2 focus-visible:ring-foreground/20 sm:h-8 sm:w-8 ${
                           preference.mode === "manual"
                             ? "border-primary bg-primary/15 text-primary"
@@ -329,7 +330,7 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
                           viewBox={btn.viewBox}
                           fill="currentColor"
                           role="img"
-                          aria-label={btn.name}
+                          aria-label="生成模型"
                         >
                           <path d={btn.path} />
                         </svg>

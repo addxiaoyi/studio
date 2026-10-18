@@ -1,4 +1,5 @@
 import { tool } from "langchain";
+import type { Pool } from "pg";
 import { z } from "zod";
 import {
   CanvasElement,
@@ -728,14 +729,15 @@ const handlers: Record<
 // ---------------------------------------------------------------------------
 
 export function createManipulateCanvasTool(deps: {
-  createUserClient: (accessToken: string) => any;
+  createUserClient?: (accessToken: string) => any;
+  localDb?: Pool;
 }) {
   return tool(
     async (input, config) => {
       const canvasId = (config as any)?.configurable?.canvas_id;
       const accessToken = (config as any)?.configurable?.access_token;
 
-      if (!canvasId || !accessToken) {
+      if (!canvasId || (!deps.localDb && !accessToken)) {
         return JSON.stringify({
           error: "no_canvas_context",
           message:
@@ -744,12 +746,15 @@ export function createManipulateCanvasTool(deps: {
       }
 
       // --- Read current canvas -------------------------------------------------
-      const client = deps.createUserClient(accessToken);
-      const { data, error } = await client
-        .from("canvases")
-        .select("content")
-        .eq("id", canvasId)
-        .single();
+      if (!deps.localDb && !deps.createUserClient) {
+        return JSON.stringify({ error: "storage_unavailable", message: "Canvas storage is unavailable." });
+      }
+      const client = deps.localDb ? null : deps.createUserClient!(accessToken);
+      const localCanvas = deps.localDb
+        ? await deps.localDb.query("select content from canvases where id=$1", [canvasId])
+        : null;
+      const data = localCanvas ? localCanvas.rows[0] : (await client.from("canvases").select("content").eq("id", canvasId).single()).data;
+      const error = localCanvas || data ? null : new Error("Canvas not found");
 
       if (error || !data) {
         return JSON.stringify({
@@ -793,10 +798,17 @@ export function createManipulateCanvasTool(deps: {
 
       // --- Write back ----------------------------------------------------------
       const updatedContent = { ...content, elements };
-      const { error: writeError } = await client
-        .from("canvases")
-        .update({ content: updatedContent })
-        .eq("id", canvasId);
+      let writeError: { message: string } | null = null;
+      if (deps.localDb) {
+        const result = await deps.localDb.query(
+          "update canvases set content=$1,updated_at=now() where id=$2",
+          [JSON.stringify(updatedContent), canvasId],
+        );
+        if (!result.rowCount) writeError = { message: "Canvas not found" };
+      } else {
+        const result = await client.from("canvases").update({ content: updatedContent }).eq("id", canvasId);
+        writeError = result.error;
+      }
 
       if (writeError) {
         return JSON.stringify({

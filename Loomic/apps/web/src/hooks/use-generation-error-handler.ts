@@ -5,6 +5,7 @@ import { useCallback } from "react";
 import { useTierLimitToast } from "@/components/credits/tier-limit-toast";
 import { ApiApplicationError } from "@/lib/server-api";
 import { useToast } from "@/components/toast";
+import { t, useLocale } from "@/lib/i18n";
 
 const TIER_LIMIT_CODES = new Set([
   "concurrency_limit",
@@ -23,6 +24,7 @@ const TIER_LIMIT_CODES = new Set([
  *          known tier/credit limit (i.e. caller should NOT show its own error UI)
  */
 export function useGenerationErrorHandler() {
+  const copy = t(useLocale()).generation;
   const { showTierLimit } = useTierLimitToast();
   const { error: showErrorToast } = useToast();
 
@@ -31,7 +33,7 @@ export function useGenerationErrorHandler() {
       if (!(error instanceof ApiApplicationError)) {
         // Not an application error — log for debugging, show generic toast to user
         console.error("[generation-error] Unexpected error:", error);
-        showErrorToast("生成失败，请重试。");
+        showErrorToast(`${copy.failed}，${copy.retry}。`);
         return false;
       }
 
@@ -47,11 +49,15 @@ export function useGenerationErrorHandler() {
       }
 
       // Other application errors: log raw message, show generic toast to user
-      console.error("[generation-error] Application error:", error.code, error.message);
-      showErrorToast("生成失败，请重试。");
+      console.error(
+        "[generation-error] Application error:",
+        error.code,
+        error.message,
+      );
+      showErrorToast(`${copy.failed}，${copy.retry}。`);
       return false;
     },
-    [showTierLimit, showErrorToast],
+    [copy, showTierLimit, showErrorToast],
   );
 
   return { handleGenerationError };

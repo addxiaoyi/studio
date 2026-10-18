@@ -12,6 +12,14 @@ const STORAGE_KEY = "helstera-pwa-install-dismissed-at";
 const MIN_DWELL_MS = 3000;
 const SUPPRESS_DAYS = 14;
 
+function getStorage(): Storage | null {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
@@ -24,7 +32,8 @@ export function PWAInstallPrompt() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     // Already dismissed recently?
-    const lastDismissed = Number(window.localStorage.getItem(STORAGE_KEY));
+    const storage = getStorage();
+    const lastDismissed = Number(storage?.getItem(STORAGE_KEY));
     if (lastDismissed && Date.now() - lastDismissed < SUPPRESS_DAYS * 86_400_000) {
       return;
     }
@@ -58,7 +67,7 @@ export function PWAInstallPrompt() {
   const dismiss = () => {
     setVisible(false);
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, String(Date.now()));
+      getStorage()?.setItem(STORAGE_KEY, String(Date.now()));
     }
   };
 

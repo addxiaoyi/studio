@@ -175,11 +175,25 @@ describe("@helstera/shared contracts", () => {
         userId: "user_123",
         role: "owner",
       },
+      isSystemAdmin: false,
     });
 
     expect(parsed.profile.id).toBe("user_123");
     expect(parsed.workspace.ownerUserId).toBe("user_123");
     expect(parsed.membership.workspaceId).toBe("workspace_123");
+    expect(parsed.isSystemAdmin).toBe(false);
+  });
+
+  it("accepts fractional credit balances used by exact model billing", () => {
+    const viewerResponseSchema = getExportedSchema("viewerResponseSchema");
+    const parsed = viewerResponseSchema.parse({
+      profile: { id: "user_123", email: "maker@helstera.test", displayName: "Maker", avatarUrl: null },
+      workspace: { id: "workspace_123", name: "Personal Workspace", type: "personal", ownerUserId: "user_123" },
+      membership: { workspaceId: "workspace_123", userId: "user_123", role: "owner" },
+      isSystemAdmin: false,
+      credits: { balance: 1.8, plan: "free", dailyClaimed: false, limits: { maxConcurrentJobs: 3, maxResolution: "2160p", monthlyCredits: 0, dailyCredits: 0 } },
+    });
+    expect(parsed.credits?.balance).toBe(1.8);
   });
 
   it("shares project list and create contracts for GET/POST /api/projects", () => {
@@ -480,6 +494,12 @@ describe("@helstera/shared contracts", () => {
       "run_conflict",
       "run_failed",
       "tool_failed",
+      "provider_unavailable",
+      "provider_auth_failed",
+      "model_disabled",
+            "model_selection_required",
+      "upstream_timeout",
+      "upstream_rate_limited",
     ]);
     expect(JSON.parse(JSON.stringify(errorCodeValues))).toEqual(
       errorCodeValues,

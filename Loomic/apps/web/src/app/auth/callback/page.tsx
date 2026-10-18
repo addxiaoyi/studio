@@ -4,15 +4,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense, useEffect, useRef } from "react";
 
 import { LoadingScreen } from "../../../components/loading-screen";
-import {
-  ApiApplicationError,
-  ApiAuthError,
-  fetchViewer,
-} from "../../../lib/server-api";
-import { getSupabaseBrowserClient } from "../../../lib/supabase-browser";
 import { exchangeLocalToken } from "../../../lib/local-auth";
-
-const CALLBACK_TIMEOUT_MS = 5_000;
 
 function loginErrorUrl(error: string): string {
   return `/login?${new URLSearchParams({ error }).toString()}`;
@@ -27,80 +19,22 @@ function AuthCallbackPageContent() {
     if (started.current) return;
     started.current = true;
 
-    const code = searchParams.get("code");
-    const tokenHash = searchParams.get("token_hash");
     const localToken = searchParams.get("local_token");
-    const providerError = searchParams.get("error");
+    const oauthCode = searchParams.get("code");
+    const oauthState = searchParams.get("state");
 
-    if (providerError) {
-      router.replace(loginErrorUrl(providerError));
+    if (oauthCode && oauthState) {
+      window.location.href = `/api/integrations/douyin/oauth/exchange?code=${encodeURIComponent(oauthCode)}&state=${encodeURIComponent(oauthState)}`;
       return;
     }
 
     if (localToken) {
       void exchangeLocalToken(localToken)
-        .then(() => window.location.replace("/home"))
+        .then(() => router.replace("/home"))
         .catch(() => router.replace(loginErrorUrl("auth_exchange_failed")));
       return;
     }
-
-    if (!code) {
-      router.replace(loginErrorUrl("auth_callback_missing_code"));
-      return;
-    }
-
-    const supabase = getSupabaseBrowserClient();
-    let cancelled = false;
-    const timeoutId = window.setTimeout(() => {
-      cancelled = true;
-      router.replace(loginErrorUrl("auth_callback_timeout"));
-    }, CALLBACK_TIMEOUT_MS);
-
-    void (async () => {
-      try {
-        const { data, error } = tokenHash
-          ? await supabase.auth.verifyOtp({ token_hash: tokenHash, type: "email" })
-          : await supabase.auth.exchangeCodeForSession(code!);
-
-        if (cancelled) return;
-
-        if (error || !data.session?.access_token) {
-          router.replace(loginErrorUrl("auth_exchange_failed"));
-          return;
-        }
-
-        try {
-          await fetchViewer(data.session.access_token);
-        } catch (viewerError) {
-          if (
-            viewerError instanceof ApiAuthError ||
-            viewerError instanceof ApiApplicationError ||
-            viewerError instanceof Error
-          ) {
-            router.replace(loginErrorUrl("viewer_bootstrap_failed"));
-            return;
-          }
-
-          router.replace(loginErrorUrl("viewer_bootstrap_failed"));
-          return;
-        }
-
-        if (!cancelled) {
-          router.replace("/home");
-        }
-      } catch {
-        if (!cancelled) {
-          router.replace(loginErrorUrl("auth_exchange_failed"));
-        }
-      } finally {
-        clearTimeout(timeoutId);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-    };
+    router.replace(loginErrorUrl("local_auth_callback_required"));
   }, [router, searchParams]);
 
   return <LoadingScreen />;

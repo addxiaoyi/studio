@@ -299,12 +299,6 @@ export function MarketplacePanel({
     if (!token) return;
 
     const trimmed = debouncedQuery.trim();
-    if (!trimmed) {
-      setSkills([]);
-      setTotal(0);
-      setSearched(false);
-      return;
-    }
 
     const seq = ++searchSeqRef.current;
 

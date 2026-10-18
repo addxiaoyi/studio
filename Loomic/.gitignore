@@ -8,6 +8,7 @@
 
 # testing
 /coverage
+**/test-results/
 
 # next.js
 /.next/
@@ -61,3 +62,19 @@ docs/home-discovery-library.md
 docs/lovart-deep-analysis-*.md
 docs/tech/pricing-profitability-report.md
 docs/tech/replicate-models-pricing.md
+
+# Local Codex release artifacts and generated inspection files
+.codex-*
+.codex-deploy/
+.codex-local-*/
+.codex-release/
+.playwright-mcp/
+**/.next-dev/
+*.tgz
+*.zip
+vendor/
+temp-hy3-server/
+__pycache__/
+**/__pycache__/
+canvasId
+sessionId

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type { ChatMessage, ChatMessageCreateRequest, ChatSessionSummary, ContentBlock } from "@helstera/shared";
-import type { AuthenticatedUser } from "../supabase/user.js";
+import type { AuthenticatedUser } from "../auth/types.js";
 import { ChatServiceError, type ChatService } from "../features/chat/chat-service.js";
 
 export function createLocalChatService(db: Pool): ChatService {
@@ -30,11 +30,15 @@ export function createLocalChatService(db: Pool): ChatService {
     },
     async createMessage(user, sessionId, input: ChatMessageCreateRequest) {
       await assertSessionAccess(db, sessionId, user.id);
-      const { rows } = await db.query("insert into chat_messages (session_id, role, content, tool_activities, content_blocks) values ($1, $2, $3, $4, $5) returning id, role, content, tool_activities, content_blocks, created_at", [sessionId, input.role, input.content, input.toolActivities ?? null, input.contentBlocks ?? null]);
+      const { rows } = await db.query("insert into chat_messages (session_id, role, content, tool_activities, content_blocks) values ($1, $2, $3, $4, $5) returning id, role, content, tool_activities, content_blocks, created_at", [sessionId, input.role, input.content, toJson(input.toolActivities), toJson(input.contentBlocks)]);
       await db.query("update chat_sessions set updated_at = now() where id = $1", [sessionId]);
       return mapMessage(rows[0]);
     },
   };
+}
+
+function toJson(value: unknown): string | null {
+  return value == null ? null : JSON.stringify(value);
 }
 
 async function assertCanvasAccess(db: Pool, canvasId: string, userId: string) {

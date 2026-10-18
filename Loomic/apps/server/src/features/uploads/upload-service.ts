@@ -2,8 +2,9 @@ import type { AssetBucket, AssetObject } from "@helstera/shared";
 
 import type {
   AuthenticatedUser,
-  UserSupabaseClient,
-} from "../../supabase/user.js";
+  DataClient,
+} from "../../auth/types.js";
+import type { StorageProvider } from "../../storage/storage-provider.js";
 
 /** Buckets configured as public in Supabase — use getPublicUrl instead of signed URLs */
 const PUBLIC_BUCKETS = new Set(["project-assets"]);
@@ -52,7 +53,8 @@ export type UploadService = {
 const SIGNED_URL_EXPIRY_SECONDS = 3600;
 
 export function createUploadService(options: {
-  createUserClient: (accessToken: string) => UserSupabaseClient;
+  createUserClient: (accessToken: string) => DataClient;
+  storage: StorageProvider;
 }): UploadService {
   return {
     async uploadFile(user, input) {
@@ -64,12 +66,15 @@ export function createUploadService(options: {
         input.fileName,
       );
 
-      const { error: storageError } = await client.storage
-        .from(input.bucket)
-        .upload(objectPath, input.fileBuffer, {
+      const { error: storageError } = await options.storage.upload(
+        input.bucket,
+        objectPath,
+        input.fileBuffer,
+        {
           contentType: input.mimeType,
           upsert: false,
-        });
+        }
+      );
 
       if (storageError) {
         throw new UploadServiceError(
@@ -95,7 +100,7 @@ export function createUploadService(options: {
 
       if (insertError || !assetRow) {
         // Clean up the uploaded file on DB insert failure
-        await client.storage.from(input.bucket).remove([objectPath]);
+        await options.storage.remove(input.bucket, [objectPath]);
         throw new UploadServiceError(
           "upload_failed",
           "Failed to record asset metadata.",
@@ -103,7 +108,7 @@ export function createUploadService(options: {
         );
       }
 
-      const url = await getAssetUrl(client, input.bucket, objectPath);
+      const url = await getAssetUrl(options.storage, input.bucket, objectPath);
 
       return {
         asset: {
@@ -137,7 +142,7 @@ export function createUploadService(options: {
         );
       }
 
-      return getAssetUrl(client, assetRow.bucket, assetRow.object_path);
+      return getAssetUrl(options.storage, assetRow.bucket, assetRow.object_path);
     },
 
     async deleteAsset(user, assetId) {
@@ -157,9 +162,7 @@ export function createUploadService(options: {
         );
       }
 
-      await client.storage
-        .from(assetRow.bucket)
-        .remove([assetRow.object_path]);
+      await options.storage.remove(assetRow.bucket, [assetRow.object_path]);
 
       const { error: deleteError } = await client
         .from("asset_objects")
@@ -191,26 +194,29 @@ function buildObjectPath(
 }
 
 async function getAssetUrl(
-  client: UserSupabaseClient,
+  storage: StorageProvider,
   bucket: string,
   objectPath: string,
 ): Promise<string> {
   if (PUBLIC_BUCKETS.has(bucket)) {
-    const { data } = client.storage.from(bucket).getPublicUrl(objectPath);
-    return data.publicUrl;
+    const { data, error } = await storage.getPublicUrl(bucket, objectPath);
+    if (error || !data?.signedUrl) throw new UploadServiceError("upload_failed", "Failed to generate public URL.", 500);
+    return data.signedUrl;
   }
   // Fallback for private buckets (e.g. user-avatars)
-  return createSignedUrl(client, bucket, objectPath);
+  return createSignedUrl(storage, bucket, objectPath);
 }
 
 async function createSignedUrl(
-  client: UserSupabaseClient,
+  storage: StorageProvider,
   bucket: string,
   objectPath: string,
 ): Promise<string> {
-  const { data, error } = await client.storage
-    .from(bucket)
-    .createSignedUrl(objectPath, SIGNED_URL_EXPIRY_SECONDS);
+  const { data, error } = await storage.getPublicUrl(
+    bucket,
+    objectPath,
+    SIGNED_URL_EXPIRY_SECONDS
+  );
 
   if (error || !data?.signedUrl) {
     throw new UploadServiceError(

@@ -8,6 +8,25 @@
 
 type CanvasElement = Record<string, unknown>;
 
+/** Keep persisted agent-created elements compatible with Excalidraw's hit testing. */
+export function normalizeCanvasElement(element: CanvasElement): CanvasElement {
+  const normalized = { ...element };
+  if (!Array.isArray(normalized.groupIds)) normalized.groupIds = [];
+  if ((normalized.type === "line" || normalized.type === "arrow" || normalized.type === "freedraw") && !Array.isArray(normalized.points)) {
+    normalized.points = [[0, 0], [Number(normalized.width) || 0, Number(normalized.height) || 0]];
+  }
+  if (!Array.isArray(normalized.boundElements)) normalized.boundElements = null;
+  if (normalized.frameId === undefined) normalized.frameId = null;
+  if (normalized.roundness === undefined) normalized.roundness = null;
+  if (normalized.link === undefined) normalized.link = null;
+  if (normalized.locked === undefined) normalized.locked = false;
+  if (normalized.opacity === undefined) normalized.opacity = 100;
+  if (normalized.angle === undefined) normalized.angle = 0;
+  if (normalized.scale === undefined) normalized.scale = [1, 1];
+  if (normalized.status === undefined) normalized.status = "saved";
+  return normalized;
+}
+
 const EXCALIDRAW_FONT_FAMILY_MAP: Record<number, string> = {
   1: "20px Virgil, Segoe Print, Comic Sans MS, cursive",
   2: "20px Helvetica, Arial, sans-serif",
@@ -120,6 +139,14 @@ export function normalizeCanvasElements(
   elements: CanvasElement[],
 ): { elements: CanvasElement[]; changed: boolean } {
   let changed = false;
+  for (let index = 0; index < elements.length; index += 1) {
+    const current = elements[index]!;
+    const normalized = normalizeCanvasElement(current);
+    if (JSON.stringify(normalized) !== JSON.stringify(current)) {
+      elements[index] = normalized;
+      changed = true;
+    }
+  }
   if (validateBindings(elements)) changed = true;
   if (recenterBoundTextElements(elements)) changed = true;
   return { elements, changed };

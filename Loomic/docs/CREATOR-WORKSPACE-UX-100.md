@@ -1,0 +1,140 @@
+# Creator Workspace UX - 100 Acceptance Items
+
+Status: `[x]` implemented and covered by a focused check; `[~]` present or locally improved but needs browser/manual verification; `[ ]` not implemented in this pass.
+
+## Navigation and workspace shell
+
+- [~] 01. Shared page titles and primary actions use a consistent hierarchy.
+- [ ] 02. Nested pages expose a useful breadcrumb/back path.
+- [x] 03. Active routes expose `aria-current="page"`.
+- [~] 04. Primary navigation remains distinct from secondary destinations.
+- [~] 05. Collapsed navigation keeps accessible labels and hover titles.
+- [~] 06. Route changes preserve the expanded active navigation group.
+- [~] 07. Mobile navigation respects safe-area insets and has large targets.
+- [x] 08. Mobile More menu closes on outside pointer, Escape, and route change.
+- [~] 09. Workspace pages expose a skip-to-main link.
+- [x] 10. Credit load failure has an explicit retry action.
+
+## Home and project entry
+
+- [~] 11. Home keeps a direct creation entry visible.
+- [~] 12. Prompt attachments expose upload, failure, and retry states.
+- [~] 13. Prompt submission exposes the active model mode.
+- [~] 14. Generation surfaces show available cost estimates before submission.
+- [x] 15. Recent-project load failure is distinct from an empty list and retryable.
+- [x] 16. Project search is labeled and has a clear action.
+- [~] 17. Project actions remain keyboard reachable and destructive actions confirm.
+- [x] 18. Creation brief and type are temporarily saved in the current tab session.
+- [~] 19. First-run guidance is available without blocking repeated work.
+- [~] 20. Asset-to-canvas editing opens the selected asset in the editor.
+
+## Canvas editing
+
+- [~] 21. Empty canvas offers useful first actions.
+- [~] 22. Canvas tools expose active and focus-visible states.
+- [~] 23. Selection count and available actions are discoverable.
+- [~] 24. Zoom and selection navigation remain reachable.
+- [~] 25. Layer and canvas selection stay synchronized.
+- [~] 26. Timeline open/close behavior is predictable.
+- [x] 27. Video preview width and height are constrained to the viewport.
+- [~] 28. Closing the video preview restores focus to the prior canvas control.
+- [~] 29. Video controls remain usable on narrow screens and keyboard.
+- [~] 30. Canvas save and sync states are visible and recoverable.
+
+## AI chat and messages
+
+- [x] 31. Duplicate image references in message history collapse by asset ID or URL; request payloads remain unchanged.
+- [x] 32. Chat media cards remain within the message column instead of stretching the panel.
+- [x] 33. Duplicate media tool blocks collapse when they reference the same Job ID.
+- [x] 34. The sidebar progress item no longer hides or duplicates unrelated Job cards.
+- [x] 35. Expired, canceled, completed, and terminal-failure approvals become compact non-actionable status rows.
+- [~] 36. Stream connection and generation states announce progress.
+- [x] 37. Auto-follow stops when the reader scrolls up and offers a return-to-latest action.
+- [~] 38. Retry retains the prior prompt and reference context.
+- [~] 39. Attachments can be inspected and removed before sending.
+- [x] 40. Synchronous locks prevent rapid duplicate send and approval requests.
+
+## Image and video generation
+
+- [~] 41. Image and video modes are distinguishable at their entry points.
+- [~] 42. Incompatible capabilities are rejected before work is submitted.
+- [~] 43. Automatic, manual, unavailable, and fallback model states are visible.
+- [~] 44. Approval details show the selected model, parameters, references, and cost.
+- [x] 45. The same approval ID renders one actionable approval card.
+- [x] 46. Confirm and cancel actions are guarded against rapid duplicate clicks.
+- [x] 47. Duplicate status blocks for the same Job render once.
+- [~] 48. Queue, running, success, failure, and unknown outcomes have distinct copy.
+- [~] 49. Retry remains disabled until the Job is confirmed retry-safe.
+- [~] 50. Job timeline and recovery actions are visible in the tool detail view.
+
+## Asset management
+
+- [~] 51. Type filters, search, and pagination expose the current state.
+- [x] 52. Asset search can be cleared without resetting unrelated filters.
+- [~] 53. Batch action bar reports selection count and page scope.
+- [~] 54. Preview tiles have stable dimensions and loading placeholders.
+- [~] 55. Failed previews have a retry action.
+- [x] 56. Video assets use video MIME validation and native preview controls.
+- [~] 57. Bottom fade stays out of download, edit, and share controls.
+- [x] 58. Asset cards show active retention or recovery-window time remaining.
+- [x] 59. Soft-deleted assets have per-item and batch restore actions.
+- [x] 60. Delete confirmation accurately explains the seven-day recovery window.
+
+## Feed workflow
+
+- [x] 61. Six-step workflow has a compact mobile navigation and desktop stepper.
+- [~] 62. `packageId` and `step` restore from the URL.
+- [~] 63. Hotspot search, sort, pagination, and loading states remain visible.
+- [~] 64. Custom topic creation works without selecting a hotspot.
+- [~] 65. Review and automatic-draft modes stay separate.
+- [x] 66. Automation status announces its current stage.
+- [~] 67. Retry targets the failed automation stage and preserves edited fields.
+- [~] 68. Platform variants show draft availability per selected platform.
+- [~] 69. Dirty structure state blocks leaving until the user chooses.
+- [~] 70. Scheduling and publishing keep explicit human confirmation.
+
+## Creation, storyboard, and libraries
+
+- [~] 71. Creation entry emphasizes the next useful action.
+- [x] 72. Project-type choices expose selected state to assistive technology.
+- [x] 73. Creation brief has a character limit and session draft recovery.
+- [~] 74. Storyboard without a project offers a direct creation/recovery action.
+- [~] 75. Current storyboard shot is clearly indicated.
+- [~] 76. Storyboard save and generation failures have recovery paths.
+- [~] 77. Character, scene, and prop reference assets can be reused.
+- [~] 78. Storyboard generation exposes model and estimated cost.
+- [~] 79. Brand-kit color, font, and logo selection follows shared control states.
+- [~] 80. Prompt, gallery, texture, and skill libraries expose search and empty states.
+
+## Settings, collaboration, and account
+
+- [x] 81. Profile and model-setting feedback uses status/error announcements.
+- [~] 82. Agent chat model and media-generation model settings are distinct.
+- [~] 83. Paid-generation auto-approval states its billing effect and saves with feedback.
+- [~] 84. Publishing account connection and revoke states are visible.
+- [~] 85. Billing, top-up, and credit usage share clear navigation.
+- [~] 86. Usage history has loading, empty, and error states.
+- [~] 87. Team invite button is locked during submission; list/search failures are recoverable.
+- [~] 88. Skill install, enablement, and version states are distinguishable.
+- [~] 89. Authentication and permission failures expose a recovery action.
+- [x] 90. Settings tabs support arrow/Home/End navigation and tab-panel semantics.
+
+## Responsive, accessibility, and resilience
+
+- [~] 91. The signed-in workspace shell and More menu pass at 320, 390, and 768 CSS pixels in Chromium and iPhone Safari; asset, Feed, and canvas detail layouts still need per-page browser checks.
+- [ ] 92. Verify critical workspaces at 200% browser zoom.
+- [~] 93. Primary workspace controls are keyboard reachable; complete end-to-end keyboard audit remains.
+- [~] 94. Dialogs use the shared accessible primitive; video preview restores focus.
+- [ ] 95. Verify text/control/error contrast in rendered light and dark themes.
+- [x] 96. CSS and Framer Motion honor `prefers-reduced-motion`.
+- [~] 97. Primary lists have loading skeletons and explicit empty states.
+- [~] 98. Network failures preserve user input and offer targeted retry where implemented.
+- [x] 99. Session/message and Feed polling ignore or stop stale asynchronous updates.
+- [~] 100. Key progress and outcome changes use status/alert semantics; full screen-reader pass remains.
+
+## Verification
+
+- `pnpm --filter @helstera/web typecheck`
+- `pnpm --filter @helstera/web test`
+- `pnpm --filter @helstera/web build`
+- Browser checks at desktop/mobile, reduced motion, keyboard-only, and 200% zoom are still required for unchecked visual/accessibility items.

@@ -1,16 +1,32 @@
 import { tool } from "langchain";
+import type { Pool } from "pg";
 import { z } from "zod";
 
 const brandKitSchema = z.object({});
 
 export function createBrandKitTool(
-  deps: { createUserClient: (accessToken: string) => any },
+  deps: { createUserClient?: (accessToken: string) => any; localDb?: Pool },
   brandKitId: string,
 ) {
   return tool(
     async (_input, config) => {
+      if (deps.localDb) {
+        const userId = (config as any)?.configurable?.user_id as string | undefined;
+        if (!userId) return JSON.stringify({ error: "No user available" });
+        const { rows: kits } = await deps.localDb.query(
+          "select id, name, guidance_text from brand_kits where id = $1 and user_id = $2",
+          [brandKitId, userId],
+        );
+        if (!kits[0]) return JSON.stringify({ error: "Brand kit not found" });
+        const { rows: assets } = await deps.localDb.query(
+          "select asset_type, display_name, role, text_content, file_url, metadata from brand_kit_assets where kit_id = $1 order by sort_order, created_at",
+          [brandKitId],
+        );
+        return formatBrandKit(kits[0], assets);
+      }
+
       const accessToken = (config as any)?.configurable?.access_token;
-      if (!accessToken) {
+      if (!accessToken || !deps.createUserClient) {
         return JSON.stringify({ error: "No access token available" });
       }
 
@@ -57,6 +73,18 @@ export function createBrandKitTool(
         }
       }
 
+      return formatBrandKit(kit, safeAssets);
+    },
+    {
+      name: "get_brand_kit",
+      description:
+        "查询当前项目绑定的品牌套件信息，包含设计指南、颜色、字体、Logo等品牌资产。当用户提到品牌、风格、设计规范时使用此工具。",
+      schema: brandKitSchema,
+    },
+  );
+}
+
+function formatBrandKit(kit: any, safeAssets: any[]) {
       const result = {
         kit_name: kit.name,
         design_guidance: kit.guidance_text ?? "",
@@ -91,12 +119,4 @@ export function createBrandKitTool(
       };
 
       return JSON.stringify(result, null, 2);
-    },
-    {
-      name: "get_brand_kit",
-      description:
-        "查询当前项目绑定的品牌套件信息，包含设计指南、颜色、字体、Logo等品牌资产。当用户提到品牌、风格、设计规范时使用此工具。",
-      schema: brandKitSchema,
-    },
-  );
 }

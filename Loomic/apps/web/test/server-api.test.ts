@@ -7,6 +7,7 @@ import {
   fetchProjects,
   fetchVideoModels,
   fetchViewer,
+  videoPollDelayMs,
 } from "../src/lib/server-api";
 
 const mockFetch = vi.fn();
@@ -14,6 +15,11 @@ globalThis.fetch = mockFetch;
 const mockToken = "token_" + "abc";
 
 describe("authenticated server API", () => {
+  it("uses bounded backoff for long video polling", () => {
+    expect(videoPollDelayMs(0)).toBe(2_000);
+    expect(videoPollDelayMs(3)).toBe(8_000);
+    expect(videoPollDelayMs(99)).toBe(15_000);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("NEXT_PUBLIC_SERVER_BASE_URL", "http://localhost:3001");
@@ -207,7 +213,7 @@ describe("authenticated server API", () => {
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:3001/api/video-models",
-      { credentials: "include" },
+      expect.objectContaining({ credentials: "include", signal: expect.any(AbortSignal) }),
     );
     expect(result.models[0]).toMatchObject({
       id: "metaso/minimax-h3",

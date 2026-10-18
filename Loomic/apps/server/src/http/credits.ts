@@ -3,18 +3,17 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 
 import {
-  TOPUP_PACKAGES,
   applicationErrorResponseSchema,
   unauthenticatedErrorResponseSchema,
 } from "@helstera/shared";
 
-import {
-  CreditServiceError,
-  type CreditService,
-} from "../features/credits/credit-service.js";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
-import type { RequestAuthenticator } from "../supabase/user.js";
+import {
+  type CreditService,
+  CreditServiceError,
+} from "../features/credits/credit-service.js";
 import type { PaymentService } from "../features/payments/payment-service.js";
+import type { RequestAuthenticator } from "../auth/types.js";
 
 const packageIdSchema = z.object({ packageId: z.string() });
 const topupCheckoutSchema = z.object({ packageId: z.string() });
@@ -51,7 +50,7 @@ export async function registerCreditRoutes(
 
   // GET /api/credits/packages — list top-up packages
   app.get("/api/credits/packages", async (_request, reply) => {
-    return reply.code(200).send({ packages: TOPUP_PACKAGES });
+    return reply.code(200).send({ packages: options.creditService.listTopupPackages() });
   });
 
   // GET /api/credits/transactions — recent transactions
@@ -62,7 +61,9 @@ export async function registerCreditRoutes(
 
       const viewer = await options.viewerService.ensureViewer(user);
       const query = request.query as { limit?: string };
-      const limit = query.limit ? Math.min(parseInt(query.limit, 10), 100) : 20;
+      const limit = query.limit
+        ? Math.min(Number.parseInt(query.limit, 10), 100)
+        : 20;
 
       const transactions = await options.creditService.getTransactions(
         viewer.workspace.id,
@@ -172,8 +173,10 @@ export async function registerCreditRoutes(
         const user = await options.auth.authenticate(request);
         if (!user) return sendUnauthenticated(reply);
 
+        const viewer = await options.viewerService.ensureViewer(user);
         const order = await options.creditService.getTopupOrder(
           request.params.outTradeNo,
+          viewer.workspace.id,
         );
         if (!order) {
           return reply.code(404).send({ error: "Order not found" });

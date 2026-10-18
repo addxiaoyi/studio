@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Zap, ChevronRight, Plus } from "lucide-react";
+import { Zap, ChevronRight, Plus, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
 import { useAuth } from "@/lib/auth-context";
@@ -11,7 +11,7 @@ import { useCredits } from "@/hooks/use-credits";
 
 export function CreditHeaderButton() {
   const { user } = useAuth();
-  const { balance, totalToppedUp, loading } = useCredits();
+  const { balance, totalToppedUp, loading, error, refresh } = useCredits();
 
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLDivElement>(null);
@@ -68,6 +68,14 @@ export function CreditHeaderButton() {
     );
   }
 
+  if (error) {
+    return (
+      <button type="button" onClick={() => void refresh()} aria-label="积分加载失败，点击重试" className="flex h-8 items-center gap-2 rounded-md border border-destructive/30 px-2 text-xs text-destructive hover:bg-destructive/5">
+        <RefreshCw className="size-3.5" />重试积分
+      </button>
+    );
+  }
+
   return (
     <>
       <div ref={btnRef} className="flex items-center gap-1.5">
@@ -82,6 +90,9 @@ export function CreditHeaderButton() {
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
+          aria-label={`积分余额 ${balance}`}
+          aria-haspopup="dialog"
+          aria-expanded={open}
           className="flex h-8 items-center gap-1.5 rounded-full glass-soft border border-border/40 px-3 text-xs font-medium tabular-nums text-foreground transition-all duration-300 hover:glass"
         >
           <Zap className="h-3 w-3 text-accent fill-accent" strokeWidth={1.5} />
@@ -107,6 +118,8 @@ export function CreditHeaderButton() {
           <AnimatePresence>
             <div ref={popoverRef} style={popoverStyle}>
               <motion.div
+                role="dialog"
+                aria-label="积分余额与充值"
                 initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}

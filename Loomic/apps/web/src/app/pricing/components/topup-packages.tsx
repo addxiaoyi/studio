@@ -85,17 +85,11 @@ function PackageCard({
           {pkg.credits.toLocaleString()}
         </span>
         <span className="text-sm text-muted-foreground font-light">积分</span>
-        {pkg.bonusCredits && (
-          <span className="inline-flex items-center gap-0.5 rounded-full glass-soft border border-accent/30 px-2 py-0.5 text-[10px] font-medium text-foreground">
-            <Plus className="size-2.5" strokeWidth={2} />
-            {pkg.bonusCredits.toLocaleString()} 加赠
-          </span>
-        )}
       </div>
 
       {/* Total credits display */}
       <p className="mt-2 text-xs text-muted-foreground/80 font-light">
-        合计到账 {(pkg.credits + (pkg.bonusCredits ?? 0)).toLocaleString()} 积分 · 永久有效
+        到账 ¥{(pkg.priceCnyFen / 100).toLocaleString()} 余额 · 永久有效
       </p>
 
       {/* CTA */}

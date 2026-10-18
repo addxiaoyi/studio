@@ -35,6 +35,8 @@ export const skillListItemSchema = z.object({
   installed: z.boolean().optional(),
   enabled: z.boolean().optional(),
   installedAt: z.string().datetime({ offset: true }).optional(),
+  lockedVersion: z.string().nullable().optional(),
+  lockedAt: z.string().datetime({ offset: true }).nullable().optional(),
 });
 export type SkillListItem = z.infer<typeof skillListItemSchema>;
 
@@ -57,6 +59,12 @@ export const skillDetailSchema = skillListItemSchema.extend({
   sourceUrl: z.string().nullable().optional(),
   packageName: z.string().nullable().optional(),
   files: z.array(skillFileEntrySchema).optional(),
+  securityAudit: z.object({
+    risk: z.enum(["low", "medium", "high"]),
+    scripts: z.number(),
+    capabilities: z.array(z.string()),
+    findings: z.array(z.string()),
+  }).optional(),
 });
 export type SkillDetail = z.infer<typeof skillDetailSchema>;
 

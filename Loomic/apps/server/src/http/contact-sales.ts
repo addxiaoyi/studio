@@ -6,7 +6,7 @@ import {
   unauthenticatedErrorResponseSchema,
 } from "@helstera/shared";
 
-import type { AdminSupabaseClient } from "../supabase/admin.js";
+import type { DataAdminClient } from "../auth/types.js";
 
 const contactInquirySchema = z.object({
   name: z.string().min(1, "请填写姓名").max(100),
@@ -24,7 +24,7 @@ export type ContactInquiryInput = z.infer<typeof contactInquirySchema>;
 export async function registerContactSalesRoutes(
   app: FastifyInstance,
   options: {
-    getAdminClient: () => AdminSupabaseClient;
+    getAdminClient: () => DataAdminClient;
   },
 ) {
   // POST /api/contact-sales — submit an enterprise sales inquiry

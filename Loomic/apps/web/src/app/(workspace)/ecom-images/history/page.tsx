@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
+import { getServerBaseUrl } from "@/lib/env";
 import { cn } from "@/lib/utils";
 import { History as HistoryIcon, ArrowRight, ImageIcon, Sparkles, X, Download, RefreshCw } from "lucide-react";
 
@@ -75,7 +76,7 @@ export default function EcomHistoryPage() {
 
       try {
         const res = await fetch(
-          `${process.env.NEXT_PUBLIC_SERVER_BASE_URL ?? "http://localhost:3001"}/api/ecom/jobs`,
+          `${getServerBaseUrl()}/api/ecom/jobs`,
           {
             headers: { Authorization: `Bearer ${session.access_token}` },
             credentials: "include",
@@ -311,7 +312,7 @@ function JobDetailModal({
     const fetchJob = async () => {
       try {
         const res = await fetch(
-          `${process.env.NEXT_PUBLIC_SERVER_BASE_URL ?? "http://localhost:3001"}/api/ecom/jobs/${jobId}`,
+          `${getServerBaseUrl()}/api/ecom/jobs/${jobId}`,
           {
             headers: { Authorization: `Bearer ${session.access_token}` },
             cache: "no-store",

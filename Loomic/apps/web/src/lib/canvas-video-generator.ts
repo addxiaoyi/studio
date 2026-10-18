@@ -67,7 +67,7 @@ export function createVideoGeneratorElement(
     type: "video-generator",
     status: "idle",
     prompt: "",
-    model: options?.model ?? "google-official/veo-3.1-generate-preview",
+    model: options?.model ?? "minimax-h3",
     aspectRatio,
     duration: options?.duration ?? 5,
     resolution: options?.resolution ?? "720p",

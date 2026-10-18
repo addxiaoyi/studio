@@ -31,7 +31,8 @@ vi.mock("../src/hooks/use-credits", () => ({
   }),
 }));
 
-import EcomImagesPage, { SCENES } from "../src/app/(workspace)/ecom-images/page";
+import EcomImagesPage from "../src/app/(workspace)/ecom-images/page";
+import { SCENES } from "../src/app/(workspace)/ecom-images/constants";
 
 beforeEach(() => {
   mockFetch.mockReset();
@@ -59,7 +60,7 @@ describe("Prompt preview & regenerate", () => {
     // Select the first scene
     const firstSceneButton = screen
       .getAllByRole("button")
-      .filter((btn) => btn.className.includes("rounded-xl"))[0];
+      .find((btn) => btn.dataset.testid === "scene-card");
     expect(firstSceneButton).toBeDefined();
     await user.click(firstSceneButton!);
 
@@ -77,7 +78,7 @@ describe("Prompt preview & regenerate", () => {
     await user.type(screen.getByPlaceholderText(/美的空气净化器/), "智能音箱");
     const sceneBtn = screen
       .getAllByRole("button")
-      .filter((btn) => btn.className.includes("rounded-xl"))[0]!;
+      .find((btn) => btn.dataset.testid === "scene-card")!;
     await user.click(sceneBtn);
 
     // Click preview toggle
@@ -110,7 +111,7 @@ describe("Prompt preview & regenerate", () => {
 
     // Selected count shows 2 scenes
     await waitFor(() => {
-      expect(screen.getByText(/已选 2/)).toBeInTheDocument();
+      expect(screen.getByText("已选 2 个场景")).toBeInTheDocument();
     });
 
     // Prefill key should be consumed

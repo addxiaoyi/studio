@@ -4,32 +4,32 @@ import { useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Zap, Plus, Loader2, ChevronRight } from "lucide-react";
+import {
+  Zap,
+  Plus,
+  Loader2,
+  ChevronRight,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import { t, useLocale } from "@/lib/i18n";
 
 import { useAuth } from "@/lib/auth-context";
 import { useCredits } from "@/hooks/use-credits";
-import { createEpayTopup, fetchTopupPackages, getTopupOrder, isEpayEnabled } from "@/lib/credits-api";
-import { YeePayCheckoutDialog } from "@/components/yeepay-checkout-dialog";
-import { CreditUsageHistory } from "@/components/credits/credit-usage-history";
+import {
+  createEpayTopup,
+  createEpayCustomTopup,
+  fetchTopupPackages,
+  getTopupOrder,
+  isEpayEnabled,
+} from "@/lib/credits-api";
 import type { TopupPackage } from "@helstera/shared";
 
-function detectRegion(): "international" | "china" {
-  if (typeof window === "undefined") return "international";
-  const lang = window.navigator?.language ?? "";
-  if (lang.toLowerCase().startsWith("zh")) return "china";
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (tz.toLowerCase().includes("shanghai") || tz === "Asia/Chongqing") {
-      return "china";
-    }
-  } catch {
-    // ignore
-  }
-  return "international";
-}
+type EpayType = "alipay" | "wxpay";
 
-function formatPrice(pkg: TopupPackage, region: "international" | "china"): string {
+function formatPrice(
+  pkg: TopupPackage,
+  region: "international" | "china",
+): string {
   if (region === "china") {
     return `¥${(pkg.priceCnyFen / 100).toLocaleString()}`;
   }
@@ -37,21 +37,17 @@ function formatPrice(pkg: TopupPackage, region: "international" | "china"): stri
 }
 
 export function BillingSection() {
+  const copy = t(useLocale()).billing;
   const { session } = useAuth();
   const searchParams = useSearchParams();
   const { balance, totalToppedUp, totalSpent, refresh } = useCredits();
-  const [region, setRegion] = useState<"international" | "china">("international");
+  const region: "international" | "china" = "china";
   const [packages, setPackages] = useState<TopupPackage[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(true);
-  const [activePackage, setActivePackage] = useState<TopupPackage | null>(null);
-  const [yeepayOpen, setYeepayOpen] = useState(false);
   const [loadingPackageId, setLoadingPackageId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-
-  // Detect region and load packages
-  useEffect(() => {
-    setRegion(detectRegion());
-  }, []);
+  const [customAmount, setCustomAmount] = useState("100");
+  const [payType, setPayType] = useState<EpayType>("alipay");
 
   // Load packages
   const loadPackages = useCallback(async () => {
@@ -80,16 +76,16 @@ export function BillingSection() {
           const { order } = await getTopupOrder(token, outTradeNo);
           if (order.status === "paid") {
             await refresh();
-            setNotice("充值已到账。");
+            setNotice(copy.paid);
             return;
           }
           if (["failed", "expired", "refunded"].includes(order.status)) {
-            setNotice("充值订单未完成，请重新选择充值包。");
+            setNotice(copy.incomplete);
             return;
           }
         } catch (error) {
           console.error("[billing] Failed to refresh top-up order:", error);
-          setNotice("订单状态暂时无法确认，请稍后刷新页面。");
+          setNotice(copy.unknown);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -110,44 +106,91 @@ export function BillingSection() {
       }
 
       setLoadingPackageId(pkg.id);
-      setActivePackage(pkg);
       setNotice(null);
 
       try {
-        if (region === "china") {
-          if (isEpayEnabled()) {
-            const { checkoutUrl } = await createEpayTopup(token, pkg.id);
-            window.location.assign(checkoutUrl);
-          } else {
-            setYeepayOpen(true);
-          }
-        } else {
-          setNotice("国际支付渠道正在接入中，请切换为 CNY 使用易支付充值。");
-          setActivePackage(null);
+        if (!isEpayEnabled()) {
+          throw new Error("支付网关尚未配置，请联系管理员。");
         }
+        const { checkoutUrl } = await createEpayTopup(token, pkg.id, payType);
+        window.location.assign(checkoutUrl);
       } catch (err) {
-        setNotice(
-          err instanceof Error ? err.message : "创建订单失败，请重试。",
-        );
+        setNotice(err instanceof Error ? err.message : copy.createFailed);
       } finally {
         setLoadingPackageId(null);
       }
     },
-    [session?.access_token, region],
+    [copy, payType, session?.access_token],
   );
-
-  const handleYeePaySuccess = useCallback(() => {
-    refresh();
-  }, [refresh]);
+  const handleCustomTopup = useCallback(async () => {
+    const token = session?.access_token;
+    const amount = Math.round(Number(customAmount) * 100);
+    if (!token) {
+      window.location.href = "/login?redirect=/settings?tab=billing";
+      return;
+    }
+    if (!Number.isInteger(amount) || amount < 1000 || amount > 5000000) {
+      setNotice(copy.invalidAmount);
+      return;
+    }
+    try {
+      const { checkoutUrl } = await createEpayCustomTopup(token, amount, payType);
+      window.location.assign(checkoutUrl);
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "创建订单失败，请重试。",
+      );
+    }
+  }, [copy, customAmount, payType, session?.access_token]);
 
   return (
     <div className="space-y-10">
       {/* Header */}
       <div>
-        <h2 className="display-sm text-foreground">积分与充值</h2>
-        <p className="mt-3 body-relaxed max-w-lg">
-          一次性购买积分，永久有效。所有 AI 模型按需使用，按使用量消耗。
-        </p>
+        <h2 className="display-sm text-foreground">{copy.title}</h2>
+        <p className="mt-3 body-relaxed max-w-lg">{copy.description}</p>
+      </div>
+
+      <div className="rounded-2xl glass-soft border border-border/40 p-5">
+        <h3 className="font-medium text-foreground">{copy.custom}</h3>
+        <p className="mt-1 text-sm text-muted-foreground">{copy.customHint}</p>
+        <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="支付方式">
+          {([['alipay', '支付宝'], ['wxpay', '微信支付']] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setPayType(value)}
+              aria-pressed={payType === value}
+              className={cn(
+                "rounded-lg border px-3 py-2 text-sm transition",
+                payType === value
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border/60 text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 flex max-w-sm gap-2">
+          <input
+            value={customAmount}
+            onChange={(e) => setCustomAmount(e.target.value)}
+            type="number"
+            min="10"
+            max="50000"
+            step="1"
+            className="h-10 flex-1 rounded-lg border border-border bg-background px-3"
+            aria-label="充值金额（元）"
+          />
+          <button
+            type="button"
+            onClick={handleCustomTopup}
+            className="rounded-lg bg-foreground px-4 text-sm text-background"
+          >
+            充值
+          </button>
+        </div>
       </div>
 
       {/* Balance hero */}
@@ -158,7 +201,9 @@ export function BillingSection() {
             <p className="mt-3 text-5xl font-extralight tabular-nums tracking-tighter text-foreground">
               {balance.toLocaleString()}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground font-light">可用积分</p>
+            <p className="mt-1 text-sm text-muted-foreground font-light">
+              可用余额（元）
+            </p>
           </div>
           <div className="rounded-2xl glass-soft border border-border/40 p-3">
             <Zap
@@ -185,8 +230,8 @@ export function BillingSection() {
         </div>
       </div>
 
-      {/* Top-up packages */}
-      <div>
+      {/* Fixed packages remain available as quick amount shortcuts. */}
+      <div className="hidden">
         <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h3 className="display-sm text-foreground">选择充值包</h3>
@@ -201,10 +246,9 @@ export function BillingSection() {
           <div className="self-start inline-flex items-center gap-1 rounded-full glass-soft border border-border/40 p-1 text-xs">
             <button
               type="button"
-              onClick={() => setRegion("international")}
               className={cn(
                 "rounded-full px-3 py-1.5 transition-all duration-200",
-                region === "international"
+                false
                   ? "bg-foreground text-background font-medium"
                   : "text-muted-foreground hover:text-foreground",
               )}
@@ -213,10 +257,9 @@ export function BillingSection() {
             </button>
             <button
               type="button"
-              onClick={() => setRegion("china")}
               className={cn(
                 "rounded-full px-3 py-1.5 transition-all duration-200",
-                region === "china"
+                true
                   ? "bg-foreground text-background font-medium"
                   : "text-muted-foreground hover:text-foreground",
               )}
@@ -255,33 +298,14 @@ export function BillingSection() {
                 region={region}
                 loading={loadingPackageId === pkg.id}
                 onTopup={handleTopup}
+                copy={copy}
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* Transaction history */}
-      <div>
-        <h3 className="display-sm text-foreground mb-5">积分流水</h3>
-        <CreditUsageHistory />
-      </div>
 
-      {/* YeePay dialog */}
-      {session?.access_token && activePackage && (
-        <YeePayCheckoutDialog
-          open={yeepayOpen}
-          onOpenChange={(open) => {
-            setYeepayOpen(open);
-            if (!open) setActivePackage(null);
-          }}
-          packageId={activePackage.id}
-          packageLabel={activePackage.name}
-          amountCnyFen={activePackage.priceCnyFen}
-          accessToken={session.access_token}
-          onSuccess={handleYeePaySuccess}
-        />
-      )}
     </div>
   );
 }
@@ -291,11 +315,13 @@ function PackageCard({
   region,
   loading,
   onTopup,
+  copy,
 }: {
   pkg: TopupPackage;
   region: "international" | "china";
   loading: boolean;
   onTopup: (pkg: TopupPackage) => void;
+  copy: ReturnType<typeof t>["billing"];
 }) {
   const isHighlighted = pkg.highlighted;
   return (
@@ -312,7 +338,7 @@ function PackageCard({
       {isHighlighted && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2">
           <span className="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-medium tracking-wide bg-foreground text-background">
-            最划算
+            {copy.bestValue}
           </span>
         </div>
       )}
@@ -331,16 +357,13 @@ function PackageCard({
         <span className="text-2xl font-light tabular-nums text-foreground tracking-tight">
           {pkg.credits.toLocaleString()}
         </span>
-        <span className="text-sm text-muted-foreground font-light">积分</span>
-        {pkg.bonusCredits && (
-          <span className="inline-flex items-center gap-0.5 rounded-full glass-soft border border-accent/30 px-2 py-0.5 text-[10px] font-medium text-foreground">
-            +{pkg.bonusCredits.toLocaleString()} 加赠
-          </span>
-        )}
+        <span className="text-sm text-muted-foreground font-light">
+          {copy.credits}
+        </span>
       </div>
 
       <p className="mt-2 text-xs text-muted-foreground/80 font-light">
-        合计 {(pkg.credits + (pkg.bonusCredits ?? 0)).toLocaleString()} 积分 · 永久有效
+        {copy.total} ¥{(pkg.priceCnyFen / 100).toLocaleString()} 余额 · {copy.permanent}
       </p>
 
       <button
@@ -357,12 +380,12 @@ function PackageCard({
         {loading ? (
           <>
             <Loader2 className="size-3.5 animate-spin" strokeWidth={1.5} />
-            处理中...
+            {copy.processing}
           </>
         ) : (
           <>
             <Plus className="size-3.5" strokeWidth={1.5} />
-            立即充值
+            {copy.buy}
           </>
         )}
       </button>

@@ -31,7 +31,8 @@ vi.mock("../src/hooks/use-credits", () => ({
   }),
 }));
 
-import EcomImagesPage, { SCENES, RATIOS, CATEGORIES } from "../src/app/(workspace)/ecom-images/page";
+import EcomImagesPage from "../src/app/(workspace)/ecom-images/page";
+import { SCENES, RATIOS, CATEGORIES } from "../src/app/(workspace)/ecom-images/constants";
 
 // ---------------------------------------------------------------------------
 // Constants tests
@@ -112,9 +113,7 @@ describe("EcomImagesPage renders", () => {
   it("renders 25 scene cards (buttons)", () => {
     setup();
     // Every scene button is a <button> with class containing "rounded-xl" inside the scene selector
-    const sceneButtons = screen.getAllByRole("button").filter((btn) =>
-      btn.className.includes("rounded-xl"),
-    );
+    const sceneButtons = screen.getAllByTestId("scene-card");
     expect(sceneButtons).toHaveLength(25);
   });
 
@@ -122,6 +121,13 @@ describe("EcomImagesPage renders", () => {
     setup();
     const ratioButtons = screen.getAllByRole("button", { name: /^\d+:\d+$/ });
     expect(ratioButtons).toHaveLength(8);
+  });
+
+  it("mounts the sticky generation bar directly under document.body", async () => {
+    setup();
+    const actionBar = await screen.findByTestId("generation-action-bar");
+    expect(actionBar.parentElement).toBe(document.body);
+    expect(actionBar).toHaveClass("fixed", "inset-x-0", "bottom-0");
   });
 });
 
@@ -131,31 +137,34 @@ describe("EcomImagesPage interactions", () => {
   it("selecting a scene adds it to selectedScenes", async () => {
     const { user } = setup();
 
-    // The first "产品" scene button — click it
-    const productButtons = screen.getAllByRole("button").filter(
-      (btn) => btn.className.includes("rounded-xl"),
-    );
-    await user.click(productButtons[0]!);
+    const selectedScene = screen.getAllByTestId("scene-card").find((button) => button.textContent?.includes("Infographic"));
+    expect(selectedScene).toBeDefined();
+    await user.click(selectedScene!);
+    expect(screen.queryByText(/已选 \d+/)).not.toBeInTheDocument();
 
-    // Selected count badge should appear
-    expect(screen.getByText(/已选 1/)).toBeInTheDocument();
+    await user.click(selectedScene!);
+    expect(screen.getAllByText(/已选 1/).length).toBeGreaterThan(0);
+    expect(selectedScene).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("updates the total image count from the quantity selector", async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole("button", { name: "3" }));
+
+    expect(screen.getByText("共 3 张")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成 3 张图片" })).toBeInTheDocument();
+    expect(screen.getAllByText(/30 积分/)).not.toHaveLength(0);
   });
 
   it("clicking a selected scene removes it", async () => {
     const { user } = setup();
 
-    const productButtons = screen.getAllByRole("button").filter(
-      (btn) => btn.className.includes("rounded-xl"),
-    );
+    const selectedScene = screen.getAllByTestId("scene-card").find((button) => button.textContent?.includes("Infographic"));
+    expect(selectedScene).toBeDefined();
 
-    // Select it
-    await user.click(productButtons[0]!);
-    expect(screen.getByText(/已选 1/)).toBeInTheDocument();
-
-    // Deselect it
-    await user.click(productButtons[0]!);
+    await user.click(selectedScene!);
     // The "已选" badge should disappear
-    expect(screen.queryByText(/已选/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/已选 \d+/)).not.toBeInTheDocument();
   });
 
   it("product name input updates state", async () => {
@@ -174,7 +183,7 @@ describe("EcomImagesPage interactions", () => {
 
   it("ratio buttons update state on click", async () => {
     const { user } = setup();
-    // Default ratio is 1:1 (first button)
+    // Select a different output ratio
     const ratio3_2 = screen.getByRole("button", { name: "3:2" });
     await user.click(ratio3_2);
     expect(ratio3_2).toHaveClass("bg-foreground");
@@ -188,7 +197,9 @@ describe("EcomImagesPage interactions", () => {
 
   it("generate button is disabled when no scenes selected", async () => {
     const { user } = setup();
-    // Enter a product name but no scenes
+    // Clear the default scene, then enter a product name.
+    const selectedScene = screen.getAllByTestId("scene-card").find((button) => button.textContent?.includes("Infographic"));
+    await user.click(selectedScene!);
     const input = screen.getByRole("textbox", { name: /商品名称/ });
     await user.type(input, "空气净化器");
     const generateBtn = screen.getByRole("button", { name: /生成 \d+ 张图片/ });
@@ -199,11 +210,6 @@ describe("EcomImagesPage interactions", () => {
     const { user } = setup();
     const input = screen.getByRole("textbox", { name: /商品名称/ });
     await user.type(input, "空气净化器");
-
-    const sceneButtons = screen.getAllByRole("button").filter(
-      (btn) => btn.className.includes("rounded-xl"),
-    );
-    await user.click(sceneButtons[0]!);
 
     const generateBtn = screen.getByRole("button", { name: /生成 \d+ 张图片/ });
     expect(generateBtn).toBeEnabled();
@@ -221,9 +227,7 @@ describe("EcomImagesPage interactions", () => {
     await user.type(searchInput, "hero");
 
     // Scene buttons should still be present but fewer
-    const visibleButtons = screen.getAllByRole("button").filter(
-      (btn) => btn.className.includes("rounded-xl"),
-    );
+    const visibleButtons = screen.getAllByTestId("scene-card");
     // Only "Hero Image" matches "hero"
     expect(visibleButtons).toHaveLength(1);
   });

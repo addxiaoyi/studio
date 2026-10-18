@@ -5,40 +5,49 @@ import { getServerBaseUrl, loadWebEnv } from "../src/lib/env";
 describe("@helstera/web env helpers", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("loads the browser-safe env values from process env", () => {
     vi.stubEnv("NEXT_PUBLIC_SERVER_BASE_URL", "http://localhost:4010");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", " https://example.supabase.co ");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", " anon-key ");
 
     const env = loadWebEnv();
 
     expect(env).toEqual({
       serverBaseUrl: "http://localhost:4010",
-      supabaseUrl: "https://example.supabase.co",
-      supabaseAnonKey: "anon-key",
     });
   });
 
   it("allows overrides", () => {
     vi.stubEnv("NEXT_PUBLIC_SERVER_BASE_URL", "http://localhost:4010");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-key");
 
     const env = loadWebEnv({ serverBaseUrl: "http://custom:3000" });
 
     expect(env.serverBaseUrl).toBe("http://custom:3000");
-    expect(env.supabaseUrl).toBe("https://example.supabase.co");
-    expect(env.supabaseAnonKey).toBe("anon-key");
   });
 
   it("getServerBaseUrl returns serverBaseUrl", () => {
     vi.stubEnv("NEXT_PUBLIC_SERVER_BASE_URL", "http://localhost:4010");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-key");
 
     loadWebEnv(); // populate cache
     expect(getServerBaseUrl()).toBe("http://localhost:4010");
+  });
+
+  it("uses the site origin when a remote browser receives a loopback API URL", () => {
+    vi.stubEnv("NEXT_PUBLIC_SERVER_BASE_URL", "http://localhost:3001");
+    vi.stubGlobal("window", { location: { hostname: "studio.0st.top" } });
+    expect(getServerBaseUrl()).toBe("");
+  });
+
+  it("uses same-origin API requests when a remote build has no API URL", () => {
+    vi.stubEnv("NEXT_PUBLIC_SERVER_BASE_URL", "");
+    vi.stubGlobal("window", { location: { hostname: "studio.0st.top" } });
+    expect(getServerBaseUrl()).toBe("");
+  });
+
+  it("keeps localhost API routing for local development", () => {
+    vi.stubEnv("NEXT_PUBLIC_SERVER_BASE_URL", "");
+    vi.stubGlobal("window", { location: { hostname: "localhost" } });
+    expect(getServerBaseUrl()).toBe("http://localhost:3001");
   });
 });

@@ -8,7 +8,6 @@
 set -uo pipefail
 
 POSTGRES_PORT=55432
-SUPABASE_MOCK_PORT=54321
 BACKEND_PORT=3001
 WEB_PORT=3000
 
@@ -37,7 +36,7 @@ step() { printf "\n\033[1;36m▶\033[0m %s\n" "$*"; }
 step "PostgreSQL (port $POSTGRES_PORT)"
 if docker ps --format '{{.Names}}' | grep -q '^helstera-postgres$'; then
   if docker exec helstera-postgres pg_isready -U postgres -q 2>/dev/null; then
-    USER_COUNT=$(docker exec helstera-postgres psql -U postgres -d helstera -tAc "SELECT count(*) FROM auth.users" 2>/dev/null | tr -d ' ')
+    USER_COUNT=$(docker exec helstera-postgres psql -U postgres -d helstera -tAc "SELECT count(*) FROM app_users" 2>/dev/null | tr -d ' ')
     if [ "$USER_COUNT" -ge 4 ]; then
       ok "helstera-postgres up — $USER_COUNT test users seeded"
     else
@@ -50,24 +49,13 @@ else
   fail "helstera-postgres container not running. Run: bash scripts/dev-local.sh"
 fi
 
-# ── 2. Supabase mock ──
-step "Supabase mock (port $SUPABASE_MOCK_PORT)"
-if port_listening "$SUPABASE_MOCK_PORT"; then
-  # Try a real login to verify end-to-end auth works
-  LOGIN_TEST=$(curl -s -X POST "http://localhost:$SUPABASE_MOCK_PORT/auth/v1/token?grant_type=password" \
-    -H "Content-Type: application/json" \
-    -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnbReJBMrXVEiNdPWw" \
-    -d '{"email":"pro@test.helstera.com","password":"Helstera-Test-2026"}' 2>/dev/null)
-  if echo "$LOGIN_TEST" | grep -q '"access_token"'; then
-    ok "Supabase mock up — login end-to-end works"
-  else
-    warn "Supabase mock up but login test failed (run: bash scripts/dev-local.sh)"
-  fi
+step "Local PostgreSQL and API"
+if curl -sf "http://localhost:$BACKEND_PORT/api/health/ready" >/dev/null 2>&1; then
+  ok "Local database readiness endpoint responds"
 else
-  fail "Supabase mock not running on :$SUPABASE_MOCK_PORT"
+  warn "API readiness failed; inspect backend.log"
 fi
 
-# ── 3. Backend ──
 step "Backend API (port $BACKEND_PORT)"
 if port_listening "$BACKEND_PORT"; then
   # /api/credits/packages is a public endpoint (no auth needed) — perfect health check
@@ -96,5 +84,4 @@ fi
 printf "\n"
 printf "  Web:        \033[36mhttp://localhost:%s/\033[0m\n" "$WEB_PORT"
 printf "  Backend:    \033[36mhttp://localhost:%s/\033[0m\n" "$BACKEND_PORT"
-printf "  Supabase:   \033[36mhttp://localhost:%s/\033[0m\n" "$SUPABASE_MOCK_PORT"
 printf "  Postgres:   \033[36m127.0.0.1:%s/helstera\033[0m\n\n" "$POSTGRES_PORT"

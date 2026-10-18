@@ -32,8 +32,28 @@ export type ReadyAttachment = {
   name?: string;
 };
 
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+
+function inferImageMimeType(file: File): string | null {
+  const declared = file.type.trim().toLowerCase();
+  if (ALLOWED_TYPES.has(declared)) return declared;
+  const extension = file.name.toLowerCase().split(".").pop();
+  const inferred = extension === "jpg" || extension === "jpeg"
+    ? "image/jpeg"
+    : extension === "png"
+      ? "image/png"
+      : extension === "webp"
+        ? "image/webp"
+        : extension === "gif"
+          ? "image/gif"
+          : null;
+  return inferred && ALLOWED_TYPES.has(inferred) ? inferred : null;
+}
+
+function normalizeImageFile(file: File, mimeType: string): File {
+  return file.type === mimeType ? file : new File([file], file.name, { type: mimeType, lastModified: file.lastModified });
+}
 
 export function useImageAttachments(accessToken: string, projectId?: string) {
   const [attachments, setAttachments] = useState<ImageAttachmentState[]>([]);
@@ -62,19 +82,21 @@ export function useImageAttachments(accessToken: string, projectId?: string) {
       const newAttachments: ImageAttachmentState[] = [];
 
       for (const file of files) {
-        if (!ALLOWED_TYPES.has(file.type)) {
-          console.warn("[image-attachments] Rejected file type:", file.type);
+        const mimeType = inferImageMimeType(file);
+        if (!mimeType) {
+          console.warn("[image-attachments] Rejected file type:", file.type || file.name);
           continue;
         }
+        const uploadFileValue = normalizeImageFile(file, mimeType);
         if (file.size > MAX_FILE_SIZE_BYTES) {
           const id = crypto.randomUUID();
           newAttachments.push({
             id,
-            file,
+            file: uploadFileValue,
             preview: "",
             uploading: false,
-            error: "File exceeds 10MB limit",
-            mimeType: file.type,
+            error: "图片不能超过 25MB",
+            mimeType,
             source: "upload",
           });
           continue;
@@ -84,16 +106,16 @@ export function useImageAttachments(accessToken: string, projectId?: string) {
         const preview = URL.createObjectURL(file);
         newAttachments.push({
           id,
-          file,
+          file: uploadFileValue,
           preview,
           uploading: true,
-          mimeType: file.type,
+          mimeType,
           source: "upload",
           name: file.name,
         });
 
         // Start upload
-        uploadFile(accessTokenRef.current, file, projectId)
+        uploadFile(accessTokenRef.current, uploadFileValue, projectId)
           .then((res) => {
             setAttachments((prev) =>
               prev.map((a) =>
@@ -156,7 +178,9 @@ export function useImageAttachments(accessToken: string, projectId?: string) {
         ),
       );
 
-      uploadFile(accessTokenRef.current, att.file, projectId)
+      const mimeType = inferImageMimeType(att.file);
+      if (!mimeType) return;
+      uploadFile(accessTokenRef.current, normalizeImageFile(att.file, mimeType), projectId)
         .then((res) => {
           setAttachments((prev) =>
             prev.map((a) =>

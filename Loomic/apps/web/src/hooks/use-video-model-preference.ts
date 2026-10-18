@@ -4,7 +4,13 @@ import { useCallback, useSyncExternalStore } from "react";
 import type { VideoGenerationPreference } from "@helstera/shared";
 
 const STORAGE_KEY = "helstera:video-model-preference";
-const DEFAULT_MODEL = "gk-video-3.5";
+const DEFAULT_MODEL = "minimax-h3";
+const REMOVED_MODEL_PREFIXES = ["gk-video-", "grok-"];
+
+function isRemovedModel(model: string) {
+  const id = model.trim().toLowerCase().replace(/^openai:/, "").split(/[/:]/).pop() ?? "";
+  return REMOVED_MODEL_PREFIXES.some((prefix) => id.startsWith(prefix));
+}
 
 export type VideoModelPreference = VideoGenerationPreference;
 
@@ -53,15 +59,17 @@ function normalizePreference(
 
   const models = Array.isArray(preference.models)
     ? preference.models.filter(
-        (model): model is string => typeof model === "string" && model.length > 0,
+        (model): model is string => typeof model === "string" && model.length > 0 && !isRemovedModel(model),
       )
-    : typeof preference.model === "string" && preference.model.length > 0
+    : typeof preference.model === "string" && preference.model.length > 0 && !isRemovedModel(preference.model)
       ? [preference.model]
       : defaultPreference.models;
 
+  const hasValidModels = models.length > 0;
+
   return {
-    mode: preference.mode === "manual" ? "manual" : "auto",
-    models: models.length > 0 ? models : defaultPreference.models,
+    mode: preference.mode === "manual" && hasValidModels ? "manual" : "auto",
+    models: hasValidModels ? models : defaultPreference.models,
     duration: typeof preference.duration === "number" ? preference.duration : defaultPreference.duration,
   };
 }
@@ -94,6 +102,7 @@ export function useVideoModelPreference() {
         : [...preference.models, model];
 
       setPreference({
+        duration: preference.duration,
         mode: "manual",
         models,
       });
@@ -105,10 +114,9 @@ export function useVideoModelPreference() {
     setPreference({ ...preference, duration });
   }, [preference, setPreference]);
 
-  const activeVideoGenerationPreference =
-    preference.mode === "manual" && preference.models.length > 0
-      ? preference
-      : undefined;
+  // Duration is a user choice even in automatic routing mode. Dropping the
+  // preference here makes the server fall back to the tool's 5-second default.
+  const activeVideoGenerationPreference = preference;
 
   return {
     preference,

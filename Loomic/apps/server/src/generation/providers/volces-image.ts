@@ -19,20 +19,6 @@ const VOLCES_IMAGE_MODELS: readonly ModelInfo[] = [
       "豆包 Seedream 3.0 文字生图模型，中文 prompt 理解优秀，支持 1024–2048 多种分辨率。",
     iconUrl: ICON_VOLCES,
   },
-  {
-    id: "doubao-seededit-3-0-i2i-250628",
-    displayName: "SeedEdit 3.0",
-    description:
-      "豆包 SeedEdit 3.0 图像编辑模型，支持图生图 + 自然语言编辑指令，保留原图主体。",
-    iconUrl: ICON_VOLCES,
-  },
-  {
-    id: "high_aes_general_v30l_zt2i",
-    displayName: "通用 3.0",
-    description:
-      "字节跳动高质感通用图像生成模型，适合海报、商品图、品牌素材场景。",
-    iconUrl: ICON_VOLCES,
-  },
 ];
 
 export class VolcesImageProvider implements ImageProvider {
@@ -43,10 +29,17 @@ export class VolcesImageProvider implements ImageProvider {
 
   constructor(apiKey: string, baseURL?: string) {
     this.apiKey = apiKey;
-    this.baseURL = baseURL ?? DEFAULT_BASE_URL;
+    this.baseURL = (baseURL ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
   }
 
   async generate(params: ImageGenerateParams): Promise<GeneratedImage> {
+    if (params.inputImages?.length) {
+      throw new GenerationError(
+        "volces",
+        "invalid_input",
+        `${params.model} does not support reference images through the Ark image-generation endpoint`,
+      );
+    }
     const { width, height } = aspectRatioToDimensions(params.aspectRatio ?? "1:1");
     const size = `${width}x${height}`;
 
@@ -65,6 +58,7 @@ export class VolcesImageProvider implements ImageProvider {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(180_000),
     });
 
     if (!response.ok) {
@@ -76,10 +70,25 @@ export class VolcesImageProvider implements ImageProvider {
       );
     }
 
-    const data = (await response.json()) as {
-      data: Array<{ url?: string; b64_json?: string }>;
-    };
-    const imageData = data.data[0];
+    let data: { data?: Array<{ url?: string; b64_json?: string }> };
+    try {
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error("response body must be an object");
+      }
+      const candidate = payload as { data?: unknown };
+      if (!Array.isArray(candidate.data)) {
+        throw new Error("response data must be an array");
+      }
+      data = candidate as { data: Array<{ url?: string; b64_json?: string }> };
+    } catch (error) {
+      throw new GenerationError(
+        "volces",
+        "invalid_provider_response",
+        `Volces returned an invalid image response: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const imageData = data.data?.[0];
     let url = imageData?.url;
     if (!url && imageData?.b64_json) {
       url = `data:image/png;base64,${imageData.b64_json}`;

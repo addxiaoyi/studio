@@ -1,6 +1,8 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Square } from "lucide-react";
 
 import type { MessageMention } from "@helstera/shared";
 import type { ImageAttachmentState } from "../hooks/use-image-attachments";
@@ -12,7 +14,7 @@ import { ImageAttachmentBar } from "./image-attachment-bar";
 import { ImageModelPreferencePopover } from "./image-model-preference";
 
 type ChatInputProps = {
-  onSend: (message: string) => void;
+  onSend: (message: string, videoModel?: string) => void;
   disabled?: boolean;
   attachments?: ImageAttachmentState[];
   onAddFiles?: (files: File[]) => void;
@@ -23,6 +25,7 @@ type ChatInputProps = {
   mentions?: MessageMention[];
   onRemoveMention?: (mention: MessageMention) => void;
   selectedCanvasElements?: CanvasSelectedElement[];
+  onCancel?: () => void;
 };
 
 export type ChatInputHandle = {
@@ -42,14 +45,23 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   mentions,
   onRemoveMention,
   selectedCanvasElements,
+  onCancel,
 }, ref) {
+  const router = useRouter();
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [dropMessage, setDropMessage] = useState<string | null>(null);
   const { preference } = useImageModelPreference();
   const { preference: videoPreference } = useVideoModelPreference();
   const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
   const modelBtnRef = useRef<HTMLButtonElement>(null);
+  const pendingSendRef = useRef<{
+    text: string;
+    attachmentIds: string[];
+  } | null>(null);
 
   useImperativeHandle(ref, () => ({
     clearAtQuery() {
@@ -63,13 +75,79 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
-    if ((!trimmed && (!attachments || attachments.length === 0)) || disabled || isUploading) return;
+    if ((!trimmed && (!attachments || attachments.length === 0)) || disabled) return;
+    if (isUploading) {
+      pendingSendRef.current = {
+        text: trimmed,
+        attachmentIds: (attachments ?? []).map((attachment) => attachment.id),
+      };
+      return;
+    }
+    if (attachments?.some((attachment) => attachment.error)) return;
+    if (trimmed === "/提示词" || trimmed === "/prompts") {
+      sessionStorage.setItem("helstera_prompt_return", window.location.href);
+      router.push("/prompts?pick=1");
+      return;
+    }
     onSend(trimmed);
     setValue("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, disabled, isUploading, onSend, attachments]);
+  }, [value, disabled, isUploading, onSend, attachments, router]);
+
+  useEffect(() => {
+    const pending = pendingSendRef.current;
+    if (isUploading || !pending || disabled) return;
+
+    const currentAttachments = attachments ?? [];
+    const currentIds = new Set(currentAttachments.map((attachment) => attachment.id));
+    const pendingAttachmentsStillPresent = pending.attachmentIds.every((id) => currentIds.has(id));
+    if (!pendingAttachmentsStillPresent) {
+      pendingSendRef.current = null;
+      return;
+    }
+    if (
+      pending.attachmentIds.some((id) =>
+        currentAttachments.some((attachment) => attachment.id === id && attachment.error),
+      )
+    ) {
+      return;
+    }
+
+    pendingSendRef.current = null;
+    onSend(pending.text);
+    setValue("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+  }, [attachments, disabled, isUploading, onSend]);
+
+  useEffect(() => {
+    const selected = sessionStorage.getItem("helstera_selected_prompt");
+    if (!selected) return;
+    sessionStorage.removeItem("helstera_selected_prompt");
+    setValue(selected);
+  }, []);
+
+  useEffect(() => {
+    const openModels = () => setModelPopoverOpen(true);
+    const retryGeneration = (event: Event) => {
+      const detail = (event as CustomEvent<{ prompt?: string; submit?: boolean; videoModel?: string }>).detail;
+      const prompt = detail?.prompt?.trim();
+      if (!prompt) return;
+      if (detail.submit && !disabled && !isUploading) {
+        onSend(prompt, detail.videoModel);
+        return;
+      }
+      setValue(prompt);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+    window.addEventListener("helstera:open-model-preference", openModels);
+    window.addEventListener("helstera:retry-generation", retryGeneration);
+    return () => {
+      window.removeEventListener("helstera:open-model-preference", openModels);
+      window.removeEventListener("helstera:retry-generation", retryGeneration);
+    };
+  }, [disabled, isUploading, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -140,9 +218,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      dragDepthRef.current = 0;
+      setIsDraggingFiles(false);
       if (!onAddFiles) return;
-      const files = Array.from(e.dataTransfer.files).filter((f) =>
-        f.type.startsWith("image/"),
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      const files = droppedFiles.filter((f) => f.type.startsWith("image/"));
+      setDropMessage(
+        droppedFiles.length > files.length
+          ? "目前只支持 PNG、JPG、WEBP 和 GIF 图片"
+          : null,
       );
       if (files.length > 0) {
         onAddFiles(files);
@@ -151,8 +235,25 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     [onAddFiles],
   );
 
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDraggingFiles(true);
+    setDropMessage(null);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepthRef.current -= 1;
+    if (dragDepthRef.current <= 0) {
+      dragDepthRef.current = 0;
+      setIsDraggingFiles(false);
+    }
+  }, []);
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
   }, []);
 
   const handlePaste = useCallback(
@@ -188,10 +289,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   return (
     <div className="px-2 pb-2">
       <div
-        className="flex min-h-[120px] flex-col justify-between gap-2 rounded-2xl border border-border/60 glass-soft p-2 transition-[border,box-shadow] duration-300 focus-within:border-foreground/20 focus-within:shadow-card"
+        className={`relative flex min-h-[120px] flex-col justify-between gap-2 rounded-2xl border glass-soft p-2 transition-[border,box-shadow,background-color] duration-200 focus-within:border-foreground/20 focus-within:shadow-card ${isDraggingFiles ? "border-primary bg-primary/[0.06] shadow-[0_0_0_3px_hsl(var(--primary)/0.12)]" : "border-border/60"}`}
         onDrop={handleDrop}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
       >
+        {isDraggingFiles && (
+          <div className="pointer-events-none absolute inset-1 z-10 flex items-center justify-center rounded-xl border border-dashed border-primary bg-background/90 text-sm font-medium text-primary backdrop-blur-sm">
+            松开鼠标上传图片
+          </div>
+        )}
         {hasSelection && (
           <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground glass-soft rounded-lg">
             <div className="flex items-center gap-1.5 min-w-0">
@@ -202,7 +310,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                     <circle cx="8.5" cy="8.5" r="1.5" />
                     <path d="m21 15-5-5L5 21" />
                   </svg>
-                  {selectionImageCount} {selectionImageCount === 1 ? "image" : "images"}
+                  {selectionImageCount} 张图片
                 </span>
               )}
               {selectionImageCount > 0 && selectionShapeCount > 0 && (
@@ -213,10 +321,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
                     <rect x="3" y="3" width="18" height="18" rx="2" />
                   </svg>
-                  {selectionShapeCount} {selectionShapeCount === 1 ? "shape" : "shapes"}
+                  {selectionShapeCount} 个图形
                 </span>
               )}
-              <span className="text-[10px] text-muted-foreground/60">selected on canvas</span>
+              <span className="text-[10px] text-muted-foreground/60">已选画布内容</span>
             </div>
           </div>
         )}
@@ -261,12 +369,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder='Start with an idea, or type "@" to mention'
+          placeholder='输入需求，或使用 @ 引用模型、素材和技能'
           aria-label="输入消息"
           rows={1}
           style={{ scrollbarWidth: "none" }}
           className="min-h-[48px] max-h-60 resize-none bg-transparent px-1 text-sm leading-[1.8] text-foreground placeholder:text-muted-foreground focus:outline-none [&::-webkit-scrollbar]:hidden"
         />
+        {dropMessage && (
+          <p className="px-1 text-xs text-destructive" role="status">
+            {dropMessage}
+          </p>
+        )}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             {onAddFiles && (
@@ -322,21 +435,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             </div>
           </div>
           <button
-            onClick={handleSubmit}
-            disabled={disabled || !hasContent || isUploading}
+            type="button"
+            onClick={disabled && onCancel ? onCancel : handleSubmit}
+            disabled={isUploading || (!disabled && !hasContent)}
+            aria-label={disabled && onCancel ? "停止生成" : "发送消息"}
             className="flex h-8 min-w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-all duration-300 hover:bg-primary/80 active:bg-primary/90 disabled:opacity-20 disabled:cursor-not-allowed"
           >
-            <svg
-              className="h-[14px] w-[14px]"
-              viewBox="0 0 14 14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.6}
-              strokeLinecap="round"
-            >
-              <path d="M7 11.5V2.5" />
-              <path d="M3 6.5L7 2.5L11 6.5" />
-            </svg>
+            {disabled && onCancel ? <Square className="size-3.5 fill-current" /> : <svg className="h-[14px] w-[14px]" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><path d="M7 11.5V2.5" /><path d="M3 6.5L7 2.5L11 6.5" /></svg>}
           </button>
         </div>
       </div>

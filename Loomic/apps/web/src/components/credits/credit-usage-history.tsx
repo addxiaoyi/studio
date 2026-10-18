@@ -1,7 +1,7 @@
 // @credits-system — Usage history table showing credit transactions
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Zap } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
@@ -38,7 +38,8 @@ const GRANT_TYPES = new Set([
 
 // ── Page size ────────────────────────────────────────────────
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 365;
+const HEATMAP_DAYS = 84;
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -53,6 +54,19 @@ function formatDate(iso: string | number): string {
   });
 }
 
+function dayKey(value: string | number): string {
+  const date = new Date(typeof value === "number" && value < 1e12 ? value * 1000 : value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function heatLevel(amount: number, max: number): number {
+  if (amount <= 0 || max <= 0) return 0;
+  const ratio = amount / max;
+  if (ratio <= 0.25) return 1;
+  if (ratio <= 0.5) return 2;
+  if (ratio <= 0.75) return 3;
+  return 4;
+}
 // ── Main component ───────────────────────────────────────────
 
 export function CreditUsageHistory() {
@@ -91,6 +105,27 @@ export function CreditUsageHistory() {
     setLoadingMore(false);
   };
 
+  const heatmap = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const transaction of transactions) {
+      const amount = Number(transaction.amount);
+      if (!Number.isFinite(amount)) continue;
+      const key = dayKey(transaction.created_at);
+      totals.set(key, (totals.get(key) ?? 0) + amount);
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    start.setDate(today.getDate() - (HEATMAP_DAYS - 1));
+    const days = Array.from({ length: HEATMAP_DAYS }, (_, index) => {
+      const date = new Date(start);
+      date.setDate(start.getDate() + index);
+      const key = dayKey(date.toISOString());
+      return { key, date, amount: totals.get(key) ?? 0 };
+    });
+    const max = Math.max(...days.map((day) => Math.abs(day.amount)), 0);
+    return { days, max };
+  }, [transactions]);
   // Filter transactions
   const filtered = transactions.filter((t) => {
     if (filter === "deducted") return DEDUCT_TYPES.has(t.transaction_type);
@@ -129,6 +164,30 @@ export function CreditUsageHistory() {
         ))}
       </div>
 
+      <section className="rounded-2xl border border-border/40 bg-card/50 p-4 sm:p-5" aria-label="Credit usage heatmap">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-medium text-foreground">Activity</h3>
+            <p className="mt-1 text-xs text-muted-foreground">Daily net credit movement over the last 12 weeks.</p>
+          </div>
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <span>Less</span>
+            {[0, 1, 2, 3, 4].map((level) => <span key={level} className={`size-3 rounded-sm border border-border/30 ${level === 0 ? "bg-muted" : level === 1 ? "bg-emerald-100" : level === 2 ? "bg-emerald-300" : level === 3 ? "bg-emerald-500" : "bg-emerald-700"}`} aria-label={`Level ${level}`} />)}
+            <span>More</span>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-7 gap-1.5 sm:grid-cols-12 sm:gap-2">
+          {heatmap.days.map((day) => {
+            const level = heatLevel(Math.abs(day.amount), heatmap.max);
+            const color = level === 0 ? "bg-muted" : level === 1 ? "bg-emerald-100" : level === 2 ? "bg-emerald-300" : level === 3 ? "bg-emerald-500" : "bg-emerald-700";
+            return <div key={day.key} title={`${day.date.toLocaleDateString()} · ${day.amount >= 0 ? "+" : ""}${day.amount.toFixed(2)} credits`} aria-label={`${day.key}: ${day.amount.toFixed(2)} credits`} className={`aspect-square rounded-md border border-border/20 ${color}`} />;
+          })}
+        </div>
+        <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
+          <span>{heatmap.days[0]?.date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+          <span>{heatmap.days.at(-1)?.date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+        </div>
+      </section>
       {/* Table */}
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center gap-2 py-12 text-center">

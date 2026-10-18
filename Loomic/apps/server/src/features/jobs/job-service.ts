@@ -8,9 +8,9 @@ import type {
 import type { PgmqClient } from "../../queue/pgmq-client.js";
 import type {
   AuthenticatedUser,
-  UserSupabaseClient,
-} from "../../supabase/user.js";
-import type { AdminSupabaseClient } from "../../supabase/admin.js";
+  DataClient,
+} from "../../auth/types.js";
+import type { DataAdminClient } from "../../auth/types.js";
 
 // Queue name mapping
 const QUEUE_MAP: Record<BackgroundJobType, string> = {
@@ -44,12 +44,13 @@ export type CreateJobInput = {
   canvasId?: string;
   sessionId?: string;
   threadId?: string;
+  idempotencyKey?: string;
   jobType: BackgroundJobType;
   payload: Record<string, unknown>;
 };
 
 export type JobService = {
-  createJob(user: AuthenticatedUser, input: CreateJobInput): Promise<BackgroundJob>;
+  createJob(user: AuthenticatedUser, input: CreateJobInput): Promise<BackgroundJob & { reused: boolean; reactivated?: boolean }>;
   getJob(user: AuthenticatedUser, jobId: string): Promise<BackgroundJob>;
   listJobs(
     user: AuthenticatedUser,
@@ -64,12 +65,19 @@ export type JobService = {
   markSucceeded(jobId: string, result: Record<string, unknown>): Promise<void>;
   markFailed(jobId: string, errorCode: string, errorMessage: string): Promise<void>;
   markDeadLetter(jobId: string, errorCode: string, errorMessage: string): Promise<void>;
+  saveProviderResult(jobId: string, result: Record<string, unknown>): Promise<void>;
+  hasProviderCheckpoint(jobId: string): Promise<boolean>;
+  retryProviderCheckpoint(jobId: string): Promise<boolean>;
+  markSyncPending(jobId: string, result: Record<string, unknown>, errorCode: string, errorMessage: string): Promise<void>;
+  markSyncFailed(jobId: string, errorCode: string, errorMessage: string): Promise<void>;
   incrementAttempt(jobId: string): Promise<{ attempt_count: number; max_attempts: number }>;
+  claimJob(jobId: string): Promise<{ attempt_count: number; max_attempts: number } | null>;
+  updateProgress(jobId: string, progress: number, stage: string): Promise<void>;
 };
 
 export function createJobService(options: {
-  createUserClient: (accessToken: string) => UserSupabaseClient;
-  getAdminClient: () => AdminSupabaseClient;
+  createUserClient: (accessToken: string) => DataClient;
+  getAdminClient: () => DataAdminClient;
   pgmq: PgmqClient;
 }): JobService {
   function mapJobRow(row: Record<string, unknown>): BackgroundJob {
@@ -87,6 +95,8 @@ export function createJobService(options: {
       result: (row.result as Record<string, unknown>) ?? null,
       error_code: (row.error_code as string) ?? null,
       error_message: (row.error_message as string) ?? null,
+      progress: Number(row.progress ?? 0),
+      stage: (row.stage as string) ?? null,
       attempt_count: row.attempt_count as number,
       max_attempts: row.max_attempts as number,
       created_by: row.created_by as string,
@@ -96,16 +106,77 @@ export function createJobService(options: {
       completed_at: (row.completed_at as string) ?? null,
       failed_at: (row.failed_at as string) ?? null,
       canceled_at: (row.canceled_at as string) ?? null,
+      sync_attempt_count: Number(row.sync_attempt_count ?? 0),
+      next_sync_at: (row.next_sync_at as string) ?? null,
+      sync_error_code: (row.sync_error_code as string) ?? null,
+      sync_error_message: (row.sync_error_message as string) ?? null,
     };
   }
 
   const SELECT_COLS =
-    "id, workspace_id, project_id, canvas_id, session_id, thread_id, queue_name, job_type, status, payload, result, error_code, error_message, attempt_count, max_attempts, created_by, created_at, updated_at, started_at, completed_at, failed_at, canceled_at";
+    "id, workspace_id, project_id, canvas_id, session_id, thread_id, idempotency_key, queue_name, job_type, status, payload, result, error_code, error_message, progress, stage, attempt_count, max_attempts, created_by, created_at, updated_at, started_at, completed_at, failed_at, canceled_at, sync_attempt_count, next_sync_at, sync_error_code, sync_error_message";
+
+  async function findIdempotentJob(
+    client: DataClient,
+    userId: string,
+    idempotencyKey: string,
+  ) {
+    const { data, error } = await client
+      .from("background_jobs")
+      .select(SELECT_COLS)
+      .eq("created_by", userId)
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
+    if (error) {
+      throw new JobServiceError("job_query_failed", "Failed to query idempotent job.", 500);
+    }
+    return data ? mapJobRow(data as unknown as Record<string, unknown>) : null;
+  }
+
+  async function reactivateCanceledJob(
+    client: DataClient,
+    user: AuthenticatedUser,
+    input: CreateJobInput,
+    existing: BackgroundJob,
+  ) {
+    const { data, error } = await client
+      .from("background_jobs")
+      .update({ status: "queued", canceled_at: null, failed_at: null, error_code: null, error_message: null, updated_at: new Date().toISOString() })
+      .eq("id", existing.id)
+      .eq("created_by", user.id)
+      .eq("status", "canceled")
+      .select(SELECT_COLS)
+      .maybeSingle();
+    if (error) throw new JobServiceError("job_create_failed", "Failed to requeue canceled job.", 500);
+    if (!data) return null;
+    try {
+      await options.pgmq.send(QUEUE_MAP[input.jobType], {
+        job_id: existing.id,
+        job_type: input.jobType,
+        workspace_id: input.workspaceId,
+        ...(input.canvasId ? { canvas_id: input.canvasId } : {}),
+        ...(input.sessionId ? { session_id: input.sessionId } : {}),
+      });
+    } catch (enqueueError) {
+      await client.from("background_jobs").update({ status: "canceled", canceled_at: new Date().toISOString() }).eq("id", existing.id);
+      throw new JobServiceError("job_create_failed", "Failed to requeue canceled job.", 500);
+    }
+    return { ...mapJobRow(data as unknown as Record<string, unknown>), reused: true, reactivated: true };
+  }
 
   return {
     async createJob(user, input) {
       const client = options.createUserClient(user.accessToken);
       const queueName = QUEUE_MAP[input.jobType];
+
+      if (input.idempotencyKey) {
+        const existing = await findIdempotentJob(client, user.id, input.idempotencyKey);
+        if (existing?.status === "canceled") {
+          const reactivated = await reactivateCanceledJob(client, user, input, existing);
+          if (reactivated) return reactivated;
+        }
+        if (existing) return { ...existing, reused: true };
+      }
 
       const { data: job, error } = await client
         .from("background_jobs")
@@ -115,6 +186,7 @@ export function createJobService(options: {
           canvas_id: input.canvasId ?? null,
           session_id: input.sessionId ?? null,
           thread_id: input.threadId ?? null,
+          idempotency_key: input.idempotencyKey ?? null,
           queue_name: queueName,
           job_type: input.jobType,
           payload: input.payload as Json,
@@ -124,6 +196,14 @@ export function createJobService(options: {
         .single();
 
       if (error || !job) {
+        if (input.idempotencyKey && isUniqueViolation(error)) {
+          const existing = await findIdempotentJob(client, user.id, input.idempotencyKey);
+          if (existing?.status === "canceled") {
+            const reactivated = await reactivateCanceledJob(client, user, input, existing);
+            if (reactivated) return reactivated;
+          }
+          if (existing) return { ...existing, reused: true };
+        }
         throw new JobServiceError(
           "job_create_failed",
           "Failed to create job record.",
@@ -150,7 +230,7 @@ export function createJobService(options: {
         );
       }
 
-      return mapJobRow(job as unknown as Record<string, unknown>);
+      return { ...mapJobRow(job as unknown as Record<string, unknown>), reused: false };
     },
 
     async getJob(user, jobId) {
@@ -241,7 +321,8 @@ export function createJobService(options: {
           credits_cost: creditsCost,
           credits_transaction_id: transactionId,
         })
-        .eq("id", jobId);
+        .eq("id", jobId)
+        .eq("status", "running");
     },
 
     async markRunning(jobId) {
@@ -253,6 +334,20 @@ export function createJobService(options: {
         .eq("status", "queued");
     },
 
+    async claimJob(jobId) {
+      const admin = options.getAdminClient();
+      const { data, error } = await admin
+        .from("background_jobs")
+        .update({ status: "running", started_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq("id", jobId)
+        .in("status", ["queued", "failed"])
+        .select("attempt_count,max_attempts")
+        .maybeSingle();
+      if (error) throw new Error(`Failed to claim job: ${error.message}`);
+      return data
+        ? { attempt_count: Number(data.attempt_count ?? 1), max_attempts: Number(data.max_attempts ?? 3) }
+        : null;
+    },
     async markSucceeded(jobId, result) {
       const admin = options.getAdminClient();
       await admin
@@ -260,9 +355,12 @@ export function createJobService(options: {
         .update({
           status: "succeeded",
           result: result as Json,
+          error_code: null,
+          error_message: null,
           completed_at: new Date().toISOString(),
         })
-        .eq("id", jobId);
+        .eq("id", jobId)
+        .eq("status", "running");
     },
 
     async markFailed(jobId, errorCode, errorMessage) {
@@ -275,7 +373,8 @@ export function createJobService(options: {
           error_message: errorMessage,
           failed_at: new Date().toISOString(),
         })
-        .eq("id", jobId);
+        .eq("id", jobId)
+        .eq("status", "running");
     },
 
     async markDeadLetter(jobId, errorCode, errorMessage) {
@@ -288,10 +387,49 @@ export function createJobService(options: {
           error_message: errorMessage,
           failed_at: new Date().toISOString(),
         })
-        .eq("id", jobId);
+        .eq("id", jobId)
+        .eq("status", "running");
     },
 
-    async incrementAttempt(jobId) {
+    async saveProviderResult(jobId, result) {
+      const admin = options.getAdminClient();
+      const { data, error } = await admin.from("background_jobs").update({ provider_result: result as Json }).eq("id", jobId).eq("status", "running").select("id").maybeSingle();
+      if (error || !data) {
+        const failure = new Error(`Failed to checkpoint Provider result for job ${jobId}: ${error?.message ?? "job is no longer running"}`);
+        (failure as Error & { code?: string }).code = "upstream_outcome_unknown";
+        throw failure;
+      }
+    },
+
+    async hasProviderCheckpoint(jobId) {
+      const admin = options.getAdminClient();
+      const { data, error } = await admin.from("background_jobs").select("provider_result").eq("id", jobId).maybeSingle();
+      if (error) throw new Error(`Failed to inspect Provider checkpoint for job ${jobId}: ${error.message}`);
+      return Boolean(data?.provider_result && typeof data.provider_result === "object");
+    },
+
+    async retryProviderCheckpoint(jobId) {
+      const admin = options.getAdminClient();
+      const { data, error } = await admin.from("background_jobs").update({ status: "queued", attempt_count: 0, failed_at: null, error_code: null, error_message: null, sync_claimed_at: null, updated_at: new Date().toISOString() }).eq("id", jobId).eq("status", "sync_failed").not("provider_result", "is", null).is("result->>asset_id", null).select("id, job_type, workspace_id").maybeSingle();
+      if (error) throw new Error(`Failed to retry Provider checkpoint for job ${jobId}: ${error.message}`);
+      if (!data) return false;
+      try {
+        await options.pgmq.send(QUEUE_MAP[data.job_type as BackgroundJobType], { job_id: jobId, job_type: data.job_type, workspace_id: data.workspace_id });
+      } catch (enqueueError) {
+        await admin.from("background_jobs").update({ status: "sync_failed", updated_at: new Date().toISOString() }).eq("id", jobId).eq("status", "queued");
+        throw enqueueError;
+      }
+      return true;
+    },
+
+    async markSyncPending(jobId, result, errorCode, errorMessage) {
+      const admin = options.getAdminClient();
+      await admin.from("background_jobs").update({ status: "sync_pending", result: result as Json, stage: "canvas_sync_pending", sync_error_code: errorCode, sync_error_message: errorMessage, error_code: errorCode, error_message: errorMessage, next_sync_at: new Date().toISOString() }).eq("id", jobId).eq("status", "running");
+    },
+    async markSyncFailed(jobId, errorCode, errorMessage) {
+      const admin = options.getAdminClient();
+      await admin.from("background_jobs").update({ status: "sync_failed", sync_error_code: errorCode, sync_error_message: errorMessage, error_code: errorCode, error_message: errorMessage, stage: "provider_result_sync_failed", next_sync_at: null, sync_claimed_at: null, failed_at: new Date().toISOString() }).eq("id", jobId).in("status", ["running", "sync_pending", "sync_failed"]);
+    },    async incrementAttempt(jobId) {
       const admin = options.getAdminClient();
       // NOTE: increment_job_attempt may not be in generated Supabase types yet
       const { data, error } = await (admin as any).rpc("increment_job_attempt", {
@@ -313,5 +451,12 @@ export function createJobService(options: {
       // Job not found — return safe defaults
       return { attempt_count: 1, max_attempts: 3 };
     },
+    async updateProgress(jobId, progress, stage) {
+      await (options.getAdminClient() as any).from("background_jobs").update({ progress: Math.max(0, Math.min(100, progress)), stage }).eq("id", jobId);
+    },
   };
+}
+
+function isUniqueViolation(error: { code?: string } | null) {
+  return error?.code === "23505";
 }

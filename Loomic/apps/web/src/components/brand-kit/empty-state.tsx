@@ -5,21 +5,23 @@ import {
   EmptyState as BaseEmptyState,
   EmptyStateAction,
 } from "@/components/empty-state";
+import { t, useLocale } from "@/lib/i18n";
 
 interface EmptyStateProps {
   onCreateKit: () => void;
 }
 
 export function EmptyState({ onCreateKit }: EmptyStateProps) {
+  const copy = t(useLocale()).brandKit;
   return (
     <BaseEmptyState
       icon={Palette}
-      title="还没有品牌套件"
-      description="创建一个品牌套件，集中管理色板、字体和 Logo。"
+      title={copy.emptyTitle}
+      description={copy.emptyDescription}
       action={
         <EmptyStateAction
           primary={{
-            label: "创建品牌套件",
+            label: copy.create,
             onClick: onCreateKit,
           }}
         />
