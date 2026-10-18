@@ -112,6 +112,7 @@ function GroupLinks({ group, pathname, open, onToggle, collapsed = false }: { gr
         onClick={onToggle}
         aria-expanded={open}
         aria-controls={`${group.id}-navigation-items`}
+        aria-label={group.label}
         title={group.label}
         className={cn("flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm transition-colors hover:bg-foreground/[0.05]", collapsed && "w-10 justify-center px-0", active ? "text-foreground" : "text-muted-foreground")}
       >
@@ -206,7 +207,17 @@ export function AppSidebar() {
   const labelsHidden = collapsed || !labelsVisible;
 
   return <>
-    <aside onMouseEnter={expandSidebar} onMouseLeave={collapseSidebar} className={cn("relative z-30 hidden h-[100dvh] shrink-0 flex-col overflow-hidden border-r border-border/40 bg-background/75 px-3 py-4 backdrop-blur transition-[width] duration-200 md:flex", collapsed ? "w-16" : "w-56")}>
+    <aside
+      onMouseEnter={expandSidebar}
+      onMouseLeave={collapseSidebar}
+      onFocusCapture={expandSidebar}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          collapseSidebar();
+        }
+      }}
+      className={cn("relative z-30 hidden h-[100dvh] shrink-0 flex-col overflow-hidden border-r border-border/40 bg-background/75 px-3 py-4 backdrop-blur transition-[width] duration-200 md:flex", collapsed ? "w-16" : "w-56")}
+    >
       <Link href="/home" title="Helstera" className={cn("mb-4 flex h-8 items-center gap-2 px-2", labelsHidden && "justify-center px-0")}><motion.div whileHover={{ scale: 1.08 }}><HelsteraLogo className="size-6 text-foreground" /></motion.div>{!labelsHidden && <span className="text-sm font-semibold tracking-tight">Helstera</span>}</Link>
       <div className="space-y-1">{primaryItems.map((item) => <NavLink key={item.href} item={{ ...item, label: item.href === "/home" ? labels.home : item.label }} active={isPathActive(pathname, item.href)} collapsed={labelsHidden} />)}</div>
       <div className="my-3 border-t border-border/40" />
