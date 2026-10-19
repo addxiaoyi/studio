@@ -1548,7 +1548,7 @@ export default function FeedPage() {
                  <Button variant="outline" onClick={() => void saveStructureDraft()} disabled={structureSaving || !structureDirty || !structureValid}>
                    {structureSaving ? "保存中..." : "保存结构草稿"}
                  </Button>
-                 {structureDirty && <span className="text-xs text-amber-700 dark:text-amber-300">有未保存修改</span>}
+                 {structureDirty && <span data-testid="feed-structure-dirty" role="status" aria-live="polite" aria-atomic="true" className="text-xs text-amber-700 dark:text-amber-300">有未保存修改；离开页面前会提示保存</span>}
                </div>
                <div className="mt-5 flex flex-wrap gap-2">
                 <Button data-testid="feed-approve-structure" onClick={() => void approveStructure()} disabled={structureSaving || !structureValid}>

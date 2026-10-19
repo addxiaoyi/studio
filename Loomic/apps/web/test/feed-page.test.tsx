@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -238,6 +238,22 @@ describe("feed workflow closure", () => {
     expect(statuses).toHaveTextContent("抖音：草稿已就绪");
     expect(statuses).toHaveTextContent("小红书：草稿已就绪");
     expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  it("marks edited structure as dirty and protects browser leave", async () => {
+    const user = userEvent.setup();
+    searchParamsMock.current = new URLSearchParams({ packageId: packageRecord.id, step: "2" });
+    render(<FeedPage />);
+
+    await waitFor(() => expect(fetchFeedPackageMock).toHaveBeenCalledWith("test-token", packageRecord.id));
+    const titleInput = await screen.findByDisplayValue("生成标题");
+    await user.clear(titleInput);
+    await user.type(titleInput, "未保存的新标题");
+    expect(screen.getByTestId("feed-structure-dirty")).toHaveTextContent("有未保存修改");
+
+    const beforeUnload = new Event("beforeunload", { cancelable: true });
+    fireEvent(window, beforeUnload);
+    expect(beforeUnload.defaultPrevented).toBe(true);
   });
 
   it("patches edited structure, starts render, and exposes every selected platform", async () => {

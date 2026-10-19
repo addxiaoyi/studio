@@ -90,7 +90,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 66. Automation status announces its current stage.
 - [~] 67. Retry targets the failed automation stage and preserves edited fields.
 - [x] 68. Platform variants show draft availability per selected platform with localized status labels and accessible live-region semantics.
-- [~] 69. Dirty structure state blocks leaving until the user chooses.
+- [x] 69. Dirty structure state blocks leaving until the user chooses, announces the pending edit, and protects browser leave with a regression.
 - [~] 70. Scheduling and publishing keep explicit human confirmation.
 
 ## Creation, storyboard, and libraries
