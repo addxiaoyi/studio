@@ -167,3 +167,7 @@ Chromium covers a failed asset request followed by a successful retry.
 Storyboard model catalog loading now distinguishes loading, unavailable, and request
 failure states, with an accessible in-place retry that restores the model selectors
 and generation actions after recovery.
+
+Storyboard asset creation and editing now preserve the draft on request failure, lock
+duplicate submits, announce the error, and expose a targeted retry; Chromium covers an
+asset edit failure followed by a successful save.

@@ -388,4 +388,37 @@ test.describe("UX 100 visual safeguards", () => {
     await expect(page.getByRole("combobox", { name: "图片模型" })).toBeEnabled();
     expect(imageModelAttempts).toBeGreaterThanOrEqual(3);
   });
+
+  test("storyboard asset edit failure preserves the draft and retries", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.route("**/api/projects/project-asset-retry/story-assets", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ assets: [{ id: "asset-retry", projectId: "project-asset-retry", kind: "character", name: "旧名称", description: "旧描述", imageUrl: null, metadata: {}, createdAt: "2026-10-19T00:00:00.000Z", updatedAt: "2026-10-19T00:00:00.000Z" }] }),
+      }),
+    );
+    await page.route("**/api/projects/project-asset-retry/storyboards", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ storyboards: [] }) }),
+    );
+    let updateAttempts = 0;
+    await page.route("**/api/projects/project-asset-retry/story-assets/asset-retry", (route) => {
+      updateAttempts += 1;
+      if (updateAttempts === 1) {
+        return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { message: "资产保存暂时失败" } }) });
+      }
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ asset: { id: "asset-retry", projectId: "project-asset-retry", kind: "character", name: "新名称", description: "新描述", imageUrl: null, metadata: {}, createdAt: "2026-10-19T00:00:00.000Z", updatedAt: "2026-10-19T00:00:00.000Z" } }) });
+    });
+
+    await page.goto("/storyboard?projectId=project-asset-retry");
+    await page.getByRole("button", { name: "编辑旧名称" }).click();
+    const assetNameInput = page.locator('input[aria-label="资产名称"]');
+    await assetNameInput.fill("新名称");
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "资产保存暂时失败" })).toBeVisible();
+    await expect(assetNameInput).toHaveValue("新名称");
+    await page.getByRole("button", { name: "重试保存" }).click();
+    await expect(page.getByText("新名称", { exact: true })).toBeVisible();
+    expect(updateAttempts).toBe(2);
+  });
 });

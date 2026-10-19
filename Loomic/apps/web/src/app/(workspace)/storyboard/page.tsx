@@ -86,6 +86,11 @@ export default function StoryboardPage() {
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [assetDraft, setAssetDraft] = useState({ name: "", description: "" });
   const [savingAsset, setSavingAsset] = useState(false);
+  const [addingAsset, setAddingAsset] = useState(false);
+  const [assetError, setAssetError] = useState("");
+  const [assetErrorAction, setAssetErrorAction] = useState<
+    { type: "add" } | { type: "save"; assetId: string } | null
+  >(null);
   const [uploadingReference, setUploadingReference] = useState<string | null>(
     null,
   );
@@ -248,16 +253,26 @@ export default function StoryboardPage() {
   const addAsset = async () => {
     const token = session?.access_token;
     const name = assetName.trim();
-    if (!token || !projectId || !name) return;
-    const { asset } = await createStoryAsset(token, projectId, {
-      kind,
-      name,
-      description: assetDescription.trim(),
-      imageUrl: null,
-    });
-    setAssets((current) => [asset, ...current]);
-    setAssetName("");
-    setAssetDescription("");
+    if (!token || !projectId || !name || addingAsset) return;
+    setAddingAsset(true);
+    setAssetError("");
+    setAssetErrorAction(null);
+    try {
+      const { asset } = await createStoryAsset(token, projectId, {
+        kind,
+        name,
+        description: assetDescription.trim(),
+        imageUrl: null,
+      });
+      setAssets((current) => [asset, ...current]);
+      setAssetName("");
+      setAssetDescription("");
+    } catch (error) {
+      setAssetError(error instanceof Error ? error.message : "资产添加失败，请重试。");
+      setAssetErrorAction({ type: "add" });
+    } finally {
+      setAddingAsset(false);
+    }
   };
 
   const editAsset = (asset: StoryAsset) => {
@@ -270,6 +285,8 @@ export default function StoryboardPage() {
     const name = assetDraft.name.trim();
     if (!token || !projectId || !name || savingAsset) return;
     setSavingAsset(true);
+    setAssetError("");
+    setAssetErrorAction(null);
     try {
       const { asset: updated } = await updateStoryAsset(
         token,
@@ -287,8 +304,22 @@ export default function StoryboardPage() {
         current.map((item) => (item.id === updated.id ? updated : item)),
       );
       setEditingAssetId(null);
+    } catch (error) {
+      setAssetError(error instanceof Error ? error.message : "资产保存失败，请重试。");
+      setAssetErrorAction({ type: "save", assetId: asset.id });
     } finally {
       setSavingAsset(false);
+    }
+  };
+
+  const retryAssetAction = () => {
+    if (assetErrorAction?.type === "add") {
+      void addAsset();
+      return;
+    }
+    if (assetErrorAction?.type === "save") {
+      const asset = assets.find((item) => item.id === assetErrorAction.assetId);
+      if (asset) void saveAsset(asset);
     }
   };
 
@@ -656,8 +687,8 @@ export default function StoryboardPage() {
                 placeholder="资产名称"
                 className="min-w-0 flex-1 rounded-lg border border-border/60 bg-background px-2.5 text-xs"
               />
-              <Button type="button" size="sm" onClick={() => void addAsset()}>
-                添加
+              <Button type="button" size="sm" onClick={() => void addAsset()} disabled={!assetName.trim() || addingAsset}>
+                {addingAsset ? "添加中…" : "添加"}
               </Button>
               </div>
             </div>
@@ -677,6 +708,14 @@ export default function StoryboardPage() {
             />
             </label>
           </div>
+          {assetError ? (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              <span>{assetError}</span>
+              <Button type="button" variant="outline" size="sm" onClick={retryAssetAction} disabled={addingAsset || savingAsset}>
+                {assetErrorAction?.type === "add" ? "重试添加" : "重试保存"}
+              </Button>
+            </div>
+          ) : null}
           <div className="space-y-2">
             {assets.map((asset) => (
               <div
