@@ -143,10 +143,14 @@ export function AgentSection({
       <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <Label htmlFor="autoApprovePaidGeneration">Auto-approve paid generation</Label>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">When disabled, image and video generation waits for confirmation before charging credits.</p>
+            <Label htmlFor="autoApprovePaidGeneration">自动确认付费生成</Label>
+            <p id="autoApprovePaidGeneration-description" className="mt-1 text-xs leading-5 text-muted-foreground">
+              {autoApprovePaidGeneration
+                ? "开启后，图片和视频任务会直接提交并扣除 credits，不再逐次确认。"
+                : "关闭后，每次生成前会先展示预计消耗，确认后才扣费。"}
+            </p>
           </div>
-          <input id="autoApprovePaidGeneration" type="checkbox" checked={autoApprovePaidGeneration} onChange={(event) => void changePaidGeneration(event.target.checked)} disabled={savingPreference} aria-busy={savingPreference} className="mt-1 size-4 accent-foreground disabled:opacity-50" />
+          <input id="autoApprovePaidGeneration" type="checkbox" checked={autoApprovePaidGeneration} onChange={(event) => void changePaidGeneration(event.target.checked)} disabled={savingPreference} aria-busy={savingPreference} aria-describedby="autoApprovePaidGeneration-description" className="mt-1 size-4 accent-foreground disabled:opacity-50" />
         </div>
       </div>
 
