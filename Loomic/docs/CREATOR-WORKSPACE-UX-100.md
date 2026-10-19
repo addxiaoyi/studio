@@ -116,7 +116,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 86. Usage history has loading, empty, and retryable error states.
 - [x] 87. Team invite button is locked during submission; member-list failures expose a retry action and search remains recoverable.
 - [x] 88. Skill install, enablement, and version states are distinguishable, and catalog failures expose a retry action.
-- [~] 89. Authentication and permission failures expose a recovery action.
+- [x] 89. Authentication failures preserve an internal return path through login; external redirect targets are rejected.
 - [x] 90. Settings tabs support arrow/Home/End navigation and tab-panel semantics.
 
 ## Responsive, accessibility, and resilience

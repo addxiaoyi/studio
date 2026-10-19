@@ -301,7 +301,7 @@ describe("Projects page", () => {
     render(<ProjectsPage />, { wrapper: ToastProvider });
     await waitFor(() => {
       expect(mockSignOut).toHaveBeenCalled();
-      expect(mockReplace).toHaveBeenCalledWith("/login");
+      expect(mockReplace).toHaveBeenCalledWith("/login?redirect=%2Fprojects");
     });
   });
 
@@ -357,7 +357,7 @@ describe("Projects page", () => {
     render(<ProjectsPage />, { wrapper: ToastProvider });
     await waitFor(() => {
       expect(mockSignOut).toHaveBeenCalled();
-      expect(mockReplace).toHaveBeenCalledWith("/login");
+      expect(mockReplace).toHaveBeenCalledWith("/login?redirect=%2Fprojects");
     });
   });
 });

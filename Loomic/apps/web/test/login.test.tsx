@@ -131,4 +131,21 @@ describe("Login page", () => {
       expect(mockReplace).toHaveBeenCalledWith("/home");
     });
   });
+
+  it("returns to the requested workspace path after sign-in", async () => {
+    mockSearchParams.mockReturnValue(new URLSearchParams("redirect=%2Ffeed%3Fstep%3D2"));
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+
+    await screen.findByRole("button", { name: /send code|发送验证码/i });
+    fireEvent.click(screen.getByRole("button", { name: /use password instead|使用密码登录/i }));
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "user@example.com" } });
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "MOCK_PASSWORD" } });
+    fireEvent.click(screen.getByRole("button", { name: /^(sign in|登录)$/i }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/feed?step=2"));
+  });
 });

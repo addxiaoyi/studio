@@ -26,6 +26,7 @@ import {
 
 import { useAuth } from "@/lib/auth-context";
 import { fetchViewer } from "@/lib/server-api";
+import { loginPath } from "@/lib/navigation";
 
 type AdminItem = { href: string; label: string; hint: string; icon: LucideIcon };
 type AdminSection = { label: string; items: AdminItem[] };
@@ -78,7 +79,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (loading) return;
     if (!session?.access_token) {
-      router.replace("/login");
+      router.replace(loginPath(pathname));
       return;
     }
     void fetchViewer(session.access_token)

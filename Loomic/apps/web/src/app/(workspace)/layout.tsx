@@ -10,6 +10,7 @@ import { LoadingScreen } from "@/components/loading-screen";
 import { PageTransition } from "@/components/page-transition";
 import { WorkspaceBreadcrumbs } from "@/components/workspace-breadcrumbs";
 import { useAuth } from "@/lib/auth-context";
+import { loginPath } from "@/lib/navigation";
 
 const routeTitles: Record<string, string> = {
   "/home": "工作台",
@@ -46,7 +47,8 @@ export default function WorkspaceLayout({
 
   useEffect(() => {
     if (!loading && !user) {
-      router.replace("/login");
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      router.replace(loginPath(currentPath));
     }
   }, [loading, user, router]);
 

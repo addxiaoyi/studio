@@ -15,6 +15,7 @@ import {
   verifyLocalCode,
 } from "../lib/local-auth";
 import { t, useLocale } from "@/lib/i18n";
+import { getSafeRedirect } from "@/lib/navigation";
 
 const stagger = {
   hidden: {},
@@ -28,9 +29,10 @@ const fadeIn = {
 
 interface LoginFormProps {
   initialErrorMessage?: string | null;
+  redirectTo?: string;
 }
 
-export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
+export function LoginForm({ initialErrorMessage = null, redirectTo = "/home" }: LoginFormProps) {
   const copy = t(useLocale()).authForm;
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -40,6 +42,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(initialErrorMessage);
+  const destination = getSafeRedirect(redirectTo);
 
   useEffect(() => {
     if (mode === "code" && error?.includes("请刷新页面后使用邮箱验证码登录")) {
@@ -58,7 +61,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
     try {
       if (codeSent) {
         await verifyLocalCode(trimmed, code);
-        router.replace("/home");
+        router.replace(destination);
       } else {
         await requestLocalCode(trimmed);
         setCodeSent(true);
@@ -77,7 +80,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
     setError(null);
     try {
       await verifyLocalCode(trimmed, code);
-      router.replace("/home");
+      router.replace(destination);
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : copy.codeError);
     } finally {
@@ -94,7 +97,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
 
     try {
       await signInLocalWithPassword(trimmed, password);
-      router.replace("/home");
+      router.replace(destination);
     } catch (authError) {
       setError(
         authError instanceof Error ? authError.message : copy.passwordError,
@@ -116,7 +119,7 @@ export function LoginForm({ initialErrorMessage = null }: LoginFormProps) {
         setCodeSent(true);
       } else {
         await resetLocalPassword(trimmed, code, password);
-        router.replace("/home");
+        router.replace(destination);
       }
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : "密码重置失败，请重试");

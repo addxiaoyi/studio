@@ -15,6 +15,7 @@ import {
   ApiAuthError,
 } from "@/lib/server-api";
 import { Button } from "@/components/ui/button";
+import { loginPath } from "@/lib/navigation";
 
 export default function ProjectsPage() {
   const { session, signOut } = useAuth();
@@ -54,7 +55,7 @@ export default function ProjectsPage() {
     } catch (err) {
       if (err instanceof ApiAuthError) {
         await signOutRef.current();
-        routerRef.current.replace("/login");
+        routerRef.current.replace(loginPath("/projects"));
         return;
       }
       setLoadError("Failed to load data. Please try again.");

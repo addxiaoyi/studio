@@ -8,6 +8,7 @@ import { LoginForm } from "../../components/login-form";
 import { LoadingScreen } from "../../components/loading-screen";
 import { useAuth } from "../../lib/auth-context";
 import { t, useLocale } from "../../lib/i18n";
+import { getSafeRedirect, loginPath } from "../../lib/navigation";
 
 const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
   auth_callback_missing_code:
@@ -25,6 +26,7 @@ function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackError = searchParams.get("error");
+  const redirectTo = getSafeRedirect(searchParams.get("redirect"));
   const initialErrorMessage = callbackError
     ? (CALLBACK_ERROR_MESSAGES[callbackError] ??
       "Could not complete sign-in. Please try again.")
@@ -32,12 +34,12 @@ function LoginPageContent() {
 
   useEffect(() => {
     if (callbackError) {
-      router.replace("/login/");
+      router.replace(redirectTo === "/home" ? "/login/" : loginPath(redirectTo));
     }
     if (!loading && user) {
-      router.replace("/home");
+      router.replace(redirectTo);
     }
-  }, [callbackError, user, loading, router]);
+  }, [callbackError, redirectTo, user, loading, router]);
 
   if (loading || user) return <LoadingScreen />;
 
@@ -47,7 +49,7 @@ function LoginPageContent() {
       description={copy.signInDescription}
       features={copy.signInFeatures}
     >
-      <LoginForm initialErrorMessage={initialErrorMessage} />
+      <LoginForm initialErrorMessage={initialErrorMessage} redirectTo={redirectTo} />
     </AuthShell>
   );
 }

@@ -9,6 +9,7 @@ import { ProjectsSkeleton } from "@/components/skeletons/projects-skeleton";
 import { useAuth } from "@/lib/auth-context";
 import { ApiAuthError, fetchArchivedProjects } from "@/lib/server-api";
 import { useRouter } from "next/navigation";
+import { loginPath } from "@/lib/navigation";
 
 export default function ArchivedProjectsPage() {
   const { session, signOut } = useAuth();
@@ -30,7 +31,7 @@ export default function ArchivedProjectsPage() {
     } catch (cause) {
       if (cause instanceof ApiAuthError) {
         await signOut();
-        router.replace("/login");
+        router.replace(loginPath("/projects/archived"));
         return;
       }
       setError(cause instanceof Error ? cause.message : "无法加载回收站。");
