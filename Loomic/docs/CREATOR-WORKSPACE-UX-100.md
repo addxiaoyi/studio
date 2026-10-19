@@ -30,7 +30,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 
 ## Canvas editing
 
-- [~] 21. Empty canvas offers useful first actions.
+- [x] 21. Empty canvas offers an accessible AI creation action and keyboard shortcut guidance.
 - [x] 22. Canvas tools and layer selection expose active, pressed, and focus-visible states without nested interactive controls.
 - [~] 23. Selection count and available actions are discoverable.
 - [~] 24. Zoom and selection navigation remain reachable.

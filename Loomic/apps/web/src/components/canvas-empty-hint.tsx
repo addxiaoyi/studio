@@ -82,9 +82,17 @@ export function CanvasEmptyHint({
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-      <p className="text-base text-muted-foreground/50">
-        {"输入你的想法开始创作"}
-      </p>
+      <div className="flex flex-col items-center gap-3 rounded-2xl border border-border/40 bg-background/75 px-6 py-5 text-center shadow-soft backdrop-blur-sm">
+        <p className="text-sm text-muted-foreground">输入你的想法开始创作</p>
+        <button
+          type="button"
+          onClick={() => onOpenChatRef.current()}
+          className="pointer-events-auto min-h-10 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
+          打开 AI 创作
+        </button>
+        <span className="text-[11px] text-muted-foreground/80">也可以按 C 快速打开</span>
+      </div>
     </div>
   );
 }
