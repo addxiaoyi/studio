@@ -359,4 +359,33 @@ test.describe("UX 100 visual safeguards", () => {
     await expect(page.getByRole("heading", { name: "分镜脚本" })).toBeVisible();
     expect(assetAttempts).toBeGreaterThanOrEqual(3);
   });
+
+  test("storyboard model catalog failure retries in place", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.route("**/api/projects/project-model-retry/story-assets", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ assets: [] }) }),
+    );
+    await page.route("**/api/projects/project-model-retry/storyboards", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ storyboards: [{ id: "board-model", projectId: "project-model-retry", sceneNo: 1, title: "模型恢复测试", script: "脚本", shotPrompt: "画面", imageAssetId: null, videoAssetId: null, status: "draft", metadata: {}, createdAt: "2026-10-19T00:00:00.000Z", updatedAt: "2026-10-19T00:00:00.000Z" }] }),
+      }),
+    );
+    let imageModelAttempts = 0;
+    await page.route("**/api/image-models", (route) => {
+      imageModelAttempts += 1;
+      if (imageModelAttempts <= 2) {
+        return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "模型目录暂时不可用" }) });
+      }
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [{ id: "image-model", displayName: "图片模型", description: "", provider: "test", accessible: true, providerPriceCny: 1, capabilities: { imageToImage: true }, limits: { maxResolution: "1K" } }], unavailableModels: [], defaultModel: "image-model" }) });
+    });
+    await page.route("**/api/video-models", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [], unavailableModels: [] }) }));
+
+    await page.goto("/storyboard?projectId=project-model-retry");
+    await expect(page.getByRole("alert").filter({ hasText: "模型加载失败" })).toBeVisible();
+    await page.getByRole("button", { name: "重试加载模型" }).click();
+    await expect(page.getByRole("combobox", { name: "图片模型" })).toBeEnabled();
+    expect(imageModelAttempts).toBeGreaterThanOrEqual(3);
+  });
 });

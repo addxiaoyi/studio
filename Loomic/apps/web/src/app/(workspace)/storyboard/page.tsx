@@ -98,6 +98,9 @@ export default function StoryboardPage() {
   const [videoModels, setVideoModels] = useState<VideoModelInfo[]>([]);
   const [imageModel, setImageModel] = useState("");
   const [videoModel, setVideoModel] = useState("");
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelLoadError, setModelLoadError] = useState("");
+  const [modelLoadAttempt, setModelLoadAttempt] = useState(0);
   const [generating, setGenerating] = useState<"image" | "video" | null>(null);
   const [generationError, setGenerationError] = useState("");
   const [generationErrorMode, setGenerationErrorMode] = useState<"image" | "video" | null>(null);
@@ -180,8 +183,12 @@ export default function StoryboardPage() {
 
   useEffect(() => {
     if (!projectId) return;
+    setModelsLoading(true);
+    setModelLoadError("");
+    let active = true;
     void Promise.all([fetchImageModels(), fetchVideoModels()])
       .then(([images, videos]) => {
+        if (!active) return;
         const availableImages = images.models.filter(
           (model) => model.accessible !== false,
         );
@@ -197,10 +204,16 @@ export default function StoryboardPage() {
         );
         setVideoModel(availableVideos[0]?.id ?? "");
       })
-      .catch((error) =>
-        console.error("[storyboard] model loading failed", error),
-      );
-  }, [projectId]);
+      .catch(() => {
+        if (active) setModelLoadError("图片和视频模型加载失败，请重试。");
+      })
+      .finally(() => {
+        if (active) setModelsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [modelLoadAttempt, projectId]);
 
   const currentBoard = boards[selectedBoard];
   const selectedImage = imageModels.find((model) => model.id === imageModel);
@@ -1010,6 +1023,19 @@ export default function StoryboardPage() {
                     </span>
                   </div>
                 </div>
+                {modelsLoading ? (
+                  <p role="status" aria-live="polite" className="border-b border-border/60 px-4 py-3 text-xs text-muted-foreground">
+                    正在加载可用模型…
+                  </p>
+                ) : null}
+                {modelLoadError ? (
+                  <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+                    <span>{modelLoadError}</span>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setModelLoadAttempt((attempt) => attempt + 1)}>
+                      重试加载模型
+                    </Button>
+                  </div>
+                ) : null}
                 <div className="grid gap-4 p-4 lg:grid-cols-2">
                   <label className="grid min-w-0 gap-2 text-xs font-medium">
                     <span className="flex items-center gap-2">

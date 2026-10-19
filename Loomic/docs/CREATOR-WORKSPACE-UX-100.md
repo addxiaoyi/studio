@@ -163,3 +163,7 @@ start each client-side page in the new content context.
 The storyboard workspace now retries failed project data in place instead of relying
 on a same-route refresh, and its loading/error states expose status and alert semantics;
 Chromium covers a failed asset request followed by a successful retry.
+
+Storyboard model catalog loading now distinguishes loading, unavailable, and request
+failure states, with an accessible in-place retry that restores the model selectors
+and generation actions after recovery.
