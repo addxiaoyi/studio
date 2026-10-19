@@ -1,7 +1,7 @@
 "use client";
 
 import type { ModelInfo } from "@helstera/shared";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
@@ -45,6 +45,8 @@ export function AgentSection({
   const [imageModels, setImageModels] = useState<ImageModelInfo[]>([]);
   const [videoModels, setVideoModels] = useState<VideoModelInfo[]>([]);
   const [mediaModelsLoading, setMediaModelsLoading] = useState(true);
+  const [mediaModelsError, setMediaModelsError] = useState(false);
+  const mediaRequestRef = useRef(0);
   const [savingPreference, setSavingPreference] = useState(false);
   const [selectedModel, setSelectedModel] = useState(initialModel);
 
@@ -71,19 +73,25 @@ export function AgentSection({
       .finally(() => setModelsLoading(false));
   }, [fetchModels]);
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([fetchImageModels(), fetchVideoModels()])
-      .then(([images, videos]) => {
-        if (cancelled) return;
-        setImageModels(images.models);
-        setVideoModels(videos.models);
-      })
-      .finally(() => {
-        if (!cancelled) setMediaModelsLoading(false);
-      });
-    return () => { cancelled = true; };
+  const loadMediaModels = useCallback(async () => {
+    const requestId = ++mediaRequestRef.current;
+    setMediaModelsLoading(true);
+    setMediaModelsError(false);
+    try {
+      const [images, videos] = await Promise.all([fetchImageModels(), fetchVideoModels()]);
+      if (requestId !== mediaRequestRef.current) return;
+      setImageModels(images.models);
+      setVideoModels(videos.models);
+    } catch {
+      if (requestId === mediaRequestRef.current) setMediaModelsError(true);
+    } finally {
+      if (requestId === mediaRequestRef.current) setMediaModelsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadMediaModels();
+  }, [loadMediaModels]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -202,7 +210,13 @@ export function AgentSection({
           <p className="text-xs text-muted-foreground">{copy.allSessions}</p>
         </div>
 
-        <div className="grid gap-4 border-t border-border/60 pt-7 sm:grid-cols-2">
+        {mediaModelsError ? (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-t border-destructive/30 pt-7 text-sm text-destructive">
+            <span>图片和视频模型加载失败，请重试。</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => void loadMediaModels()} disabled={mediaModelsLoading}>重试加载媒体模型</Button>
+          </div>
+        ) : null}
+        <div className="grid gap-4 border-t border-border/60 pt-7 sm:grid-cols-2" aria-busy={mediaModelsLoading}>
           <div className="rounded-2xl border border-border/60 bg-card p-4">
             <div className="mb-3">
               <Label htmlFor="defaultImageModel">默认图片模型</Label>
