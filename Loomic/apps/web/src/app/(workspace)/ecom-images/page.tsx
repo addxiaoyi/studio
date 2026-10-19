@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CATEGORIES, RATIOS, SCENES } from "./constants";
 import { StyledSelect } from "@/components/ui/styled-select";
 import { getModelPricingLabel } from "@/lib/model-pricing";
+import { EcomImagePreviewDialog } from "@/components/ecom-image-preview-dialog";
 
 const MAX_REFERENCE_IMAGES = 10;
 const MAX_REFERENCE_BYTES = 25 * 1024 * 1024;
@@ -918,10 +919,7 @@ export default function EcomImagesPage() {
         </div>
       )}
       {previewImage && (
-        <div role="dialog" aria-modal="true" aria-label="查看生成原图" className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onClick={() => setPreviewImage(null)}>
-          <button type="button" aria-label="关闭预览" onClick={() => setPreviewImage(null)} className="absolute right-5 top-5 flex size-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"><X className="size-5" /></button>
-          <img src={previewImage} alt="生成结果原尺寸预览" className="max-h-[92vh] max-w-[92vw] object-contain" onClick={(event) => event.stopPropagation()} />
-        </div>
+        <EcomImagePreviewDialog src={previewImage} onClose={() => setPreviewImage(null)} />
       )}
     </section>
   );
