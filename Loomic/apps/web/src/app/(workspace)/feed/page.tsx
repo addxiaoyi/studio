@@ -1038,7 +1038,7 @@ export default function FeedPage() {
         {strategyBusy && automationRun && <Button variant="outline" size="sm" onClick={stopAutomationMonitoring}>停止监控</Button>}
         <Button variant="outline" size="sm" onClick={() => void runFeedAutomation()} disabled={strategyBusy} aria-busy={strategyBusy}>{strategyBusy ? "生成中" : "自动生成草稿"}</Button>
       </div>
-      {step === 1 && selectedPlatforms.length > 0 && <div className="mb-4 flex flex-wrap gap-2" aria-label="platform-draft-status">{selectedPlatforms.map((platform) => { const variant = activeVariants.find((item) => item.platform === platform); return <span key={platform} className="rounded-md border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">{platform}: {variant?.title ? "draft ready" : "waiting"}</span>; })}</div>}
+      {step === 1 && selectedPlatforms.length > 0 && <div className="mb-4 flex flex-wrap gap-2" role="region" aria-label="平台草稿状态" aria-live="polite">{selectedPlatforms.map((platform) => { const variant = activeVariants.find((item) => item.platform === platform); const label = platforms.find(([id]) => id === platform)?.[1] ?? platform; const status = variant?.title ? "草稿已就绪" : "等待草稿"; return <span key={platform} aria-label={`${label}：${status}`} className="rounded-md border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">{label}：{status}</span>; })}</div>}
       <header className="flex flex-wrap items-start justify-between gap-5">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">

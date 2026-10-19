@@ -225,6 +225,21 @@ describe("feed workflow closure", () => {
     expect(screen.getByText(/当前步骤：脚本/)).toBeInTheDocument();
   });
 
+  it("announces draft availability per selected platform", async () => {
+    searchParamsMock.current = new URLSearchParams({
+      packageId: packageRecord.id,
+      step: "1",
+    });
+
+    render(<FeedPage />);
+
+    await waitFor(() => expect(fetchFeedPackageMock).toHaveBeenCalledWith("test-token", packageRecord.id));
+    const statuses = screen.getByRole("region", { name: "平台草稿状态" });
+    expect(statuses).toHaveTextContent("抖音：草稿已就绪");
+    expect(statuses).toHaveTextContent("小红书：草稿已就绪");
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
   it("patches edited structure, starts render, and exposes every selected platform", async () => {
     const user = userEvent.setup();
     await openCustomTopic(user);

@@ -89,7 +89,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 65. Review and automatic-draft modes stay separate.
 - [x] 66. Automation status announces its current stage.
 - [~] 67. Retry targets the failed automation stage and preserves edited fields.
-- [~] 68. Platform variants show draft availability per selected platform.
+- [x] 68. Platform variants show draft availability per selected platform with localized status labels and accessible live-region semantics.
 - [~] 69. Dirty structure state blocks leaving until the user chooses.
 - [~] 70. Scheduling and publishing keep explicit human confirmation.
 
