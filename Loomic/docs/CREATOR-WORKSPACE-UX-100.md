@@ -34,7 +34,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 22. Canvas tools and layer selection expose active, pressed, and focus-visible states without nested interactive controls.
 - [x] 23. Selection count and available actions are discoverable, with a focused selection-action regression check.
 - [x] 24. Zoom and selection navigation remain reachable, with labelled keyboard controls and a focused regression check.
-- [~] 25. Layer and canvas selection stay synchronized; the layer control now exposes its selected state, while full canvas synchronization remains to be browser-verified.
+- [~] 25. Layer and canvas selection stay synchronized; a component regression now verifies canvas `onChange` updates the layer `aria-pressed` state, while full Excalidraw browser synchronization remains to be verified.
 - [x] 26. Timeline open/close behavior is predictable; opening moves focus to the close control and closing restores the toolbar trigger.
 - [x] 27. Video preview width and height are constrained to the viewport.
 - [x] 28. Closing the video preview restores focus to the prior canvas control and is covered by a component regression test.
