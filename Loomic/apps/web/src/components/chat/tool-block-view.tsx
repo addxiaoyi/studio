@@ -622,14 +622,14 @@ const MediaShimmer = React.memo(function MediaShimmer({
         </div>
       </div>
       <div className="px-3 py-2">
-        <div className={`text-[12px] font-medium ${isFailed ? "text-destructive" : "text-muted-foreground/70"}`}>
+        <div role={isFailed ? "alert" : "status"} aria-live={isFailed ? "assertive" : "polite"} aria-atomic="true" className={`text-[12px] font-medium ${isFailed ? "text-destructive" : "text-muted-foreground/70"}`}>
           {statusText}
         </div>
         {job ? (
           <div className="mt-1 space-y-1.5 text-[11px] text-muted-foreground">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2" aria-label="生成任务进度">
               <span className="truncate">{job.stage ?? `真实状态：${job.status}`}</span>
-              <span className="shrink-0 tabular-nums">{progress}%</span>
+              <span className="shrink-0 tabular-nums" aria-label={`进度 ${progress}%`}>{progress}%</span>
             </div>
             <div className="h-1 overflow-hidden rounded-full bg-muted">
               <div
@@ -728,7 +728,7 @@ const MediaErrorCard = React.memo(function MediaErrorCard({
           </svg>
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-foreground">
+          <div role="alert" aria-live="assertive" aria-atomic="true" className="text-sm font-medium text-foreground">
             {isVideoTool ? "\u89c6\u9891\u751f\u6210\u5931\u8d25" : "\u56fe\u7247\u751f\u6210\u5931\u8d25"}
           </div>
           <div className="mt-0.5 text-[12px] text-muted-foreground line-clamp-2">
@@ -736,19 +736,19 @@ const MediaErrorCard = React.memo(function MediaErrorCard({
           </div>
           {routing?.selectedModel && <RoutingNotice routing={routing} />}
           <div className="mt-3 flex flex-wrap gap-2">
-            {showFailover && isVideoTool && <button type="button" onClick={openFailover} className="rounded-lg bg-foreground px-2.5 py-1.5 text-[11px] font-medium text-background hover:bg-foreground/85">智能容灾：选择下一个模型</button>}
-            <button type="button" onClick={openModels} className="rounded-lg border border-border/70 bg-background px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted">
+            {showFailover && isVideoTool && <button type="button" onClick={openFailover} className="rounded-lg bg-foreground px-2.5 py-1.5 text-[11px] font-medium text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-foreground/85">智能容灾：选择下一个模型</button>}
+            <button type="button" onClick={openModels} className="rounded-lg border border-border/70 bg-background px-2.5 py-1.5 text-[11px] font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-muted">
               重新选择可用模型
             </button>
-            <button type="button" onClick={useAutoRouting} disabled={!retryAllowed} className="rounded-lg border border-border/70 bg-background px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted">
+            <button type="button" onClick={useAutoRouting} disabled={!retryAllowed} aria-describedby={!retryAllowed ? "generation-retry-policy" : undefined} className="rounded-lg border border-border/70 bg-background px-2.5 py-1.5 text-[11px] font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-muted">
               使用系统自动路由
             </button>
-            <button type="button" onClick={retry} disabled={!retryAllowed || !prompt} title={retryAllowed ? "重新提交已明确失败的任务" : "任务状态尚未确认失败，已禁用以避免重复扣费"} className="rounded-lg bg-foreground px-2.5 py-1.5 text-[11px] font-medium text-background hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-40">
+            <button type="button" onClick={retry} disabled={!retryAllowed || !prompt} aria-describedby="generation-retry-policy" title={retryAllowed ? "重新提交已明确失败的任务" : "任务状态尚未确认失败，已禁用以避免重复扣费"} className="rounded-lg bg-foreground px-2.5 py-1.5 text-[11px] font-medium text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-40">
               重新提交任务
             </button>
           </div>
           {!canRetry && (
-            <p className="mt-2 text-[10px] leading-4 text-muted-foreground">任务尚未确认终止，为避免上游重复受理和重复扣费，暂不允许再次提交。</p>
+            <p id="generation-retry-policy" className="mt-2 text-[10px] leading-4 text-muted-foreground">任务尚未确认终止，为避免上游重复受理和重复扣费，暂不允许再次提交。</p>
           )}
         </div>
       </div>

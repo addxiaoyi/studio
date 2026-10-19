@@ -43,6 +43,17 @@ it('replaces pending output with the terminal job error', async () => {
   expect(screen.getByText('图片生成失败')).toBeInTheDocument();
 });
 
+it('announces running progress and terminal failure as atomic status messages', async () => {
+  fetchJob.mockResolvedValue({ job });
+  render(<ToolBlockView block={block} />);
+  expect(await screen.findByRole('status')).toHaveTextContent('模型正在生成');
+
+  cleanup();
+  fetchJob.mockResolvedValue({ job: { ...job, status: 'dead_letter', error_message: '任务已终止' } });
+  render(<ToolBlockView block={{ ...block, output: { jobId: 'accepted', pending: true } }} />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('图片生成失败');
+});
+
 it('shows the actual routed model on the successful image instead of the requested model', async () => {
   fetchJob.mockResolvedValue({ job: { ...job, status: 'succeeded',
     payload: { ...job.payload, routing: { selectedModel: 'gpt-image-2-4k', preferredModel: 'gpt-image-2', fallback: true } },
