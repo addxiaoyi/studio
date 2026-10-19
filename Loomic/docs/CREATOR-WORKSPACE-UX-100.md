@@ -38,7 +38,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 26. Timeline open/close behavior is predictable; opening moves focus to the close control and closing restores the toolbar trigger.
 - [x] 27. Video preview width and height are constrained to the viewport.
 - [x] 28. Closing the video preview restores focus to the prior canvas control and is covered by a component regression test.
-- [~] 29. Video controls remain usable on narrow screens and keyboard.
+- [~] 29. Video controls remain usable on narrow screens and keyboard; the preview now exposes a named player, keyboard guidance, and focus-visible close/download controls, while a full canvas browser pass remains.
 - [~] 30. Canvas save and sync states are visible and recoverable.
 
 ## AI chat and messages

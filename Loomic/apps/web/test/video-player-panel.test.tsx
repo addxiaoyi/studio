@@ -36,6 +36,9 @@ describe("VideoPlayerPanel", () => {
     const trigger = screen.getByRole("button", { name: "打开视频预览" });
     await user.click(trigger);
     expect(screen.getByRole("button", { name: "关闭视频预览" })).toHaveFocus();
+    expect(screen.getByRole("dialog", { name: "视频预览" })).toHaveAttribute("aria-describedby", "video-player-panel-description");
+    expect(screen.getByLabelText("视频播放器")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载视频" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "关闭视频预览" }));
     expect(trigger).toHaveFocus();

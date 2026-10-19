@@ -87,13 +87,15 @@ export function VideoPlayerPanel({
       role="dialog"
       aria-modal="false"
       aria-label={title || "视频预览"}
+      aria-labelledby="video-player-panel-title"
+      aria-describedby="video-player-panel-description"
       className="fixed z-[100] w-[min(400px,calc(100vw-1rem))] rounded-lg border border-border/60 glass-soft shadow-card-hover backdrop-blur-lg overflow-hidden"
       onKeyDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/50">
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground truncate">
+        <div id="video-player-panel-title" className="flex items-center gap-2 text-sm font-medium text-foreground truncate">
           <svg
             className="h-4 w-4 shrink-0 text-muted-foreground"
             viewBox="0 0 24 24"
@@ -103,7 +105,7 @@ export function VideoPlayerPanel({
           >
             <polygon points="5 3 19 12 5 21 5 3" />
           </svg>
-          <span className="truncate">{title || "Video"}</span>
+          <span className="truncate">{title || "视频预览"}</span>
           {durationSeconds != null && (
             <span className="text-xs text-muted-foreground">
               {durationSeconds}s
@@ -115,7 +117,7 @@ export function VideoPlayerPanel({
           ref={closeButtonRef}
           onClick={onClose}
           aria-label="关闭视频预览"
-          className="rounded-full p-1 hover:bg-foreground/[0.04]/80 transition-all duration-300"
+          className="rounded-full p-1 hover:bg-foreground/[0.04]/80 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <svg
             className="h-4 w-4 text-muted-foreground"
@@ -137,6 +139,7 @@ export function VideoPlayerPanel({
           controls
           playsInline
           preload="metadata"
+          aria-label={`${title || "视频"}播放器`}
           className="w-full max-h-[250px] object-contain sm:max-h-[280px]"
           style={{ display: "block" }}
         >
@@ -145,13 +148,15 @@ export function VideoPlayerPanel({
       </div>
 
       {/* Footer with download */}
+      <p id="video-player-panel-description" className="sr-only">使用键盘或播放器控件播放、暂停和调整视频进度。</p>
       <div className="flex items-center justify-end px-3 py-2 border-t border-border/50">
         <a
           href={videoUrl}
           download={`${title || "video"}.mp4`}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:bg-foreground/[0.04]/80 transition-all duration-300"
+          aria-label={`下载${title || "视频"}`}
+          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:bg-foreground/[0.04]/80 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <svg
             className="h-3.5 w-3.5"
