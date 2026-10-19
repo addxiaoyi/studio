@@ -76,6 +76,16 @@ export function ProfileSection({
     }
   }
 
+  async function revokeAccount(account: PublishingAccount) {
+    if (!window.confirm(`确认解绑“${account.alias}”？解绑后，信息流不会再使用这个账号。`)) return;
+    try {
+      await onRevokeAccount(account.id);
+      setFeedback({ type: "success", message: `${account.alias} 已解绑。` });
+    } catch (error) {
+      setFeedback({ type: "error", message: error instanceof Error ? error.message : "账号解绑失败，请重试。" });
+    }
+  }
+
   return (
     <div className="space-y-8">
       <div>
@@ -132,12 +142,15 @@ export function ProfileSection({
           {accounts.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">暂未绑定账号。添加后即可在信息流排程中选择。</div>
           ) : accounts.map((account) => (
-            <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-card p-4">
+              <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-card p-4">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-foreground">{account.alias}</p>
-                <p className="mt-1 text-xs text-muted-foreground">{platformLabel(account.platform)} · {modeLabel(account.connection_mode)}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>{platformLabel(account.platform)} · {modeLabel(account.connection_mode)}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] ${account.status === "active" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : account.status === "pending" ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : "bg-muted text-muted-foreground"}`} aria-label={`连接状态：${accountStatusLabel(account.status)}`}>{accountStatusLabel(account.status)}</span>
+                </div>
               </div>
-              <Button type="button" variant="outline" size="sm" disabled={accountBusy} onClick={() => void onRevokeAccount(account.id)}><Unplug className="mr-1.5 size-3.5" />解绑</Button>
+              <Button type="button" variant="outline" size="sm" disabled={accountBusy} onClick={() => void revokeAccount(account)}><Unplug className="mr-1.5 size-3.5" />{accountBusy ? "处理中…" : "解绑"}</Button>
             </div>
           ))}
         </div>
@@ -196,6 +209,13 @@ function platformLabel(platform: string) {
 
 function modeLabel(mode: string) {
   return modeOptions.find((item) => item.value === mode)?.label ?? mode;
+}
+
+function accountStatusLabel(status: string) {
+  if (status === "active") return "已连接";
+  if (status === "pending") return "待确认";
+  if (status === "revoked") return "已撤销";
+  return status || "状态未知";
 }
 
 const socialPlatforms: Array<{

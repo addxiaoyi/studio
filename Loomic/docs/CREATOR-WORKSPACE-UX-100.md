@@ -111,7 +111,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 81. Profile and model-setting feedback uses status/error announcements.
 - [~] 82. Agent chat model and media-generation model settings are distinct.
 - [x] 83. Paid-generation auto-approval states its billing effect, uses an associated description, and saves with feedback.
-- [~] 84. Publishing account connection and revoke states are visible.
+- [x] 84. Publishing account connection and revoke states are visible, with status labels, confirmation, and retryable failure feedback covered by a component regression.
 - [~] 85. Billing, top-up, and credit usage share clear navigation; pricing region selection is touchable/keyboard-reachable, international-channel status is explicit, and billing catalog/payment failures now expose retryable feedback; the full billing journey remains to be audited.
 - [x] 86. Usage history has loading, empty, and retryable error states.
 - [x] 87. Team invite button is locked during submission; member-list failures expose a retry action and search remains recoverable.
