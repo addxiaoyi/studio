@@ -171,6 +171,8 @@ type MediaRouting = {
   resolution?: string;
 };
 
+type JobPollingState = "pending" | "synced" | "unknown";
+
 function getMediaRouting(job: GenerationJob | null): MediaRouting | null {
   const resultRouting = job?.result?.routing;
   if (resultRouting && typeof resultRouting === "object") {
@@ -200,6 +202,7 @@ function useGenerationJobStatus(
 ) {
   const { session } = useAuth();
   const [job, setJob] = useState<GenerationJob | null>(null);
+  const [pollingState, setPollingState] = useState<JobPollingState>("pending");
 
   useEffect(() => {
     if (!active || !session?.access_token) return;
@@ -226,6 +229,7 @@ function useGenerationJobStatus(
         if (matched) {
           const next = matched as GenerationJob;
           setJob(next);
+          setPollingState("synced");
           errorCount = 0;
           if (terminalStatuses.has(next.status)) return;
         }
@@ -233,6 +237,7 @@ function useGenerationJobStatus(
       } catch {
         // The visible tool state remains useful when status polling is transiently unavailable.
         errorCount += 1;
+        if (errorCount >= 3) setPollingState("unknown");
         schedule(Math.min(2_000 * 2 ** errorCount, 30_000));
       }
     };
@@ -244,7 +249,7 @@ function useGenerationJobStatus(
     };
   }, [active, confirmedJobId, input?.prompt, output?.jobId, session?.access_token, toolName]);
 
-  return job;
+  return { job, pollingState };
 }
 
 /* ------------------------------------------------------------------ */
@@ -295,7 +300,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
   const modelName = inputData?.model as string | undefined;
   const aspectRatio =
     (inputData?.aspectRatio as string) ?? (isVideoTool ? "16:9" : "1:1");
-  const generationJob = useGenerationJobStatus(
+  const { job: generationJob, pollingState } = useGenerationJobStatus(
     isMediaTool && !hideDuplicateJob && (!isCompleted || Boolean((block.output as Record<string, unknown> | undefined)?.jobId) || Boolean(confirmedJobId)),
     block.toolName,
     inputData,
@@ -309,7 +314,8 @@ export const ToolBlockView = React.memo(function ToolBlockView({
   const lateSuccess = isMediaTool && generationJob?.status === "succeeded";
   const backgroundPending = isMediaTool && (
     generationJob?.status === "queued" || generationJob?.status === "running" ||
-    (!generationJob && block.output?.pending === true)
+    (!generationJob && block.output?.pending === true) ||
+    pollingState === "unknown"
   );
   if (isImageTool && lateSuccess && !imageArtifact && generationJob?.result?.signed_url) {
     imageArtifact = {
@@ -325,7 +331,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
     ? outputErrorCode
     : generationJob?.error_code ?? undefined;
   const mediaError =
-    isMediaTool && isCompleted && !imageArtifact && !lateSuccess && !backgroundPending
+    isMediaTool && isCompleted && !imageArtifact && !lateSuccess && !backgroundPending && pollingState !== "unknown"
       ? terminalFailure
         ? generationJob.error_message ?? "生成任务未完成，请查看任务详情。"
         : ((block.output as Record<string, unknown> | undefined)?.error as string | undefined)
@@ -426,6 +432,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
           modelName={actualModelName}
           job={generationJob}
           routing={mediaRouting}
+          pollingState={pollingState}
         />
       )}
 
@@ -555,12 +562,14 @@ const MediaShimmer = React.memo(function MediaShimmer({
   modelName,
   job,
   routing,
+  pollingState,
 }: {
   isVideoTool: boolean;
   aspectRatio: string;
   modelName: string | undefined;
   job: GenerationJob | null;
   routing: MediaRouting | null;
+  pollingState: JobPollingState;
 }) {
   const status = job?.status;
   const isQueued = status === "queued";
@@ -568,6 +577,8 @@ const MediaShimmer = React.memo(function MediaShimmer({
   const isSucceeded = status === "succeeded";
   const statusText = isFailed
     ? "任务已失败"
+    : pollingState === "unknown"
+      ? "状态暂时无法确认，正在重试"
     : isSucceeded
       ? "生成完成，画布已同步"
     : isQueued

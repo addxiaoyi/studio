@@ -63,8 +63,8 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 45. The same approval ID renders one actionable approval card.
 - [x] 46. Confirm and cancel actions are guarded against rapid duplicate clicks.
 - [x] 47. Duplicate status blocks for the same Job render once.
-- [~] 48. Queue, running, success, failure, and unknown outcomes have distinct copy.
-- [~] 49. Retry remains disabled until the Job is confirmed retry-safe.
+- [~] 48. Queue, running, success, failure, and unknown outcomes have distinct copy; media polling now announces an unknown status instead of treating a transient outage as failure.
+- [~] 49. Retry remains disabled until the Job is confirmed retry-safe; the retry policy is now programmatically associated with disabled actions.
 - [~] 50. Job timeline and recovery actions are visible in the tool detail view.
 
 ## Asset management
@@ -130,7 +130,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 97. Primary lists have loading skeletons and explicit empty states.
 - [~] 98. Network failures preserve user input and offer targeted retry where implemented; billing catalog failures now retry in place and usage history distinguishes failed loading from an empty result.
 - [x] 99. Session/message and Feed polling ignore or stop stale asynchronous updates.
-- [~] 100. Key progress and outcome changes use atomic status/alert semantics; full screen-reader pass remains.
+- [~] 100. Media generation progress, unknown state, and terminal failure now use atomic status/alert semantics; full screen-reader pass remains.
 
 ## Verification
 

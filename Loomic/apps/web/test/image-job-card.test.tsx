@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ToolBlock } from '@helstera/shared';
 import { ToolBlockView } from '../src/components/chat/tool-block-view';
@@ -7,7 +7,7 @@ import { ToolBlockView } from '../src/components/chat/tool-block-view';
 const { fetchJob } = vi.hoisted(() => ({ fetchJob: vi.fn() }));
 vi.mock('../src/lib/server-api', () => ({ fetchJob, fetchJobs: vi.fn() }));
 vi.mock('../src/lib/auth-context', () => ({ useAuth: () => ({ session: { access_token: 'test' } }) }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.useRealTimers(); });
 
 const block: ToolBlock = {
   type: 'tool', toolCallId: 'call', toolName: 'generate_image', status: 'completed',
@@ -52,6 +52,19 @@ it('announces running progress and terminal failure as atomic status messages', 
   fetchJob.mockResolvedValue({ job: { ...job, status: 'dead_letter', error_message: '任务已终止' } });
   render(<ToolBlockView block={{ ...block, output: { jobId: 'accepted', pending: true } }} />);
   expect(await screen.findByRole('alert')).toHaveTextContent('图片生成失败');
+});
+
+it('announces an unknown status without enabling retry after polling failures', async () => {
+  vi.useFakeTimers();
+  fetchJob.mockRejectedValue(new Error('temporary status outage'));
+  render(<ToolBlockView block={{ ...block, output: { jobId: 'accepted', pending: true } }} />);
+
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  await act(async () => { vi.advanceTimersByTime(4_000); await Promise.resolve(); await Promise.resolve(); });
+  await act(async () => { vi.advanceTimersByTime(8_000); await Promise.resolve(); await Promise.resolve(); });
+
+  expect(screen.getByRole('status')).toHaveTextContent('状态暂时无法确认');
+  expect(screen.queryByRole('button', { name: '重新提交任务' })).not.toBeInTheDocument();
 });
 
 it('shows the actual routed model on the successful image instead of the requested model', async () => {
