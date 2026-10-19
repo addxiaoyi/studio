@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HexColorPicker } from "react-colorful";
-import { Film, Shapes, WandSparkles } from "lucide-react";
+import { Film, Shapes, Trash2, WandSparkles } from "lucide-react";
 
 /* ── Preset color swatches for background picker ── */
 const BG_PRESETS = ["transparent","#000000","#FFFFFF","#d3f256","#6C5CE7","#00B894","#FD79A8","#0984E3"] as const;
@@ -25,6 +25,9 @@ interface CanvasBottomBarProps {
   onToggleTimeline: () => void;
   /** Whether any left panel (layers/files) is open — shifts the bar right */
   leftPanelOpen: boolean;
+  selectedCount: number;
+  onClearSelection: () => void;
+  onDeleteSelection: () => void;
 }
 
 /* ── Inline SVG icons ── */
@@ -99,7 +102,7 @@ function Popover({ open, triggerRef, onClose, children, className: extraClass }:
 
 /* ── Toolbar button ── */
 const btnClass =
-  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground transition-all duration-200";
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-all duration-200 hover:bg-foreground/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1";
 
 /* ── Element helpers for Search ── */
 // biome-ignore lint/suspicious/noExplicitAny: Excalidraw element has no public type
@@ -130,7 +133,7 @@ function ElementRow({ el, onSelect }: { el: ExcalidrawEl; onSelect: (id: string)
 /* ================================================================
    Main component
    ================================================================ */
-export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, filesOpen, onToggleFiles, timelineOpen, onToggleTimeline, leftPanelOpen }: CanvasBottomBarProps) {
+export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, filesOpen, onToggleFiles, timelineOpen, onToggleTimeline, leftPanelOpen, selectedCount, onClearSelection, onDeleteSelection }: CanvasBottomBarProps) {
   /* ── Zoom state ── */
   const [zoom, setZoom] = useState(1);
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
@@ -236,6 +239,7 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, fil
       onKeyDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
+      {selectedCount > 0 && <div className="mb-1 flex items-center gap-1 rounded-xl border border-border/60 bg-background/95 px-2 py-1 text-[11px] shadow-sm" role="status" aria-live="polite"><span className="whitespace-nowrap text-foreground">已选 {selectedCount} 项</span><button type="button" onClick={onClearSelection} className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">清除</button><button type="button" onClick={onDeleteSelection} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="删除选中元素"><Trash2 className="size-3" aria-hidden="true" />删除</button></div>}
       <div className="flex flex-col items-center gap-0.5 rounded-2xl glass-soft border border-border/40 px-1 py-1 shadow-soft">
         {/* ── Background color button ── */}
         <button ref={bgBtnRef} type="button" className={btnClass} onClick={toggleBgPicker} aria-label="画布背景色" title="画布背景色">
@@ -245,18 +249,18 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, fil
         </button>
 
         {/* ── Layers button ── */}
-        <button type="button" className={`${btnClass} ${layersOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleLayers} aria-label="图层" title="图层">
+        <button type="button" className={`${btnClass} ${layersOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleLayers} aria-label="图层" aria-pressed={layersOpen} title="图层">
           <LayersIcon className="h-4 w-4" />
         </button>
 
         {/* ── Files button ── */}
-        <button type="button" className={`${btnClass} ${filesOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleFiles} aria-label="素材文件" title="素材文件">
+        <button type="button" className={`${btnClass} ${filesOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleFiles} aria-label="素材文件" aria-pressed={filesOpen} title="素材文件">
           <FileIcon className="h-3.5 w-3.5" />
         </button>
-        <button type="button" className={`${btnClass} ${timelineOpen ? "bg-muted text-foreground" : ""}`} onClick={onToggleTimeline} aria-label="媒体时间线" title="媒体时间线">
+        <button type="button" className={`${btnClass} ${timelineOpen ? "bg-muted text-foreground" : ""}`} onClick={onToggleTimeline} aria-label="媒体时间线" aria-pressed={timelineOpen} title="媒体时间线">
           <Film className="h-3.5 w-3.5" />
         </button>
-        <button type="button" className={`${btnClass} ${standardShapes ? "bg-muted text-foreground" : ""}`} onClick={toggleShapeStyle} aria-label={standardShapes ? "标准图形已开启" : "手绘图形已开启"} title={standardShapes ? "标准图形已开启" : "手绘图形已开启"}>
+        <button type="button" className={`${btnClass} ${standardShapes ? "bg-muted text-foreground" : ""}`} onClick={toggleShapeStyle} aria-label={standardShapes ? "标准图形已开启" : "手绘图形已开启"} aria-pressed={standardShapes} title={standardShapes ? "标准图形已开启" : "手绘图形已开启"}>
           <Shapes className="h-3.5 w-3.5" />
         </button>
         {selectedShapeCount > 0 && <button type="button" className={btnClass} onClick={standardizeSelectedShapes} aria-label="将选中图形转换为标准图形" title="将选中图形转换为标准图形"><WandSparkles className="h-3.5 w-3.5" /></button>}
@@ -266,7 +270,7 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, fil
 
         {/* ── Zoom controls ── */}
         <button type="button" className={btnClass} onClick={handleZoomOut} aria-label="缩小" title="缩小"><MinusIcon className="h-3.5 w-3.5" /></button>
-        <button ref={zoomBtnRef} type="button" title="缩放比例" className="min-h-7 text-center text-xs text-muted-foreground select-none cursor-pointer hover:text-foreground transition-all duration-300" onClick={toggleZoomMenu}>
+        <button ref={zoomBtnRef} type="button" title="缩放比例" aria-label={`缩放比例 ${Math.round(zoom * 100)}%，打开缩放选项`} aria-expanded={zoomMenuOpen} className="min-h-8 min-w-10 rounded-md text-center text-xs text-muted-foreground select-none cursor-pointer transition-all duration-300 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1" onClick={toggleZoomMenu}>
           {Math.round(zoom * 100)}%
         </button>
         <button type="button" className={btnClass} onClick={handleZoomIn} aria-label="放大" title="放大"><PlusIcon className="h-3.5 w-3.5" /></button>
@@ -276,10 +280,10 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, fil
       <Popover open={zoomMenuOpen} triggerRef={zoomBtnRef} onClose={() => setZoomMenuOpen(false)}>
         <div className="flex flex-col gap-0.5 min-w-[100px]">
           {ZOOM_PRESETS.map((v) => (
-            <button key={v} type="button" className="px-3 py-1.5 text-xs text-left rounded-md hover:bg-foreground/[0.04] transition-all duration-300 text-foreground" onClick={() => handleZoomTo(v)}>{Math.round(v * 100)}%</button>
+            <button key={v} type="button" className="rounded-md px-3 py-1.5 text-left text-xs text-foreground transition-all duration-300 hover:bg-foreground/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => handleZoomTo(v)}>{Math.round(v * 100)}%</button>
           ))}
           <div className="h-px bg-border my-0.5" />
-          <button type="button" className="px-3 py-1.5 text-xs text-left rounded-md hover:bg-foreground/[0.04] transition-all duration-300 text-foreground" onClick={handleFitAll}>Fit All</button>
+          <button type="button" className="rounded-md px-3 py-1.5 text-left text-xs text-foreground transition-all duration-300 hover:bg-foreground/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={handleFitAll}>适应画布</button>
         </div>
       </Popover>
 
@@ -290,7 +294,7 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, fil
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-foreground">画布背景色</span>
             <button type="button" className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-foreground transition-all duration-300"
-              onClick={() => setBgPickerOpen(false)} aria-label="Close color picker">
+              onClick={() => setBgPickerOpen(false)} aria-label="关闭颜色选择器">
               <CloseIcon className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -308,7 +312,7 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, fil
               <button key={hex} type="button"
                 className={`h-6 w-6 shrink-0 rounded-full border hover:scale-110 transition-all duration-300 ${bgColor === hex ? "border-foreground ring-1 ring-foreground ring-offset-1 ring-offset-card" : "border-border"}`}
                 style={hex === "transparent" ? CHECKER_STYLE : { backgroundColor: hex }}
-                onClick={() => applyBgColor(hex)} aria-label={`Set background to ${hex}`} />
+                onClick={() => applyBgColor(hex)} aria-label={`设置画布背景色 ${hex}`} aria-pressed={bgColor === hex} />
             ))}
           </div>
           {/* Hex input row */}

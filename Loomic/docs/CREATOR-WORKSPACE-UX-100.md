@@ -32,8 +32,8 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 
 - [x] 21. Empty canvas offers an accessible AI creation action and keyboard shortcut guidance.
 - [x] 22. Canvas tools and layer selection expose active, pressed, and focus-visible states without nested interactive controls.
-- [~] 23. Selection count and available actions are discoverable.
-- [~] 24. Zoom and selection navigation remain reachable.
+- [x] 23. Selection count and available actions are discoverable, with a focused selection-action regression check.
+- [x] 24. Zoom and selection navigation remain reachable, with labelled keyboard controls and a focused regression check.
 - [~] 25. Layer and canvas selection stay synchronized; the layer control now exposes its selected state, while full canvas synchronization remains to be browser-verified.
 - [~] 26. Timeline open/close behavior is predictable.
 - [x] 27. Video preview width and height are constrained to the viewport.

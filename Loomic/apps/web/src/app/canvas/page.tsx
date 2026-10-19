@@ -94,6 +94,20 @@ function CanvasPageContent() {
   const handleCloseLayers = useCallback(() => setLayersOpen(false), []);
   const handleCloseFiles = useCallback(() => setFilesOpen(false), []);
   const handleToggleTimeline = useCallback(() => setTimelineOpen((value) => !value), []);
+  const handleClearSelection = useCallback(() => {
+    excalidrawApiRef.current?.updateScene({ appState: { selectedElementIds: {} } });
+  }, []);
+  const handleDeleteSelection = useCallback(() => {
+    const api = excalidrawApiRef.current;
+    if (!api) return;
+    const selectedIds = new Set(Object.keys(api.getAppState().selectedElementIds ?? {}));
+    if (selectedIds.size === 0) return;
+    api.updateScene({
+      elements: api.getSceneElements().map((element: any) => selectedIds.has(element.id) ? { ...element, isDeleted: true } : element),
+      appState: { selectedElementIds: {} },
+      captureUpdate: "IMMEDIATELY",
+    });
+  }, []);
 
   const accessToken = session?.access_token;
   const accessTokenRef = useRef(accessToken);
@@ -399,6 +413,9 @@ function CanvasPageContent() {
           timelineOpen={timelineOpen}
           onToggleTimeline={handleToggleTimeline}
           leftPanelOpen={layersOpen || filesOpen}
+          selectedCount={selectedCanvasElements.length}
+          onClearSelection={handleClearSelection}
+          onDeleteSelection={handleDeleteSelection}
         />
         <CanvasTimelinePanel
           excalidrawApi={excalidrawApi}

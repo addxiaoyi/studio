@@ -68,6 +68,8 @@ type CanvasEditorProps = {
   onSelectionChange?: (elements: CanvasSelectedElement[]) => void;
 };
 
+type CanvasSaveState = "saved" | "saving" | "error";
+
 const SAVE_DEBOUNCE_MS = 1500;
 const THUMBNAIL_DEBOUNCE_MS = 10_000;
 const THUMBNAIL_INITIAL_REFRESH_DELAY_MS = 1500;
@@ -135,6 +137,7 @@ export function CanvasEditor({
   canvasIdRef.current = canvasId;
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [excalidrawApi, setExcalidrawApi] = useState<any>(null);
+  const [saveState, setSaveState] = useState<CanvasSaveState>("saved");
   const [resolvedFilesVersion, setResolvedFilesVersion] = useState(0);
   const [isImageDragActive, setIsImageDragActive] = useState(false);
   const [deleteGesture, setDeleteGesture] = useState<{ active: boolean; overTrash: boolean }>({ active: false, overTrash: false });
@@ -409,6 +412,7 @@ export function CanvasEditor({
           files,
         };
         pendingSaveRef.current = content;
+        setSaveState("saving");
 
         const save = async () => {
           const { canvas } = await fetchCanvas(accessTokenRef.current, canvasIdRef.current);
@@ -422,9 +426,13 @@ export function CanvasEditor({
           .then(() => {
             if (pendingSaveRef.current === content) {
               pendingSaveRef.current = null;
+              setSaveState("saved");
             }
           })
-          .catch((err) => console.error("[canvas-editor] save failed:", err));
+          .catch((err) => {
+            if (pendingSaveRef.current === content) setSaveState("error");
+            console.error("[canvas-editor] save failed:", err);
+          });
       }, SAVE_DEBOUNCE_MS);
 
       // --- 2. Debounced thumbnail (runs much less frequently than save) ---
@@ -654,6 +662,35 @@ export function CanvasEditor({
   const buildSavePayloadRef = useRef(buildSavePayload);
   buildSavePayloadRef.current = buildSavePayload;
 
+  const retrySave = useCallback(() => {
+    const payload = buildSavePayloadRef.current();
+    if (!payload) return;
+    pendingSaveRef.current = payload;
+    setSaveState("saving");
+    const save = async () => {
+      const { canvas } = await fetchCanvas(accessTokenRef.current, canvasIdRef.current);
+      await saveCanvas(
+        accessTokenRef.current,
+        canvasIdRef.current,
+        mergeCanvasSaveWithRemoteContent(payload, canvas.content),
+      );
+    };
+    saveQueueRef.current = saveQueueRef.current
+      .catch((error) => console.warn("[canvas-editor] previous save failed:", error))
+      .then(save);
+    saveQueueRef.current
+      .then(() => {
+        if (pendingSaveRef.current === payload) {
+          pendingSaveRef.current = null;
+          setSaveState("saved");
+        }
+      })
+      .catch((error) => {
+        if (pendingSaveRef.current === payload) setSaveState("error");
+        console.error("[canvas-editor] retry save failed:", error);
+      });
+  }, []);
+
   // Flush pending save on page close (beforeunload) and component unmount
   useEffect(() => {
     const flushBeforeUnload = () => {
@@ -838,6 +875,12 @@ export function CanvasEditor({
           renderEmbeddable={renderEmbeddable}
           validateEmbeddable={validateEmbeddable}
         />
+        <div className="pointer-events-auto absolute left-1/2 top-3 z-[125] flex -translate-x-1/2 items-center gap-2 rounded-full border border-border/60 bg-background/90 px-3 py-1.5 text-[11px] text-muted-foreground shadow-sm backdrop-blur" role="status" aria-live="polite">
+          <span className={saveState === "error" ? "text-destructive" : saveState === "saving" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}>
+            {saveState === "saving" ? "保存中…" : saveState === "error" ? "保存失败" : "已保存"}
+          </span>
+          {saveState === "error" && <button type="button" onClick={retrySave} className="rounded-full px-2 py-0.5 font-medium text-foreground underline decoration-dotted underline-offset-2 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">重试保存</button>}
+        </div>
         {excalidrawApi && (
           <MemoizedCanvasToolMenu
             accessToken={accessToken}
