@@ -40,6 +40,7 @@ describe("CanvasBottomBar", () => {
       />,
     );
 
+    expect(screen.getByTestId("canvas-bottom-toolbar")).toHaveClass("w-10", "min-w-10", "shrink-0");
     expect(screen.getByRole("status")).toHaveTextContent("已选 2 项");
     expect(screen.getByRole("button", { name: "缩放比例 100%，打开缩放选项" })).toHaveAttribute("aria-expanded", "false");
 

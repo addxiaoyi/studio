@@ -25,7 +25,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { CreditBalance } from "@/components/credits/credit-balance";
-import { HelsteraLogo } from "@/components/icons/helstera-logo";
+import { HelsteraBrandMark } from "@/components/helstera-brand-mark";
 import { useAuth } from "@/lib/auth-context";
 import { t } from "@/lib/i18n";
 import { fetchViewer } from "@/lib/server-api";
@@ -224,7 +224,9 @@ export function AppSidebar() {
       aria-label="工作区侧栏"
       className={cn("relative z-30 hidden h-[100dvh] shrink-0 flex-col overflow-hidden border-r border-border/40 bg-background/75 px-3 py-4 backdrop-blur transition-[width] duration-200 md:flex", collapsed ? "w-16" : "w-56")}
     >
-      <Link href="/home" title="Helstera" className={cn("mb-4 flex h-8 items-center gap-2 px-2", labelsHidden && "justify-center px-0")}><motion.div whileHover={{ scale: 1.08 }}><HelsteraLogo className="size-6 text-foreground" /></motion.div>{!labelsHidden && <span className="text-sm font-semibold tracking-tight">Helstera</span>}</Link>
+      <Link href="/home" title="Helstera" className={cn("mb-4 flex h-8 items-center px-2", labelsHidden && "justify-center px-0")}>
+        <HelsteraBrandMark size="sm" showIcon={!labelsHidden} />
+      </Link>
       <div className="space-y-1">{primaryItems.map((item) => <NavLink key={item.href} item={{ ...item, label: item.href === "/home" ? labels.home : item.label }} active={isPathActive(pathname, item.href)} collapsed={labelsHidden} />)}</div>
       <div className="my-3 border-t border-border/40" />
       <div className="space-y-1">{navGroups.map((group) => <GroupLinks key={group.id} group={group} pathname={pathname} open={Boolean(openGroups[group.id])} collapsed={labelsHidden} onToggle={() => setOpenGroups((current) => ({ ...current, [group.id]: !current[group.id] }))} />)}</div>

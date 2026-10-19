@@ -487,7 +487,7 @@ export const messages = {
       loggingIn: "Signing in...",
       login: "Sign in",
       useCode: "Use code sign-in",
-      usePassword: "Use password sign-in",
+      usePassword: "Use password instead",
       needAccount: "Need an account?",
       createOne: "Create one",
       workspaceError: "Could not load your workspace. Please try again.",

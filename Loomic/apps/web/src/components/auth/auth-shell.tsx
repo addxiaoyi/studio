@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import type { ReactNode } from "react";
 
-import { HelsteraLogo } from "@/components/icons/helstera-logo";
+import { HelsteraBrandMark } from "@/components/helstera-brand-mark";
 import { t } from "@/lib/i18n";
 
 const fadeUp = {
@@ -63,10 +63,7 @@ export function AuthShell({
             custom={0}
             className="mb-10 flex items-center gap-3"
           >
-            <HelsteraLogo className="size-12 rounded" />
-            <span className="text-2xl font-medium tracking-tight">
-              Helstera
-            </span>
+            <HelsteraBrandMark size="lg" animated className="text-background" />
           </motion.div>
 
           <motion.h1

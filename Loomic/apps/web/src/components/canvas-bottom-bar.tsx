@@ -243,7 +243,7 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, lay
       onWheel={(e) => e.stopPropagation()}
     >
       {selectedCount > 0 && <div className="mb-1 flex items-center gap-1 rounded-xl border border-border/60 bg-background/95 px-2 py-1 text-[11px] shadow-sm" role="status" aria-live="polite"><span className="whitespace-nowrap text-foreground">已选 {selectedCount} 项</span><button type="button" onClick={onClearSelection} className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">清除</button><button type="button" onClick={onDeleteSelection} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="删除选中元素"><Trash2 className="size-3" aria-hidden="true" />删除</button></div>}
-      <div className="flex flex-col items-center gap-0.5 rounded-2xl glass-soft border border-border/40 px-1 py-1 shadow-soft">
+      <div data-testid="canvas-bottom-toolbar" className="flex w-10 min-w-10 shrink-0 flex-col items-center gap-0.5 rounded-2xl glass-soft border border-border/40 px-1 py-1 shadow-soft">
         {/* ── Background color button ── */}
         <button ref={bgBtnRef} type="button" className={btnClass} onClick={toggleBgPicker} aria-label="画布背景色" title="画布背景色">
           {bgColor === "transparent"

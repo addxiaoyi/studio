@@ -18,7 +18,7 @@ import { TechText } from "@/components/tech-text";
 import { HomeWorkspacePulse } from "@/components/home-workspace-pulse";
 import { HomeFirstRunGuide } from "@/components/home-first-run-guide";
 import { LoadingScreen } from "@/components/loading-screen";
-import { HelsteraLogo } from "@/components/icons/helstera-logo";
+import { HelsteraBrandMark } from "@/components/helstera-brand-mark";
 import { ProjectThumbnail } from "@/components/project-thumbnail";
 import { HomeProjectsSkeleton } from "@/components/skeletons/home-skeleton";
 import { useCreateProject } from "@/hooks/use-create-project";
@@ -318,10 +318,7 @@ export default function HomePage() {
           custom={0}
           className="mb-5 flex items-center gap-2"
         >
-          <HelsteraLogo className="size-7 text-foreground" />
-          <span className="text-base font-medium text-foreground tracking-tight">
-            Helstera
-          </span>
+          <HelsteraBrandMark size="md" showIcon className="text-foreground" />
         </motion.div>
 
         <motion.h1
