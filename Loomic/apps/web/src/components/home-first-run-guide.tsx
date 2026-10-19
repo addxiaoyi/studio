@@ -40,23 +40,23 @@ export function HomeFirstRunGuide() {
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">GET STARTED</p>
           <h2 id="first-run-guide-title" className="mt-2 text-lg font-medium tracking-tight">三步建立你的创作工作台</h2>
         </div>
-        <button type="button" onClick={complete} aria-label="关闭引导" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><X className="size-4" /></button>
+        <button type="button" onClick={complete} aria-label="关闭引导" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><X className="size-4" aria-hidden="true" /></button>
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-3">
         {steps.map((item, index) => (
-          <div key={item.title} className={`rounded-lg border p-4 ${index === step ? "border-foreground/30 bg-background" : "border-border/60 bg-background/40"}`}>
+          <div key={item.title} data-testid={`first-run-step-${index}`} aria-current={index === step ? "step" : undefined} className={`rounded-lg border p-4 ${index === step ? "border-foreground/30 bg-background" : "border-border/60 bg-background/40"}`}>
             <div className="flex items-center gap-2">
               <span className="grid size-6 place-items-center rounded-full border text-[11px] font-medium">{index < step ? <Check className="size-3.5" /> : index + 1}</span>
               <p className="text-xs font-semibold">{item.title}</p>
             </div>
             <p className="mt-3 min-h-10 text-xs leading-5 text-muted-foreground">{item.body}</p>
-            {index === step && <Link href={item.href} onClick={next} className="mt-4 inline-flex items-center gap-1 text-xs font-medium underline underline-offset-2">{item.action}<ArrowRight className="size-3.5" /></Link>}
+            {index === step && <Link href={item.href} onClick={next} className="mt-4 inline-flex items-center gap-1 text-xs font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{item.action}<ArrowRight className="size-3.5" aria-hidden="true" /></Link>}
           </div>
         ))}
       </div>
       <div className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span>第 {step + 1} 步，共 {steps.length} 步</span>
-        <button type="button" onClick={next} className="font-medium text-foreground underline underline-offset-2">{step === steps.length - 1 ? "完成引导" : "跳过当前步骤"}</button>
+        <span role="status" aria-live="polite" aria-atomic="true">第 {step + 1} 步，共 {steps.length} 步</span>
+        <button type="button" onClick={next} className="font-medium text-foreground underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{step === steps.length - 1 ? "完成引导" : "跳过当前步骤"}</button>
       </div>
     </section>
   );
