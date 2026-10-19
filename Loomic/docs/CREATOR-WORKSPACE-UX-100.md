@@ -69,7 +69,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 
 ## Asset management
 
-- [~] 51. Type filters, search, and pagination expose the current state.
+- [x] 51. Type filters, search, recovery view, and pagination expose their current state.
 - [x] 52. Asset search can be cleared without resetting unrelated filters.
 - [~] 53. Batch action bar reports selection count and page scope.
 - [~] 54. Preview tiles have stable dimensions and loading placeholders.

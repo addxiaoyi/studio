@@ -167,4 +167,22 @@ test.describe("UX 100 visual safeguards", () => {
       ).toBeGreaterThanOrEqual(4.5);
     }
   });
+
+  test("asset recovery copy and type filters expose their state", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.route("**/api/assets/history**", (route: Route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ data: [], pagination: { page: 1, pageSize: 12, total: 0, hasMore: false } }),
+      }),
+    );
+    await page.goto("/assets");
+    await expect(page.getByRole("heading", { name: "我的资产" })).toBeVisible();
+    await page.getByRole("button", { name: "查看恢复区" }).click();
+    await expect(page.getByText("恢复区资产将在 7 天后清理")).toBeVisible();
+    await expect(page.getByRole("button", { name: "全部" })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "视频" }).click();
+    await expect(page.getByRole("button", { name: "视频" })).toHaveAttribute("aria-pressed", "true");
+  });
 });
