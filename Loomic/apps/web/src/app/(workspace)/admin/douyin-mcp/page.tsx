@@ -43,7 +43,7 @@ export default function DouyinMcpPage() {
           <StatusCard label="Token 配置" value={status.configured ? "已配置" : "未配置"} ok={status.configured} />
           <StatusCard label="允许工具" value={String(status.allowedTools.length)} ok={status.allowedTools.length > 0} />
         </div>
-        <div className="rounded-2xl border border-border/40 bg-card/50 p-5 text-sm">Token ����: {formatExpiry(status.credentials.clientTokenExpiresAt)}{status.credentials.lastError ? ` · ${status.credentials.lastError}` : ""}</div>
+        <div className="rounded-2xl border border-border/40 bg-card/50 p-5 text-sm">Token 过期时间：{formatExpiry(status.credentials.clientTokenExpiresAt)}{status.credentials.lastError ? ` · ${status.credentials.lastError}` : ""}</div>
         <section className="rounded-2xl border border-border/40 bg-card/50 p-5"><div className="flex items-start justify-between gap-4"><div><h2 className="text-sm font-semibold">允许调用的工具</h2><p className="mt-1 text-xs text-muted-foreground">只有环境变量白名单中的工具可以被服务端调用。</p></div><span className="text-xs text-muted-foreground">{tools.length} 个已发现</span></div><div className="mt-5 space-y-3">{tools.length ? tools.map((tool) => <div key={tool.name} className="rounded-xl border border-border/40 p-4"><p className="font-mono text-xs font-medium">{tool.name}</p><p className="mt-2 text-xs leading-5 text-muted-foreground">{tool.description ?? "未提供描述"}</p></div>) : <p className="text-sm text-muted-foreground">暂无工具。配置 DOUYIN_MCP_CLIENT_TOKEN 后刷新。</p>}</div></section>
       </>}
     </section>
@@ -51,9 +51,9 @@ export default function DouyinMcpPage() {
 }
 
 function formatExpiry(value: string | null): string {
-  if (!value) return "δ��ȡ";
+  if (!value) return "无法获取";
   const remainingMinutes = Math.max(0, Math.round((new Date(value).getTime() - Date.now()) / 60000));
-  return remainingMinutes > 0 ? `${remainingMinutes} ����` : "����ˢ��";
+  return remainingMinutes > 0 ? `${remainingMinutes} 分钟` : "已过期，请刷新";
 }
 
 function StatusCard({ label, value, ok }: { label: string; value: string; ok: boolean }) {

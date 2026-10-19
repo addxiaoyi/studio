@@ -177,7 +177,7 @@ export function GenerationApprovalCard(props: GenerationApprovalCardProps) {
       {expired ? <p role="status" className="mt-3 text-xs text-muted-foreground">{"\u786e\u8ba4\u5df2\u8fc7\u671f\uff0c\u65e7\u6d88\u606f\u4e2d\u7684\u6309\u94ae\u4e0d\u518d\u53ef\u64cd\u4f5c\uff0c\u8bf7\u91cd\u65b0\u53d1\u8d77\u751f\u6210\u3002"}</p> : null}
       {!expired && state === "failed" ? (
         <button type="button" onClick={confirm} disabled={submitting || expired || !session?.access_token} className="mt-3 rounded-lg border border-border px-3 py-2 text-xs text-foreground disabled:opacity-50">
-          ����ύ
+          重新提交
         </button>
       ) : null}
       {!expired && (state === "pending" || state === "submitting") ? (

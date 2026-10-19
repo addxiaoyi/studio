@@ -695,7 +695,7 @@ export default function FeedPage() {
     if (!token || strategyBusy) return;
     const automationPrompt = strategyPrompt.trim() || brief.trim() || title.trim();
     if (!automationPrompt || !selectedPlatforms.length) {
-      setError("���������⡢���˵��Ͳ���ƽ̨");
+      setError("请填写选题、简短说明并至少选择一个发布平台");
       return;
     }
     automationAbortRef.current?.abort();
@@ -714,7 +714,7 @@ export default function FeedPage() {
         idempotencyKey: `feed-auto:${crypto.randomUUID()}`,
       });
       setAutomationRun(run);
-      setNotice("�Զ������ѽ�����У����ɿɱ༭�����ݲݸ塣");
+      setNotice("自动化任务已创建，正在生成可编辑内容草稿。");
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise<void>((resolve, reject) => {
           const timeout = window.setTimeout(() => {
@@ -731,20 +731,20 @@ export default function FeedPage() {
         const status = await fetchFeedAutomation(token, run.id);
         if (controller.signal.aborted) return;
         setAutomationRun(status);
-        if (status.status === "failed") throw new Error(status.errorMessage || "Feed �Զ�����ʧ��");
+        if (status.status === "failed") throw new Error(status.errorMessage || "Feed 自动化生成失败");
         if (status.status === "draft_ready") {
           const created = await fetchFeedPackage(token, status.packageId);
           await hydratePackage(created);
           setPackages((current) => [created, ...current.filter((item) => item.id !== created.id)]);
           setStep(2);
-          setNotice("�Զ����ݲݸ��Ѿ����ɣ����Խṹ��ƽ̨�汾��");
+          setNotice("自动草稿已生成，可以编辑结构和平台版本。");
           return;
         }
       }
-      throw new Error("Feed �Զ�����ʱ��");
+      throw new Error("Feed 自动化任务超时");
     } catch (cause) {
       if (controller.signal.aborted) return;
-      setError(cause instanceof Error ? cause.message : "Feed �Զ�����ʧ��");
+      setError(cause instanceof Error ? cause.message : "Feed 自动化任务失败");
     } finally {
       if (automationAbortRef.current === controller) {
         automationAbortRef.current = null;
@@ -766,9 +766,9 @@ export default function FeedPage() {
     try {
       const next = await retryFeedAutomation(token, automationRun.id);
       setAutomationRun(next);
-      setNotice("�Զ��������Ѿ����»����У�");
+      setNotice("自动化任务已重新排队。");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "���Ի���ʧ��");
+      setError(cause instanceof Error ? cause.message : "重试阶段失败");
     } finally {
       setStrategyBusy(false);
     }
