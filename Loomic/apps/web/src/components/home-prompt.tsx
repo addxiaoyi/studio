@@ -246,6 +246,7 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
           onPaste={handlePaste}
           onInput={handleInput}
           placeholder="让 Helstera 帮你设计..."
+          aria-label="创作提示词"
           disabled={disabled}
           rows={2}
           className="w-full resize-none bg-transparent px-4 pt-4 pb-3 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
@@ -273,6 +274,7 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   title="Attach"
+                  aria-label="添加参考图"
                   className="flex h-10 w-10 items-center justify-center rounded-full border border-border/60 text-foreground transition-all duration-200 hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-foreground/20 sm:h-8 sm:w-8"
                 >
                   <svg
@@ -291,6 +293,7 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
                 type="button"
                 disabled
                 title="Attach"
+                aria-label="添加参考图（不可用）"
                 className="flex h-10 w-10 cursor-not-allowed items-center justify-center rounded-full border border-border/60 text-foreground opacity-30 sm:h-8 sm:w-8"
               >
                 <svg
@@ -308,6 +311,9 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
 
           <div className="flex items-center gap-2">
             <AgentModelSelector />
+            <span className="hidden max-w-28 truncate text-[10px] text-muted-foreground sm:inline" aria-hidden="true">
+              图片：{preference.mode === "manual" ? "手动" : "自动"} · 视频：{videoPreference.mode === "manual" ? "手动" : "自动"}
+            </span>
             <div className="flex items-center gap-0.5">
               {toolbarButtons.slice(1).map((btn) => {
                 if (btn.name === "生成模型") {
@@ -318,7 +324,8 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
                         type="button"
                         onClick={() => setModelPopoverOpen((prev) => !prev)}
                         title="选择图片或视频模型"
-                        aria-label="选择图片或视频模型"
+                        aria-label={`选择图片或视频模型（图片${preference.mode === "manual" ? "手动" : "自动"}，视频${videoPreference.mode === "manual" ? "手动" : "自动"}）`}
+                        aria-expanded={modelPopoverOpen}
                         className={`flex h-10 w-10 items-center justify-center rounded-full border transition-all duration-200 focus-visible:ring-2 focus-visible:ring-foreground/20 sm:h-8 sm:w-8 ${
                           preference.mode === "manual"
                             ? "border-primary bg-primary/15 text-primary"
@@ -329,8 +336,7 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
                           className="h-[14px] w-[14px]"
                           viewBox={btn.viewBox}
                           fill="currentColor"
-                          role="img"
-                          aria-label="生成模型"
+                          aria-hidden="true"
                         >
                           <path d={btn.path} />
                         </svg>
@@ -355,8 +361,7 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
                       className="h-[14px] w-[14px]"
                       viewBox={btn.viewBox}
                       fill="currentColor"
-                      role="img"
-                      aria-label={btn.name}
+                      aria-hidden="true"
                     >
                       <path d={btn.path} />
                     </svg>
@@ -379,8 +384,7 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
                 className="h-[14px] w-[14px]"
                 viewBox={submitIcon.viewBox}
                 fill="currentColor"
-                role="img"
-                aria-label="Submit"
+                aria-hidden="true"
               >
                 <path d={submitIcon.path} />
               </svg>

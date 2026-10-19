@@ -147,6 +147,11 @@ test.describe("UX 100 visual safeguards", () => {
     await page.goto("/home");
     const skipLink = page.getByRole("link", { name: "跳到主内容" });
     await expect(skipLink).toBeAttached();
+    await expect(page.getByRole("textbox", { name: "创作提示词" })).toBeVisible();
+    const modelButton = page.getByRole("button", { name: /选择图片或视频模型/ });
+    await expect(modelButton).toHaveAttribute("aria-expanded", "false");
+    await expect(modelButton).toHaveAccessibleName(/图片(自动|手动).*视频(自动|手动)/);
+    await expect(page.getByText(/图片：.*视频：/)).toBeVisible();
     await page.evaluate(() => {
       document.body.tabIndex = -1;
       document.body.focus();

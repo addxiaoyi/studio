@@ -19,7 +19,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 
 - [~] 11. Home keeps a direct creation entry visible.
 - [x] 12. Prompt attachments expose upload, validation failure, and keyboard-usable retry states; non-retryable files remain removable.
-- [~] 13. Prompt submission exposes the active model mode.
+- [x] 13. Prompt submission exposes the active image/video model modes in visible and accessible labels, covered by the Chromium home regression.
 - [~] 14. Generation surfaces show available cost estimates before submission.
 - [x] 15. Recent-project load failure is distinct from an empty list and retryable.
 - [x] 16. Project search is labeled and has a clear action.
