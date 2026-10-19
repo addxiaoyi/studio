@@ -167,6 +167,7 @@ test.describe("UX 100 visual safeguards", () => {
     await expect(libraryGroup).toHaveAttribute("aria-expanded", "true");
     await sidebar.getByRole("link", { name: "项目" }).click();
     await expect(page).toHaveURL(/\/projects\/?$/);
+    await expect(page.locator("#main")).toBeFocused();
     await expect(sidebar.getByRole("button", { name: "资源库" })).toHaveAttribute("aria-expanded", "true");
 
     await page.setViewportSize({ width: 390, height: 844 });

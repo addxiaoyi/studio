@@ -46,6 +46,10 @@ export default function WorkspaceLayout({
   }, [pathname]);
 
   useEffect(() => {
+    document.getElementById("main")?.focus({ preventScroll: true });
+  }, [pathname]);
+
+  useEffect(() => {
     if (!loading && !user) {
       const currentPath = `${window.location.pathname}${window.location.search}`;
       router.replace(loginPath(currentPath));
@@ -73,6 +77,7 @@ export default function WorkspaceLayout({
       {/* pb-14 on mobile for the fixed bottom navigation bar, reset on md+ */}
       <main
         id="main"
+        tabIndex={-1}
         className="workspace-main relative min-w-0 flex-1 overflow-auto pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
       >
         {/* Top-right header credits button */}

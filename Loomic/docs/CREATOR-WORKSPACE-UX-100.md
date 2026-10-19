@@ -155,3 +155,7 @@ The shared select control now follows a select-only combobox pattern: its highli
 option is announced through `aria-activedescendant`, Arrow/Home/End navigation works
 without committing early, and Escape or selection returns focus to the trigger. Feed,
 Storyboard, settings, and admin forms all inherit this keyboard behavior.
+
+Workspace route changes now move focus to the programmatic main-content target while
+preserving the active navigation group, so keyboard and assistive-technology users
+start each client-side page in the new content context.
