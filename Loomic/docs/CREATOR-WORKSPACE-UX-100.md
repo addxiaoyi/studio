@@ -63,8 +63,8 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 45. The same approval ID renders one actionable approval card.
 - [x] 46. Confirm and cancel actions are guarded against rapid duplicate clicks.
 - [x] 47. Duplicate status blocks for the same Job render once.
-- [~] 48. Queue, running, success, failure, and unknown outcomes have distinct copy; media polling now announces an unknown status instead of treating a transient outage as failure.
-- [~] 49. Retry remains disabled until the Job is confirmed retry-safe; the retry policy is now programmatically associated with disabled actions.
+- [x] 48. Queue, running, success, failure, and unknown outcomes have distinct copy, covered by focused job-state regressions.
+- [x] 49. Retry remains disabled until the Job is confirmed retry-safe, while confirmed terminal failures enable resubmit with an associated policy description.
 - [~] 50. Job timeline and recovery actions are visible in the tool detail view.
 
 ## Asset management
