@@ -421,4 +421,32 @@ test.describe("UX 100 visual safeguards", () => {
     await expect(page.getByText("新名称", { exact: true })).toBeVisible();
     expect(updateAttempts).toBe(2);
   });
+
+  test("feed hotspot search exposes refresh state and can be cleared", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.route("**/api/feed/trends**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("q")) await new Promise((resolve) => setTimeout(resolve, 500));
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ data: { items: [{ id: "trend-1", platform: "系统热点", title: "测试热点", summary: "测试摘要", heat: 88, source_url: null }], total: 1, page: 1, pageSize: 10, totalPages: 1, sort: "heat", query: url.searchParams.get("q") ?? "" } }),
+      });
+    });
+    await page.route("**/api/feed/packages", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [] }) }));
+    await page.route("**/api/feed/accounts", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [] }) }));
+    await page.route("**/api/feed/sources", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [] }) }));
+    await page.route("**/api/video-models", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [], unavailableModels: [] }) }));
+
+    await page.goto("/feed");
+    const results = page.getByRole("region", { name: "实时热点结果" });
+    await expect(results).toContainText("测试热点");
+    const search = page.getByRole("textbox", { name: "搜索热点" });
+    await search.fill("新品");
+    await expect(results).toHaveAttribute("aria-busy", "true");
+    await expect(page.getByRole("status").filter({ hasText: "正在刷新热点" })).toBeVisible();
+    await expect(results).toHaveAttribute("aria-busy", "false");
+    await page.getByRole("button", { name: "清除热点搜索" }).click();
+    await expect(search).toHaveValue("");
+  });
 });

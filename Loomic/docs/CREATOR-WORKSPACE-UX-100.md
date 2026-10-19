@@ -171,3 +171,7 @@ and generation actions after recovery.
 Storyboard asset creation and editing now preserve the draft on request failure, lock
 duplicate submits, announce the error, and expose a targeted retry; Chromium covers an
 asset edit failure followed by a successful save.
+
+Feed hotspot results now expose a named busy region and polite refresh status, while
+the search control has a keyboard-accessible clear action and explicit pagination names;
+Chromium covers the async search-refresh and clear flow.

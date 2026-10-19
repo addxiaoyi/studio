@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Send,
   Sparkles,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -1168,13 +1169,25 @@ export default function FeedPage() {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="搜索热点标题或摘要"
-                    aria-label="搜索热点"
-                    className="h-9 w-full rounded-lg border border-border/60 bg-background px-3 text-xs sm:w-52"
-                  />
+                  <div className="relative w-full sm:w-52">
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="搜索热点标题或摘要"
+                      aria-label="搜索热点"
+                      className="h-9 w-full rounded-lg border border-border/60 bg-background px-3 pr-9 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    {query ? (
+                      <button
+                        type="button"
+                        aria-label="清除热点搜索"
+                        onClick={() => setQuery("")}
+                        className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <X className="size-3.5" aria-hidden="true" />
+                      </button>
+                    ) : null}
+                  </div>
                   <StyledSelect
                     value={trendSort}
                     onChange={(value) => {
@@ -1208,9 +1221,17 @@ export default function FeedPage() {
                   <ArrowRight className="ml-2 size-4" />
                 </Button>
               </div>
-              <div className="mt-5 grid gap-3">
+              <div
+                className="mt-5 grid gap-3"
+                role="region"
+                aria-label="实时热点结果"
+                aria-busy={trendLoading}
+              >
+                {trendLoading && trends.length ? (
+                  <p role="status" aria-live="polite" className="sr-only">正在刷新热点…</p>
+                ) : null}
                 {trendLoading && !trends.length ? (
-                  <p className="py-10 text-center text-sm text-muted-foreground">
+                  <p role="status" aria-live="polite" className="py-10 text-center text-sm text-muted-foreground">
                     <Loader2 className="mr-2 inline size-4 animate-spin" />
                     正在加载热点
                   </p>
@@ -1250,8 +1271,8 @@ export default function FeedPage() {
                   {trendTotal ? `第 ${trendPage} / ${trendTotalPages} 页 · 共 ${trendTotal} 条` : "暂无匹配热点"}
                 </span>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" disabled={trendLoading || trendPage <= 1} onClick={() => void loadTrends({ page: trendPage - 1 })}>上一页</Button>
-                  <Button variant="outline" size="sm" disabled={trendLoading || trendPage >= trendTotalPages} onClick={() => void loadTrends({ page: trendPage + 1 })}>下一页</Button>
+                  <Button aria-label="上一页热点" variant="outline" size="sm" disabled={trendLoading || trendPage <= 1} onClick={() => void loadTrends({ page: trendPage - 1 })}>上一页</Button>
+                  <Button aria-label="下一页热点" variant="outline" size="sm" disabled={trendLoading || trendPage >= trendTotalPages} onClick={() => void loadTrends({ page: trendPage + 1 })}>下一页</Button>
                 </div>
               </div>
             </>
