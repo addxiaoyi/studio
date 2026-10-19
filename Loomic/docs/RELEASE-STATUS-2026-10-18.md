@@ -50,8 +50,8 @@ and a pricing assertion that sees a disabled region button.
 
 The UX matrix currently records:
 
-- 50 items as implemented and focused-tested.
-- 47 items as locally improved but requiring browser or manual verification.
+- 51 items as implemented and focused-tested.
+- 46 items as locally improved but requiring browser or manual verification.
 - 3 items as open: nested breadcrumbs, 200% zoom verification, and rendered
   light/dark contrast verification.
 

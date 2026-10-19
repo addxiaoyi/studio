@@ -162,6 +162,12 @@ test.describe("UX 100 visual safeguards", () => {
     const sidebar = page.getByRole("complementary", { name: "工作区侧栏" });
     await sidebar.getByRole("link", { name: "工作台" }).focus();
     await expect(sidebar).toHaveClass(/w-56/);
+    const libraryGroup = sidebar.getByRole("button", { name: "资源库" });
+    await libraryGroup.click();
+    await expect(libraryGroup).toHaveAttribute("aria-expanded", "true");
+    await sidebar.getByRole("link", { name: "项目" }).click();
+    await expect(page).toHaveURL(/\/projects\/?$/);
+    await expect(sidebar.getByRole("button", { name: "资源库" })).toHaveAttribute("aria-expanded", "true");
 
     await page.setViewportSize({ width: 390, height: 844 });
     const more = page.getByRole("button", { name: "更多工作区导航" });

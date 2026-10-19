@@ -9,7 +9,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 03. Active routes expose `aria-current="page"`.
 - [~] 04. Primary navigation remains distinct from secondary destinations.
 - [x] 05. Collapsed navigation keeps accessible labels and hover titles; Chromium verifies keyboard focus expands the desktop sidebar.
-- [~] 06. Route changes preserve the expanded active navigation group.
+- [x] 06. Route changes preserve the expanded active navigation group, covered by the Chromium shell navigation regression.
 - [~] 07. Mobile navigation respects safe-area insets and has large targets.
 - [x] 08. Mobile More menu closes on outside pointer, Escape, and route change.
 - [x] 09. Workspace pages expose a skip-to-main link, covered by the Chromium keyboard-shell regression.
