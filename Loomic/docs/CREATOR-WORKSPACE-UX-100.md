@@ -31,10 +31,10 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 ## Canvas editing
 
 - [~] 21. Empty canvas offers useful first actions.
-- [~] 22. Canvas tools expose active and focus-visible states.
+- [x] 22. Canvas tools and layer selection expose active, pressed, and focus-visible states without nested interactive controls.
 - [~] 23. Selection count and available actions are discoverable.
 - [~] 24. Zoom and selection navigation remain reachable.
-- [~] 25. Layer and canvas selection stay synchronized.
+- [~] 25. Layer and canvas selection stay synchronized; the layer control now exposes its selected state, while full canvas synchronization remains to be browser-verified.
 - [~] 26. Timeline open/close behavior is predictable.
 - [x] 27. Video preview width and height are constrained to the viewport.
 - [x] 28. Closing the video preview restores focus to the prior canvas control and is covered by a component regression test.

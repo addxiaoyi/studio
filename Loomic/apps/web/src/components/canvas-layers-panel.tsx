@@ -129,19 +129,21 @@ const LayerRow = memo(function LayerRow({
 
   return (
     <div style={{ contentVisibility: "auto", containIntrinsicSize: "auto 44px" }}>
-      <button
-        type="button"
-        className={`group/layer flex h-11 w-full items-center gap-2.5 rounded-lg px-2 text-left transition-all duration-300 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
-          selected
-            ? "bg-muted"
-            : "hover:bg-foreground/[0.04]"
-        }`}
-        onClick={handleClick}
+      <div
+        className={`group/layer flex h-11 w-full items-center gap-2.5 rounded-lg px-2 text-left transition-all duration-300 ${selected ? "bg-muted" : "hover:bg-foreground/[0.04]"}`}
       >
-        <LayerThumbnail el={el} files={files} />
-        <span className="flex-1 truncate text-[11px] text-foreground min-w-0">
-          {elLabel(el)}
-        </span>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+          onClick={handleClick}
+          aria-pressed={selected}
+          aria-label={`选择图层 ${elLabel(el)}`}
+        >
+          <LayerThumbnail el={el} files={files} />
+          <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">
+            {elLabel(el)}
+          </span>
+        </button>
         <div className="flex items-center gap-0.5">
           <button
             type="button"
@@ -160,7 +162,7 @@ const LayerRow = memo(function LayerRow({
             <EyeIcon className="h-4 w-4" />
           </button>
         </div>
-      </button>
+      </div>
     </div>
   );
 });
