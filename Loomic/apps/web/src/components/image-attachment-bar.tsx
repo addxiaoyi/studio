@@ -21,7 +21,7 @@ export function ImageAttachmentBar({ attachments, onRemove, onRetry }: ImageAtta
           {att.preview ? (
             <img
               src={att.preview}
-              alt="Attachment"
+              alt={att.name ? `附件：${att.name}` : "附件图片"}
               className="h-full w-full object-cover"
             />
           ) : (
@@ -40,18 +40,25 @@ export function ImageAttachmentBar({ attachments, onRemove, onRetry }: ImageAtta
           )}
 
           {/* Error overlay with retry */}
-          {att.error && (
-            <div
-              className={`absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-red-500/20 ${onRetry && att.file ? "cursor-pointer" : ""}`}
-              onClick={onRetry && att.file ? () => onRetry(att.id) : undefined}
+          {att.error && onRetry && att.file && (
+            <button
+              type="button"
+              className="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-0.5 bg-red-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+              onClick={() => onRetry(att.id)}
+              aria-label={`重试上传 ${att.name ?? "图片"}`}
               title={att.error}
             >
               <svg className="h-3.5 w-3.5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M4 2a1 1 0 0 1 1 1v2.101a7.002 7.002 0 0 1 11.601 2.566 1 1 0 1 1-1.885.666A5.002 5.002 0 0 0 5.999 7H9a1 1 0 0 1 0 2H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Zm.008 9.057a1 1 0 0 1 1.276.61A5.002 5.002 0 0 0 14.001 13H11a1 1 0 1 1 0-2h5a1 1 0 0 1 1 1v5a1 1 0 1 1-2 0v-2.101a7.002 7.002 0 0 1-11.601-2.566 1 1 0 0 1 .61-1.276Z" clipRule="evenodd" />
               </svg>
-              {onRetry && att.file && (
-                <span className="text-[9px] font-medium text-red-600">Retry</span>
-              )}
+              <span className="text-[9px] font-medium text-red-600">Retry</span>
+            </button>
+          )}
+          {att.error && (!onRetry || !att.file) && (
+            <div className="absolute inset-0 flex items-center justify-center bg-red-500/20" role="status" aria-label={att.error} title={att.error}>
+              <svg className="h-3.5 w-3.5 text-red-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fillRule="evenodd" d="M10 2a8 8 0 1 0 8 8 8.009 8.009 0 0 0-8-8Zm.75 4.5a.75.75 0 0 0-1.5 0v4a.75.75 0 0 0 1.5 0Zm0 6a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z" clipRule="evenodd" />
+              </svg>
             </div>
           )}
 
@@ -59,7 +66,8 @@ export function ImageAttachmentBar({ attachments, onRemove, onRetry }: ImageAtta
           <button
             type="button"
             onClick={() => onRemove(att.id)}
-            className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground group-hover:flex"
+            aria-label={`移除${att.name ? ` ${att.name}` : "附件"}`}
+            className="absolute -right-1 -top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground group-hover:flex group-focus-within:flex focus-visible:flex"
           >
             <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
               <path d="M18 6 6 18M6 6l12 12" />

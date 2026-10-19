@@ -18,7 +18,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 ## Home and project entry
 
 - [~] 11. Home keeps a direct creation entry visible.
-- [~] 12. Prompt attachments expose upload, failure, and retry states.
+- [x] 12. Prompt attachments expose upload, failure, and keyboard-usable retry states.
 - [~] 13. Prompt submission exposes the active model mode.
 - [~] 14. Generation surfaces show available cost estimates before submission.
 - [x] 15. Recent-project load failure is distinct from an empty list and retryable.
@@ -51,7 +51,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 36. Stream connection and generation states announce progress, including the direct video path; a full screen-reader pass remains.
 - [x] 37. Auto-follow stops when the reader scrolls up and offers a return-to-latest action.
 - [~] 38. Retry retains the prior prompt and reference context.
-- [~] 39. Attachments can be inspected and removed before sending.
+- [x] 39. Attachments can be inspected and removed before sending, including keyboard-usable failure retry and remove actions.
 - [x] 40. Synchronous locks prevent rapid duplicate send and approval requests.
 
 ## Image and video generation
