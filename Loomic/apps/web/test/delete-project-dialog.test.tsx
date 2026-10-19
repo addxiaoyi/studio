@@ -20,8 +20,8 @@ describe("DeleteProjectDialog", () => {
 
     const dialog = screen.getByRole("dialog", { name: /删除项目|Delete project/ });
     expect(dialog).toBeInTheDocument();
-    expect(dialog).toHaveTextContent(/确定删除此项目？此操作无法撤销。|Delete this project\? This cannot be undone\./);
-    expect(screen.getByRole("button", { name: /永久删除|Delete permanently/ })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent(/项目会移入回收站，7 天后自动清理|The project will move to the recovery area/);
+    expect(screen.getByRole("button", { name: /移到回收站|Move to recovery/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /取消|Cancel/ })).toBeInTheDocument();
   });
 });

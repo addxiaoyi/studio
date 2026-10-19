@@ -56,7 +56,7 @@ export function DeleteProjectDialog({
                 <Loader2 size={16} />
               </motion.span>
             ) : (
-              copy.permanentDelete
+              copy.moveToRecovery
             )}
           </Button>
         </div>

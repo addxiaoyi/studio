@@ -176,9 +176,9 @@ export const messages = {
     },
     project: {
       deleteTitle: "删除项目",
-      deleteConfirm: "确定删除此项目？此操作无法撤销。",
+      deleteConfirm: "项目会移入回收站，7 天后自动清理；在此之前可以从回收站恢复。",
       cancel: "取消",
-      permanentDelete: "永久删除",
+      moveToRecovery: "移到回收站",
       deleted: "项目已删除",
       deleteFailed: "项目删除失败",
     },
@@ -464,9 +464,9 @@ export const messages = {
     },
     project: {
       deleteTitle: "Delete project",
-      deleteConfirm: "Delete this project? This cannot be undone.",
+      deleteConfirm: "The project will move to the recovery area and be cleaned up after 7 days. You can restore it before then.",
       cancel: "Cancel",
-      permanentDelete: "Delete permanently",
+      moveToRecovery: "Move to recovery",
       deleted: "Project deleted",
       deleteFailed: "Could not delete the project",
     },

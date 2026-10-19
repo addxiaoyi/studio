@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OfficialModelPriceCatalog } from "@helstera/shared";
 import { HomeModelPricePreview } from "../src/components/home-model-price-preview";
 
@@ -73,6 +73,8 @@ const catalog: OfficialModelPriceCatalog = {
 };
 
 describe("HomeModelPricePreview", () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
     api.fetchPrices.mockReset().mockResolvedValue(catalog);
     api.fetchImages.mockReset().mockResolvedValue({ models: [{
@@ -128,7 +130,7 @@ describe("HomeModelPricePreview", () => {
     api.fetchVideos.mockResolvedValue({ models: [{
       id: "veo-3.1",
       displayName: "Veo 3.1",
-      description: "��Ƶ����",
+      description: "视频生成",
       provider: "configured",
       billingUnit: "per_second",
       providerPriceCny: 0.4,
@@ -138,6 +140,6 @@ describe("HomeModelPricePreview", () => {
     }] });
     render(<HomeModelPricePreview />);
 
-    expect(await screen.findByText("待验证")).toBeTruthy();
+    expect((await screen.findAllByText("待验证")).length).toBeGreaterThan(0);
   });
 });
