@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CanvasLayersPanel } from "../src/components/canvas-layers-panel";
@@ -34,5 +34,21 @@ describe("CanvasLayersPanel", () => {
     };
     render(<CanvasLayersPanel excalidrawApi={api} open onClose={vi.fn()} />);
     expect(await screen.findByRole("button", { name: "关闭图层面板" })).toHaveFocus();
+  });
+
+  it("reflects selection changes emitted by the canvas", async () => {
+    let onChangeCallback: (() => void) | undefined;
+    const api = {
+      getSceneElements: () => [{ id: "layer-1", type: "rectangle", isDeleted: false }],
+      getFiles: () => ({}),
+      getAppState: () => ({ selectedElementIds: { "layer-1": false } }),
+      onChange: (callback: () => void) => { onChangeCallback = callback; return () => undefined; },
+      updateScene: vi.fn(),
+    };
+    render(<CanvasLayersPanel excalidrawApi={api} open onClose={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "选择图层 Rectangle" })).toHaveAttribute("aria-pressed", "false");
+    api.getAppState = () => ({ selectedElementIds: { "layer-1": true } });
+    await act(async () => { onChangeCallback?.(); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "选择图层 Rectangle" })).toHaveAttribute("aria-pressed", "true"));
   });
 });

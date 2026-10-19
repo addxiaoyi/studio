@@ -252,13 +252,14 @@ export function CanvasLayersPanel({
   return (
     <div
       ref={panelRef}
+      aria-labelledby="canvas-layers-panel-title"
       className="fixed left-0 top-0 z-30 flex h-full w-[280px] flex-col border-r border-border/60 glass-strong animate-in slide-in-from-left duration-200"
       onKeyDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
       {/* Title bar */}
       <div className="flex h-11 shrink-0 items-center justify-between px-3">
-        <span className="text-sm font-medium text-foreground">图层</span>
+        <h2 id="canvas-layers-panel-title" className="text-sm font-medium text-foreground">图层</h2>
         <button
           type="button"
           ref={closeButtonRef}
