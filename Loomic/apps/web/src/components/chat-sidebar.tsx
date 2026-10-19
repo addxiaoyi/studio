@@ -250,6 +250,10 @@ export function ChatSidebar({
 
   const initialPromptSent = useRef(false);
   const messagesViewportRef = useRef<HTMLDivElement>(null);
+  const chatPanelRef = useRef<HTMLDivElement>(null);
+  const chatCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const collapsedTriggerRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(open);
   const shouldAutoFollowRef = useRef(true);
   const [showLatestButton, setShowLatestButton] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -262,6 +266,15 @@ export function ChatSidebar({
   const selectedCanvasElementsRef = useRef(selectedCanvasElements);
   selectedCanvasElementsRef.current = selectedCanvasElements;
   const prevConnectedRef = useRef(false);
+
+  useEffect(() => {
+    if (open && isOverlay) {
+      chatCloseButtonRef.current?.focus();
+    } else if (!open && wasOpenRef.current) {
+      collapsedTriggerRef.current?.focus();
+    }
+    wasOpenRef.current = open;
+  }, [isOverlay, open]);
 
   const {
     attachments: imageAttachments,
@@ -1337,11 +1350,26 @@ export function ChatSidebar({
     initialPrompt,
   ]);
 
+  const approvalCards = useMemo(() => uniqueGenerationApprovals(messages), [messages]);
+  const canvasApprovalId = typeof canvasApproval?.approvalId === "string" ? canvasApproval.approvalId : null;
+  const approvalRenderedInMessage = canvasApprovalId !== null && approvalCards.visibleIds.has(canvasApprovalId);
+  const handleCanvasApprovalJobCreated = useCallback((jobId: string) => {
+    if (!canvasApproval) return;
+    setCanvasApproval(null);
+    setCanvasApprovalJob({
+      id: jobId,
+      jobType: canvasApproval.jobType === "video_generation" ? "video_generation" : "image_generation",
+      status: "queued",
+      progress: 0,
+    });
+  }, [canvasApproval]);
+
   // ── Collapsed state ──
   if (!open) {
     return (
       <div className="absolute right-3 top-3 z-20">
         <button
+          ref={collapsedTriggerRef}
           onClick={onToggle}
           type="button"
           aria-label="打开 AI 对话面板"
@@ -1365,7 +1393,38 @@ export function ChatSidebar({
   // Shared event isolation — prevent keyboard/clipboard events from bleeding
   // into Excalidraw canvas when the sidebar has focus.
   const eventIsolationProps = {
-    onKeyDown: (e: React.KeyboardEvent) => e.stopPropagation(),
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (isOverlay && e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onToggle();
+        return;
+      }
+
+      if (isOverlay && e.key === "Tab") {
+        const panel = chatPanelRef.current;
+        if (panel) {
+          const focusable = Array.from(
+            panel.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ),
+          );
+          const first = focusable[0];
+          const last = focusable.at(-1);
+          if (first && last) {
+            if (e.shiftKey && document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }
+      }
+
+      e.stopPropagation();
+    },
     onKeyUp: (e: React.KeyboardEvent) => e.stopPropagation(),
     onCopy: (e: React.ClipboardEvent) => e.stopPropagation(),
     onCut: (e: React.ClipboardEvent) => e.stopPropagation(),
@@ -1427,25 +1486,12 @@ export function ChatSidebar({
         return jobIds.includes(canvasApprovalJob.id);
       }))
     : false;
-  const approvalCards = useMemo(() => uniqueGenerationApprovals(messages), [messages]);
-  const canvasApprovalId = typeof canvasApproval?.approvalId === "string" ? canvasApproval.approvalId : null;
-  const approvalRenderedInMessage = canvasApprovalId !== null && approvalCards.visibleIds.has(canvasApprovalId);
-  const handleCanvasApprovalJobCreated = useCallback((jobId: string) => {
-    if (!canvasApproval) return;
-    setCanvasApproval(null);
-    setCanvasApprovalJob({
-      id: jobId,
-      jobType: canvasApproval.jobType === "video_generation" ? "video_generation" : "image_generation",
-      status: "queued",
-      progress: 0,
-    });
-  }, [canvasApproval]);
   const panelContent = (
     <>
       {/* Header */}
-      <div id="canvas-chat-panel" className="flex min-h-[48px] items-center justify-between pl-4 pr-2">
+      <div className="flex min-h-[48px] items-center justify-between pl-4 pr-2">
         <div className="flex items-center gap-1 min-w-0">
-          <h2 className="text-sm font-medium text-foreground shrink-0">
+          <h2 id="canvas-chat-panel-title" className="text-sm font-medium text-foreground shrink-0">
             Helstera Agent
           </h2>
           {!sessionsLoading && (
@@ -1461,8 +1507,10 @@ export function ChatSidebar({
         <button
           type="button"
           onClick={onToggle}
-          className="rounded-full p-1.5 text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground transition-all duration-300 duration-200 shrink-0"
-          title="Collapse panel"
+          ref={chatCloseButtonRef}
+          aria-label="关闭 AI 对话面板"
+          className="flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-full p-1.5 text-muted-foreground transition-all duration-200 hover:bg-foreground/[0.04] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title="关闭 AI 对话面板"
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none">
             <path
@@ -1675,6 +1723,11 @@ export function ChatSidebar({
         />
         {/* Chat panel — full screen on mobile, fixed-width drawer on tablet */}
         <div
+          ref={chatPanelRef}
+          id="canvas-chat-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="canvas-chat-panel-title"
           className={
             breakpoint === "mobile"
               ? "fixed inset-0 z-50 flex flex-col glass-strong animate-in slide-in-from-right duration-250"
@@ -1702,7 +1755,7 @@ export function ChatSidebar({
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize chat panel"
+        aria-label="调整对话面板宽度"
         aria-valuenow={sidebarWidth}
         aria-valuemin={SIDEBAR_MIN}
         aria-valuemax={SIDEBAR_MAX}

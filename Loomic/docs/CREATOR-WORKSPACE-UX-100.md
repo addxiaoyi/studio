@@ -145,3 +145,8 @@ parent back path, narrow-viewport wrapping for shared chrome, and stronger seman
 tokens when the user requests increased contrast. Chat streaming now announces
 connection and direct-generation phases, and keyboard focus expands the desktop
 sidebar so its labels remain visible while navigating without a pointer.
+
+The latest interaction pass hardens the mobile and tablet AI chat overlay with dialog
+semantics, Escape dismissal, trapped keyboard focus, and focus restoration to its
+trigger. The close path is covered by a component regression, including the React
+Hook-order failure that previously surfaced when the panel was toggled closed.

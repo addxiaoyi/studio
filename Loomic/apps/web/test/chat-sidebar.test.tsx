@@ -3,6 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -181,5 +182,41 @@ describe("ChatSidebar", () => {
     // Basic render check - input should be available
     const input = await screen.findByPlaceholderText(/输入需求|start with an idea/i);
     expect(input).toBeInTheDocument();
+  });
+
+  it("treats the mobile panel as a dismissible dialog and restores trigger focus", async () => {
+    const user = userEvent.setup();
+
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      return (
+        <ChatSidebar
+          accessToken={mockToken}
+          canvasId="canvas-1"
+          open={open}
+          onToggle={() => setOpen((value) => !value)}
+          ws={mockWs}
+        />
+      );
+    }
+
+    render(
+      <ToastProvider>
+        <TierLimitToastProvider>
+          <Harness />
+        </TierLimitToastProvider>
+      </ToastProvider>,
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "Helstera Agent" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    const closeButton = screen.getByRole("button", { name: "关闭 AI 对话面板" });
+    expect(closeButton).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    const trigger = await screen.findByRole("button", { name: "打开 AI 对话面板" });
+    expect(trigger).toHaveFocus();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
