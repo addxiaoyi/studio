@@ -45,6 +45,7 @@ export function CreditBalance() {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -60,6 +61,16 @@ export function CreditBalance() {
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      wasOpenRef.current = true;
+      popoverRef.current?.querySelector<HTMLElement>("a, button")?.focus();
+    } else if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      btnRef.current?.focus();
+    }
   }, [open]);
 
   useEffect(() => {
@@ -123,6 +134,7 @@ export function CreditBalance() {
           <AnimatePresence>
             <div ref={popoverRef} style={popoverStyle}>
               <motion.div
+                aria-labelledby="credit-balance-popover-title"
                 role="dialog"
                 aria-label="积分余额与使用情况"
                 initial={{ opacity: 0, x: -8 }}
@@ -133,7 +145,8 @@ export function CreditBalance() {
               >
                 <div className="mb-4">
                   <div className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-accent" strokeWidth={1.5} />
+                    <h2 id="credit-balance-popover-title" className="sr-only">积分余额与使用情况</h2>
+                    <Sparkles className="h-5 w-5 text-accent" strokeWidth={1.5} aria-hidden="true" />
                     <span className="text-3xl font-light tabular-nums text-foreground tracking-tight">
                       <AnimatedBalance value={balance} />
                     </span>

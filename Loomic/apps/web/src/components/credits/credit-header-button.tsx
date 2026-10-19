@@ -16,6 +16,8 @@ export function CreditHeaderButton() {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -40,6 +42,16 @@ export function CreditHeaderButton() {
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      wasOpenRef.current = true;
+      popoverRef.current?.querySelector<HTMLElement>("a, button")?.focus();
+    } else if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      triggerRef.current?.focus();
+    }
   }, [open]);
 
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
@@ -88,6 +100,7 @@ export function CreditHeaderButton() {
         </Link>
 
         <button
+          ref={triggerRef}
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-label={`积分余额 ${balance}`}
@@ -118,6 +131,7 @@ export function CreditHeaderButton() {
           <AnimatePresence>
             <div ref={popoverRef} style={popoverStyle}>
               <motion.div
+                aria-labelledby="credit-header-popover-title"
                 role="dialog"
                 aria-label="积分余额与充值"
                 initial={{ opacity: 0, y: -4 }}
@@ -127,7 +141,8 @@ export function CreditHeaderButton() {
                 className="w-72 rounded-2xl glass-strong border border-border/40 p-5 text-foreground shadow-card-hover"
               >
                 <div className="mb-4 flex items-center gap-2">
-                  <Zap className="h-5 w-5 text-accent" strokeWidth={1.5} />
+                  <h2 id="credit-header-popover-title" className="sr-only">积分余额与充值</h2>
+                  <Zap className="h-5 w-5 text-accent" strokeWidth={1.5} aria-hidden="true" />
                   <span className="text-3xl font-light tabular-nums text-foreground tracking-tight">
                     {balance.toLocaleString()}
                   </span>
