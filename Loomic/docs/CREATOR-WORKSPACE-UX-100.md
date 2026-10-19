@@ -150,3 +150,8 @@ The latest interaction pass hardens the mobile and tablet AI chat overlay with d
 semantics, Escape dismissal, trapped keyboard focus, and focus restoration to its
 trigger. The close path is covered by a component regression, including the React
 Hook-order failure that previously surfaced when the panel was toggled closed.
+
+The shared select control now follows a select-only combobox pattern: its highlighted
+option is announced through `aria-activedescendant`, Arrow/Home/End navigation works
+without committing early, and Escape or selection returns focus to the trigger. Feed,
+Storyboard, settings, and admin forms all inherit this keyboard behavior.
