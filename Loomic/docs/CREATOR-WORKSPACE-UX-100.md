@@ -125,7 +125,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 92. Workspace chrome now reflows and wraps at reduced CSS viewport widths; the Chromium UX-100 test passes at a 640 CSS-pixel 200% proxy, while a manual browser-zoom pass remains.
 - [~] 93. Primary workspace controls are keyboard reachable and the desktop sidebar expands on focus; complete end-to-end keyboard audit remains.
 - [~] 94. Dialogs use the shared accessible primitive; video preview restores focus.
-- [~] 95. Semantic contrast tokens and a `prefers-contrast: more` fallback now cover shared chrome; Chromium verifies foreground and muted text AA in light/dark themes, while all control/error pairs remain to be measured.
+- [x] 95. Semantic contrast tokens and a `prefers-contrast: more` fallback cover shared chrome; Chromium now verifies foreground, muted, primary, destructive, success, warning, and card pairs in light/dark themes.
 - [x] 96. CSS and Framer Motion honor `prefers-reduced-motion`.
 - [~] 97. Primary lists have loading skeletons and explicit empty states.
 - [~] 98. Network failures preserve user input and offer targeted retry where implemented; billing catalog failures now retry in place and usage history distinguishes failed loading from an empty result.

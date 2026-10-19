@@ -183,6 +183,13 @@ test.describe("UX 100 visual safeguards", () => {
         foreground: styles.getPropertyValue("--foreground").trim(),
         muted: styles.getPropertyValue("--muted-foreground").trim(),
         background: styles.getPropertyValue("--background").trim(),
+        card: styles.getPropertyValue("--card").trim(),
+        primary: styles.getPropertyValue("--primary").trim(),
+        primaryForeground: styles.getPropertyValue("--primary-foreground").trim(),
+        destructive: styles.getPropertyValue("--destructive").trim(),
+        success: styles.getPropertyValue("--success").trim(),
+        warning: styles.getPropertyValue("--warning").trim(),
+        warningForeground: styles.getPropertyValue("--warning-foreground").trim(),
       };
     };
 
@@ -197,6 +204,11 @@ test.describe("UX 100 visual safeguards", () => {
       expect(
         contrastRatio(tokens.muted, tokens.background),
       ).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(tokens.primaryForeground, tokens.primary)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(tokens.destructive, tokens.background)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(tokens.success, tokens.background)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(tokens.warningForeground, tokens.warning)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(tokens.foreground, tokens.card)).toBeGreaterThanOrEqual(4.5);
     }
   });
 

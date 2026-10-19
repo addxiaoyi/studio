@@ -42,8 +42,8 @@ reliability work that is present in this checkout. The detailed 100-item
 acceptance matrix is tracked in
 [`docs/CREATOR-WORKSPACE-UX-100.md`](docs/CREATOR-WORKSPACE-UX-100.md).
 
-- 45 UX items are implemented and covered by focused checks.
-- 52 items are locally improved but still require browser or manual evidence.
+- 46 UX items are implemented and covered by focused checks.
+- 51 items are locally improved but still require browser or manual evidence.
 - 3 items remain explicitly open: breadcrumbs, 200% zoom verification, and
   rendered contrast verification.
 - Verified locally: Web typecheck, 53 Web Vitest files / 201 tests, Server
