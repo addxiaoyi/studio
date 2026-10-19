@@ -9,6 +9,7 @@ export type ImageAttachmentState = {
   preview: string;
   uploading: boolean;
   error?: string;
+  retryable?: boolean;
   assetId?: string;
   url?: string;
   mimeType: string;
@@ -84,7 +85,18 @@ export function useImageAttachments(accessToken: string, projectId?: string) {
       for (const file of files) {
         const mimeType = inferImageMimeType(file);
         if (!mimeType) {
-          console.warn("[image-attachments] Rejected file type:", file.type || file.name);
+          const id = crypto.randomUUID();
+          newAttachments.push({
+            id,
+            file,
+            preview: "",
+            uploading: false,
+            error: "不支持此文件类型，请选择 PNG、JPG、WEBP 或 GIF 图片",
+            mimeType: file.type || "application/octet-stream",
+            source: "upload",
+            name: file.name,
+            retryable: false,
+          });
           continue;
         }
         const uploadFileValue = normalizeImageFile(file, mimeType);
@@ -98,6 +110,8 @@ export function useImageAttachments(accessToken: string, projectId?: string) {
             error: "图片不能超过 25MB",
             mimeType,
             source: "upload",
+            name: file.name,
+            retryable: false,
           });
           continue;
         }

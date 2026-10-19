@@ -18,7 +18,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 ## Home and project entry
 
 - [~] 11. Home keeps a direct creation entry visible.
-- [x] 12. Prompt attachments expose upload, failure, and keyboard-usable retry states.
+- [x] 12. Prompt attachments expose upload, validation failure, and keyboard-usable retry states; non-retryable files remain removable.
 - [~] 13. Prompt submission exposes the active model mode.
 - [~] 14. Generation surfaces show available cost estimates before submission.
 - [x] 15. Recent-project load failure is distinct from an empty list and retryable.

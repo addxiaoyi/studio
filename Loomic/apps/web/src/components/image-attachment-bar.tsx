@@ -40,7 +40,7 @@ export function ImageAttachmentBar({ attachments, onRemove, onRetry }: ImageAtta
           )}
 
           {/* Error overlay with retry */}
-          {att.error && onRetry && att.file && (
+          {att.error && onRetry && att.file && att.retryable !== false && (
             <button
               type="button"
               className="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-0.5 bg-red-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
@@ -54,7 +54,7 @@ export function ImageAttachmentBar({ attachments, onRemove, onRetry }: ImageAtta
               <span className="text-[9px] font-medium text-red-600">Retry</span>
             </button>
           )}
-          {att.error && (!onRetry || !att.file) && (
+          {att.error && (!onRetry || !att.file || att.retryable === false) && (
             <div className="absolute inset-0 flex items-center justify-center bg-red-500/20" role="status" aria-label={att.error} title={att.error}>
               <svg className="h-3.5 w-3.5 text-red-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                 <path fillRule="evenodd" d="M10 2a8 8 0 1 0 8 8 8.009 8.009 0 0 0-8-8Zm.75 4.5a.75.75 0 0 0-1.5 0v4a.75.75 0 0 0 1.5 0Zm0 6a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z" clipRule="evenodd" />
