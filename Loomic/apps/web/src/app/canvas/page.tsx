@@ -65,6 +65,7 @@ function CanvasPageContent() {
   const [layersOpen, setLayersOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const timelineToggleRef = useRef<HTMLButtonElement>(null);
   const [brandKitId, setBrandKitId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("Untitled");
   const [autoDeleteEmptyCanvas, setAutoDeleteEmptyCanvas] = useState(false);
@@ -94,6 +95,10 @@ function CanvasPageContent() {
   const handleCloseLayers = useCallback(() => setLayersOpen(false), []);
   const handleCloseFiles = useCallback(() => setFilesOpen(false), []);
   const handleToggleTimeline = useCallback(() => setTimelineOpen((value) => !value), []);
+  const handleCloseTimeline = useCallback(() => {
+    setTimelineOpen(false);
+    window.requestAnimationFrame(() => timelineToggleRef.current?.focus());
+  }, []);
   const handleClearSelection = useCallback(() => {
     excalidrawApiRef.current?.updateScene({ appState: { selectedElementIds: {} } });
   }, []);
@@ -412,6 +417,7 @@ function CanvasPageContent() {
           onToggleFiles={handleToggleFiles}
           timelineOpen={timelineOpen}
           onToggleTimeline={handleToggleTimeline}
+          timelineToggleRef={timelineToggleRef}
           leftPanelOpen={layersOpen || filesOpen}
           selectedCount={selectedCanvasElements.length}
           onClearSelection={handleClearSelection}
@@ -420,7 +426,7 @@ function CanvasPageContent() {
         <CanvasTimelinePanel
           excalidrawApi={excalidrawApi}
           open={timelineOpen}
-          onClose={() => setTimelineOpen(false)}
+          onClose={handleCloseTimeline}
           accessToken={accessToken}
           projectId={canvasData.projectId}
         />

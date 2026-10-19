@@ -1,7 +1,7 @@
 "use client";
 
 import { Download, Film, Image as ImageIcon, Music, Pause, Play, Plus, Type, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { uploadFile } from "../lib/server-api";
 
 type TimelinePanelProps = {
@@ -42,6 +42,11 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, accessToken,
   const [playhead, setPlayhead] = useState(0);
   const [previewing, setPreviewing] = useState(false);
   const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (open) closeButtonRef.current?.focus();
+  }, [open]);
 
   const totalDuration = Math.max(5, ...items.map((item) => item.kind === "video" || item.kind === "audio" || item.kind === "subtitle" ? item.trimEnd : 0));
 
@@ -232,13 +237,13 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, accessToken,
   if (!open) return null;
 
   return (
-    <aside className="absolute bottom-16 left-4 right-4 z-30 max-w-3xl rounded-2xl border border-border/60 bg-background/95 p-3 shadow-2xl backdrop-blur-xl" aria-label="媒体时间线">
+    <aside className="absolute bottom-16 left-4 right-4 z-30 max-w-3xl rounded-2xl border border-border/60 bg-background/95 p-3 shadow-2xl backdrop-blur-xl" aria-label="媒体时间线" aria-live="polite">
       <div className="flex items-center justify-between border-b border-border/60 pb-2">
         <div>
           <h2 className="text-xs font-medium text-foreground">媒体时间线</h2>
           <p className="mt-0.5 text-[11px] text-muted-foreground">素材、字幕和裁剪参数会随项目自动保存</p>
         </div>
-        <button type="button" onClick={onClose} className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="关闭时间线"><X className="size-4" /></button>
+        <button ref={closeButtonRef} type="button" onClick={onClose} className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="关闭时间线"><X className="size-4" /></button>
       </div>
       <div className="mt-3 flex gap-2">
         <input value={subtitle} onChange={(event) => setSubtitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addSubtitle(); }} placeholder="输入字幕内容" className="h-8 min-w-0 flex-1 rounded-lg border border-border/60 bg-muted/40 px-2.5 text-xs outline-none focus:border-foreground/30" />

@@ -48,4 +48,24 @@ describe("CanvasBottomBar", () => {
     expect(onDeleteSelection).toHaveBeenCalledOnce();
     expect(onClearSelection).toHaveBeenCalledOnce();
   });
+
+  it("marks the timeline trigger as pressed while it is open", () => {
+    render(
+      <CanvasBottomBar
+        excalidrawApi={null}
+        layersOpen={false}
+        onToggleLayers={vi.fn()}
+        filesOpen={false}
+        onToggleFiles={vi.fn()}
+        timelineOpen
+        onToggleTimeline={vi.fn()}
+        leftPanelOpen={false}
+        selectedCount={0}
+        onClearSelection={vi.fn()}
+        onDeleteSelection={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "媒体时间线" })).toHaveAttribute("aria-pressed", "true");
+  });
 });

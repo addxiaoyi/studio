@@ -23,6 +23,7 @@ interface CanvasBottomBarProps {
   onToggleFiles: () => void;
   timelineOpen: boolean;
   onToggleTimeline: () => void;
+  timelineToggleRef?: React.RefObject<HTMLButtonElement | null>;
   /** Whether any left panel (layers/files) is open — shifts the bar right */
   leftPanelOpen: boolean;
   selectedCount: number;
@@ -133,7 +134,7 @@ function ElementRow({ el, onSelect }: { el: ExcalidrawEl; onSelect: (id: string)
 /* ================================================================
    Main component
    ================================================================ */
-export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, filesOpen, onToggleFiles, timelineOpen, onToggleTimeline, leftPanelOpen, selectedCount, onClearSelection, onDeleteSelection }: CanvasBottomBarProps) {
+export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, filesOpen, onToggleFiles, timelineOpen, onToggleTimeline, timelineToggleRef, leftPanelOpen, selectedCount, onClearSelection, onDeleteSelection }: CanvasBottomBarProps) {
   /* ── Zoom state ── */
   const [zoom, setZoom] = useState(1);
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
@@ -257,7 +258,7 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, fil
         <button type="button" className={`${btnClass} ${filesOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleFiles} aria-label="素材文件" aria-pressed={filesOpen} title="素材文件">
           <FileIcon className="h-3.5 w-3.5" />
         </button>
-        <button type="button" className={`${btnClass} ${timelineOpen ? "bg-muted text-foreground" : ""}`} onClick={onToggleTimeline} aria-label="媒体时间线" aria-pressed={timelineOpen} title="媒体时间线">
+        <button ref={timelineToggleRef} type="button" className={`${btnClass} ${timelineOpen ? "bg-muted text-foreground" : ""}`} onClick={onToggleTimeline} aria-label="媒体时间线" aria-pressed={timelineOpen} title="媒体时间线">
           <Film className="h-3.5 w-3.5" />
         </button>
         <button type="button" className={`${btnClass} ${standardShapes ? "bg-muted text-foreground" : ""}`} onClick={toggleShapeStyle} aria-label={standardShapes ? "标准图形已开启" : "手绘图形已开启"} aria-pressed={standardShapes} title={standardShapes ? "标准图形已开启" : "手绘图形已开启"}>
