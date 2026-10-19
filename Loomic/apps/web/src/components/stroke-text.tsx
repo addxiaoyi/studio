@@ -65,15 +65,24 @@ export function StrokeText({
       stagger,
     });
 
+    let disposed = false;
     const play = () => timeline.restart();
     if (trigger === "hover") {
       gsap.set(chars, endState);
       root.addEventListener("pointerenter", play);
     } else {
-      timeline.play(0);
+      const start = () => {
+        if (!disposed) timeline.play(0);
+      };
+      if (document.fonts?.ready) {
+        document.fonts.ready.then(start).catch(start);
+      } else {
+        start();
+      }
     }
 
     return () => {
+      disposed = true;
       root.removeEventListener("pointerenter", play);
       timeline.kill();
       gsap.killTweensOf(chars);

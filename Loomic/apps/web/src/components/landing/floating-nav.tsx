@@ -96,8 +96,7 @@ export function FloatingNav() {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 shrink-0 group">
-            <HelsteraLogo className="size-7" />
-            <span className="font-medium text-base tracking-tight">Helstera</span>
+          <HelsteraLogo className="text-base" />
           </Link>
 
           {/* Desktop Nav Links */}

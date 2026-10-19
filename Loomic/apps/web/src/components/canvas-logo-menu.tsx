@@ -177,10 +177,10 @@ export function CanvasLogoMenu({
         onOpenChange={() => undefined}
       >
         <DropdownMenuTrigger
-          className="flex items-center justify-center size-8 rounded-xl glass border border-border/40 hover:bg-foreground/[0.04] transition-all duration-300 duration-200 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-foreground/20"
+          className="flex h-8 items-center rounded-xl glass border border-border/40 px-2 hover:bg-foreground/[0.04] transition-all duration-300 duration-200 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-foreground/20"
           aria-label="菜单"
         >
-          <HelsteraLogo className="size-5 text-foreground" />
+          <HelsteraLogo className="text-sm text-foreground" />
         </DropdownMenuTrigger>
 
         <DropdownMenuContent align="start" sideOffset={6} className="w-56 glass shadow-soft border-border/60 rounded-2xl p-1.5">

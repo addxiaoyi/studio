@@ -318,7 +318,7 @@ export default function HomePage() {
           custom={0}
           className="mb-5 flex items-center gap-2"
         >
-          <HelsteraBrandMark size="md" showIcon className="text-foreground" />
+          <HelsteraBrandMark size="md" className="text-foreground" />
         </motion.div>
 
         <motion.h1

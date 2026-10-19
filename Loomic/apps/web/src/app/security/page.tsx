@@ -76,8 +76,7 @@ export default function SecurityPage() {
       <header className="sticky top-0 z-50 glass-strong">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <Link href="/" className="flex items-center gap-2">
-            <HelsteraLogo className="size-7" />
-            <span className="font-medium text-base tracking-tight">Helstera</span>
+            <HelsteraLogo className="text-base" />
           </Link>
           <nav className="flex items-center gap-6 text-sm">
             <Link href="/pricing" className="text-muted-foreground hover:text-foreground transition-all duration-300">

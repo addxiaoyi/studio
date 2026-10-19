@@ -84,8 +84,7 @@ export function LandingFooter() {
           {/* Brand column */}
           <div className="col-span-2 md:col-span-1">
             <Link href="/" className="inline-flex items-center gap-2">
-              <HelsteraLogo className="size-7" />
-              <span className="font-medium tracking-tight">Helstera</span>
+              <HelsteraLogo className="text-base" />
             </Link>
 
             <p className="mt-3 text-sm text-muted-foreground leading-relaxed font-light">

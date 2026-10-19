@@ -10,8 +10,7 @@ export default function PrivacyPage() {
       <header className="sticky top-0 z-50 glass-strong">
         <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-6">
           <Link href="/" className="flex items-center gap-2">
-            <HelsteraLogo className="size-7" />
-            <span className="font-medium text-base tracking-tight">Helstera</span>
+            <HelsteraLogo className="text-base" />
           </Link>
           <Link
             href="/login"

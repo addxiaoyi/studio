@@ -2,6 +2,26 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+@font-face {
+  font-family: "Claude Sans";
+  src: url("/fonts/claude-sans-bold-italic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 700 900;
+  font-display: swap;
+}
+
+.helstera-wordmark {
+  display: inline-block;
+  width: auto !important;
+  height: auto !important;
+  white-space: nowrap;
+  font-family: "Claude Sans", var(--font-sans), sans-serif;
+  font-style: italic;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+
 @keyframes thinking-shimmer {
     from { transform: translateX(-120%); }
     to { transform: translateX(320%); }

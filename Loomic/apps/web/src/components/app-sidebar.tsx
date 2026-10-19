@@ -225,7 +225,7 @@ export function AppSidebar() {
       className={cn("relative z-30 hidden h-[100dvh] shrink-0 flex-col overflow-hidden border-r border-border/40 bg-background/75 px-3 py-4 backdrop-blur transition-[width] duration-200 md:flex", collapsed ? "w-16" : "w-56")}
     >
       <Link href="/home" title="Helstera" className={cn("mb-4 flex h-8 items-center px-2", labelsHidden && "justify-center px-0")}>
-        <HelsteraBrandMark size="sm" showIcon={!labelsHidden} />
+        <HelsteraBrandMark size="sm" />
       </Link>
       <div className="space-y-1">{primaryItems.map((item) => <NavLink key={item.href} item={{ ...item, label: item.href === "/home" ? labels.home : item.label }} active={isPathActive(pathname, item.href)} collapsed={labelsHidden} />)}</div>
       <div className="my-3 border-t border-border/40" />

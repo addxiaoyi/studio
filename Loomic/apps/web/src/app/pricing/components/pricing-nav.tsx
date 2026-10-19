@@ -13,10 +13,7 @@ export function PricingNav() {
     >
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
         <a href="/" className="flex items-center gap-2">
-          <HelsteraLogo className="size-7 text-foreground" />
-          <span className="text-base font-medium tracking-tight">
-            Helstera
-          </span>
+          <HelsteraLogo className="text-base text-foreground" />
         </a>
 
         <div className="flex items-center gap-1.5">

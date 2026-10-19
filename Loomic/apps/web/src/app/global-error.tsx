@@ -90,8 +90,7 @@ export default function GlobalError({ error, reset }: ErrorProps) {
             href="/"
             className="mt-12 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
-            <HelsteraLogo className="size-5" />
-            <span className="font-medium tracking-tight">Helstera</span>
+            <HelsteraLogo className="text-sm" />
           </Link>
         </div>
       </body>

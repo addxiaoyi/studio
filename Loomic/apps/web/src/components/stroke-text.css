@@ -4,6 +4,8 @@
   line-height: 0.95;
   white-space: nowrap;
   user-select: none;
+  font-family: "Claude Sans", var(--font-sans), sans-serif;
+  font-style: italic;
 }
 
 .stroke-text--hover {

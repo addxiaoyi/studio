@@ -8,10 +8,10 @@ import { HelsteraBrandMark } from "../src/components/helstera-brand-mark";
 describe("HelsteraBrandMark", () => {
   afterEach(cleanup);
 
-  it("renders the compact icon-only brand mark", () => {
-    render(<HelsteraBrandMark size="sm" showIcon={false} />);
+  it("renders the compact text-only brand mark", () => {
+    render(<HelsteraBrandMark size="sm" />);
     expect(screen.getByRole("img", { name: "Helstera" })).toBeInTheDocument();
-    expect(document.querySelector(".stroke-text")).not.toBeInTheDocument();
+    expect(document.querySelector(".helstera-wordmark")).toBeInTheDocument();
   });
 
   it("renders the animated wordmark with an accessible brand label", () => {
