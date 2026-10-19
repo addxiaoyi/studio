@@ -77,18 +77,20 @@ export function CreditUsageHistory() {
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterMode>("all");
   const [hasMore, setHasMore] = useState(true);
 
   const loadTransactions = useCallback(async (limit: number) => {
     const token = accessTokenRef.current;
     if (!token) return;
+    setLoadError(null);
     try {
       const result = await fetchCreditTransactions(token, limit);
       setTransactions(result.transactions as unknown as CreditTransaction[]);
       setHasMore(result.transactions.length >= limit);
-    } catch {
-      // Silently fail — user will see empty state
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "无法加载用量记录。");
     } finally {
       setLoading(false);
     }
@@ -135,6 +137,24 @@ export function CreditUsageHistory() {
 
   if (loading) {
     return <LoadingState variant="text" lines={4} className="py-8" />;
+  }
+
+  if (loadError) {
+    return (
+      <div
+        role="alert"
+        className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 text-sm"
+      >
+        <p className="text-destructive">{loadError}</p>
+        <button
+          type="button"
+          onClick={() => void loadTransactions(PAGE_SIZE)}
+          className="mt-4 min-h-10 rounded-lg border border-destructive/30 px-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5"
+        >
+          重新加载用量记录
+        </button>
+      </div>
+    );
   }
 
   return (
