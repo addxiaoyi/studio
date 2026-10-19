@@ -239,4 +239,37 @@ test.describe("UX 100 visual safeguards", () => {
     await expect(page.getByRole("link", { name: "下载 测试资产" })).toBeVisible();
     expect(previewAttempts).toBeGreaterThanOrEqual(2);
   });
+
+  test("storyboard offers project recovery and exposes the current shot", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.goto("/storyboard");
+    await expect(page.getByRole("heading", { name: "创建分镜项目" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "创建并进入分镜工作台" })).toBeVisible();
+
+    await page.route("**/api/projects/project-1/story-assets", (route: Route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ assets: [] }) }),
+    );
+    await page.route("**/api/projects/project-1/storyboards", (route: Route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ storyboards: [
+          { id: "board-1", projectId: "project-1", sceneNo: 1, title: "雨夜开场", script: "进入街道", shotPrompt: "雨夜街道", imageAssetId: null, videoAssetId: null, status: "draft", metadata: {}, createdAt: "2026-10-19T00:00:00.000Z", updatedAt: "2026-10-19T00:00:00.000Z" },
+          { id: "board-2", projectId: "project-1", sceneNo: 2, title: "产品特写", script: "展示产品", shotPrompt: "产品特写", imageAssetId: null, videoAssetId: null, status: "draft", metadata: {}, createdAt: "2026-10-19T00:00:00.000Z", updatedAt: "2026-10-19T00:00:00.000Z" },
+        ] }),
+      }),
+    );
+    await page.route("**/api/image-models", (route: Route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [{ id: "image-model", displayName: "图片模型", description: "", provider: "test", accessible: true, providerPriceCny: 1, capabilities: { imageToImage: true }, limits: { maxResolution: "1K" } }], unavailableModels: [], defaultModel: "image-model" }) }));
+    await page.route("**/api/video-models", (route: Route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [{ id: "video-model", displayName: "视频模型", description: "", provider: "test", accessible: true, providerPriceCny: 1, capabilities: { textToVideo: true, imageToVideo: true, videoToVideo: false, audio: false }, limits: { maxDuration: 5, maxInputImages: 3, maxResolution: "720p" } }], unavailableModels: [] }) }));
+
+    await page.goto("/storyboard?projectId=project-1");
+    const firstShot = page.getByRole("button", { name: /第 1 个分镜：雨夜开场/ });
+    const secondShot = page.getByRole("button", { name: /第 2 个分镜：产品特写/ });
+    await expect(firstShot).toHaveAttribute("aria-current", "step");
+    await expect(firstShot).toHaveAttribute("aria-pressed", "true");
+    await secondShot.click();
+    await expect(secondShot).toHaveAttribute("aria-current", "step");
+    await expect(firstShot).not.toHaveAttribute("aria-current", "step");
+    await expect(page.getByLabel("资产名称")).toBeVisible();
+  });
 });

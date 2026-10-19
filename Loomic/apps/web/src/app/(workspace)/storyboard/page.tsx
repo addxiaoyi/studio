@@ -617,14 +617,18 @@ export default function StoryboardPage() {
                   key={id}
                   type="button"
                   onClick={() => setKind(id)}
+                  aria-pressed={kind === id}
                   className={`rounded-lg border px-3 py-2 text-xs ${kind === id ? "border-foreground/50 bg-foreground/[0.06]" : "border-border/60"}`}
                 >
                   {label} {assetCounts.get(id)}
                 </button>
               ))}
             </div>
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3 grid gap-2">
+              <label htmlFor="story-asset-name" className="text-xs font-medium text-muted-foreground">资产名称</label>
+              <div className="flex gap-2">
               <input
+                id="story-asset-name"
                 value={assetName}
                 onChange={(event) => setAssetName(event.target.value)}
                 onKeyDown={(event) => {
@@ -636,8 +640,11 @@ export default function StoryboardPage() {
               <Button type="button" size="sm" onClick={() => void addAsset()}>
                 添加
               </Button>
+              </div>
             </div>
+            <label htmlFor="story-asset-description" className="mt-2 grid gap-1.5 text-xs font-medium text-muted-foreground">资产描述
             <textarea
+              id="story-asset-description"
               value={assetDescription}
               onChange={(event) => setAssetDescription(event.target.value)}
               placeholder={
@@ -649,6 +656,7 @@ export default function StoryboardPage() {
               }
               className="mt-2 min-h-20 w-full rounded-lg border border-border/60 bg-background px-2.5 py-2 text-base leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs"
             />
+            </label>
           </div>
           <div className="space-y-2">
             {assets.map((asset) => (
@@ -810,6 +818,9 @@ export default function StoryboardPage() {
                 key={board.id}
                 type="button"
                 onClick={() => setSelectedBoard(index)}
+                aria-current={index === selectedBoard ? "step" : undefined}
+                aria-pressed={index === selectedBoard}
+                aria-label={`第 ${board.sceneNo} 个分镜：${board.title}${index === selectedBoard ? "，当前" : ""}`}
                 className={`shrink-0 rounded-lg border px-3 py-2 text-xs ${index === selectedBoard ? "border-foreground/50 bg-foreground/[0.06]" : "border-border/60"}`}
               >
                 #{board.sceneNo} {board.title}

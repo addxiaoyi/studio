@@ -98,8 +98,8 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 71. Creation entry emphasizes the next useful action.
 - [x] 72. Project-type choices expose selected state to assistive technology.
 - [x] 73. Creation brief has a character limit and session draft recovery.
-- [~] 74. Storyboard without a project offers a direct creation/recovery action.
-- [~] 75. Current storyboard shot is clearly indicated.
+- [x] 74. Storyboard without a project offers a direct creation/recovery action, covered by the Chromium storyboard regression.
+- [x] 75. Current storyboard shot is clearly indicated with `aria-current="step"` and a pressed state.
 - [x] 76. Storyboard save and generation failures have explicit retry actions.
 - [~] 77. Character, scene, and prop reference assets can be reused.
 - [~] 78. Storyboard generation exposes model and estimated cost.
