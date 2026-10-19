@@ -65,6 +65,7 @@ export default function EcomHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     const fetchJobs = async () => {
@@ -74,6 +75,8 @@ export default function EcomHistoryPage() {
         return;
       }
 
+      setLoading(true);
+      setError(null);
       try {
         const res = await fetch(
           `${getServerBaseUrl()}/api/ecom/jobs`,
@@ -103,7 +106,7 @@ export default function EcomHistoryPage() {
     };
 
     void fetchJobs();
-  }, [session?.access_token]);
+  }, [retryKey, session?.access_token]);
 
   return (
     <section className="min-h-screen bg-background py-10 px-6 max-w-6xl mx-auto">
@@ -154,6 +157,13 @@ export default function EcomHistoryPage() {
           className="glass-soft border border-destructive/40 rounded-2xl p-8 text-center"
         >
           <p className="text-sm text-destructive font-light">{error}</p>
+          <button
+            type="button"
+            onClick={() => setRetryKey((value) => value + 1)}
+            className="mt-5 min-h-10 rounded-full border border-destructive/40 px-4 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5"
+          >
+            重新加载历史记录
+          </button>
         </div>
       ) : !jobs || jobs.length === 0 ? (
         <div className="glass rounded-2xl p-16 text-center">

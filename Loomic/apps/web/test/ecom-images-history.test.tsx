@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 const mockFetch = vi.fn();
@@ -130,13 +131,20 @@ describe("EcomHistoryPage", () => {
   });
 
   it("shows error alert when API fails", async () => {
-    mockFetch.mockResolvedValueOnce({
+    mockFetch
+      .mockResolvedValueOnce({
       ok: false,
       json: () => Promise.resolve({ error: { message: "Internal error" } }),
-    });
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ jobs: [] }),
+      });
     render(<EcomHistoryPage />);
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(/Internal error/);
     });
+    await userEvent.click(screen.getByRole("button", { name: "重新加载历史记录" }));
+    await waitFor(() => expect(screen.getByText(/还没有生成任务/)).toBeInTheDocument());
   });
 });

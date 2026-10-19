@@ -104,7 +104,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 77. Character, scene, and prop reference assets can be reused.
 - [~] 78. Storyboard generation exposes model and estimated cost.
 - [~] 79. Brand-kit color, font, and logo selection follows shared control states.
-- [~] 80. Prompt, gallery, texture, and skill libraries expose search and empty states.
+- [~] 80. Prompt, gallery, texture, and skill libraries expose search and empty states; e-commerce history now exposes a retryable load failure.
 
 ## Settings, collaboration, and account
 
