@@ -93,12 +93,14 @@ export default function StoryboardPage() {
   const [selectedBoard, setSelectedBoard] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [imageModels, setImageModels] = useState<ImageModelInfo[]>([]);
   const [videoModels, setVideoModels] = useState<VideoModelInfo[]>([]);
   const [imageModel, setImageModel] = useState("");
   const [videoModel, setVideoModel] = useState("");
   const [generating, setGenerating] = useState<"image" | "video" | null>(null);
   const [generationError, setGenerationError] = useState("");
+  const [generationErrorMode, setGenerationErrorMode] = useState<"image" | "video" | null>(null);
   const [projectError, setProjectError] = useState("");
   const [loadError, setLoadError] = useState("");
   const creatingProjectRef = useRef(false);
@@ -396,6 +398,7 @@ export default function StoryboardPage() {
     const token = session?.access_token;
     if (!token || !projectId || !currentBoard) return;
     setSaving(true);
+    setSaveError("");
     try {
       const { storyboard } = await saveStoryboard(
         token,
@@ -407,6 +410,8 @@ export default function StoryboardPage() {
           index === selectedBoard ? storyboard : board,
         ),
       );
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "分镜保存失败，请重试。");
     } finally {
       setSaving(false);
     }
@@ -455,6 +460,7 @@ export default function StoryboardPage() {
     }
     setGenerating(mode);
     setGenerationError("");
+    setGenerationErrorMode(null);
     try {
       if (mode === "image") {
         const image = await generateImageDirect(token, prompt, {
@@ -514,6 +520,7 @@ export default function StoryboardPage() {
       setGenerationError(
         error instanceof Error ? error.message : "生成失败，请稍后重试。",
       );
+      setGenerationErrorMode(mode);
       if (mode === "video") {
         void saveStoryboard(token, projectId, {
           ...currentBoard,
@@ -789,6 +796,14 @@ export default function StoryboardPage() {
               </Button>
             </div>
           </div>
+          {saveError ? (
+            <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+              <span>{saveError}</span>
+              <Button type="button" variant="outline" size="sm" onClick={() => void saveCurrentBoard()} disabled={saving}>
+                重试保存
+              </Button>
+            </div>
+          ) : null}
           <div className="mt-5 flex gap-2 overflow-x-auto pb-1">
             {boards.map((board, index) => (
               <button
@@ -1090,12 +1105,17 @@ export default function StoryboardPage() {
                 </div>
               </div>
               {generationError && (
-                <p
+                <div
                   role="alert"
-                  className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
                 >
-                  {generationError}
-                </p>
+                  <span>{generationError}</span>
+                  {generationErrorMode ? (
+                    <Button type="button" variant="outline" size="sm" onClick={() => void generateBoard(generationErrorMode)} disabled={generating !== null}>
+                      重试生成
+                    </Button>
+                  ) : null}
+                </div>
               )}
             </div>
           ) : (

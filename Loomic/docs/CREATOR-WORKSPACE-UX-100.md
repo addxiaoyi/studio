@@ -100,7 +100,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 73. Creation brief has a character limit and session draft recovery.
 - [~] 74. Storyboard without a project offers a direct creation/recovery action.
 - [~] 75. Current storyboard shot is clearly indicated.
-- [~] 76. Storyboard save and generation failures have recovery paths.
+- [x] 76. Storyboard save and generation failures have explicit retry actions.
 - [~] 77. Character, scene, and prop reference assets can be reused.
 - [~] 78. Storyboard generation exposes model and estimated cost.
 - [~] 79. Brand-kit color, font, and logo selection follows shared control states.
