@@ -98,6 +98,7 @@ export default function SkillsPage() {
   // Data state
   const [skills, setSkills] = useState<SkillListItem[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Filter state (installed tab only)
   const [searchQuery, setSearchQuery] = useState("");
@@ -120,6 +121,7 @@ export default function SkillsPage() {
   const loadSkills = useCallback(async () => {
     const token = getToken();
     if (!token) return;
+    setLoadError(null);
 
     try {
       const [catalog, workspace] = await Promise.all([
@@ -141,6 +143,7 @@ export default function SkillsPage() {
     } catch (err) {
       if (err instanceof ApiAuthError) return;
       console.error("Failed to fetch skills:", err);
+      setLoadError(err instanceof Error ? err.message : "技能目录加载失败，请重试。");
     }
   }, [getToken]);
 
@@ -360,6 +363,24 @@ export default function SkillsPage() {
 
   if (pageLoading) {
     return <SkillsSkeleton />;
+  }
+
+  if (loadError) {
+    return (
+      <div role="alert" className="mx-4 rounded-2xl border border-destructive/30 bg-destructive/5 p-6 text-sm sm:mx-6 md:mx-8">
+        <p className="text-destructive">{loadError}</p>
+        <button
+          type="button"
+          onClick={() => {
+            setPageLoading(true);
+            void loadSkills().finally(() => setPageLoading(false));
+          }}
+          className="mt-4 min-h-10 rounded-lg border border-destructive/30 px-3 font-medium text-destructive transition-colors hover:bg-destructive/5"
+        >
+          重试加载技能
+        </button>
+      </div>
+    );
   }
 
   // ---------------------------------------------------------------------------

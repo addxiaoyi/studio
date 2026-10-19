@@ -115,7 +115,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 85. Billing, top-up, and credit usage share clear navigation; pricing region selection is now touchable/keyboard-reachable with explicit international-channel status, while the full billing journey remains to be audited.
 - [x] 86. Usage history has loading, empty, and retryable error states.
 - [x] 87. Team invite button is locked during submission; member-list failures expose a retry action and search remains recoverable.
-- [~] 88. Skill install, enablement, and version states are distinguishable.
+- [x] 88. Skill install, enablement, and version states are distinguishable, and catalog failures expose a retry action.
 - [~] 89. Authentication and permission failures expose a recovery action.
 - [x] 90. Settings tabs support arrow/Home/End navigation and tab-panel semantics.
 
