@@ -175,3 +175,7 @@ asset edit failure followed by a successful save.
 Feed hotspot results now expose a named busy region and polite refresh status, while
 the search control has a keyboard-accessible clear action and explicit pagination names;
 Chromium covers the async search-refresh and clear flow.
+
+Feed scheduling and publishing actions now have independent duplicate-submit locks,
+busy labels, explicit accessible names for publish mode/account selectors, and clearer
+in-progress copy; component coverage verifies a rapid double-submit creates one plan.

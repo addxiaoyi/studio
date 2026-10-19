@@ -14,6 +14,8 @@ const {
   fetchFeedRenderStatusMock,
   renderFeedPackageMock,
   saveFeedStructureDraftMock,
+  createFeedScheduleMock,
+  actOnFeedScheduleMock,
   searchParamsMock,
 } = vi.hoisted(() => ({
   createFeedPackageMock: vi.fn(),
@@ -22,6 +24,8 @@ const {
   fetchFeedRenderStatusMock: vi.fn(),
   renderFeedPackageMock: vi.fn(),
   saveFeedStructureDraftMock: vi.fn(),
+  createFeedScheduleMock: vi.fn(),
+  actOnFeedScheduleMock: vi.fn(),
   searchParamsMock: { current: new URLSearchParams() },
 }));
 
@@ -112,10 +116,10 @@ vi.mock("../src/components/ui/styled-select", () => ({
 
 vi.mock("../src/lib/server-api", () => ({
   createFeedPackage: createFeedPackageMock,
-  createFeedSchedule: vi.fn(),
+  createFeedSchedule: createFeedScheduleMock,
   approveFeedStructure: approveFeedStructureMock,
   fetchPublishingAccounts: vi.fn(),
-  actOnFeedSchedule: vi.fn(),
+  actOnFeedSchedule: actOnFeedScheduleMock,
   downloadFeedManifest: vi.fn(),
   downloadFeedTimeline: vi.fn(),
   fetchFeedPackage: fetchFeedPackageMock,
@@ -140,6 +144,8 @@ beforeEach(async () => {
   fetchFeedRenderStatusMock.mockReset();
   renderFeedPackageMock.mockReset();
   saveFeedStructureDraftMock.mockReset();
+  createFeedScheduleMock.mockReset();
+  actOnFeedScheduleMock.mockReset();
 
   const api = await import("../src/lib/server-api");
   vi.mocked(api.fetchFeedTrends).mockResolvedValue({
@@ -174,6 +180,8 @@ beforeEach(async () => {
   }));
   renderFeedPackageMock.mockResolvedValue({ id: packageRecord.id, status: "rendering", jobs: [] });
   saveFeedStructureDraftMock.mockImplementation(async (_token, _id, structure) => ({ ...packageRecord, structure }));
+  createFeedScheduleMock.mockResolvedValue({ id: "plan-default" });
+  actOnFeedScheduleMock.mockResolvedValue({});
 });
 
 afterEach(cleanup);
@@ -278,5 +286,26 @@ describe("feed workflow closure", () => {
     await user.click(screen.getByRole("button", { name: "进入排程与发布" }));
     expect(screen.getByTestId("feed-platform-douyin")).toBeInTheDocument();
     expect(screen.getByTestId("feed-platform-xiaohongshu")).toBeInTheDocument();
+  });
+
+  it("locks schedule submission while the server confirms the plan", async () => {
+    const user = userEvent.setup();
+    const api = await import("../src/lib/server-api");
+    vi.mocked(api.fetchPublishingAccounts).mockResolvedValue([
+      { id: "account-1", platform: "douyin", alias: "品牌抖音号", notes: "", status: "active", connection_mode: "scan_confirm" },
+    ]);
+    createFeedScheduleMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ id: "plan-1" }), 120)));
+    searchParamsMock.current = new URLSearchParams({ packageId: packageRecord.id, step: "5" });
+    render(<FeedPage />);
+
+    await waitFor(() => expect(fetchFeedPackageMock).toHaveBeenCalledWith("test-token", packageRecord.id));
+    await user.selectOptions(screen.getByRole("combobox", { name: "已绑定账号" }), "account-1");
+    await user.type(screen.getByLabelText("计划发布时间"), "2030-01-01T10:00");
+    const saveButton = screen.getByRole("button", { name: "保存排程" });
+    fireEvent.click(saveButton);
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(createFeedScheduleMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText("任务已进入待确认，确认后才会进入发布队列。")).toBeVisible());
   });
 });

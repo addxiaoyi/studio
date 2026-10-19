@@ -167,6 +167,7 @@ export default function FeedPage() {
   const [packages, setPackages] = useState<FeedPackageRecord[]>([]);
   const [active, setActive] = useState<FeedPackageRecord | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scheduleAction, setScheduleAction] = useState<"save" | "confirm" | "publish" | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [trendLoading, setTrendLoading] = useState(false);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
@@ -865,6 +866,7 @@ export default function FeedPage() {
     }
   }
   async function schedulePost() {
+    if (scheduleAction) return;
     if (!token || !active || !publishPlatform || !accountId || !scheduledAt) {
       setError("请先选择已绑定账号和计划发布时间");
       return;
@@ -873,7 +875,7 @@ export default function FeedPage() {
       setError("当前平台还没有内容变体，请先刷新内容包详情");
       return;
     }
-    setBusy(true);
+    setScheduleAction("save");
     setError("");
     setNotice("");
     try {
@@ -896,27 +898,31 @@ export default function FeedPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "排程保存失败");
     } finally {
-      setBusy(false);
+      setScheduleAction(null);
     }
   }
 
   async function confirmSchedule(scheduleId: string) {
-    if (!token) return;
+    if (!token || scheduleAction) return;
+    setScheduleAction("confirm");
     try { await actOnFeedSchedule(token, scheduleId, { action: "confirm" }); setNotice("已确认，任务进入待发布状态。"); }
     catch (err) { setError(err instanceof Error ? err.message : "确认失败"); }
+    finally { setScheduleAction(null); }
   }
   async function markPublished() {
     const planId = scheduleDrafts[publishPlatform]?.planId;
+    if (scheduleAction) return;
     if (!token || !planId || !postUrl.trim()) {
       setError("请先填写公开帖子链接，再标记已发布");
       return;
     }
+    setScheduleAction("publish");
     try {
       await actOnFeedSchedule(token, planId, { action: "mark_published", externalUrl: postUrl.trim() });
       setNotice(`${publishPlatform} 已记录为人工发布，公开链接已保存。`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "标记发布失败");
-    }
+    } finally { setScheduleAction(null); }
   }
 
   async function createDouyinLink(kind: "live" | "profile" | "item") {
@@ -1745,6 +1751,7 @@ export default function FeedPage() {
                     <StyledSelect
                       value={publishMode}
                       onChange={(value) => { setPublishMode(value as PublishingAccount["connection_mode"]); setAccountId(""); }}
+                      aria-label="发布方式"
                       options={[
                         { value: "scan_confirm", label: "确认后发布", note: "默认安全模式，用户确认后进入队列" },
                         { value: "deep_link", label: "打开平台发布", note: "下载素材并前往平台手工发布" },
@@ -1758,6 +1765,7 @@ export default function FeedPage() {
                     <StyledSelect
                       value={accountId}
                       onChange={selectAccount}
+                      aria-label="已绑定账号"
                       options={[
                         { value: "", label: "请选择账号", note: "账号按当前用户隔离" },
                         ...accounts.filter((item) => item.status === "active" && item.platform === publishPlatform && item.connection_mode === publishMode).map((item) => ({ value: item.id, label: item.alias, note: `${platforms.find(([id]) => id === item.platform)?.[1] ?? item.platform} · ${item.connection_mode}` })),
@@ -1781,9 +1789,10 @@ export default function FeedPage() {
                 <Button
                   variant="outline"
                   onClick={() => void schedulePost()}
-                  disabled={busy || !active || !currentVariant}
+                  disabled={busy || scheduleAction !== null || !active || !currentVariant}
+                  aria-busy={scheduleAction === "save"}
                 >
-                  保存排程
+                  {scheduleAction === "save" ? "保存中…" : "保存排程"}
                 </Button>
                 {publishPlatform === "douyin" && (
                   <div className="sm:col-span-2 rounded-lg border border-border/60 bg-muted/20 p-3">
@@ -1803,7 +1812,9 @@ export default function FeedPage() {
                 {scheduleDrafts[publishPlatform]?.planId && publishMode === "scan_confirm" && (
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
                     <p className="text-xs text-amber-800 dark:text-amber-200">此任务尚未发布，需要当前账号所有者确认。</p>
-                    <Button size="sm" onClick={() => void confirmSchedule(scheduleDrafts[publishPlatform]!.planId)}>确认进入发布队列</Button>
+                    <Button size="sm" onClick={() => void confirmSchedule(scheduleDrafts[publishPlatform]!.planId)} disabled={scheduleAction !== null} aria-busy={scheduleAction === "confirm"}>
+                      {scheduleAction === "confirm" ? "确认中…" : "确认进入发布队列"}
+                    </Button>
                   </div>
                 )}
                 {scheduleDrafts[publishPlatform]?.planId && (
@@ -1814,8 +1825,8 @@ export default function FeedPage() {
                       <li>在平台客户端或创作者后台人工发布，不要把时间线 JSON 当作最终 MP4。</li>
                       <li>发布完成后粘贴公开帖子链接，再点击“标记已发布”。</li>
                     </ol>
-                    <Button className="mt-3" size="sm" variant="outline" onClick={() => void markPublished()} disabled={!postUrl.trim()}>
-                      标记已发布并保存链接
+                    <Button className="mt-3" size="sm" variant="outline" onClick={() => void markPublished()} disabled={!postUrl.trim() || scheduleAction !== null} aria-busy={scheduleAction === "publish"}>
+                      {scheduleAction === "publish" ? "保存中…" : "标记已发布并保存链接"}
                     </Button>
                   </div>
                 )}
