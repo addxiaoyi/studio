@@ -14,10 +14,10 @@ import { PricingHero } from "./components/pricing-hero";
 import { PricingFAQ } from "./components/pricing-faq";
 import { TopupPackages } from "./components/topup-packages";
 
-type PaymentRegion = "china";
+type PaymentRegion = "international" | "china";
 
 export default function PricingPage() {
-  const region: PaymentRegion = "china";
+  const [region, setRegion] = useState<PaymentRegion>("china");
   const [loadingPackageId, setLoadingPackageId] = useState<string | null>(null);
 
   const { session } = useAuth();
@@ -48,7 +48,7 @@ export default function PricingPage() {
         setLoadingPackageId(null);
       }
     },
-    [session?.access_token],
+    [region, session?.access_token],
   );
 
   return (
@@ -60,13 +60,15 @@ export default function PricingPage() {
 
         {/* Current balance + region selector */}
         <section className="px-6">
-          <div className="max-w-6xl mx-auto mb-12 flex flex-col items-center gap-6">
-            <div className="inline-flex items-center gap-1 rounded-full glass-soft border border-border/40 p-1 text-xs">
+          <div className="max-w-6xl mx-auto mb-12 flex flex-col items-center gap-3">
+            <fieldset className="inline-flex items-center gap-1 rounded-full glass-soft border border-border/40 p-1 text-xs">
+              <legend className="sr-only">支付地区</legend>
               <button
                 type="button"
-                disabled
+                aria-pressed={region === "international"}
+                onClick={() => setRegion("international")}
                 className={`rounded-full px-3 py-1.5 transition-all duration-200 ${
-                  false
+                  region === "international"
                     ? "bg-foreground text-background font-medium"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -75,7 +77,8 @@ export default function PricingPage() {
               </button>
               <button
                 type="button"
-                disabled
+                aria-pressed={region === "china"}
+                onClick={() => setRegion("china")}
                 className={`rounded-full px-3 py-1.5 transition-all duration-200 ${
                   region === "china"
                     ? "bg-foreground text-background font-medium"
@@ -84,7 +87,12 @@ export default function PricingPage() {
               >
                 🇨🇳 中国大陆 (CNY)
               </button>
-            </div>
+            </fieldset>
+            {region === "international" ? (
+              <output aria-live="polite" className="text-xs text-amber-700 dark:text-amber-300">
+                国际支付渠道正在接入中；当前可切换到中国大陆 (CNY) 使用易支付。
+              </output>
+            ) : null}
 
             {session?.access_token && (
               <div className="inline-flex items-center gap-3 rounded-full glass-soft border border-border/40 px-5 py-2 text-sm">

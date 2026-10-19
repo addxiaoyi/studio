@@ -25,11 +25,12 @@ test.describe("Pricing page", () => {
     const regionIntl = page.getByRole("button", { name: /International|USD/i });
     if (await regionCN.isVisible()) {
       await regionCN.click();
-      await expect(regionCN).toHaveAttribute("class", /bg-foreground/);
+      await expect(regionCN).toHaveAttribute("aria-pressed", "true");
     }
     if (await regionIntl.isVisible()) {
       await regionIntl.click();
-      await expect(regionIntl).toHaveAttribute("class", /bg-foreground/);
+      await expect(regionIntl).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByText(/国际支付渠道正在接入中/)).toBeVisible();
     }
   });
 

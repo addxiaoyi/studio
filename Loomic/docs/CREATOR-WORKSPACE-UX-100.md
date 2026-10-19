@@ -112,7 +112,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 82. Agent chat model and media-generation model settings are distinct.
 - [~] 83. Paid-generation auto-approval states its billing effect and saves with feedback.
 - [~] 84. Publishing account connection and revoke states are visible.
-- [~] 85. Billing, top-up, and credit usage share clear navigation.
+- [~] 85. Billing, top-up, and credit usage share clear navigation; pricing region selection is now touchable/keyboard-reachable with explicit international-channel status, while the full billing journey remains to be audited.
 - [~] 86. Usage history has loading, empty, and error states.
 - [~] 87. Team invite button is locked during submission; list/search failures are recoverable.
 - [~] 88. Skill install, enablement, and version states are distinguishable.

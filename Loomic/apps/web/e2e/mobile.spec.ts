@@ -40,8 +40,8 @@ test.describe("Mobile (iPhone 14)", () => {
     const chinaBtn = page.getByRole("button", { name: /中国大陆.*CNY/ });
     if (await chinaBtn.count() > 0) {
       await chinaBtn.first().click();
-      // Packages remain visible
-      await expect(page.getByText(/选择你的计划/)).toBeVisible();
+      // The package section remains visible after changing the region.
+      await expect(page.getByRole("heading", { name: /简单透明的积分充值/ })).toBeVisible();
     }
   });
 
