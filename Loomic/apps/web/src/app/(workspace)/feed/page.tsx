@@ -115,6 +115,14 @@ const packageStatusLabels: Record<string, string> = {
   analyzed: "已复盘",
 };
 
+const automationStageLabels: Record<string, string> = {
+  trend_analysis: "分析热点",
+  strategy: "生成策略",
+  structure: "生成内容结构",
+  review: "等待审阅",
+  completed: "已完成",
+};
+
 function packageNextAction(status: string): string {
   if (["draft", "structured"].includes(status)) return "完成并保存结构后批准";
   if (status === "approved") return "开始生成图片与视频";
@@ -1023,12 +1031,12 @@ export default function FeedPage() {
     <main className="mx-auto flex min-h-full w-full max-w-7xl flex-col px-5 py-8 sm:px-8 lg:px-12">
       <div className="mb-3 flex flex-wrap items-center justify-end gap-2" aria-label="feed-automation">
         <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
-          {automationRun?.status === "failed" ? "Draft failed" : automationRun?.status === "draft_ready" ? "Draft ready" : automationRun ? "Draft running" : ""}
-          {automationRun?.current_stage ? ` · ${automationRun.current_stage.replaceAll("_", " ")}` : ""}
+          {automationRun?.status === "failed" ? "自动化失败" : automationRun?.status === "draft_ready" ? "策略草稿已就绪" : automationRun ? "正在生成策略草稿" : ""}
+          {automationRun?.current_stage ? ` · ${automationStageLabels[automationRun.current_stage] ?? automationRun.current_stage.replaceAll("_", " ")}` : ""}
         </span>
-        {automationRun?.status === "failed" && <Button variant="outline" size="sm" onClick={() => void retryAutomation()} disabled={strategyBusy}>Retry stage</Button>}
-        {strategyBusy && automationRun && <Button variant="outline" size="sm" onClick={stopAutomationMonitoring}>Stop monitoring</Button>}
-        <Button variant="outline" size="sm" onClick={() => void runFeedAutomation()} disabled={strategyBusy} aria-busy={strategyBusy}>{strategyBusy ? "Running" : "Auto draft"}</Button>
+        {automationRun?.status === "failed" && <Button variant="outline" size="sm" onClick={() => void retryAutomation()} disabled={strategyBusy}>重试当前阶段</Button>}
+        {strategyBusy && automationRun && <Button variant="outline" size="sm" onClick={stopAutomationMonitoring}>停止监控</Button>}
+        <Button variant="outline" size="sm" onClick={() => void runFeedAutomation()} disabled={strategyBusy} aria-busy={strategyBusy}>{strategyBusy ? "生成中" : "自动生成草稿"}</Button>
       </div>
       {step === 1 && selectedPlatforms.length > 0 && <div className="mb-4 flex flex-wrap gap-2" aria-label="platform-draft-status">{selectedPlatforms.map((platform) => { const variant = activeVariants.find((item) => item.platform === platform); return <span key={platform} className="rounded-md border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">{platform}: {variant?.title ? "draft ready" : "waiting"}</span>; })}</div>}
       <header className="flex flex-wrap items-start justify-between gap-5">
@@ -1208,23 +1216,24 @@ export default function FeedPage() {
                   </p>
                 ) : trends.length ? (
                   trends.map((item, index) => (
-                    <button
-                      key={`${item.id}-${index}`}
-                      type="button"
-                      onClick={() => chooseTrend(item)}
-                      className="rounded-xl border border-border/60 p-4 text-left transition-colors hover:border-foreground/40 hover:bg-muted/30"
-                    >
-                      <div className="flex justify-between gap-3">
-                        <strong className="text-sm">{item.title}</strong>
-                        <span className="shrink-0 text-[11px] text-muted-foreground">
-                          {item.platform} · 热度 {item.heat ?? "-"}
-                        </span>
-                      </div>
-                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                        {item.summary || "暂无摘要，点击后补充商品说明。"}
-                      </p>
-                      {item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} className="mt-2 inline-block text-xs underline underline-offset-2">查看原文</a>}
-                    </button>
+                    <article key={`${item.id}-${index}`} className="rounded-xl border border-border/60 transition-colors hover:border-foreground/40 hover:bg-muted/30">
+                      <button
+                        type="button"
+                        onClick={() => chooseTrend(item)}
+                        className="w-full rounded-xl p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                      >
+                        <div className="flex justify-between gap-3">
+                          <strong className="text-sm">{item.title}</strong>
+                          <span className="shrink-0 text-[11px] text-muted-foreground">
+                            {item.platform} · 热度 {item.heat ?? "-"}
+                          </span>
+                        </div>
+                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                          {item.summary || "暂无摘要，点击后补充商品说明。"}
+                        </p>
+                      </button>
+                      {item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer" className="ml-4 mb-4 inline-block text-xs underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">查看原文</a>}
+                    </article>
                   ))
                 ) : (
                   <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">

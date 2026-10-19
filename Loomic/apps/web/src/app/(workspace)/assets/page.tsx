@@ -248,8 +248,8 @@ export default function AssetsPage() {
     }
   };
 
-  return <main data-assets-scroll className="relative mx-auto max-h-[calc(100vh-4rem)] min-h-full max-w-7xl overflow-y-auto p-6 pb-24 md:p-10 md:pb-28">
-    {!loading && !error && visible.length > 0 && <GradualBlur autoHide />}
+  return <main data-assets-scroll aria-busy={loading} className="relative mx-auto max-h-[calc(100vh-4rem)] min-h-full max-w-7xl overflow-y-auto p-6 pb-24 md:p-10 md:pb-28">
+    {!loading && !error && visible.length > 0 && <GradualBlur autoHide height="4rem" className="bottom-24 z-0" />}
     {showRecovery && <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs"><span>恢复区资产将在 7 天后清理</span><button type="button" onClick={() => void restoreSelected()} disabled={selectedIds.size === 0} className="rounded-md border px-2 py-1 disabled:opacity-40">恢复所选</button></div>}
     <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-muted-foreground">图片与视频生成记录 · 保存 30 天</p><h1 className="mt-1 text-3xl font-semibold">我的资产</h1><p className="mt-2 text-sm text-muted-foreground">资产将在生成后 30 天自动清理，请及时下载或继续在画布中编辑。</p></div><button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm disabled:opacity-50"><RefreshCw className="size-4" />刷新</button></header>
     <div className="mt-7 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -257,13 +257,13 @@ export default function AssetsPage() {
       <div className="flex flex-wrap items-center gap-1" aria-label="资产类型">{(["all", "image", "video"] as const).map((item) => <button key={item} type="button" aria-pressed={filter === item} onClick={() => { setFilter(item); setPage(1); }} className={`rounded-lg px-4 py-2 text-sm ${filter === item ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"}`}>{item === "all" ? "全部" : item === "image" ? "图片" : "视频"}</button>)}</div>
       <div className="relative block w-full max-w-sm"><Search aria-hidden="true" className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" /><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="搜索标题或提示词" aria-label="搜索资产标题或提示词" className="h-9 w-full rounded-lg border border-border/60 bg-background pl-9 pr-9 text-sm outline-none focus:border-foreground/40" />{query && <button type="button" onClick={() => { setQuery(""); setPage(1); }} aria-label="清除资产搜索" className="absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"><X className="size-4" /></button>}</div>
     </div>
-    {!loading && visible.length > 0 && <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs"><button type="button" onClick={selectAll} className="inline-flex items-center gap-1.5 font-medium">{selectedIds.size === visible.length ? <Check className="size-3.5" /> : null}全选本页</button><span className="text-muted-foreground">已选 {selectedIds.size} 项 · 共 {pagination.total} 项</span>{selectedIds.size > 0 && <button type="button" onClick={() => void removeSelected()} className="ml-auto inline-flex items-center gap-1.5 text-destructive"><Trash2 className="size-3.5" />删除所选</button>}</div>}
+    {!loading && visible.length > 0 && <div className="relative z-10 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs" role="region" aria-label="资产批量操作" aria-live="polite"><button type="button" onClick={selectAll} aria-pressed={selectedIds.size === visible.length} className="inline-flex items-center gap-1.5 font-medium">{selectedIds.size === visible.length ? <Check className="size-3.5" /> : null}全选本页</button><span className="text-muted-foreground">已选 {selectedIds.size} 项 · 当前页 {visible.length} 项 · 共 {pagination.total} 项</span>{selectedIds.size > 0 && <button type="button" onClick={() => void removeSelected()} disabled={loading} className="ml-auto inline-flex items-center gap-1.5 text-destructive disabled:opacity-50"><Trash2 className="size-3.5" />删除所选</button>}</div>}
     {loading && <div className="flex min-h-72 items-center justify-center"><LoaderCircle className="size-6 animate-spin text-muted-foreground" /></div>}
     {!loading && error && <div role="alert" className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive"><span>{error}</span><button type="button" onClick={() => void load()} className="inline-flex h-9 items-center gap-2 rounded-md border border-destructive/30 px-3 text-xs font-medium hover:bg-destructive/5"><RefreshCw className="size-3.5" />重试加载</button></div>}
     {!loading && !error && visible.length === 0 && <div className="mt-8 flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed text-center"><Images className="size-10 text-muted-foreground/40" /><h2 className="mt-4 font-medium">还没有资产</h2><p className="mt-1 text-sm text-muted-foreground">从图片或视频创作页开始生成。</p></div>}
     {publishNotice && <p role="status" className="mt-5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">{publishNotice}，可在左侧“作品库”查看。</p>}
     {!loading && !error && visible.length > 0 && (
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div className="relative z-10 mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {visible.map((asset) => {
           const previewUrl = previewUrls[asset.id];
           const previewError = previewErrors[asset.id];
@@ -282,30 +282,32 @@ export default function AssetsPage() {
               >
                 {selectedIds.has(asset.id) ? <Check className="size-4" /> : null}
               </button>
-              <div className="relative flex aspect-square items-center justify-center bg-muted">
+              <div className="relative flex aspect-square items-center justify-center bg-muted" aria-busy={!previewUrl && !previewError}>
                 {previewUrl ? asset.mediaType === "video" ? (
                   <video src={previewUrl} controls playsInline preload="metadata" aria-label={`${displayName} 视频预览`} className="h-full w-full object-contain" />
                 ) : (
                   <button type="button" onClick={() => void openEditor(asset)} disabled={!editable} aria-label={`在画布中编辑 ${displayName}`} className="group h-full w-full disabled:cursor-not-allowed">
                     <img src={previewUrl} alt={displayName} loading="lazy" className="h-full w-full object-cover transition-opacity group-hover:opacity-85" />
                   </button>
-                ) : (
+                ) : previewError ? (
                   <div className="flex flex-col items-center gap-2 px-5 text-center">
                     {asset.mediaType === "video" ? <Video className="size-9 text-muted-foreground/40" /> : <Images className="size-9 text-muted-foreground/40" />}
-                    <span className="text-xs text-muted-foreground">{previewError ?? "正在加载预览..."}</span>
+                    <span className="text-xs text-muted-foreground">{previewError}</span>
                   </div>
+                ) : (
+                  <div className="absolute inset-0 animate-pulse bg-muted-foreground/10" role="status" aria-label="正在加载预览"><span className="sr-only">正在加载预览…</span></div>
                 )}
               </div>
-              <div className="flex items-start gap-3 p-4">
+              <div className="relative z-10 flex items-start gap-3 bg-card p-4">
                 <div className="min-w-0 flex-1">
                   <h2 className="truncate text-sm font-medium">{displayName}</h2>
                   <p className="mt-1 text-xs text-muted-foreground">{openingId === asset.id ? "正在打开编辑器..." : `${asset.mediaType === "video" ? "视频" : "图片"} · ${new Date(asset.createdAt).toLocaleDateString("zh-CN")}`}</p>
                   {daysLeft !== null ? <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{asset.retentionState === "soft_deleted" ? "恢复期剩余" : "保留期剩余"} {daysLeft} 天</p> : null}
                   {editable && <button type="button" onClick={() => void openEditor(asset)} disabled={openingId === asset.id} className="mt-2 text-xs font-medium text-foreground underline underline-offset-2 disabled:opacity-50">{openingId === asset.id ? "正在打开…" : "在画布中编辑"}</button>}
                 </div>
-                {previewUrl ? <a href={previewUrl} download aria-label={`下载 ${displayName}`} className="flex size-8 shrink-0 items-center justify-center rounded-md border"><Download className="size-4" /></a> : <button type="button" onClick={() => setPreviewRetry((value) => value + 1)} aria-label={`重试加载 ${displayName}`} className="shrink-0 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted">重试</button>}
+                {previewUrl ? <a href={previewUrl} download aria-label={`下载 ${displayName}`} className="flex size-8 shrink-0 items-center justify-center rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Download className="size-4" /></a> : previewError ? <button type="button" onClick={() => setPreviewRetry((value) => value + 1)} aria-label={`重试加载 ${displayName}`} className="shrink-0 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">重试预览</button> : <span className="size-8 shrink-0" aria-hidden="true" />}
               </div>
-              <div className="flex items-center justify-between border-t border-border/50 px-4 py-3">
+              <div className="relative z-10 flex items-center justify-between border-t border-border/50 bg-card px-4 py-3">
                 <span className="text-[11px] text-muted-foreground">{asset.retentionState === "soft_deleted" ? "恢复区资产" : asset.published ? "已公开到作品库" : "仅自己可见"}</span>
                 {asset.retentionState === "soft_deleted" ? (
                   <button type="button" onClick={() => void restore(asset)} className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted"><Undo2 className="size-3.5" />恢复</button>
@@ -320,6 +322,6 @@ export default function AssetsPage() {
         })}
       </div>
     )}
-    {!loading && !error && pagination.total > 0 && <div className="mt-8 flex items-center justify-center gap-3"><button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">上一页</button><span className="text-xs text-muted-foreground">第 {pagination.page} 页 · 共 {pagination.total} 项</span><button type="button" disabled={!pagination.hasMore} onClick={() => setPage((value) => value + 1)} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">下一页</button></div>}
+    {!loading && !error && pagination.total > 0 && <div className="relative z-10 mt-8 flex items-center justify-center gap-3"><button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="rounded-lg border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">上一页</button><span className="text-xs text-muted-foreground">第 {pagination.page} 页 · 共 {pagination.total} 项</span><button type="button" disabled={!pagination.hasMore} onClick={() => setPage((value) => value + 1)} className="rounded-lg border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">下一页</button></div>}
   </main>;
 }

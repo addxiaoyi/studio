@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-export function GradualBlur({ height = "6rem", autoHide = false }: { height?: string; autoHide?: boolean }) {
+export function GradualBlur({ height = "6rem", autoHide = false, className = "" }: { height?: string; autoHide?: boolean; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!autoHide || !ref.current) return;
@@ -13,5 +13,5 @@ export function GradualBlur({ height = "6rem", autoHide = false }: { height?: st
     update(); scroller.addEventListener("scroll", update, { passive: true });
     return () => scroller.removeEventListener("scroll", update);
   }, [autoHide]);
-  return <div ref={ref} aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 z-10 transition-opacity duration-300" style={{ height, background: "linear-gradient(to top, hsl(var(--background) / .95), transparent)" }} />;
+  return <div ref={ref} aria-hidden="true" className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 transition-opacity duration-300 ${className}`} style={{ height, background: "linear-gradient(to top, hsl(var(--background) / .95), transparent)" }} />;
 }

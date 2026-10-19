@@ -200,8 +200,10 @@ describe("feed workflow closure", () => {
 
   it("passes the selected real hotspot id into the package", async () => {
     const user = userEvent.setup();
-    render(<FeedPage />);
+    const { container } = render(<FeedPage />);
     await waitFor(() => expect(screen.getByRole("button", { name: /真实热点标题/ })).toBeInTheDocument());
+    expect(container.querySelector("button a")).toBeNull();
+    expect(screen.getByRole("link", { name: "查看原文" })).toHaveAttribute("href", "https://example.com/trend");
     await user.click(screen.getByRole("button", { name: /真实热点标题/ }));
     await user.click(screen.getByRole("button", { name: "生成内容包" }));
 

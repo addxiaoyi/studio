@@ -71,9 +71,9 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 
 - [x] 51. Type filters, search, recovery view, and pagination expose their current state.
 - [x] 52. Asset search can be cleared without resetting unrelated filters.
-- [~] 53. Batch action bar reports selection count and page scope.
-- [~] 54. Preview tiles have stable dimensions and loading placeholders.
-- [~] 55. Failed previews have a retry action.
+- [x] 53. Batch action bar reports selection count and page scope, covered by the Chromium asset regression.
+- [x] 54. Preview tiles have stable dimensions and loading placeholders, covered at a 390px Chromium viewport.
+- [x] 55. Failed previews have a retry action, covered by a failed-then-recovered preview regression.
 - [x] 56. Video assets use video MIME validation and native preview controls.
 - [~] 57. Bottom fade stays out of download, edit, and share controls.
 - [x] 58. Asset cards show active retention or recovery-window time remaining.

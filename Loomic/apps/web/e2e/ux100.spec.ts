@@ -185,4 +185,58 @@ test.describe("UX 100 visual safeguards", () => {
     await page.getByRole("button", { name: "视频" }).click();
     await expect(page.getByRole("button", { name: "视频" })).toHaveAttribute("aria-pressed", "true");
   });
+
+  test("asset previews keep a stable tile, expose page scope, and recover after retry", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockWorkspace(page);
+    await page.route("**/api/assets/history**", (route: Route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: [{
+            id: "asset-1",
+            media_type: "image",
+            title: "测试资产",
+            description: null,
+            prompt: "测试预览",
+            mime_type: "image/png",
+            created_at: "2026-10-19T00:00:00.000Z",
+            asset_object_id: "upload-1",
+            published: false,
+            retention_state: "active",
+          }],
+          pagination: { page: 1, pageSize: 12, total: 3, hasMore: true },
+        }),
+      }),
+    );
+    let previewAttempts = 0;
+    await page.route("**/api/uploads/upload-1/file**", (route: Route) => {
+      previewAttempts += 1;
+      if (previewAttempts === 1) {
+        return route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+      });
+    });
+
+    await page.goto("/assets");
+    await expect(page.getByText("文件加载失败（500）")).toBeVisible();
+    const dimensions = await page.locator("body").evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
+    expect(dimensions.scrollWidth, "asset page has no horizontal overflow at 390px").toBeLessThanOrEqual(dimensions.clientWidth);
+    const assetCard = page.locator("article").filter({ hasText: "测试资产" });
+    await expect(assetCard.locator("[aria-busy]")).toHaveClass(/aspect-square/);
+    const batchBar = page.getByRole("region", { name: "资产批量操作" });
+    await expect(batchBar).toContainText("当前页 1 项");
+    await expect(batchBar).toContainText("共 3 项");
+    await page.getByRole("button", { name: "选择 测试资产" }).click();
+    await expect(batchBar).toContainText("已选 1 项");
+
+    await page.getByRole("button", { name: "重试加载 测试资产" }).click();
+    await expect(page.getByRole("link", { name: "下载 测试资产" })).toBeVisible();
+    expect(previewAttempts).toBeGreaterThanOrEqual(2);
+  });
 });
