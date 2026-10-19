@@ -336,4 +336,27 @@ test.describe("UX 100 visual safeguards", () => {
     await expect(firstShot).not.toHaveAttribute("aria-current", "step");
     await expect(page.getByLabel("资产名称")).toBeVisible();
   });
+
+  test("storyboard data failure retries in place", async ({ page }) => {
+    await mockWorkspace(page);
+    let assetAttempts = 0;
+    await page.route("**/api/projects/project-retry/story-assets", (route) => {
+      assetAttempts += 1;
+      if (assetAttempts <= 2) {
+        return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "暂时不可用" }) });
+      }
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ assets: [] }) });
+    });
+    await page.route("**/api/projects/project-retry/storyboards", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ storyboards: [] }) }),
+    );
+    await page.route("**/api/image-models", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [], unavailableModels: [], defaultModel: "" }) }));
+    await page.route("**/api/video-models", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [], unavailableModels: [] }) }));
+
+    await page.goto("/storyboard?projectId=project-retry");
+    await expect(page.getByRole("alert")).toBeVisible();
+    await page.getByRole("button", { name: "重试" }).click();
+    await expect(page.getByRole("heading", { name: "分镜脚本" })).toBeVisible();
+    expect(assetAttempts).toBeGreaterThanOrEqual(3);
+  });
 });

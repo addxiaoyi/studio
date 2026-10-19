@@ -103,6 +103,7 @@ export default function StoryboardPage() {
   const [generationErrorMode, setGenerationErrorMode] = useState<"image" | "video" | null>(null);
   const [projectError, setProjectError] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const creatingProjectRef = useRef(false);
 
   useEffect(() => {
@@ -151,7 +152,7 @@ export default function StoryboardPage() {
     return () => {
       active = false;
     };
-  }, [projectId, router, session?.access_token]);
+  }, [loadAttempt, projectId, router, session?.access_token]);
 
   const startProject = async () => {
     const token = session?.access_token;
@@ -574,20 +575,25 @@ export default function StoryboardPage() {
   }
   if (loading)
     return (
-      <div className="p-8 text-sm text-muted-foreground">正在加载创作资产…</div>
+      <main className="p-8">
+        <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm text-muted-foreground">
+          <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+          正在加载创作资产…
+        </div>
+      </main>
     );
   if (loadError)
     return (
       <main className="flex min-h-full items-center justify-center p-8">
         <div className="max-w-md rounded-2xl border border-border/60 bg-card p-6 text-center shadow-sm">
-          <p className="text-sm text-destructive">{loadError}</p>
+          <p role="alert" className="text-sm text-destructive">{loadError}</p>
           <Button
             type="button"
             className="mt-4"
             onClick={() => {
               setLoadError("");
               setLoading(true);
-              router.refresh();
+              setLoadAttempt((attempt) => attempt + 1);
             }}
           >
             重试

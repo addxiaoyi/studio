@@ -159,3 +159,7 @@ Storyboard, settings, and admin forms all inherit this keyboard behavior.
 Workspace route changes now move focus to the programmatic main-content target while
 preserving the active navigation group, so keyboard and assistive-technology users
 start each client-side page in the new content context.
+
+The storyboard workspace now retries failed project data in place instead of relying
+on a same-route refresh, and its loading/error states expose status and alert semantics;
+Chromium covers a failed asset request followed by a successful retry.
