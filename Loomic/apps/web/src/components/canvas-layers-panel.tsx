@@ -11,6 +11,7 @@ export type CanvasLayersPanelProps = {
   excalidrawApi: any;
   open: boolean;
   onClose: () => void;
+  triggerRef?: React.RefObject<HTMLButtonElement | null>;
 };
 
 /* -- Throttle utility -- */
@@ -174,11 +175,18 @@ export function CanvasLayersPanel({
   excalidrawApi,
   open,
   onClose,
+  triggerRef,
 }: CanvasLayersPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(false);
   const [elements, setElements] = useState<ExcalidrawEl[]>([]);
   const [files, setFiles] = useState<Record<string, any>>({});
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (open) closeButtonRef.current?.focus();
+  }, [open]);
 
   /* -- Refresh elements on open + subscribe to changes -- */
   const refreshElements = useCallback(() => {
@@ -220,6 +228,15 @@ export function CanvasLayersPanel({
     return () => document.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
 
+  useEffect(() => {
+    if (open) {
+      wasOpenRef.current = true;
+    } else if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      triggerRef?.current?.focus();
+    }
+  }, [open, triggerRef]);
+
   /* -- Select element on canvas -- */
   const selectElement = useCallback(
     (id: string) => {
@@ -244,9 +261,10 @@ export function CanvasLayersPanel({
         <span className="text-sm font-medium text-foreground">图层</span>
         <button
           type="button"
+          ref={closeButtonRef}
           className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground transition-all duration-300 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
           onClick={onClose}
-          aria-label="Close layers panel"
+          aria-label="关闭图层面板"
         >
           <CloseIcon className="h-4 w-4" />
         </button>

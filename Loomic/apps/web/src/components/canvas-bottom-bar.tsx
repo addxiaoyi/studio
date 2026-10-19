@@ -19,8 +19,10 @@ interface CanvasBottomBarProps {
   excalidrawApi: any | null;
   layersOpen: boolean;
   onToggleLayers: () => void;
+  layersToggleRef?: React.RefObject<HTMLButtonElement | null>;
   filesOpen: boolean;
   onToggleFiles: () => void;
+  filesToggleRef?: React.RefObject<HTMLButtonElement | null>;
   timelineOpen: boolean;
   onToggleTimeline: () => void;
   timelineToggleRef?: React.RefObject<HTMLButtonElement | null>;
@@ -134,7 +136,7 @@ function ElementRow({ el, onSelect }: { el: ExcalidrawEl; onSelect: (id: string)
 /* ================================================================
    Main component
    ================================================================ */
-export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, filesOpen, onToggleFiles, timelineOpen, onToggleTimeline, timelineToggleRef, leftPanelOpen, selectedCount, onClearSelection, onDeleteSelection }: CanvasBottomBarProps) {
+export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, layersToggleRef, filesOpen, onToggleFiles, filesToggleRef, timelineOpen, onToggleTimeline, timelineToggleRef, leftPanelOpen, selectedCount, onClearSelection, onDeleteSelection }: CanvasBottomBarProps) {
   /* ── Zoom state ── */
   const [zoom, setZoom] = useState(1);
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
@@ -250,12 +252,12 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, fil
         </button>
 
         {/* ── Layers button ── */}
-        <button type="button" className={`${btnClass} ${layersOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleLayers} aria-label="图层" aria-pressed={layersOpen} title="图层">
+        <button ref={layersToggleRef} type="button" className={`${btnClass} ${layersOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleLayers} aria-label="图层" aria-pressed={layersOpen} title="图层">
           <LayersIcon className="h-4 w-4" />
         </button>
 
         {/* ── Files button ── */}
-        <button type="button" className={`${btnClass} ${filesOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleFiles} aria-label="素材文件" aria-pressed={filesOpen} title="素材文件">
+        <button ref={filesToggleRef} type="button" className={`${btnClass} ${filesOpen ? "bg-muted text-foreground" : ""}`} onClick={handleToggleFiles} aria-label="素材文件" aria-pressed={filesOpen} title="素材文件">
           <FileIcon className="h-3.5 w-3.5" />
         </button>
         <button ref={timelineToggleRef} type="button" className={`${btnClass} ${timelineOpen ? "bg-muted text-foreground" : ""}`} onClick={onToggleTimeline} aria-label="媒体时间线" aria-pressed={timelineOpen} title="媒体时间线">

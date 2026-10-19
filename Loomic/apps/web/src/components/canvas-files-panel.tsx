@@ -11,6 +11,7 @@ export type CanvasFilesPanelProps = {
   excalidrawApi: any;
   open: boolean;
   onClose: () => void;
+  triggerRef?: React.RefObject<HTMLButtonElement | null>;
 };
 
 /* -- Throttle utility -- */
@@ -91,8 +92,20 @@ const FileRow = memo(function FileRow({
   );
 });
 
-export function CanvasFilesPanel({ excalidrawApi, open, onClose }: CanvasFilesPanelProps) {
+export function CanvasFilesPanel({ excalidrawApi, open, onClose, triggerRef }: CanvasFilesPanelProps) {
   const [imageFiles, setImageFiles] = useState<ImageFile[]>([]);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (open) {
+      wasOpenRef.current = true;
+      closeButtonRef.current?.focus();
+    } else if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      triggerRef?.current?.focus();
+    }
+  }, [open, triggerRef]);
 
   const refreshFiles = useCallback(() => {
     if (!excalidrawApi) return;
@@ -157,9 +170,10 @@ export function CanvasFilesPanel({ excalidrawApi, open, onClose }: CanvasFilesPa
           <Link href="/ecom-images/history" className="text-xs text-muted-foreground hover:text-foreground" title="打开生成历史">历史</Link>
           <button
           type="button"
+          ref={closeButtonRef}
           className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground transition-all duration-300"
           onClick={onClose}
-          aria-label="Close files panel"
+          aria-label="关闭素材文件面板"
         >
           <CloseIcon className="h-3.5 w-3.5" />
           </button>

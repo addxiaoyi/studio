@@ -23,4 +23,16 @@ describe("CanvasLayersPanel", () => {
     expect(screen.getByRole("button", { name: "Toggle layer visibility" })).toBeInTheDocument();
     expect(document.querySelector("button button")).toBeNull();
   });
+
+  it("moves focus into the panel when opened", async () => {
+    const api = {
+      getSceneElements: () => [],
+      getFiles: () => ({}),
+      getAppState: () => ({ selectedElementIds: {} }),
+      onChange: () => () => undefined,
+      updateScene: vi.fn(),
+    };
+    render(<CanvasLayersPanel excalidrawApi={api} open onClose={vi.fn()} />);
+    expect(await screen.findByRole("button", { name: "关闭图层面板" })).toHaveFocus();
+  });
 });

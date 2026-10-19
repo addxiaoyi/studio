@@ -66,6 +66,8 @@ function CanvasPageContent() {
   const [filesOpen, setFilesOpen] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const timelineToggleRef = useRef<HTMLButtonElement>(null);
+  const layersToggleRef = useRef<HTMLButtonElement>(null);
+  const filesToggleRef = useRef<HTMLButtonElement>(null);
   const [brandKitId, setBrandKitId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("Untitled");
   const [autoDeleteEmptyCanvas, setAutoDeleteEmptyCanvas] = useState(false);
@@ -92,12 +94,18 @@ function CanvasPageContent() {
   const handleToggleChat = useCallback(() => setChatOpen((v) => !v), []);
   const handleToggleLayers = useCallback(() => { setLayersOpen((v) => !v); setFilesOpen(false); }, []);
   const handleToggleFiles = useCallback(() => { setFilesOpen((v) => !v); setLayersOpen(false); }, []);
-  const handleCloseLayers = useCallback(() => setLayersOpen(false), []);
-  const handleCloseFiles = useCallback(() => setFilesOpen(false), []);
   const handleToggleTimeline = useCallback(() => setTimelineOpen((value) => !value), []);
   const handleCloseTimeline = useCallback(() => {
     setTimelineOpen(false);
     window.requestAnimationFrame(() => timelineToggleRef.current?.focus());
+  }, []);
+  const handleCloseLayers = useCallback(() => {
+    setLayersOpen(false);
+    window.requestAnimationFrame(() => layersToggleRef.current?.focus());
+  }, []);
+  const handleCloseFiles = useCallback(() => {
+    setFilesOpen(false);
+    window.requestAnimationFrame(() => filesToggleRef.current?.focus());
   }, []);
   const handleClearSelection = useCallback(() => {
     excalidrawApiRef.current?.updateScene({ appState: { selectedElementIds: {} } });
@@ -413,8 +421,10 @@ function CanvasPageContent() {
           excalidrawApi={excalidrawApi}
           layersOpen={layersOpen}
           onToggleLayers={handleToggleLayers}
+          layersToggleRef={layersToggleRef}
           filesOpen={filesOpen}
           onToggleFiles={handleToggleFiles}
+          filesToggleRef={filesToggleRef}
           timelineOpen={timelineOpen}
           onToggleTimeline={handleToggleTimeline}
           timelineToggleRef={timelineToggleRef}
@@ -434,11 +444,13 @@ function CanvasPageContent() {
           excalidrawApi={excalidrawApi}
           open={layersOpen}
           onClose={handleCloseLayers}
+          triggerRef={layersToggleRef}
         />
         <CanvasFilesPanel
           excalidrawApi={excalidrawApi}
           open={filesOpen}
           onClose={handleCloseFiles}
+          triggerRef={filesToggleRef}
         />
       </div>
       <ChatSidebar
