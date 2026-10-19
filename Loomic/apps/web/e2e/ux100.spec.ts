@@ -272,6 +272,19 @@ test.describe("UX 100 visual safeguards", () => {
     expect(previewAttempts).toBeGreaterThanOrEqual(2);
   });
 
+  test("asset loading reserves stable preview tiles", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.route("**/api/assets/history**", async (route: Route) => {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [], pagination: { page: 1, pageSize: 12, total: 0, hasMore: false } }) });
+    });
+    await page.goto("/assets");
+    const loading = page.getByRole("status", { name: "正在加载资产" });
+    await expect(loading).toBeVisible();
+    await expect(loading.locator(".aspect-square")).toHaveCount(8);
+    await expect(loading).toBeHidden();
+  });
+
   test("storyboard offers project recovery and exposes the current shot", async ({ page }) => {
     await mockWorkspace(page);
     await page.goto("/storyboard");

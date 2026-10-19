@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Download, Images, LoaderCircle, RefreshCw, Search, Share2, Trash2, Undo2, Video, X } from "lucide-react";
+import { Check, Download, Images, RefreshCw, Search, Share2, Trash2, Undo2, Video, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -258,7 +258,12 @@ export default function AssetsPage() {
       <div className="relative block w-full max-w-sm"><Search aria-hidden="true" className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" /><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="搜索标题或提示词" aria-label="搜索资产标题或提示词" className="h-9 w-full rounded-lg border border-border/60 bg-background pl-9 pr-9 text-sm outline-none focus:border-foreground/40" />{query && <button type="button" onClick={() => { setQuery(""); setPage(1); }} aria-label="清除资产搜索" className="absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"><X className="size-4" /></button>}</div>
     </div>
     {!loading && visible.length > 0 && <div className="relative z-10 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs" role="region" aria-label="资产批量操作" aria-live="polite"><button type="button" onClick={selectAll} aria-pressed={selectedIds.size === visible.length} className="inline-flex items-center gap-1.5 font-medium">{selectedIds.size === visible.length ? <Check className="size-3.5" /> : null}全选本页</button><span className="text-muted-foreground">已选 {selectedIds.size} 项 · 当前页 {visible.length} 项 · 共 {pagination.total} 项</span>{selectedIds.size > 0 && <button type="button" onClick={() => void removeSelected()} disabled={loading} className="ml-auto inline-flex items-center gap-1.5 text-destructive disabled:opacity-50"><Trash2 className="size-3.5" />删除所选</button>}</div>}
-    {loading && <div className="flex min-h-72 items-center justify-center"><LoaderCircle className="size-6 animate-spin text-muted-foreground" /></div>}
+    {loading && <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" role="status" aria-label="正在加载资产">
+      {Array.from({ length: 8 }, (_, index) => <div key={index} className="overflow-hidden rounded-lg border border-border/60 bg-card" aria-hidden="true">
+        <div className="aspect-square animate-pulse bg-muted-foreground/10" />
+        <div className="space-y-2 p-4"><div className="h-3 w-3/5 animate-pulse rounded bg-muted-foreground/10" /><div className="h-2.5 w-2/5 animate-pulse rounded bg-muted-foreground/10" /><div className="h-8 w-20 animate-pulse rounded-md bg-muted-foreground/10" /></div>
+      </div>)}
+    </div>}
     {!loading && error && <div role="alert" className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive"><span>{error}</span><button type="button" onClick={() => void load()} className="inline-flex h-9 items-center gap-2 rounded-md border border-destructive/30 px-3 text-xs font-medium hover:bg-destructive/5"><RefreshCw className="size-3.5" />重试加载</button></div>}
     {!loading && !error && visible.length === 0 && <div className="mt-8 flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed text-center"><Images className="size-10 text-muted-foreground/40" /><h2 className="mt-4 font-medium">还没有资产</h2><p className="mt-1 text-sm text-muted-foreground">从图片或视频创作页开始生成。</p></div>}
     {publishNotice && <p role="status" className="mt-5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">{publishNotice}，可在左侧“作品库”查看。</p>}
