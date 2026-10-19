@@ -37,7 +37,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 25. Layer and canvas selection stay synchronized.
 - [~] 26. Timeline open/close behavior is predictable.
 - [x] 27. Video preview width and height are constrained to the viewport.
-- [~] 28. Closing the video preview restores focus to the prior canvas control.
+- [x] 28. Closing the video preview restores focus to the prior canvas control and is covered by a component regression test.
 - [~] 29. Video controls remain usable on narrow screens and keyboard.
 - [~] 30. Canvas save and sync states are visible and recoverable.
 
