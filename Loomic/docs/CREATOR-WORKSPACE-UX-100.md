@@ -112,7 +112,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 82. Agent chat model and media-generation model settings are distinct.
 - [x] 83. Paid-generation auto-approval states its billing effect, uses an associated description, and saves with feedback.
 - [~] 84. Publishing account connection and revoke states are visible.
-- [~] 85. Billing, top-up, and credit usage share clear navigation; pricing region selection is now touchable/keyboard-reachable with explicit international-channel status, while the full billing journey remains to be audited.
+- [~] 85. Billing, top-up, and credit usage share clear navigation; pricing region selection is touchable/keyboard-reachable, international-channel status is explicit, and billing catalog/payment failures now expose retryable feedback; the full billing journey remains to be audited.
 - [x] 86. Usage history has loading, empty, and retryable error states.
 - [x] 87. Team invite button is locked during submission; member-list failures expose a retry action and search remains recoverable.
 - [x] 88. Skill install, enablement, and version states are distinguishable, and catalog failures expose a retry action.
@@ -128,7 +128,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 95. Semantic contrast tokens and a `prefers-contrast: more` fallback now cover shared chrome; Chromium verifies foreground and muted text AA in light/dark themes, while all control/error pairs remain to be measured.
 - [x] 96. CSS and Framer Motion honor `prefers-reduced-motion`.
 - [~] 97. Primary lists have loading skeletons and explicit empty states.
-- [~] 98. Network failures preserve user input and offer targeted retry where implemented; usage history now distinguishes failed loading from an empty result.
+- [~] 98. Network failures preserve user input and offer targeted retry where implemented; billing catalog failures now retry in place and usage history distinguishes failed loading from an empty result.
 - [x] 99. Session/message and Feed polling ignore or stop stale asynchronous updates.
 - [~] 100. Key progress and outcome changes use atomic status/alert semantics; full screen-reader pass remains.
 

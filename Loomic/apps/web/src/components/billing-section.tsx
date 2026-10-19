@@ -25,6 +25,7 @@ import {
 import type { TopupPackage } from "@helstera/shared";
 
 type EpayType = "alipay" | "wxpay";
+type NoticeKind = "success" | "error" | "info";
 
 function formatPrice(
   pkg: TopupPackage,
@@ -45,17 +46,28 @@ export function BillingSection() {
   const [packages, setPackages] = useState<TopupPackage[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(true);
   const [loadingPackageId, setLoadingPackageId] = useState<string | null>(null);
+  const [customLoading, setCustomLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeKind, setNoticeKind] = useState<NoticeKind>("info");
+  const [packageError, setPackageError] = useState<string | null>(null);
   const [customAmount, setCustomAmount] = useState("100");
   const [payType, setPayType] = useState<EpayType>("alipay");
 
+  const showNotice = useCallback((message: string | null, kind: NoticeKind = "info") => {
+    setNotice(message);
+    setNoticeKind(kind);
+  }, []);
+
   // Load packages
   const loadPackages = useCallback(async () => {
+    setLoadingPackages(true);
+    setPackageError(null);
     try {
       const { packages } = await fetchTopupPackages();
       setPackages(packages);
     } catch (err) {
       console.error("[billing] Failed to load packages:", err);
+      setPackageError("充值套餐暂时无法加载，可先使用自定义充值。请重试。");
     } finally {
       setLoadingPackages(false);
     }
@@ -76,16 +88,16 @@ export function BillingSection() {
           const { order } = await getTopupOrder(token, outTradeNo);
           if (order.status === "paid") {
             await refresh();
-            setNotice(copy.paid);
+            showNotice(copy.paid, "success");
             return;
           }
           if (["failed", "expired", "refunded"].includes(order.status)) {
-            setNotice(copy.incomplete);
+            showNotice(copy.incomplete, "error");
             return;
           }
         } catch (error) {
           console.error("[billing] Failed to refresh top-up order:", error);
-          setNotice(copy.unknown);
+          showNotice(copy.unknown, "error");
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -95,7 +107,7 @@ export function BillingSection() {
     return () => {
       cancelled = true;
     };
-  }, [refresh, searchParams, session?.access_token]);
+  }, [copy, refresh, searchParams, session?.access_token, showNotice]);
 
   const handleTopup = useCallback(
     async (pkg: TopupPackage) => {
@@ -106,7 +118,7 @@ export function BillingSection() {
       }
 
       setLoadingPackageId(pkg.id);
-      setNotice(null);
+      showNotice(null);
 
       try {
         if (!isEpayEnabled()) {
@@ -115,12 +127,12 @@ export function BillingSection() {
         const { checkoutUrl } = await createEpayTopup(token, pkg.id, payType);
         window.location.assign(checkoutUrl);
       } catch (err) {
-        setNotice(err instanceof Error ? err.message : copy.createFailed);
+        showNotice(err instanceof Error ? err.message : copy.createFailed, "error");
       } finally {
         setLoadingPackageId(null);
       }
     },
-    [copy, payType, session?.access_token],
+    [copy, payType, session?.access_token, showNotice],
   );
   const handleCustomTopup = useCallback(async () => {
     const token = session?.access_token;
@@ -130,18 +142,23 @@ export function BillingSection() {
       return;
     }
     if (!Number.isInteger(amount) || amount < 1000 || amount > 5000000) {
-      setNotice(copy.invalidAmount);
+      showNotice(copy.invalidAmount, "error");
       return;
     }
+    setCustomLoading(true);
+    showNotice(null);
     try {
       const { checkoutUrl } = await createEpayCustomTopup(token, amount, payType);
       window.location.assign(checkoutUrl);
     } catch (error) {
-      setNotice(
+      showNotice(
         error instanceof Error ? error.message : "创建订单失败，请重试。",
+        "error",
       );
+    } finally {
+      setCustomLoading(false);
     }
-  }, [copy, customAmount, payType, session?.access_token]);
+  }, [copy, customAmount, payType, session?.access_token, showNotice]);
 
   return (
     <div className="space-y-10">
@@ -162,7 +179,7 @@ export function BillingSection() {
               onClick={() => setPayType(value)}
               aria-pressed={payType === value}
               className={cn(
-                "rounded-lg border px-3 py-2 text-sm transition",
+                "rounded-lg border px-3 py-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 payType === value
                   ? "border-foreground bg-foreground text-background"
                   : "border-border/60 text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -180,18 +197,31 @@ export function BillingSection() {
             min="10"
             max="50000"
             step="1"
-            className="h-10 flex-1 rounded-lg border border-border bg-background px-3"
+            className="h-10 flex-1 rounded-lg border border-border bg-background px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label="充值金额（元）"
           />
           <button
             type="button"
             onClick={handleCustomTopup}
-            className="rounded-lg bg-foreground px-4 text-sm text-background"
+            disabled={customLoading}
+            aria-busy={customLoading}
+            className="rounded-lg bg-foreground px-4 text-sm text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
           >
-            充值
+            {customLoading ? "创建中…" : "充值"}
           </button>
         </div>
       </div>
+      {packageError ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          <span>{packageError}</span>
+          <button type="button" onClick={() => void loadPackages()} disabled={loadingPackages} className="rounded-md border border-amber-500/40 px-3 py-1.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">重试加载套餐</button>
+        </div>
+      ) : null}
+      {notice ? (
+        <p role={noticeKind === "error" ? "alert" : "status"} aria-live={noticeKind === "error" ? "assertive" : "polite"} className={cn("rounded-xl border px-4 py-3 text-sm", noticeKind === "error" ? "border-destructive/30 bg-destructive/5 text-destructive" : noticeKind === "success" ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300" : "border-border/50 bg-muted/30 text-muted-foreground")}>
+          {notice}
+        </p>
+      ) : null}
 
       {/* Balance hero */}
       <div className="rounded-2xl glass border border-border/40 p-6 sm:p-7">
