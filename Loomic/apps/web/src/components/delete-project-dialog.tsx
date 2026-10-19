@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 
-import { Dialog, DialogContent } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { t, useLocale } from "@/lib/i18n";
 
@@ -29,9 +29,10 @@ export function DeleteProjectDialog({
       }}
     >
       <DialogContent className="sm:max-w-sm" showCloseButton={false}>
-        <p className="text-sm font-medium text-foreground">
+        <DialogTitle>{copy.deleteTitle}</DialogTitle>
+        <DialogDescription>
           {copy.deleteConfirm}
-        </p>
+        </DialogDescription>
         <div className="mt-4 flex items-center justify-end gap-3">
           <Button
             variant="ghost"

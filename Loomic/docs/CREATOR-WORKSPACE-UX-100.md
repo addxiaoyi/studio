@@ -23,7 +23,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 14. Generation surfaces show available cost estimates before submission.
 - [x] 15. Recent-project load failure is distinct from an empty list and retryable.
 - [x] 16. Project search is labeled and has a clear action.
-- [~] 17. Project actions remain keyboard reachable and destructive actions confirm.
+- [x] 17. Project actions remain keyboard reachable and destructive actions use a named accessible confirmation dialog.
 - [x] 18. Creation brief and type are temporarily saved in the current tab session.
 - [~] 19. First-run guidance is available without blocking repeated work.
 - [~] 20. Asset-to-canvas editing opens the selected asset in the editor.

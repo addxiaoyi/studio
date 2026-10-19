@@ -175,6 +175,7 @@ export const messages = {
       retry: "重试",
     },
     project: {
+      deleteTitle: "删除项目",
       deleteConfirm: "确定删除此项目？此操作无法撤销。",
       cancel: "取消",
       permanentDelete: "永久删除",
@@ -462,6 +463,7 @@ export const messages = {
       retry: "Retry",
     },
     project: {
+      deleteTitle: "Delete project",
       deleteConfirm: "Delete this project? This cannot be undone.",
       cancel: "Cancel",
       permanentDelete: "Delete permanently",
