@@ -25,6 +25,12 @@ it('uses the running job instead of showing a stale agent timeout', async () => 
   expect(screen.queryByText('Job timed out after 240s')).not.toBeInTheDocument();
 });
 
+it('announces queued jobs separately from running jobs', async () => {
+  fetchJob.mockResolvedValue({ job: { ...job, status: 'queued', stage: null, progress: 0 } });
+  render(<ToolBlockView block={{ ...block, output: { jobId: 'accepted', pending: true } }} />);
+  expect(await screen.findByRole('status')).toHaveTextContent('已进入队列，等待工作线程');
+});
+
 it('recovers exactly one image from a persisted late result after remount', async () => {
   fetchJob.mockResolvedValue({ job: { ...job, status: 'succeeded', result: { signed_url: '/api/uploads/image/file', width: 1024, height: 1024 } } });
   const first = render(<ToolBlockView block={block} />);
@@ -98,4 +104,12 @@ it('shows a non-retryable input error without failover or resubmit controls', as
   expect(screen.queryByText('智能容灾：选择下一个模型')).not.toBeInTheDocument();
   const retry = screen.getByRole('button', { name: '重新提交任务' });
   expect(retry).toBeDisabled();
+});
+
+it('enables resubmit only after the server confirms a terminal failure', async () => {
+  fetchJob.mockResolvedValue({ job: { ...job, status: 'failed', error_message: '上游明确失败' } });
+  render(<ToolBlockView block={{ ...block, input: { prompt: '生成一张商品图' }, output: { jobId: 'accepted', pending: true } }} />);
+  const retry = await screen.findByRole('button', { name: '重新提交任务' });
+  expect(retry).toBeEnabled();
+  expect(retry).toHaveAttribute('aria-describedby', 'generation-retry-policy');
 });
