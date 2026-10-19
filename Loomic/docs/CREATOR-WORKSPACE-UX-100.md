@@ -83,7 +83,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 ## Feed workflow
 
 - [x] 61. Six-step workflow has a compact mobile navigation and desktop stepper.
-- [~] 62. `packageId` and `step` restore from the URL.
+- [x] 62. `packageId` and `step` restore from the URL and are covered by a deep-link regression test.
 - [~] 63. Hotspot search, sort, pagination, and loading states remain visible.
 - [~] 64. Custom topic creation works without selecting a hotspot.
 - [~] 65. Review and automatic-draft modes stay separate.

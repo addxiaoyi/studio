@@ -14,6 +14,7 @@ const {
   fetchFeedRenderStatusMock,
   renderFeedPackageMock,
   saveFeedStructureDraftMock,
+  searchParamsMock,
 } = vi.hoisted(() => ({
   createFeedPackageMock: vi.fn(),
   approveFeedStructureMock: vi.fn(),
@@ -21,6 +22,7 @@ const {
   fetchFeedRenderStatusMock: vi.fn(),
   renderFeedPackageMock: vi.fn(),
   saveFeedStructureDraftMock: vi.fn(),
+  searchParamsMock: { current: new URLSearchParams() },
 }));
 
 const packageStructure = {
@@ -95,7 +97,7 @@ vi.mock("../src/hooks/use-create-project", () => ({
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParamsMock.current,
 }));
 
 vi.mock("../src/components/ui/styled-select", () => ({
@@ -131,6 +133,7 @@ vi.mock("../src/lib/server-api", () => ({
 import FeedPage from "../src/app/(workspace)/feed/page";
 
 beforeEach(async () => {
+  searchParamsMock.current = new URLSearchParams();
   createFeedPackageMock.mockReset();
   approveFeedStructureMock.mockReset();
   fetchFeedPackageMock.mockReset();
@@ -205,6 +208,19 @@ describe("feed workflow closure", () => {
     await waitFor(() => expect(createFeedPackageMock).toHaveBeenCalledWith("test-token", expect.objectContaining({
       trendItemId: packageRecord.trend_item_id,
     })));
+  });
+
+  it("restores a package and workflow step from the URL", async () => {
+    searchParamsMock.current = new URLSearchParams({
+      packageId: packageRecord.id,
+      step: "2",
+    });
+
+    render(<FeedPage />);
+
+    await waitFor(() => expect(fetchFeedPackageMock).toHaveBeenCalledWith("test-token", packageRecord.id));
+    expect(await screen.findByText("生成标题")).toBeInTheDocument();
+    expect(screen.getByText(/当前步骤：脚本/)).toBeInTheDocument();
   });
 
   it("patches edited structure, starts render, and exposes every selected platform", async () => {
