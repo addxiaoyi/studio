@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { getServerBaseUrl } from "@/lib/env";
@@ -309,6 +309,8 @@ function JobDetailModal({
   onRegenerate?: (job: EcomJob) => void;
 }) {
   const { session } = useAuth();
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const [job, setJob] = useState<EcomJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -347,10 +349,25 @@ function JobDetailModal({
 
   const successOutputs = job?.outputs?.filter((o) => o.url) ?? [];
 
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previousFocusRef.current?.focus();
+    };
+  }, [onClose]);
+
   return (
     <div
       role="dialog"
       aria-modal="true"
+      aria-labelledby="ecom-history-dialog-title"
+      aria-describedby="ecom-history-dialog-description"
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
     >
       <div
@@ -361,7 +378,7 @@ function JobDetailModal({
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-8 py-5 glass-strong border-b border-border/20">
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-medium text-foreground truncate">
+            <h2 id="ecom-history-dialog-title" className="text-lg font-medium text-foreground truncate">
               {job?.productName ?? "任务详情"}
             </h2>
             {job && (
@@ -425,8 +442,9 @@ function JobDetailModal({
             )}
             <button
               type="button"
+              ref={closeRef}
               onClick={onClose}
-              className="inline-flex size-8 items-center justify-center rounded-full glass-soft border border-border/40 text-muted-foreground hover:text-foreground transition-colors"
+              className="inline-flex size-8 items-center justify-center rounded-full glass-soft border border-border/40 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label="关闭"
             >
               <X className="size-4" strokeWidth={1.5} />
@@ -435,7 +453,7 @@ function JobDetailModal({
         </div>
 
         {/* Body */}
-        <div className="p-8">
+        <div id="ecom-history-dialog-description" className="p-8">
           {loading ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
               {Array.from({ length: 6 }, (_, i) => (

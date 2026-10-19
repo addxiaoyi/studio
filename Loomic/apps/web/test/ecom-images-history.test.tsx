@@ -130,6 +130,22 @@ describe("EcomHistoryPage", () => {
     expect(screen.getByText("失败")).toBeInTheDocument();
   });
 
+  it("moves focus into job details and restores it after Escape", async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ jobs: MOCK_JOBS }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ job: MOCK_JOBS[0] }) });
+    const user = userEvent.setup();
+    render(<EcomHistoryPage />);
+    await waitFor(() => expect(screen.getByText("美的空气净化器")).toBeInTheDocument());
+    const trigger = screen.getByRole("button", { name: /美的空气净化器/ });
+    await user.click(trigger);
+    expect(screen.getByRole("dialog", { name: "美的空气净化器" })).toHaveAttribute("aria-labelledby", "ecom-history-dialog-title");
+    expect(screen.getByRole("button", { name: "关闭" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "美的空气净化器" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   it("shows error alert when API fails", async () => {
     mockFetch
       .mockResolvedValueOnce({
