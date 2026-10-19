@@ -283,7 +283,7 @@ export default function AssetsPage() {
                 aria-label={`选择 ${displayName}`}
                 aria-pressed={selectedIds.has(asset.id)}
                 onClick={() => toggleSelected(asset.id)}
-                className={`absolute left-3 top-3 z-10 flex size-7 items-center justify-center rounded-md border bg-background/90 shadow-sm ${selectedIds.has(asset.id) ? "border-foreground bg-foreground text-background" : "border-border/60"}`}
+                className={`absolute left-3 top-3 z-10 flex size-8 items-center justify-center rounded-md border bg-background/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${selectedIds.has(asset.id) ? "border-foreground bg-foreground text-background" : "border-border/60"}`}
               >
                 {selectedIds.has(asset.id) ? <Check className="size-4" /> : null}
               </button>
@@ -315,11 +315,11 @@ export default function AssetsPage() {
               <div className="relative z-10 flex items-center justify-between border-t border-border/50 bg-card px-4 py-3">
                 <span className="text-[11px] text-muted-foreground">{asset.retentionState === "soft_deleted" ? "恢复区资产" : asset.published ? "已公开到作品库" : "仅自己可见"}</span>
                 {asset.retentionState === "soft_deleted" ? (
-                  <button type="button" onClick={() => void restore(asset)} className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted"><Undo2 className="size-3.5" />恢复</button>
+                  <button type="button" onClick={() => void restore(asset)} className="inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"><Undo2 className="size-3.5" />恢复</button>
                 ) : asset.published ? (
-                  <button type="button" onClick={() => void unpublish(asset)} disabled={publishingId === asset.id} className="text-xs text-muted-foreground underline">{publishingId === asset.id ? "处理中…" : "取消公开"}</button>
+                  <button type="button" onClick={() => void unpublish(asset)} disabled={publishingId === asset.id} className="min-h-8 rounded-md px-2 text-xs text-muted-foreground underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">{publishingId === asset.id ? "处理中…" : "取消公开"}</button>
                 ) : (
-                  <button type="button" onClick={() => void publish(asset)} disabled={publishingId === asset.id} className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted disabled:opacity-50"><Share2 className="size-3.5" />{publishingId === asset.id ? "发布中…" : "公开作品"}</button>
+                  <button type="button" onClick={() => void publish(asset)} disabled={publishingId === asset.id} className="inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50">{publishingId === asset.id ? "发布中…" : <><Share2 className="size-3.5" />公开作品</>}</button>
                 )}
               </div>
             </article>

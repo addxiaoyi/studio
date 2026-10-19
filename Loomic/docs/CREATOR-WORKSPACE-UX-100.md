@@ -179,3 +179,7 @@ Chromium covers the async search-refresh and clear flow.
 Feed scheduling and publishing actions now have independent duplicate-submit locks,
 busy labels, explicit accessible names for publish mode/account selectors, and clearer
 in-progress copy; component coverage verifies a rapid double-submit creates one plan.
+
+Asset card selection, recovery, publish, and unpublish actions now have consistent
+visible focus rings and mobile-sized targets; Chromium verifies keyboard focus reaches
+download and publish actions on the 390px asset layout.

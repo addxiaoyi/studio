@@ -287,7 +287,13 @@ test.describe("UX 100 visual safeguards", () => {
     await expect(batchBar).toContainText("已选 1 项");
 
     await page.getByRole("button", { name: "重试加载 测试资产" }).click();
-    await expect(page.getByRole("link", { name: "下载 测试资产" })).toBeVisible();
+    const download = page.getByRole("link", { name: "下载 测试资产" });
+    await expect(download).toBeVisible();
+    await download.focus();
+    await expect(download).toBeFocused();
+    const publish = page.getByRole("button", { name: "公开作品" });
+    await publish.focus();
+    await expect(publish).toBeFocused();
     expect(previewAttempts).toBeGreaterThanOrEqual(2);
   });
 
