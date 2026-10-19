@@ -181,7 +181,6 @@ const platformOptions = [
   { value: "youtube", label: "YouTube", note: "长视频与 Shorts / OAuth 待配置" },
   { value: "pinterest", label: "Pinterest", note: "商品灵感与目录 / OAuth 待配置" },
   { value: "x", label: "X", note: "海外品牌内容 / OAuth 待配置" },
-  { value: "x", label: "X", note: "海外品牌内容 / OAuth 待配置" },
 ];
 
 const modeOptions = [
@@ -219,6 +218,5 @@ const socialPlatforms: Array<{
   { id: "facebook", label: "Facebook", description: "Facebook Page 授权入口。", action: "授权连接", mode: "oauth_api", oauth: true },
   { id: "youtube", label: "YouTube", description: "YouTube 视频与 Shorts 授权入口。", action: "授权连接", mode: "oauth_api", oauth: true },
   { id: "pinterest", label: "Pinterest", description: "Pinterest 商品图钉与目录授权入口。", action: "授权连接", mode: "oauth_api", oauth: true },
-  { id: "x", label: "X", description: "X 海外品牌内容授权入口。", action: "授权连接", mode: "oauth_api", oauth: true },
   { id: "x", label: "X", description: "X 海外品牌内容授权入口。", action: "授权连接", mode: "oauth_api", oauth: true },
 ];
