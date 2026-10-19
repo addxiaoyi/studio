@@ -102,6 +102,13 @@ export function GenerationApprovalCard(props: GenerationApprovalCardProps) {
       : terminalStatus === "terminal_failed"
         ? `任务已停止：${failure ?? "生成未完成。"}`
         : "已确认，生成任务状态会显示在对应消息中。";
+  const liveStatus = state === "submitting"
+    ? "正在提交确认，请稍候。"
+    : state === "failed"
+      ? "提交失败，可以重新提交。"
+      : state === "approved"
+        ? "任务已提交，正在查询生成状态。"
+        : "等待你的确认，确认后才会创建任务并扣除 credits。";
 
   async function confirm() {
     if (!canSubmit || !session?.access_token || actionInFlightRef.current) return;
@@ -152,7 +159,7 @@ export function GenerationApprovalCard(props: GenerationApprovalCardProps) {
   }
 
   return (
-    <section className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4" aria-label="Generation confirmation">
+    <section className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4" aria-label="Generation confirmation" aria-busy={submitting}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">
@@ -169,6 +176,7 @@ export function GenerationApprovalCard(props: GenerationApprovalCardProps) {
         <div><dt className="text-muted-foreground">参考图</dt><dd className="font-medium text-foreground">{props.hasReferenceImage ? "已注入" : "无"}</dd></div>
         <div><dt className="text-muted-foreground">预计消耗</dt><dd className="font-medium text-foreground">{props.estimatedCredits} credits</dd></div>
       </dl>
+      <p id="generation-confirmation-status" role="status" aria-live="polite" className="mt-3 text-xs text-muted-foreground">{liveStatus}</p>
       {state === "approved" ? <p className="mt-3 text-xs text-emerald-700 dark:text-emerald-300">任务已提交，正在查询实际生成状态。</p> : null}
       {state === "failed" ? <p role="alert" className="mt-3 text-xs text-red-700 dark:text-red-300">{failure}</p> : null}
       {cancelFailure ? <p role="alert" className="mt-3 text-xs text-red-700 dark:text-red-300">{cancelFailure}</p> : null}
@@ -176,16 +184,16 @@ export function GenerationApprovalCard(props: GenerationApprovalCardProps) {
       {state === "rejected" ? <p className="mt-3 text-xs text-muted-foreground">已取消，不会创建任务。</p> : null}
       {expired ? <p role="status" className="mt-3 text-xs text-muted-foreground">{"\u786e\u8ba4\u5df2\u8fc7\u671f\uff0c\u65e7\u6d88\u606f\u4e2d\u7684\u6309\u94ae\u4e0d\u518d\u53ef\u64cd\u4f5c\uff0c\u8bf7\u91cd\u65b0\u53d1\u8d77\u751f\u6210\u3002"}</p> : null}
       {!expired && state === "failed" ? (
-        <button type="button" onClick={confirm} disabled={submitting || expired || !session?.access_token} className="mt-3 rounded-lg border border-border px-3 py-2 text-xs text-foreground disabled:opacity-50">
+        <button type="button" onClick={confirm} disabled={submitting || expired || !session?.access_token} className="mt-3 rounded-lg border border-border px-3 py-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
           重新提交
         </button>
       ) : null}
       {!expired && (state === "pending" || state === "submitting") ? (
         <div className="mt-4 flex gap-2">
-          <button type="button" disabled={disabled || submitting} onClick={confirm} className="rounded-lg bg-foreground px-3 py-2 text-xs font-medium text-background disabled:opacity-50">
+          <button type="button" disabled={disabled || submitting} onClick={confirm} className="rounded-lg bg-foreground px-3 py-2 text-xs font-medium text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
             {submitting ? "提交中…" : "确认生成"}
           </button>
-          <button type="button" disabled={disabled || submitting} onClick={cancel} className="rounded-lg border border-border px-3 py-2 text-xs text-foreground disabled:opacity-50">取消</button>
+          <button type="button" disabled={disabled || submitting} onClick={cancel} className="rounded-lg border border-border px-3 py-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">取消</button>
         </div>
       ) : null}
     </section>

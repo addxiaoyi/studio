@@ -59,7 +59,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [~] 41. Image and video modes are distinguishable at their entry points.
 - [~] 42. Incompatible capabilities are rejected before work is submitted.
 - [~] 43. Automatic, manual, unavailable, and fallback model states are visible.
-- [~] 44. Approval details show the selected model, parameters, references, and cost.
+- [x] 44. Approval details show the selected model, parameters, references, and cost with a focused accessible-details regression.
 - [x] 45. The same approval ID renders one actionable approval card.
 - [x] 46. Confirm and cancel actions are guarded against rapid duplicate clicks.
 - [x] 47. Duplicate status blocks for the same Job render once.

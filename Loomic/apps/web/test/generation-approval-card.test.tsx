@@ -52,6 +52,8 @@ describe("GenerationApprovalCard", () => {
     );
 
     const card = screen.getByRole("region", { name: "Generation confirmation" });
+    expect(card).toHaveAttribute("aria-busy", "false");
+    expect(screen.getByRole("status")).toHaveTextContent("等待你的确认");
     const confirm = within(card).getAllByRole("button")[0]!;
     act(() => {
       confirm.click();
@@ -59,10 +61,34 @@ describe("GenerationApprovalCard", () => {
     });
 
     expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(card).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("正在提交确认");
     await act(async () => {
       finishConfirmation({ data: { jobId: "job-1" } });
       await confirmation;
     });
+  });
+
+  it("keeps approval details available to assistive technology", () => {
+    render(
+      <GenerationApprovalCard
+        approvalId="approval-details"
+        jobType="video_generation"
+        model="video-model"
+        estimatedCredits={12}
+        duration={8}
+        resolution="720p"
+        hasReferenceImage
+        expiresAt="2030-01-01T00:00:00.000Z"
+      />,
+    );
+
+    const card = screen.getByRole("region", { name: "Generation confirmation" });
+    expect(card).toHaveTextContent("video-model");
+    expect(card).toHaveTextContent("8 秒");
+    expect(card).toHaveTextContent("720p");
+    expect(card).toHaveTextContent("已注入");
+    expect(card).toHaveTextContent("12 credits");
   });
 
   it("replaces an expired confirmation with a terminal status and stops polling", async () => {
