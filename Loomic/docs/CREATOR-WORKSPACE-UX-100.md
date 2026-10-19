@@ -183,3 +183,7 @@ in-progress copy; component coverage verifies a rapid double-submit creates one 
 Asset card selection, recovery, publish, and unpublish actions now have consistent
 visible focus rings and mobile-sized targets; Chromium verifies keyboard focus reaches
 download and publish actions on the 390px asset layout.
+
+Canvas persistence now exposes a distinct immediate “待保存” state during the debounce
+window before the request starts, preserving the existing in-flight, success, failure,
+and retry states; a component regression covers all four labels.

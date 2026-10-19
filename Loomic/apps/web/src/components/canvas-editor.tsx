@@ -68,7 +68,14 @@ type CanvasEditorProps = {
   onSelectionChange?: (elements: CanvasSelectedElement[]) => void;
 };
 
-type CanvasSaveState = "saved" | "saving" | "error";
+type CanvasSaveState = "saved" | "pending" | "saving" | "error";
+
+export function canvasSaveStateLabel(state: CanvasSaveState): string {
+  if (state === "pending") return "待保存";
+  if (state === "saving") return "保存中…";
+  if (state === "error") return "保存失败";
+  return "已保存";
+}
 
 const SAVE_DEBOUNCE_MS = 1500;
 const THUMBNAIL_DEBOUNCE_MS = 10_000;
@@ -381,6 +388,10 @@ export function CanvasEditor({
 
       // --- 1. Debounced save ---
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+
+      // Surface the unsaved debounce window immediately instead of implying
+      // that the latest canvas change is already persisted.
+      setSaveState("pending");
 
       // Mark that a save is pending. The full payload is built lazily inside
       // the timeout to avoid constructing the files map on every drag frame.
@@ -876,8 +887,8 @@ export function CanvasEditor({
           validateEmbeddable={validateEmbeddable}
         />
         <div className="pointer-events-auto absolute left-1/2 top-3 z-[125] flex -translate-x-1/2 items-center gap-2 rounded-full border border-border/60 bg-background/90 px-3 py-1.5 text-[11px] text-muted-foreground shadow-sm backdrop-blur" role="status" aria-live="polite">
-          <span className={saveState === "error" ? "text-destructive" : saveState === "saving" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}>
-            {saveState === "saving" ? "保存中…" : saveState === "error" ? "保存失败" : "已保存"}
+          <span className={saveState === "error" ? "text-destructive" : saveState === "pending" || saveState === "saving" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}>
+            {canvasSaveStateLabel(saveState)}
           </span>
           {saveState === "error" && <button type="button" onClick={retrySave} className="rounded-full px-2 py-0.5 font-medium text-foreground underline decoration-dotted underline-offset-2 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">重试保存</button>}
         </div>
