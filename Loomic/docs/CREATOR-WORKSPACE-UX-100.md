@@ -8,11 +8,11 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 02. Nested pages expose a useful breadcrumb/back path.
 - [x] 03. Active routes expose `aria-current="page"`.
 - [~] 04. Primary navigation remains distinct from secondary destinations.
-- [~] 05. Collapsed navigation keeps accessible labels and hover titles; keyboard focus now expands the desktop sidebar, with a browser pass still pending.
+- [x] 05. Collapsed navigation keeps accessible labels and hover titles; Chromium verifies keyboard focus expands the desktop sidebar.
 - [~] 06. Route changes preserve the expanded active navigation group.
 - [~] 07. Mobile navigation respects safe-area insets and has large targets.
 - [x] 08. Mobile More menu closes on outside pointer, Escape, and route change.
-- [~] 09. Workspace pages expose a skip-to-main link.
+- [x] 09. Workspace pages expose a skip-to-main link, covered by the Chromium keyboard-shell regression.
 - [x] 10. Credit load failure has an explicit retry action.
 
 ## Home and project entry

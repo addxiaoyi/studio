@@ -114,7 +114,7 @@ function GroupLinks({ group, pathname, open, onToggle, collapsed = false }: { gr
         aria-controls={`${group.id}-navigation-items`}
         aria-label={group.label}
         title={group.label}
-        className={cn("flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm transition-colors hover:bg-foreground/[0.05]", collapsed && "w-10 justify-center px-0", active ? "text-foreground" : "text-muted-foreground")}
+        className={cn("flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm transition-colors hover:bg-foreground/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", collapsed && "w-10 justify-center px-0", active ? "text-foreground" : "text-muted-foreground")}
       >
         <GroupIcon className="size-[18px] shrink-0" strokeWidth={1.8} />
         {!collapsed && <span className="flex-1 text-left">{group.label}</span>}
@@ -151,13 +151,18 @@ function MobileNavigation({ isAdmin, pathname }: { isAdmin: boolean; pathname: s
 
   useEffect(() => setMoreOpen(false), [pathname]);
 
+  useEffect(() => {
+    if (!moreOpen) return;
+    moreMenuRef.current?.querySelector<HTMLElement>("a, button")?.focus();
+  }, [moreOpen]);
+
   return (
     <>
       <nav className="pointer-events-auto fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-border/40 bg-background/90 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="主导航">
         {primaryItems.map((item) => <NavLink key={item.href} item={item} active={isPathActive(pathname, item.href)} compact />)}
         <button ref={moreButtonRef} type="button" onClick={() => setMoreOpen((value) => !value)} aria-expanded={moreOpen} aria-controls="workspace-more-navigation" aria-label={"\u66f4\u591a\u5de5\u4f5c\u533a\u5bfc\u822a"} className={cn("flex min-h-12 min-w-[68px] flex-col items-center justify-center gap-0.5 text-[10px]", moreOpen ? "text-foreground" : "text-muted-foreground")}><Wrench className="size-5" /><span>更多</span></button>
       </nav>
-      {moreOpen && <div ref={moreMenuRef} id="workspace-more-navigation" className="fixed inset-x-3 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 max-h-[65vh] overflow-y-auto rounded-lg border border-border/50 bg-background p-2 shadow-xl md:hidden"><div className="grid grid-cols-2 gap-1">{navGroups.flatMap((group) => group.items).map((item) => <NavLink key={item.href} item={item} active={isPathActive(pathname, item.href)} />)}{isAdmin && <NavLink item={adminItem} active={isPathActive(pathname, adminItem.href)} />}<NavLink item={settingsItem} active={isPathActive(pathname, settingsItem.href)} /></div></div>}
+      {moreOpen && <div ref={moreMenuRef} id="workspace-more-navigation" role="region" aria-label="更多工作区导航" className="fixed inset-x-3 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 max-h-[65vh] overflow-y-auto rounded-lg border border-border/50 bg-background p-2 shadow-xl md:hidden"><div className="grid grid-cols-2 gap-1">{navGroups.flatMap((group) => group.items).map((item) => <NavLink key={item.href} item={item} active={isPathActive(pathname, item.href)} />)}{isAdmin && <NavLink item={adminItem} active={isPathActive(pathname, adminItem.href)} />}<NavLink item={settingsItem} active={isPathActive(pathname, settingsItem.href)} /></div></div>}
     </>
   );
 }
@@ -216,6 +221,7 @@ export function AppSidebar() {
           collapseSidebar();
         }
       }}
+      aria-label="工作区侧栏"
       className={cn("relative z-30 hidden h-[100dvh] shrink-0 flex-col overflow-hidden border-r border-border/40 bg-background/75 px-3 py-4 backdrop-blur transition-[width] duration-200 md:flex", collapsed ? "w-16" : "w-56")}
     >
       <Link href="/home" title="Helstera" className={cn("mb-4 flex h-8 items-center gap-2 px-2", labelsHidden && "justify-center px-0")}><motion.div whileHover={{ scale: 1.08 }}><HelsteraLogo className="size-6 text-foreground" /></motion.div>{!labelsHidden && <span className="text-sm font-semibold tracking-tight">Helstera</span>}</Link>

@@ -141,6 +141,33 @@ test.describe("UX 100 visual safeguards", () => {
     ).toBeLessThanOrEqual(dimensions.clientWidth);
   });
 
+  test("workspace shell moves keyboard focus through skip, sidebar, and mobile More", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.setViewportSize({ width: 1280, height: 844 });
+    await page.goto("/home");
+    const skipLink = page.getByRole("link", { name: "跳到主内容" });
+    await expect(skipLink).toBeAttached();
+    await page.evaluate(() => {
+      document.body.tabIndex = -1;
+      document.body.focus();
+    });
+    await page.keyboard.press("Tab");
+    await expect(skipLink).toBeFocused();
+
+    const sidebar = page.getByRole("complementary", { name: "工作区侧栏" });
+    await sidebar.getByRole("link", { name: "工作台" }).focus();
+    await expect(sidebar).toHaveClass(/w-56/);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const more = page.getByRole("button", { name: "更多工作区导航" });
+    await more.click();
+    const moreRegion = page.getByRole("region", { name: "更多工作区导航" });
+    await expect(moreRegion).toBeVisible();
+    await expect(moreRegion.locator("a").first()).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(more).toBeFocused();
+  });
+
   test("light and dark semantic text tokens meet AA contrast against their surfaces", async ({
     page,
   }) => {
