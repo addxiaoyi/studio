@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 
 import type { ToolBlock } from "@helstera/shared";
 import { useAuth } from "../../lib/auth-context";
-import { fetchJob, fetchJobs, fetchJobTimeline } from "../../lib/server-api";
+import { cancelJob, exportJob, fetchJob, fetchJobs, fetchJobTimeline, syncJob } from "../../lib/server-api";
 import { canRetryGeneration, formatGenerationError, shouldFailoverVideoError } from "../../lib/generation-error-policy";
 import { ChatImage } from "./image-lightbox";
 import { AgentWorkflowCard } from "./agent-workflow-card";
@@ -138,7 +138,7 @@ function findSidebarRect(el: HTMLElement | null): DOMRect | null {
 
 type GenerationJob = {
   id: string;
-  status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "dead_letter";
+  status: "queued" | "running" | "succeeded" | "failed" | "sync_pending" | "sync_failed" | "canceled" | "dead_letter";
   job_type: "image_generation" | "video_generation";
   payload: Record<string, unknown>;
   attempt_count: number;
@@ -203,16 +203,25 @@ function useGenerationJobStatus(
   const { session } = useAuth();
   const [job, setJob] = useState<GenerationJob | null>(null);
   const [pollingState, setPollingState] = useState<JobPollingState>("pending");
+  const [pollEpoch, setPollEpoch] = useState(0);
+  const outputJobId = confirmedJobId ?? (typeof output?.jobId === "string" ? output.jobId : undefined);
+
+  const refreshJob = useCallback(async (updatedJob?: GenerationJob) => {
+    if (!active || !session?.access_token || !outputJobId) return;
+    const latest = updatedJob ?? (await fetchJob(session.access_token, outputJobId)).job as GenerationJob;
+    setJob(latest);
+    setPollingState("synced");
+    setPollEpoch((epoch) => epoch + 1);
+  }, [active, outputJobId, session?.access_token]);
 
   useEffect(() => {
     if (!active || !session?.access_token) return;
 
     const jobType = toolName === "generate_video" ? "video_generation" : "image_generation";
-    const outputJobId = confirmedJobId ?? (typeof output?.jobId === "string" ? output.jobId : undefined);
     let stopped = false;
     let timer: number | undefined;
     let errorCount = 0;
-    const terminalStatuses = new Set(["succeeded", "failed", "canceled", "dead_letter"]);
+    const terminalStatuses = new Set(["succeeded", "failed", "sync_failed", "canceled", "dead_letter"]);
     const schedule = (delay: number) => {
       if (!stopped) timer = window.setTimeout(() => void load(), delay);
     };
@@ -247,9 +256,9 @@ function useGenerationJobStatus(
       stopped = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [active, confirmedJobId, input?.prompt, output?.jobId, session?.access_token, toolName]);
+  }, [active, confirmedJobId, input?.prompt, output?.jobId, pollEpoch, session?.access_token, toolName]);
 
-  return { job, pollingState };
+  return { job, pollingState, refreshJob };
 }
 
 /* ------------------------------------------------------------------ */
@@ -300,7 +309,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
   const modelName = inputData?.model as string | undefined;
   const aspectRatio =
     (inputData?.aspectRatio as string) ?? (isVideoTool ? "16:9" : "1:1");
-  const { job: generationJob, pollingState } = useGenerationJobStatus(
+  const { job: generationJob, pollingState, refreshJob } = useGenerationJobStatus(
     isMediaTool && !hideDuplicateJob && (!isCompleted || Boolean((block.output as Record<string, unknown> | undefined)?.jobId) || Boolean(confirmedJobId)),
     block.toolName,
     inputData,
@@ -326,6 +335,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
     };
   }
   const terminalFailure = generationJob && ["failed", "dead_letter", "canceled"].includes(generationJob.status);
+  const syncFailure = generationJob?.status === "sync_failed";
   const outputErrorCode = (block.output as Record<string, unknown> | undefined)?.errorCode;
   const mediaErrorCode = typeof outputErrorCode === "string"
     ? outputErrorCode
@@ -448,6 +458,14 @@ export const ToolBlockView = React.memo(function ToolBlockView({
         />
       )}
 
+      {isMediaTool && syncFailure && !imageArtifact && (
+        <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-900 dark:text-amber-200">
+          <p className="font-medium">生成已完成，但画布同步失败</p>
+          <p className="mt-1 text-amber-800/80 dark:text-amber-200/80">生成结果已保留，可从任务详情重试同步，不会重新生成或再次扣费。</p>
+          <button type="button" onClick={handleOpenPanel} className="mt-2 rounded-md border border-amber-600/30 px-2.5 py-1.5 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">打开恢复操作</button>
+        </div>
+      )}
+
       {isMediaTool && isCompleted && !imageArtifact && lateSuccess && (
         <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[12px] text-emerald-700 dark:text-emerald-300">
           {isVideoTool ? "视频" : "图片"}已生成并同步到画布
@@ -532,6 +550,9 @@ export const ToolBlockView = React.memo(function ToolBlockView({
             block={block}
             rightOffset={panelRight}
             onClose={handleClosePanel}
+            {...(generationJob ? { job: generationJob } : {})}
+            timeline={timeline}
+            onRefreshJob={refreshJob}
           />,
           document.body,
         )}
@@ -887,14 +908,78 @@ function ToolDetailPanel({
   block,
   rightOffset,
   onClose,
+  job,
+  timeline,
+  onRefreshJob,
 }: {
   block: ToolBlock;
   rightOffset: number;
   onClose: () => void;
+  job?: GenerationJob;
+  timeline: Array<{ key: string; label: string; status: "done" | "active" | "failed" | "pending"; at?: string; id?: string; detail?: string }>;
+  onRefreshJob: (job?: GenerationJob) => Promise<void>;
 }) {
   const [inputExpanded, setInputExpanded] = useState(false);
+  const [busyAction, setBusyAction] = useState<"cancel" | "sync" | "export" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [currentJob, setCurrentJob] = useState(job);
+  const { session } = useAuth();
   const hasInput = block.input && Object.keys(block.input).length > 0;
   const config = getToolConfig(block.toolName);
+  const output = block.output as Record<string, unknown> | undefined;
+  const jobId = job?.id ?? (typeof output?.jobId === "string" ? output.jobId : undefined);
+  const canCancel = currentJob?.status === "queued" || currentJob?.status === "running";
+  const canSync = currentJob?.status === "sync_failed";
+
+  useEffect(() => {
+    setCurrentJob(job);
+  }, [job]);
+
+  useEffect(() => {
+    if (currentJob || !session?.access_token || !jobId) return;
+    let stopped = false;
+    void fetchJob(session.access_token, jobId)
+      .then(({ job: latest }) => {
+        if (!stopped) setCurrentJob(latest as GenerationJob);
+      })
+      .catch((error) => {
+        if (!stopped) setActionError(error instanceof Error ? error.message : "Unable to load task status");
+      });
+    return () => { stopped = true; };
+  }, [currentJob, jobId, session?.access_token]);
+
+  const runAction = useCallback(async (action: "cancel" | "sync" | "export") => {
+    if (!session?.access_token || !jobId || busyAction) return;
+    setBusyAction(action);
+    setActionError(null);
+    try {
+      if (action === "cancel") {
+        const canceled = await cancelJob(session.access_token, jobId);
+        const updatedJob = canceled.job as GenerationJob;
+        setCurrentJob(updatedJob);
+        await onRefreshJob(updatedJob);
+      }
+      if (action === "sync") {
+        const synced = await syncJob(session.access_token, jobId);
+        const updatedJob = synced.job as GenerationJob;
+        setCurrentJob(updatedJob);
+        await onRefreshJob(updatedJob);
+      }
+      if (action === "export") {
+        const blob = await exportJob(session.access_token, jobId);
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `task-${jobId}.json`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Task action failed");
+    } finally {
+      setBusyAction(null);
+    }
+  }, [busyAction, jobId, onRefreshJob, session?.access_token]);
 
   // Close on Escape
   useEffect(() => {
@@ -1031,6 +1116,25 @@ function ToolDetailPanel({
               </div>
             </div>
           )}
+
+          {jobId ? (
+            <section className="space-y-3 border-t border-border/40 pt-3" aria-label="Task recovery">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-xs font-medium text-foreground">Task timeline</h4>
+                <span className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
+                  {currentJob ? <span className="font-sans">{currentJob.status}</span> : null}
+                  <span>{jobId}</span>
+                </span>
+              </div>
+              {timeline.length > 0 ? <JobTimeline events={timeline} /> : <p className="text-xs text-muted-foreground">Timeline is not available yet.</p>}
+              <div className="flex flex-wrap gap-2">
+                {canCancel ? <button type="button" onClick={() => void runAction("cancel")} disabled={busyAction !== null} className="rounded-md border border-destructive/30 px-2.5 py-1.5 text-xs text-destructive disabled:cursor-wait disabled:opacity-50">{busyAction === "cancel" ? "Canceling..." : "Cancel task"}</button> : null}
+                {canSync ? <button type="button" onClick={() => void runAction("sync")} disabled={busyAction !== null} className="rounded-md border border-border/70 px-2.5 py-1.5 text-xs disabled:cursor-wait disabled:opacity-50">{busyAction === "sync" ? "Syncing..." : "Retry sync"}</button> : null}
+                <button type="button" onClick={() => void runAction("export")} disabled={busyAction !== null} className="rounded-md border border-border/70 px-2.5 py-1.5 text-xs disabled:cursor-wait disabled:opacity-50">{busyAction === "export" ? "Exporting..." : "Export JSON"}</button>
+              </div>
+              {actionError ? <p role="alert" className="text-xs text-destructive">{actionError}</p> : null}
+            </section>
+          ) : null}
         </div>
       </motion.div>
     </motion.div>

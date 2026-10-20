@@ -1,13 +1,18 @@
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import type { ToolBlock } from '@helstera/shared';
 import { ToolBlockView } from '../src/components/chat/tool-block-view';
 
-const { fetchJob } = vi.hoisted(() => ({ fetchJob: vi.fn() }));
-vi.mock('../src/lib/server-api', () => ({ fetchJob, fetchJobs: vi.fn() }));
+const { fetchJob, fetchJobTimeline, syncJob } = vi.hoisted(() => ({ fetchJob: vi.fn(), fetchJobTimeline: vi.fn(), syncJob: vi.fn() }));
+vi.mock('../src/lib/server-api', () => ({ fetchJob, fetchJobs: vi.fn(), fetchJobTimeline, cancelJob: vi.fn(), syncJob, exportJob: vi.fn() }));
 vi.mock('../src/lib/auth-context', () => ({ useAuth: () => ({ session: { access_token: 'test' } }) }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.useRealTimers(); });
+
+beforeEach(() => {
+  fetchJobTimeline.mockResolvedValue({ events: [] });
+});
 
 const block: ToolBlock = {
   type: 'tool', toolCallId: 'call', toolName: 'generate_image', status: 'completed',
@@ -112,4 +117,38 @@ it('enables resubmit only after the server confirms a terminal failure', async (
   const retry = await screen.findByRole('button', { name: '重新提交任务' });
   expect(retry).toBeEnabled();
   expect(retry).toHaveAttribute('aria-describedby', 'generation-retry-policy');
+});
+
+it('shows timeline and export recovery controls in the task detail panel', async () => {
+  const legacyImageName = String.fromCodePoint(1325, 892, 65533, 65533, 65533, 65533);
+  fetchJob.mockResolvedValue({ job: { ...job, payload: { ...job.payload, title: legacyImageName }, status: 'succeeded', result: { signed_url: '/api/uploads/image/file' } } });
+  fetchJobTimeline.mockResolvedValue({
+    events: [{ key: 'provider', label: 'Provider task', status: 'done', id: 'provider-1' }],
+  });
+  const user = userEvent.setup();
+  render(<ToolBlockView block={block} />);
+
+  await user.click(await screen.findByRole('img', { name: 'ԭͼ����' }));
+
+  const detailPanel = await screen.findByRole('dialog');
+  expect(detailPanel).toHaveTextContent('Task timeline');
+  expect(within(detailPanel).getByText('Provider task')).toBeInTheDocument();
+  expect(within(detailPanel).getByRole('button', { name: 'Export JSON' })).toBeInTheDocument();
+});
+
+it('offers checkpoint sync recovery without resubmitting a completed generation', async () => {
+  fetchJob.mockResolvedValueOnce({ job: { ...job, status: 'sync_failed', error_code: 'canvas_sync_failed', error_message: 'canvas unavailable' } });
+  syncJob.mockResolvedValue({ job: { ...job, status: 'queued' }, sync: { state: 'queued_from_provider_checkpoint' } });
+  const user = userEvent.setup();
+  render(<ToolBlockView block={{ ...block, output: { jobId: 'accepted', pending: true } }} />);
+
+  expect(await screen.findByText(/画布同步失败/)).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '打开恢复操作' }));
+  const detailPanel = await screen.findByRole('dialog');
+  const retrySync = within(detailPanel).getByRole('button', { name: 'Retry sync' });
+  await user.click(retrySync);
+
+  expect(syncJob).toHaveBeenCalledWith('test', 'accepted');
+  expect(await within(detailPanel).findByText('queued')).toBeInTheDocument();
+  expect(within(detailPanel).queryByRole('button', { name: 'Retry sync' })).not.toBeInTheDocument();
 });

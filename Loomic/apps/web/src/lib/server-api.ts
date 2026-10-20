@@ -374,6 +374,28 @@ export async function fetchJobTimeline(accessToken: string, jobId: string) {
     }>;
   };
 }
+
+export async function syncJob(accessToken: string, jobId: string) {
+  const response = await apiFetch(
+    `${getServerBaseUrl()}/api/jobs/${encodeURIComponent(jobId)}/sync`,
+    { method: "POST", headers: authHeaders(accessToken) },
+  );
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json()) as {
+    job: JobResponse["job"];
+    sync: { state?: string; status?: string; [key: string]: unknown };
+  };
+}
+
+export async function exportJob(accessToken: string, jobId: string): Promise<Blob> {
+  const response = await apiFetch(
+    `${getServerBaseUrl()}/api/jobs/${encodeURIComponent(jobId)}/export`,
+    { headers: authHeaders(accessToken) },
+  );
+  if (!response.ok) return handleErrorResponse(response);
+  return response.blob();
+}
+
 export async function cancelJob(accessToken: string, jobId: string) {
   const response = await apiFetch(
     `${getServerBaseUrl()}/api/jobs/${encodeURIComponent(jobId)}/cancel`,
