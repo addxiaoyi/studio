@@ -187,3 +187,7 @@ download and publish actions on the 390px asset layout.
 Canvas persistence now exposes a distinct immediate “待保存” state during the debounce
 window before the request starts, preserving the existing in-flight, success, failure,
 and retry states; a component regression covers all four labels.
+
+Asset-to-canvas editor failures now retain the selected asset and offer an action-specific
+“重试打开画布” instead of reloading the asset list; Chromium covers failed project
+creation followed by successful editor navigation.

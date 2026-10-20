@@ -103,6 +103,9 @@ export default function AssetsPage() {
   const [filter, setFilter] = useState<"all" | "image" | "video">("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [errorAction, setErrorAction] = useState<
+    { type: "load" } | { type: "editor"; assetId: string } | null
+  >(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [previewRetry, setPreviewRetry] = useState(0);
   const [publishingId, setPublishingId] = useState<string | null>(null);
@@ -158,6 +161,7 @@ export default function AssetsPage() {
       router.push(`/canvas?id=${project.primaryCanvas.id}&assetId=${encodeURIComponent(asset.id)}&mediaType=${asset.mediaType}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "无法打开图片编辑器");
+      setErrorAction({ type: "editor", assetId: asset.id });
     } finally {
       setOpeningId(null);
     }
@@ -167,8 +171,12 @@ export default function AssetsPage() {
     if (!session?.access_token) return;
     setLoading(true);
     setError("");
+    setErrorAction(null);
     try { const options = filter === "all" ? { page, pageSize: ASSETS_PER_PAGE, query, includeDeleted: showRecovery } : { page, pageSize: ASSETS_PER_PAGE, query, includeDeleted: showRecovery, mediaType: filter }; const response = await fetchGeneratedAssets(session.access_token, options); setAssets(response.assets); setPagination(response.pagination); setSelectedIds(new Set()); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "资产加载失败"); }
+    catch (cause) {
+      setError(cause instanceof Error ? cause.message : "资产加载失败");
+      setErrorAction({ type: "load" });
+    }
     finally { setLoading(false); }
   }, [session?.access_token, page, query, filter, showRecovery]);
 
@@ -248,6 +256,15 @@ export default function AssetsPage() {
     }
   };
 
+  const retryErrorAction = () => {
+    if (errorAction?.type === "editor") {
+      const asset = assets.find((item) => item.id === errorAction.assetId);
+      if (asset) void openEditor(asset);
+      return;
+    }
+    void load();
+  };
+
   return <main data-assets-scroll aria-busy={loading} className="relative mx-auto max-h-[calc(100vh-4rem)] min-h-full max-w-7xl overflow-y-auto p-6 pb-24 md:p-10 md:pb-28">
     {!loading && !error && visible.length > 0 && <GradualBlur autoHide height="4rem" className="bottom-24 z-0" />}
     {showRecovery && <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs"><span>恢复区资产将在 7 天后清理</span><button type="button" onClick={() => void restoreSelected()} disabled={selectedIds.size === 0} className="rounded-md border px-2 py-1 disabled:opacity-40">恢复所选</button></div>}
@@ -264,7 +281,7 @@ export default function AssetsPage() {
         <div className="space-y-2 p-4"><div className="h-3 w-3/5 animate-pulse rounded bg-muted-foreground/10" /><div className="h-2.5 w-2/5 animate-pulse rounded bg-muted-foreground/10" /><div className="h-8 w-20 animate-pulse rounded-md bg-muted-foreground/10" /></div>
       </div>)}
     </div>}
-    {!loading && error && <div role="alert" className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive"><span>{error}</span><button type="button" onClick={() => void load()} className="inline-flex h-9 items-center gap-2 rounded-md border border-destructive/30 px-3 text-xs font-medium hover:bg-destructive/5"><RefreshCw className="size-3.5" />重试加载</button></div>}
+    {!loading && error && <div role="alert" className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive"><span>{error}</span><button type="button" onClick={retryErrorAction} className="inline-flex h-9 items-center gap-2 rounded-md border border-destructive/30 px-3 text-xs font-medium hover:bg-destructive/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><RefreshCw className="size-3.5" />{errorAction?.type === "editor" ? "重试打开画布" : "重试加载"}</button></div>}
     {!loading && !error && visible.length === 0 && <div className="mt-8 flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed text-center"><Images className="size-10 text-muted-foreground/40" /><h2 className="mt-4 font-medium">还没有资产</h2><p className="mt-1 text-sm text-muted-foreground">从图片或视频创作页开始生成。</p></div>}
     {publishNotice && <p role="status" className="mt-5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">{publishNotice}，可在左侧“作品库”查看。</p>}
     {!loading && !error && visible.length > 0 && (

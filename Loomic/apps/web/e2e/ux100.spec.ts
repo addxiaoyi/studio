@@ -297,6 +297,35 @@ test.describe("UX 100 visual safeguards", () => {
     expect(previewAttempts).toBeGreaterThanOrEqual(2);
   });
 
+  test("asset editor failure retries the editor action instead of reloading the list", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockWorkspace(page);
+    await page.route("**/api/assets/history**", (route: Route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ data: [{ id: "asset-editor", media_type: "image", title: "编辑测试资产", description: null, prompt: "编辑", mime_type: "image/png", created_at: "2026-10-19T00:00:00.000Z", asset_object_id: "upload-editor", published: false, retention_state: "active" }], pagination: { page: 1, pageSize: 12, total: 1, hasMore: false } }),
+      }),
+    );
+    await page.route("**/api/uploads/upload-editor/file**", (route: Route) =>
+      route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64") }),
+    );
+    let projectAttempts = 0;
+    await page.route("**/api/projects", (route: Route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      projectAttempts += 1;
+      if (projectAttempts === 1) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { message: "编辑器项目创建失败" } }) });
+      return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ project: { id: "editor-project", name: "编辑测试资产", primaryCanvas: { id: "editor-canvas", name: "主画布", isPrimary: true } } }) });
+    });
+
+    await page.goto("/assets");
+    await page.getByRole("button", { name: "在画布中编辑 编辑测试资产" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "编辑器项目创建失败" })).toBeVisible();
+    await page.getByRole("button", { name: "重试打开画布" }).click();
+    await expect(page).toHaveURL(/\/canvas\/?\?id=editor-canvas/);
+    expect(projectAttempts).toBe(2);
+  });
+
   test("asset loading reserves stable preview tiles", async ({ page }) => {
     await mockWorkspace(page);
     await page.route("**/api/assets/history**", async (route: Route) => {
