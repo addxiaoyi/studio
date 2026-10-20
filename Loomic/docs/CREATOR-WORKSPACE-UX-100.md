@@ -196,6 +196,9 @@ Mobile workspace navigation now reserves a stable 56px control lane above the sa
 inset, and the More trigger has a visible focus ring; Chromium covers the Feed shell at
 320px without horizontal overflow and verifies More focus/escape behavior.
 
+Chromium now also covers the signed-in Canvas detail shell at 390px, confirming its
+top controls, bottom toolbar, and mobile chat trigger fit without horizontal overflow.
+
 Asset publish, unpublish, and restore failures now retain the operation context and
 expose action-specific retries instead of incorrectly retrying list loading; Chromium
 covers a failed publish followed by successful retry.

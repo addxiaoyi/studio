@@ -372,6 +372,31 @@ test.describe("UX 100 visual safeguards", () => {
     await expect(more).toBeFocused();
   });
 
+  test("canvas detail shell reflows at 390px without horizontal overflow", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.route("**/api/canvases/canvas-mobile", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ canvas: { id: "canvas-mobile", name: "移动画布", projectId: "project-mobile", content: { elements: [], appState: {}, files: {} } } }),
+    }));
+    await page.route("**/api/projects/project-mobile", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ project: { id: "project-mobile", name: "移动项目", brand_kit_id: null } }),
+    }));
+    await page.route("**/api/workspace/settings", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ settings: { defaultModel: "auto", autoDeleteEmptyCanvas: false } }),
+    }));
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/canvas?id=canvas-mobile");
+    await expect(page.getByRole("button", { name: "打开 AI 对话面板" })).toBeVisible();
+    const dimensions = await page.locator("body").evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
+    expect(dimensions.scrollWidth, "Canvas has no horizontal overflow at 390px").toBeLessThanOrEqual(dimensions.clientWidth);
+  });
+
   test("asset loading reserves stable preview tiles", async ({ page }) => {
     await mockWorkspace(page);
     await page.route("**/api/assets/history**", async (route: Route) => {
