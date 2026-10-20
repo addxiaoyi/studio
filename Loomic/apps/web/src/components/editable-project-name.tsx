@@ -79,7 +79,7 @@ export function EditableProjectName({
     <button
       type="button"
       onClick={startEditing}
-      className="h-8 rounded-full glass-soft hover:glass border border-transparent hover:border-border/40 px-3 text-sm font-medium text-foreground transition-all duration-300 truncate max-w-[200px] cursor-text"
+      className="h-8 max-w-[min(200px,35vw)] cursor-text truncate rounded-full border border-transparent px-3 text-sm font-medium text-foreground transition-all duration-300 hover:border-border/40 hover:glass sm:max-w-[200px]"
       title={name}
     >
       {name}

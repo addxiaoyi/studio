@@ -92,9 +92,11 @@ export function BrandKitSelector({
         type="button"
         disabled={updating}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 rounded-full glass-soft border border-border/40 px-3 py-1.5 text-sm transition-all duration-300 hover:glass disabled:opacity-50"
+        aria-label={`品牌套件：${label}`}
+        aria-expanded={open}
+        className="flex max-w-[min(160px,35vw)] items-center gap-1.5 rounded-full glass-soft border border-border/40 px-3 py-1.5 text-sm transition-all duration-300 hover:glass focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
       >
-        <span className="truncate max-w-[120px] text-foreground/80 font-light">
+        <span className="max-w-[min(120px,28vw)] truncate font-light text-foreground/80">
           {label}
         </span>
         <ChevronDown

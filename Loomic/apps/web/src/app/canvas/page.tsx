@@ -387,7 +387,7 @@ function CanvasPageContent() {
   return (
     <div className="flex h-screen w-screen overflow-hidden">
       {/* Top-left navigation bar */}
-      <div className="absolute top-3 left-3 z-20 flex items-center gap-1.5">
+      <div className="absolute left-3 right-3 top-3 z-20 flex max-w-[calc(100vw-5rem)] flex-wrap items-center gap-1.5">
         <CanvasLogoMenu
           accessToken={accessToken}
           projectId={canvasData.projectId}
@@ -446,6 +446,7 @@ function CanvasPageContent() {
           excalidrawApi={excalidrawApi}
           open={timelineOpen}
           onClose={handleCloseTimeline}
+          triggerRef={timelineToggleRef}
           accessToken={accessToken}
           projectId={canvasData.projectId}
         />

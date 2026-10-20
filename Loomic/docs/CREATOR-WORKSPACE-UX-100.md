@@ -38,7 +38,7 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 - [x] 26. Timeline open/close behavior is predictable; opening moves focus to the close control and closing restores the toolbar trigger.
 - [x] 27. Video preview width and height are constrained to the viewport.
 - [x] 28. Closing the video preview restores focus to the prior canvas control and is covered by a component regression test.
-- [~] 29. Video controls remain usable on narrow screens and keyboard; the preview now exposes a named player, keyboard guidance, and focus-visible close/download controls, while a full canvas browser pass remains.
+- [~] 29. Video controls remain usable on narrow screens and keyboard; the preview now exposes a named player, keyboard guidance, and focus-visible close/download controls, while the Canvas timeline also reflows its editing controls at 390px; a full canvas browser pass remains.
 - [~] 30. Canvas save and sync states are visible and recoverable.
 
 ## AI chat and messages
@@ -121,16 +121,16 @@ Status: `[x]` implemented and covered by a focused check; `[~]` present or local
 
 ## Responsive, accessibility, and resilience
 
-- [~] 91. The signed-in workspace shell and More menu pass at 320, 390, and 768 CSS pixels in Chromium and iPhone Safari; asset, Feed, and canvas detail layouts still need per-page browser checks.
+- [~] 91. The signed-in workspace shell and More menu pass at 320, 390, and 768 CSS pixels in Chromium and iPhone Safari; focused Chromium checks now cover asset, Feed, canvas detail, and Canvas timeline layouts, while the full cross-page matrix remains.
 - [~] 92. Workspace chrome now reflows and wraps at reduced CSS viewport widths; the Chromium UX-100 test passes at a 640 CSS-pixel 200% proxy, while a manual browser-zoom pass remains.
-- [~] 93. Primary workspace controls are keyboard reachable and the desktop sidebar expands on focus; complete end-to-end keyboard audit remains.
+- [~] 93. Primary workspace controls are keyboard reachable and the desktop sidebar expands on focus; Canvas timeline close/reopen and named editing controls now have component and Chromium coverage, while the complete end-to-end keyboard audit remains.
 - [~] 94. Dialogs use the shared accessible primitive; video preview restores focus.
 - [x] 95. Semantic contrast tokens and a `prefers-contrast: more` fallback cover shared chrome; Chromium now verifies foreground, muted, primary, destructive, success, warning, and card pairs in light/dark themes.
 - [x] 96. CSS and Framer Motion honor `prefers-reduced-motion`.
 - [~] 97. Primary lists have loading skeletons and explicit empty states.
 - [~] 98. Network failures preserve user input and offer targeted retry where implemented; billing catalog failures now retry in place and usage history distinguishes failed loading from an empty result.
 - [x] 99. Session/message and Feed polling ignore or stop stale asynchronous updates.
-- [~] 100. Media generation progress, unknown state, and terminal failure now use atomic status/alert semantics; full screen-reader pass remains.
+- [~] 100. Media generation progress, unknown state, and terminal failure now use atomic status/alert semantics; Canvas timeline no longer live-announces every playback tick and exposes named controls, while the full screen-reader pass remains.
 
 ## Verification
 
@@ -150,6 +150,13 @@ The latest interaction pass hardens the mobile and tablet AI chat overlay with d
 semantics, Escape dismissal, trapped keyboard focus, and focus restoration to its
 trigger. The close path is covered by a component regression, including the React
 Hook-order failure that previously surfaced when the panel was toggled closed.
+
+The latest Canvas pass makes the media timeline usable on narrow screens: its
+editing toolbar wraps instead of forcing horizontal page overflow, subtitle input
+uses a mobile-safe text size, every track action has a visible keyboard target, and
+playhead updates no longer cause the entire panel to be announced repeatedly. The
+390px Chromium route check verifies focus entering the panel, narrow reflow, and
+focus restoration after Escape.
 
 The shared select control now follows a select-only combobox pattern: its highlighted
 option is announced through `aria-activedescendant`, Arrow/Home/End navigation works

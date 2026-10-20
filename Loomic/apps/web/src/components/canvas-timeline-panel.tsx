@@ -8,6 +8,7 @@ type TimelinePanelProps = {
   excalidrawApi: any;
   open: boolean;
   onClose: () => void;
+  triggerRef?: React.RefObject<HTMLButtonElement | null>;
   accessToken: string;
   projectId: string;
 };
@@ -36,17 +37,27 @@ function readItems(api: any): TimelineItem[] {
     }));
 }
 
-export function CanvasTimelinePanel({ excalidrawApi, open, onClose, accessToken, projectId }: TimelinePanelProps) {
+export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, accessToken, projectId }: TimelinePanelProps) {
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [subtitle, setSubtitle] = useState("");
   const [playhead, setPlayhead] = useState(0);
   const [previewing, setPreviewing] = useState(false);
   const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
     if (open) closeButtonRef.current?.focus();
   }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      wasOpenRef.current = true;
+    } else if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      triggerRef?.current?.focus();
+    }
+  }, [open, triggerRef]);
 
   const totalDuration = Math.max(5, ...items.map((item) => item.kind === "video" || item.kind === "audio" || item.kind === "subtitle" ? item.trimEnd : 0));
 
@@ -237,19 +248,19 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, accessToken,
   if (!open) return null;
 
   return (
-    <aside className="absolute bottom-16 left-4 right-4 z-30 max-w-3xl rounded-2xl border border-border/60 bg-background/95 p-3 shadow-2xl backdrop-blur-xl" aria-label="媒体时间线" aria-live="polite">
-      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+    <aside onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }} className="absolute bottom-[calc(4.25rem+env(safe-area-inset-bottom))] left-4 right-4 z-30 max-h-[calc(100dvh-5.5rem)] max-w-3xl overflow-y-auto rounded-2xl border border-border/60 bg-background/95 p-3 shadow-2xl backdrop-blur-xl sm:bottom-16" aria-label="媒体时间线">
+      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border/60 bg-background/95 pb-2">
         <div>
           <h2 className="text-xs font-medium text-foreground">媒体时间线</h2>
           <p className="mt-0.5 text-[11px] text-muted-foreground">素材、字幕和裁剪参数会随项目自动保存</p>
         </div>
         <button ref={closeButtonRef} type="button" onClick={onClose} className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="关闭时间线"><X className="size-4" /></button>
       </div>
-      <div className="mt-3 flex gap-2">
-        <input value={subtitle} onChange={(event) => setSubtitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addSubtitle(); }} placeholder="输入字幕内容" className="h-8 min-w-0 flex-1 rounded-lg border border-border/60 bg-muted/40 px-2.5 text-xs outline-none focus:border-foreground/30" />
-        <button type="button" onClick={() => void addSubtitle()} disabled={!subtitle.trim()} className="inline-flex h-8 items-center gap-1 rounded-lg bg-foreground px-2.5 text-xs text-background disabled:cursor-not-allowed disabled:opacity-40"><Plus className="size-3.5" />添加字幕</button>
-        <label className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg border border-border/60 px-2.5 text-xs text-foreground hover:bg-muted"><Upload className="size-3.5" />音频<input type="file" accept="audio/*" className="sr-only" onChange={(event) => void addAudio(event)} /></label>
-        <button type="button" onClick={exportProject} className="inline-flex h-8 items-center gap-1 rounded-lg border border-border/60 px-2.5 text-xs text-foreground hover:bg-muted"><Download className="size-3.5" />导出清单</button>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input aria-label="字幕内容" value={subtitle} onChange={(event) => setSubtitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addSubtitle(); }} placeholder="输入字幕内容" className="h-10 min-w-0 basis-full rounded-lg border border-border/60 bg-muted/40 px-2.5 text-base outline-none focus:border-foreground/30 focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:flex-1 sm:basis-auto sm:text-xs" />
+        <button type="button" onClick={() => void addSubtitle()} disabled={!subtitle.trim()} className="inline-flex min-h-10 items-center gap-1 rounded-lg bg-foreground px-2.5 text-xs text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 sm:h-8 sm:min-h-0"><Plus className="size-3.5" aria-hidden="true" />添加字幕</button>
+        <label className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-lg border border-border/60 px-2.5 text-xs text-foreground hover:bg-muted focus-within:outline-none focus-within:ring-2 focus-within:ring-ring sm:h-8 sm:min-h-0"><Upload className="size-3.5" aria-hidden="true" />音频<input aria-label="上传音频" type="file" accept="audio/*" className="sr-only" onChange={(event) => void addAudio(event)} /></label>
+        <button type="button" onClick={exportProject} className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-border/60 px-2.5 text-xs text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:min-h-0"><Download className="size-3.5" aria-hidden="true" />导出清单</button>
       </div>
       <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-2">
         <div className="flex items-center gap-2"><button type="button" onClick={() => setPreviewing((value) => !value)} className="flex size-7 items-center justify-center rounded-full bg-foreground text-background" aria-label={previewing ? "暂停预览" : "播放预览"}>{previewing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}</button><input aria-label="时间线播放头" type="range" min="0" max={totalDuration} step="0.1" value={playhead} onChange={(event) => { setPreviewing(false); setPlayhead(Number(event.target.value)); }} className="h-1 flex-1 accent-foreground" /><span className="w-20 text-right text-[10px] tabular-nums text-muted-foreground">{playhead.toFixed(1)} / {totalDuration.toFixed(1)}s</span></div>
@@ -261,15 +272,15 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, accessToken,
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
           {items.map((item, index) => (
             <div key={item.id} className="group relative min-w-40 rounded-xl border border-border/60 bg-muted/40 p-2">
-              <button type="button" onClick={() => selectItem(item.id)} className="flex w-full items-center gap-2 text-left">
+              <button type="button" onClick={() => selectItem(item.id)} aria-label={`选择${item.label}`} className="flex min-h-10 w-full items-center gap-2 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">{item.kind === "video" ? <Film className="size-4" /> : item.kind === "subtitle" ? <Type className="size-4" /> : item.kind === "audio" ? <Music className="size-4" /> : <ImageIcon className="size-4" />}</span>
                 <span className="min-w-0 flex-1"><span className="block truncate text-xs text-foreground">{index + 1}. {item.label}</span><span className="mt-0.5 block text-[10px] text-muted-foreground">{item.kind === "video" ? `${item.duration}s 视频` : item.kind === "audio" ? `${item.trimStart.toFixed(1)}s - ${item.trimEnd.toFixed(1)}s 音频` : item.kind === "subtitle" ? `${item.trimStart.toFixed(1)}s - ${item.trimEnd.toFixed(1)}s 字幕` : "图片素材"}</span></span>
                 {item.kind === "video" && <Play className="size-3 text-muted-foreground" />}
               </button>
               {item.kind === "video" && <div className="mt-2 space-y-1"><div className="flex justify-between text-[10px] text-muted-foreground"><span>入点 {item.trimStart.toFixed(1)}s</span><span>出点 {item.trimEnd.toFixed(1)}s</span></div><input aria-label={`${item.label}入点`} type="range" min="0" max={Math.max(item.duration, 0.1)} step="0.1" value={item.trimStart} onChange={(event) => updateTrim(item.id, "trimStart", Number(event.target.value))} className="h-1 w-full accent-foreground" /><input aria-label={`${item.label}出点`} type="range" min="0" max={Math.max(item.duration, 0.1)} step="0.1" value={item.trimEnd} onChange={(event) => updateTrim(item.id, "trimEnd", Number(event.target.value))} className="h-1 w-full accent-foreground" /></div>}
-              {item.kind === "subtitle" && <div className="mt-2 space-y-2"><div className="flex justify-between text-[10px] text-muted-foreground"><span>{item.trimStart.toFixed(1)}s</span><span>{item.trimEnd.toFixed(1)}s</span></div><input aria-label={`${item.label}字幕开始时间`} type="range" min="0" max="60" step="0.1" value={item.trimStart} onChange={(event) => updateSubtitle(item.id, "trimStart", Number(event.target.value))} className="h-1 w-full accent-foreground" /><input aria-label={`${item.label}字幕结束时间`} type="range" min="0" max="60" step="0.1" value={item.trimEnd} onChange={(event) => updateSubtitle(item.id, "trimEnd", Number(event.target.value))} className="h-1 w-full accent-foreground" /><div className="flex gap-1"><button type="button" onClick={() => applySubtitleStyle(item.id, "bottom")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted">底部</button><button type="button" onClick={() => applySubtitleStyle(item.id, "title")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted">标题</button><button type="button" onClick={() => applySubtitleStyle(item.id, "emphasis")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted">强调</button></div></div>}
+              {item.kind === "subtitle" && <div className="mt-2 space-y-2"><div className="flex justify-between text-[10px] text-muted-foreground"><span>{item.trimStart.toFixed(1)}s</span><span>{item.trimEnd.toFixed(1)}s</span></div><input aria-label={`${item.label}字幕开始时间`} type="range" min="0" max="60" step="0.1" value={item.trimStart} onChange={(event) => updateSubtitle(item.id, "trimStart", Number(event.target.value))} className="h-1 w-full accent-foreground" /><input aria-label={`${item.label}字幕结束时间`} type="range" min="0" max="60" step="0.1" value={item.trimEnd} onChange={(event) => updateSubtitle(item.id, "trimEnd", Number(event.target.value))} className="h-1 w-full accent-foreground" /><div className="flex flex-wrap gap-1"><button type="button" onClick={() => applySubtitleStyle(item.id, "bottom")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">底部</button><button type="button" onClick={() => applySubtitleStyle(item.id, "title")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">标题</button><button type="button" onClick={() => applySubtitleStyle(item.id, "emphasis")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">强调</button></div></div>}
               {item.kind === "audio" && <div className="mt-2 space-y-1"><div className="flex justify-between text-[10px] text-muted-foreground"><span>起点 {item.trimStart.toFixed(1)}s</span><span>终点 {item.trimEnd.toFixed(1)}s</span></div>{item.sourceUrl && <div className="flex items-center gap-2"><button type="button" onClick={(event) => syncAudioPreview(item.id, event.currentTarget.parentElement?.querySelector("audio")!)} className="flex size-6 items-center justify-center rounded-full bg-foreground text-background" aria-label={activeAudioId === item.id ? "暂停音频" : "播放音频"}>{activeAudioId === item.id ? <Pause className="size-3" /> : <Play className="size-3" />}</button><audio data-timeline-audio src={item.sourceUrl} preload="metadata" onPause={() => { if (activeAudioId === item.id) setActiveAudioId(null); }} onTimeUpdate={(event) => { if (event.currentTarget.currentTime >= item.trimEnd) { event.currentTarget.pause(); event.currentTarget.currentTime = item.trimStart; } }} /></div>}<input aria-label={`${item.label}音频开始时间`} type="range" min="0" max="60" step="0.1" value={item.trimStart} onChange={(event) => updateTrim(item.id, "trimStart", Number(event.target.value))} className="h-1 w-full accent-foreground" /><input aria-label={`${item.label}音频结束时间`} type="range" min="0" max="60" step="0.1" value={item.trimEnd} onChange={(event) => updateTrim(item.id, "trimEnd", Number(event.target.value))} className="h-1 w-full accent-foreground" /></div>}
-              <button type="button" onClick={() => removeItem(item.id)} className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded bg-background/90 text-muted-foreground hover:text-destructive group-hover:flex" aria-label={`删除${item.label}`}><X className="size-3" /></button>
+              <button type="button" onClick={() => removeItem(item.id)} className="absolute right-1 top-1 flex size-8 items-center justify-center rounded bg-background/90 text-muted-foreground hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`删除${item.label}`}><X className="size-3.5" aria-hidden="true" /></button>
             </div>
           ))}
         </div>

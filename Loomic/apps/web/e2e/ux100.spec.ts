@@ -398,6 +398,39 @@ test.describe("UX 100 visual safeguards", () => {
     expect(dimensions.scrollWidth, "Canvas has no horizontal overflow at 390px").toBeLessThanOrEqual(dimensions.clientWidth);
   });
 
+  test("canvas timeline reflows at 390px and restores focus after keyboard dismissal", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.route("**/api/canvases/canvas-timeline", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ canvas: { id: "canvas-timeline", name: "时间线画布", projectId: "project-timeline", content: { elements: [], appState: {}, files: {} } } }),
+    }));
+    await page.route("**/api/projects/project-timeline", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ project: { id: "project-timeline", name: "时间线项目", brand_kit_id: null } }),
+    }));
+    await page.route("**/api/workspace/settings", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ settings: { defaultModel: "auto", autoDeleteEmptyCanvas: false } }),
+    }));
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/canvas?id=canvas-timeline");
+    const timelineTrigger = page.getByRole("button", { name: "媒体时间线" });
+    await expect(timelineTrigger).toBeVisible();
+    await timelineTrigger.click();
+    const timeline = page.getByRole("complementary", { name: "媒体时间线" });
+    await expect(timeline).toBeVisible();
+    await expect(timeline.getByRole("button", { name: "关闭时间线" })).toBeFocused();
+    await expect(timeline.getByRole("textbox", { name: "字幕内容" })).toHaveCSS("font-size", "16px");
+    const dimensions = await page.locator("body").evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
+    expect(dimensions.scrollWidth, "Timeline has no horizontal overflow at 390px").toBeLessThanOrEqual(dimensions.clientWidth);
+    await page.keyboard.press("Escape");
+    await expect(timelineTrigger).toBeFocused();
+  });
+
   test("asset loading reserves stable preview tiles", async ({ page }) => {
     await mockWorkspace(page);
     await page.route("**/api/assets/history**", async (route: Route) => {
