@@ -30,6 +30,7 @@ import type { SubmitImageJobFn } from "./tools/image-generate.js";
 import { singleImageSubmission } from "./image-submission.js";
 import { resolveImageReferences } from "./image-references.js";
 import type { SubmitVideoJobFn } from "./tools/video-generate.js";
+import type { SubmitWebsiteCaptureFn } from "./tools/website-capture.js";
 import type { CreditService } from "../features/credits/credit-service.js";
 import { TierGuardError, type TierGuard } from "../features/credits/tier-guard.js";
 import { type BillingErrorCode, type ImageQualityLevel } from "@helstera/shared";
@@ -584,6 +585,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
       // Build submitImageJob / submitVideoJob closures for async jobs via PGMQ
       let submitImageJob: SubmitImageJobFn | undefined;
       let submitVideoJob: SubmitVideoJobFn | undefined;
+      let submitWebsiteCapture: SubmitWebsiteCaptureFn | undefined;
       let referenceImages: string[] = [];
       if (options.jobService && (options.localDb || options.createUserClient) && run.accessToken && run.userId) {
         const jobSvc = options.jobService;
@@ -1336,6 +1338,60 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           };
         };
 
+        submitWebsiteCapture = async (input) => {
+          if (!options.localDb || !options.jobService || !userId) {
+            throw new Error("网站浏览后台任务当前不可用。");
+          }
+          if (input.mode === "local") {
+            throw new Error("本地浏览器助手尚未连接；请先选择一次性隔离浏览器。");
+          }
+          const { validatePublicHttpUrl } = await import("../features/website-capture/isolated-browser.js");
+          const startUrl = await validatePublicHttpUrl(input.url);
+          const workspaceResult = canvasId
+            ? await options.localDb.query(
+                "select p.workspace_id from canvases c join projects p on p.id=c.project_id join workspace_members wm on wm.workspace_id=p.workspace_id where c.id=$1 and wm.user_id=$2",
+                [canvasId, userId],
+              )
+            : await options.localDb.query(
+                "select id as workspace_id from workspaces where owner_user_id=$1 order by created_at limit 1",
+                [userId],
+              );
+          const workspaceId = workspaceResult.rows[0]?.workspace_id as string | undefined;
+          if (!workspaceId) throw new Error("No workspace found");
+          const idempotencyKey = input.idempotencyKey ?? `agent-website-capture:${randomUUID()}`;
+          const taskResult = await options.localDb.query<{ id: string; background_job_id: string | null; status: string; progress: number }>(
+            `insert into website_capture_tasks
+              (workspace_id, created_by, mode, start_url, page_limit, record_video, idempotency_key)
+             values ($1,$2,$3,$4,$5,$6,$7)
+             on conflict (created_by, idempotency_key) do nothing
+             returning id, background_job_id, status, progress`,
+            [workspaceId, userId, input.mode, startUrl.toString(), input.pageLimit ?? 3, input.recordVideo ?? true, idempotencyKey],
+          );
+          let task = taskResult.rows[0];
+          if (!task) {
+            task = (await options.localDb.query<{ id: string; background_job_id: string | null; status: string; progress: number }>(
+              "select id, background_job_id, status, progress from website_capture_tasks where created_by=$1 and idempotency_key=$2",
+              [userId, idempotencyKey],
+            )).rows[0];
+          }
+          if (!task) throw new Error("网站浏览任务创建失败。");
+          let jobId = task.background_job_id;
+          if (!jobId && task.status === "queued") {
+            const job = await options.jobService.createJob({ id: userId, accessToken, email: "", userMetadata: {} }, {
+              workspaceId,
+              idempotencyKey: `website-capture:${idempotencyKey}`,
+              jobType: "website_capture",
+              payload: { task_id: task.id },
+            });
+            jobId = job.id;
+            await options.localDb.query(
+              "update website_capture_tasks set background_job_id=$2, updated_at=now() where id=$1 and background_job_id is null",
+              [task.id, jobId],
+            );
+          }
+          return { taskId: task.id, jobId, status: task.status, progress: Number(task.progress ?? 0), pending: task.status !== "succeeded" };
+        };
+
       }
 
       // Load workspace skills (user-installed skills from DB).
@@ -1532,6 +1588,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           // execute 工具由 LocalShellBackend 自动提供，无需手动传递
           ...(submitImageJob ? { submitImageJob } : {}),
           ...(submitVideoJob ? { submitVideoJob } : {}),
+          ...(submitWebsiteCapture ? { submitWebsiteCapture } : {}),
           ...(persistence ? { store: persistence.store } : {}),
           ...(workspaceSkills.length > 0 ? { workspaceSkills } : {}),
         });

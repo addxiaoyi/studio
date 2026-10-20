@@ -293,9 +293,10 @@ export function isPublicAddress(address: string): boolean {
   }
   if (isIP(normalized) === 4) return isPublicIpv4(normalized);
   if (isIP(normalized) !== 6) return false;
+  if (normalized === "::" || normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:") || normalized.startsWith("2001:db8:")) return false;
   const groups = normalized.split(":");
   const firstGroup = Number.parseInt(groups[0] || "0", 16);
-  return firstGroup >= 0x2000 && firstGroup <= 0x3fff && normalized !== "2001:db8::";
+  return firstGroup >= 0x2000 && firstGroup <= 0x3fff;
 }
 
 export function buildWebsiteIntroduction(startUrl: string, pages: WebsiteCapturePage[]): string {

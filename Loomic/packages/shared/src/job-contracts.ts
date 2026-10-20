@@ -19,9 +19,10 @@ export const backgroundJobTypeSchema = z.enum([
   "image_generation",
   "video_generation",
   "feed_structure",
+  "website_capture",
 ]);
 /** Existing JobService APIs currently create generation jobs only. */
-export type BackgroundJobType = "image_generation" | "video_generation";
+export type BackgroundJobType = "image_generation" | "video_generation" | "website_capture";
 export type AnyBackgroundJobType = z.infer<typeof backgroundJobTypeSchema>;
 export type FeedStructureJobType = "feed_structure";
 

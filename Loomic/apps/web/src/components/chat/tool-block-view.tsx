@@ -4,9 +4,9 @@ import { motion } from "framer-motion";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { ToolBlock } from "@helstera/shared";
+import type { ToolBlock, WebsiteCaptureTask } from "@helstera/shared";
 import { useAuth } from "../../lib/auth-context";
-import { cancelJob, exportJob, fetchJob, fetchJobs, fetchJobTimeline, syncJob } from "../../lib/server-api";
+import { cancelJob, cancelWebsiteCapture, exportJob, fetchJob, fetchJobs, fetchJobTimeline, fetchWebsiteCapture, retryWebsiteCapture, syncJob } from "../../lib/server-api";
 import { canRetryGeneration, formatGenerationError, shouldFailoverVideoError } from "../../lib/generation-error-policy";
 import { ChatImage } from "./image-lightbox";
 import { AgentWorkflowCard } from "./agent-workflow-card";
@@ -304,6 +304,10 @@ export const ToolBlockView = React.memo(function ToolBlockView({
   let imageArtifact = block.artifacts?.find((a: { type: string }) => a.type === "image");
   const isImageTool = block.toolName === "generate_image";
   const isVideoTool = block.toolName === "generate_video";
+  const isWebsiteTool = block.toolName === "website_capture";
+  const websiteTaskId = typeof (block.output as Record<string, unknown> | undefined)?.taskId === "string"
+    ? (block.output as Record<string, unknown>).taskId as string
+    : undefined;
   const isMediaTool = isImageTool || isVideoTool;
   const inputData = block.input as Record<string, unknown> | undefined;
   const modelName = inputData?.model as string | undefined;
@@ -446,6 +450,8 @@ export const ToolBlockView = React.memo(function ToolBlockView({
         />
       )}
 
+      {isWebsiteTool && websiteTaskId ? <WebsiteCaptureProgressCard taskId={websiteTaskId} /> : null}
+
       {/* Layer 2b-err: Media generation failed */}
       {isMediaTool && isCompleted && !imageArtifact && mediaError && (
         <MediaErrorCard
@@ -497,7 +503,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
           hasDetails={!!hasDetails}
           onOpenPanel={handleOpenPanel}
         />
-      ) : showCard && !isMediaTool && !requiresApproval && !hideApprovalCard && !isLegacyVideoApproval && !lateSuccess && !backgroundPending ? (
+      ) : showCard && !isMediaTool && !isWebsiteTool && !requiresApproval && !hideApprovalCard && !isLegacyVideoApproval && !lateSuccess && !backgroundPending ? (
         /* Layer 2: Generic output card (non-image tools) */
         <div className="rounded-xl border border-border/40 p-3">
           <div className="flex items-start gap-3">
@@ -572,6 +578,108 @@ function JobTimeline({ events }: { events: Array<{ key: string; label: string; s
       </div>)}
     </div>
   </div>;
+}
+
+function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
+  const { session } = useAuth();
+  const [task, setTask] = useState<WebsiteCaptureTask | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [canceling, setCanceling] = useState(false);
+
+  useEffect(() => {
+    if (!session?.access_token) return;
+    let stopped = false;
+    const load = async () => {
+      try {
+        const data = await fetchWebsiteCapture(session.access_token, taskId);
+        if (!stopped) {
+          setTask(data.task);
+          setError(null);
+        }
+        return data.task.status;
+      } catch (nextError) {
+        if (!stopped) setError(nextError instanceof Error ? nextError.message : "无法读取网站浏览状态");
+        return "failed";
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => {
+      if (task && ["succeeded", "failed", "canceled"].includes(task.status)) return;
+      void load();
+    }, 2_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [session?.access_token, taskId, task?.status]);
+
+  const cancel = async () => {
+    if (!session?.access_token || canceling) return;
+    setCanceling(true);
+    try {
+      const result = await cancelWebsiteCapture(session.access_token, taskId);
+      setTask(result.task);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "取消失败");
+    } finally {
+      setCanceling(false);
+    }
+  };
+
+  const retry = async () => {
+    if (!session?.access_token) return;
+    try {
+      const result = await retryWebsiteCapture(session.access_token, taskId);
+      setTask(result.task);
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "重试失败");
+    }
+  };
+
+  const progress = Math.max(0, Math.min(100, task?.progress ?? 0));
+  const statusText = task?.status === "succeeded"
+    ? "网站介绍与素材已完成"
+    : task?.status === "failed"
+      ? "网站浏览失败"
+      : task?.status === "canceled"
+        ? "网站浏览已取消"
+        : task?.stage === "page_loading"
+          ? "正在浏览页面"
+          : task?.stage === "saving_assets"
+            ? "正在保存截图与录屏"
+            : task?.stage === "writing_report"
+              ? "正在整理中文介绍"
+              : "正在连接隔离浏览器";
+
+  return (
+    <section className="rounded-xl border border-border/40 bg-muted/10 p-3" aria-live="polite" aria-label="网站浏览进度">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-foreground">网站浏览与介绍</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{statusText}</p>
+        </div>
+        <span className="text-xs tabular-nums text-muted-foreground">{progress}%</span>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div className={`h-full rounded-full transition-[width] ${task?.status === "failed" ? "bg-destructive" : "bg-foreground/60"}`} style={{ width: `${progress}%` }} />
+      </div>
+      {task?.stage ? <p className="mt-2 text-[11px] text-muted-foreground">阶段：{task.stage}</p> : null}
+      {task?.status === "running" || task?.status === "queued" ? <button type="button" onClick={() => void cancel()} disabled={canceling} className="mt-2 rounded-md border border-destructive/30 px-2.5 py-1.5 text-[11px] text-destructive disabled:opacity-50">{canceling ? "正在取消..." : "取消浏览"}</button> : null}
+      {task?.status === "failed" ? <button type="button" onClick={() => void retry()} className="mt-2 rounded-md border border-border/70 px-2.5 py-1.5 text-[11px] text-foreground">重试浏览</button> : null}
+      {error ? <p role="alert" className="mt-2 text-[11px] text-destructive">{error}</p> : null}
+      {task?.status === "failed" && task.error ? <p role="alert" className="mt-2 text-[11px] text-destructive">{task.error}</p> : null}
+      {task?.status === "succeeded" && task.result ? (
+        <div className="mt-3 space-y-3">
+          <div className="whitespace-pre-wrap text-xs leading-5 text-foreground">{task.result.introduction}</div>
+          <div className="grid grid-cols-2 gap-2">
+            {task.result.pages.map((page) => <a key={page.assetId} href={page.screenshotUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-border/40"><img src={page.screenshotUrl} alt={`页面截图：${page.title}`} className="aspect-video w-full object-cover" /></a>)}
+          </div>
+          {task.result.recordingUrl ? <video controls preload="metadata" src={task.result.recordingUrl} className="w-full rounded-lg border border-border/40" aria-label="网站浏览录屏" /> : null}
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 /*  MediaShimmer — shimmer placeholder during media generation         */

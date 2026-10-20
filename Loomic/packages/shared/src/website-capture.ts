@@ -41,6 +41,7 @@ export const createWebsiteCaptureRequestSchema = z.object({
 
 export const websiteCaptureTaskSchema = z.object({
   id: z.string().uuid(),
+  backgroundJobId: z.string().uuid().nullable().optional(),
   status: websiteCaptureStatusSchema,
   mode: websiteCaptureModeSchema,
   startUrl: z.string().url(),

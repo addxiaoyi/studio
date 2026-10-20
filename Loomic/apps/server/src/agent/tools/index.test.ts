@@ -5,7 +5,9 @@ import { createMainAgentTools } from "./index.js";
 describe("createMainAgentTools", () => {
   it("registers every tool name once", () => {
     const backend = {} as never;
-    const names = createMainAgentTools(backend, {}).map((tool) => tool.name);
+    const names = createMainAgentTools(backend, {
+      submitWebsiteCapture: async () => ({ taskId: "00000000-0000-0000-0000-000000000001", status: "queued", progress: 0, pending: true }),
+    }).map((tool) => tool.name);
 
     expect(new Set(names).size).toBe(names.length);
     expect(names.filter((name) => name === "project_search")).toHaveLength(1);
@@ -15,6 +17,7 @@ describe("createMainAgentTools", () => {
       "generate_image",
       "generate_video",
       "persist_sandbox_file",
+      "website_capture",
     ]));
   });
 });

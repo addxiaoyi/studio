@@ -27,6 +27,8 @@ import type {
   ViewerResponse,
   WorkspaceSettingsResponse,
   WorkspaceSkillListResponse,
+  CreateWebsiteCaptureRequest,
+  WebsiteCaptureTask,
 } from "@helstera/shared";
 
 import { dedupeRequest } from "./dedupe-request";
@@ -2044,6 +2046,48 @@ export async function fetchJobs(accessToken: string): Promise<JobListResponse> {
   });
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json()) as JobListResponse;
+}
+
+export async function createWebsiteCapture(
+  accessToken: string,
+  input: CreateWebsiteCaptureRequest,
+): Promise<{ task: WebsiteCaptureTask; jobId: string | null; reused: boolean }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { task: WebsiteCaptureTask; jobId: string | null; reused: boolean } }).data;
+}
+
+export async function fetchWebsiteCapture(
+  accessToken: string,
+  taskId: string,
+): Promise<{ task: WebsiteCaptureTask; events: Array<{ id: number; stage: string; detail: string; created_at: string }> }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/${encodeURIComponent(taskId)}`, {
+    headers: authHeaders(accessToken),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { task: WebsiteCaptureTask; events: Array<{ id: number; stage: string; detail: string; created_at: string }> } }).data;
+}
+
+export async function cancelWebsiteCapture(accessToken: string, taskId: string): Promise<{ task: WebsiteCaptureTask }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/${encodeURIComponent(taskId)}/cancel`, {
+    method: "POST",
+    headers: authHeaders(accessToken),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { task: WebsiteCaptureTask } }).data;
+}
+
+export async function retryWebsiteCapture(accessToken: string, taskId: string): Promise<{ task: WebsiteCaptureTask }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/${encodeURIComponent(taskId)}/retry`, {
+    method: "POST",
+    headers: authHeaders(accessToken),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { task: WebsiteCaptureTask } }).data;
 }
 
 // --- Skills API ---

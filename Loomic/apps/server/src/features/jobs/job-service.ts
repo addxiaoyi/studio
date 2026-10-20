@@ -16,6 +16,7 @@ import type { DataAdminClient } from "../../auth/types.js";
 const QUEUE_MAP: Record<BackgroundJobType, string> = {
   image_generation: "image_generation_jobs",
   video_generation: "video_generation_jobs",
+  website_capture: "website_capture_jobs",
 };
 
 export class JobServiceError extends Error {
@@ -57,6 +58,7 @@ export type JobService = {
     filters?: { status?: BackgroundJobStatus; jobType?: BackgroundJobType },
   ): Promise<BackgroundJob[]>;
   cancelJob(user: AuthenticatedUser, jobId: string): Promise<BackgroundJob>;
+  retryJob(user: AuthenticatedUser, jobId: string): Promise<BackgroundJob>;
   getJobAdmin(jobId: string): Promise<BackgroundJob>;
 
   // Admin-only methods (use admin client, no user auth)
@@ -231,6 +233,26 @@ export function createJobService(options: {
       }
 
       return { ...mapJobRow(job as unknown as Record<string, unknown>), reused: false };
+    },
+    async retryJob(user, jobId) {
+      const client = options.createUserClient(user.accessToken);
+      const { data, error } = await client
+        .from("background_jobs")
+        .update({ status: "queued", canceled_at: null, failed_at: null, error_code: null, error_message: null, updated_at: new Date().toISOString() })
+        .eq("id", jobId)
+        .eq("created_by", user.id)
+        .in("status", ["failed", "dead_letter"])
+        .select(SELECT_COLS)
+        .maybeSingle();
+      if (error || !data) throw new JobServiceError("job_not_found", "Job not found or not retryable.", 409);
+      const job = mapJobRow(data as unknown as Record<string, unknown>);
+      try {
+        await options.pgmq.send(job.queue_name, { job_id: job.id, job_type: job.job_type, workspace_id: job.workspace_id });
+      } catch {
+        await client.from("background_jobs").update({ status: "failed", failed_at: new Date().toISOString() }).eq("id", jobId).eq("created_by", user.id);
+        throw new JobServiceError("job_create_failed", "Failed to requeue job.", 500);
+      }
+      return job;
     },
 
     async getJob(user, jobId) {

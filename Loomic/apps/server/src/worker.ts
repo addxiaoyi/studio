@@ -36,6 +36,7 @@ import { processDueSyncJobs } from "./features/jobs/sync-service.js";
 import "./features/jobs/executors/image-generation.js";
 import "./features/jobs/executors/video-generation.js";
 import "./features/jobs/executors/feed-structure.js";
+import "./features/jobs/executors/website-capture.js";
 import { isFeedRenderPayload, markFeedPackageFailed } from "./features/jobs/executors/feed-render.js";
 
 import {
@@ -53,6 +54,7 @@ const QUEUES = [
   "image_generation_jobs",
   "video_generation_jobs",
   "feed_structure_jobs",
+  "website_capture_jobs",
 ] as const;
 
 const JOB_STALE_AFTER_MS = 10 * 60 * 1000;
@@ -61,6 +63,7 @@ const QUEUE_TO_TYPE: Record<string, AnyBackgroundJobType> = {
   image_generation_jobs: "image_generation",
   video_generation_jobs: "video_generation",
   feed_structure_jobs: "feed_structure",
+  website_capture_jobs: "website_capture",
 };
 
 const VT_BY_QUEUE: Record<string, number> = {
@@ -69,6 +72,7 @@ const VT_BY_QUEUE: Record<string, number> = {
   // until the executor finishes so one job cannot run concurrently twice.
   video_generation_jobs: 1200,
   feed_structure_jobs: 300,
+  website_capture_jobs: 180,
 };
 
 
@@ -210,6 +214,7 @@ async function main() {
     image_generation_jobs: env.workerImageConcurrency ?? 3,
     video_generation_jobs: env.workerVideoConcurrency ?? 2,
     feed_structure_jobs: 2,
+    website_capture_jobs: 1,
   };
 
   const inFlightByQueue = new Map<string, Set<Promise<void>>>(
@@ -448,6 +453,11 @@ async function processMessage(
       "provider_auth_failed",
       "provider_request_failed",
       "job_canceled",
+      "invalid_url",
+      "blocked_protocol",
+      "url_credentials_blocked",
+      "private_address_blocked",
+      "recording_too_large",
     ]);
     const shouldDeadLetter = attempt_count >= max_attempts || (!providerCheckpointExists && NON_RETRYABLE_CODES.has(errorCode));
 

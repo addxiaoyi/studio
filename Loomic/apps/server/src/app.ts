@@ -137,6 +137,7 @@ import { registerDouyinWebhookRoutes } from "./http/douyin-webhook.js";
 import { registerDouyinOAuthRoutes } from "./http/douyin-oauth.js";
 import { DouyinCredentialManager } from "./features/douyin/douyin-credentials.js";
 import { registerStorageRoutes } from "./http/storage.js";
+import { registerWebsiteCaptureRoutes } from "./http/website-capture.js";
 import { CanvasEventBuffer } from "./ws/event-buffer.js";
 import { ConnectionManager } from "./ws/connection-manager.js";
 import { registerWsRoute } from "./ws/handler.js";
@@ -505,6 +506,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       storage: storageProvider,
     });
   }
+  registerWebsiteCaptureRoutes(app, {
+    auth,
+    db: localDb,
+    jobService,
+    viewerService,
+  });
   if (localDb) {
     registerGenerationApprovalRoutes(app, {
       auth,
