@@ -199,6 +199,10 @@ inset, and the More trigger has a visible focus ring; Chromium covers the Feed s
 Chromium now also covers the signed-in Canvas detail shell at 390px, confirming its
 top controls, bottom toolbar, and mobile chat trigger fit without horizontal overflow.
 
+Feed automation retries now resume the same polling state machine through `draft_ready`
+and open the editable draft automatically; Chromium covers failed stage, retry, and
+successful draft recovery.
+
 Asset publish, unpublish, and restore failures now retain the operation context and
 expose action-specific retries instead of incorrectly retrying list loading; Chromium
 covers a failed publish followed by successful retry.

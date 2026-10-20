@@ -322,7 +322,8 @@ test.describe("UX 100 visual safeguards", () => {
     await page.getByRole("button", { name: "在画布中编辑 编辑测试资产" }).click();
     await expect(page.getByRole("alert").filter({ hasText: "编辑器项目创建失败" })).toBeVisible();
     await page.getByRole("button", { name: "重试打开画布" }).click();
-    await expect(page).toHaveURL(/\/canvas\/?\?id=editor-canvas/);
+    await expect.poll(() => projectAttempts).toBe(2);
+    await expect(page).toHaveURL(/\/canvas\/?\?id=editor-canvas/, { timeout: 15_000 });
     expect(projectAttempts).toBe(2);
   });
 
@@ -554,5 +555,42 @@ test.describe("UX 100 visual safeguards", () => {
     await expect(results).toHaveAttribute("aria-busy", "false");
     await page.getByRole("button", { name: "清除热点搜索" }).click();
     await expect(search).toHaveValue("");
+  });
+
+  test("Feed automation retry keeps monitoring until the draft is ready", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.route("**/api/feed/trends**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { items: [], total: 0, page: 1, pageSize: 10, totalPages: 1, sort: "heat", query: "" } }) }));
+    await page.route("**/api/feed/packages", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [] }) }));
+    await page.route("**/api/feed/accounts", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [] }) }));
+    await page.route("**/api/feed/sources", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [] }) }));
+    await page.route("**/api/video-models", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [], unavailableModels: [] }) }));
+    let retryAttempts = 0;
+    await page.route("**/api/feed/automation", (route) => {
+      if (route.request().method() === "POST") {
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { id: "automation-retry", packageId: "package-auto", status: "queued", current_stage: "strategy" } }) });
+      }
+      return route.fallback();
+    });
+    await page.route("**/api/feed/automation/automation-retry", (route) => {
+      const status = retryAttempts > 0 ? { id: "automation-retry", packageId: "package-auto", status: "draft_ready", current_stage: "completed" } : { id: "automation-retry", packageId: "package-auto", status: "failed", current_stage: "strategy", errorMessage: "策略服务暂时不可用" };
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: status }) });
+    });
+    await page.route("**/api/feed/automation/automation-retry/retry", (route) => {
+      retryAttempts += 1;
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { id: "automation-retry", packageId: "package-auto", status: "queued", current_stage: "strategy" } }) });
+    });
+    await page.route("**/api/feed/packages/package-auto", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ data: { id: "package-auto", title: "自动草稿", brief: "自动化输入", trend_item_id: null, status: "structured", platforms: ["douyin"], duration_seconds: 15, workflow_mode: "review", estimated_cost_cny: 1, structure: { title: "自动草稿", hook: "先给结果", audience: "用户", painPoint: "问题", angle: "场景", hypothesis: "假设", evidence: ["证据"], cta: "查看", riskNotes: [], imagePrompt: "图片", videoPrompt: "视频", shots: [{ id: "shot-auto", startSecond: 0, endSecond: 5, visual: "画面", voiceover: "旁白", subtitle: "字幕" }] }, variants: [] } }),
+    }));
+
+    await page.goto("/feed");
+    await page.getByPlaceholder("例如：为新品做一条 15 秒抖音种草视频").fill("自动化重试测试");
+    await page.getByRole("button", { name: "自动生成草稿" }).click();
+    await expect(page.getByRole("button", { name: "重试当前阶段" })).toBeVisible({ timeout: 8_000 });
+    await page.getByRole("button", { name: "重试当前阶段" }).click();
+    await expect(page.getByRole("heading", { name: "脚本与镜头审阅" })).toBeVisible({ timeout: 8_000 });
+    expect(retryAttempts).toBe(1);
   });
 });

@@ -701,6 +701,38 @@ export default function FeedPage() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : "AI 策略师暂时不可用"); }
     finally { setStrategyBusy(false); }
   }
+
+  async function monitorFeedAutomation(run: FeedAutomationRun, controller: AbortController) {
+    if (!token) return;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          controller.signal.removeEventListener("abort", abortWait);
+          resolve();
+        }, 2_000);
+        const abortWait = () => {
+          window.clearTimeout(timeout);
+          reject(new DOMException("Automation monitoring stopped", "AbortError"));
+        };
+        controller.signal.addEventListener("abort", abortWait, { once: true });
+      });
+      if (controller.signal.aborted) return;
+      const status = await fetchFeedAutomation(token, run.id);
+      if (controller.signal.aborted) return;
+      setAutomationRun(status);
+      if (status.status === "failed") throw new Error(status.errorMessage || "Feed 自动化生成失败");
+      if (status.status === "draft_ready") {
+        const created = await fetchFeedPackage(token, status.packageId);
+        await hydratePackage(created);
+        setPackages((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+        setStep(2);
+        setNotice("自动草稿已生成，可以编辑结构和平台版本。");
+        return;
+      }
+    }
+    throw new Error("Feed 自动化任务超时");
+  }
+
   async function runFeedAutomation() {
     if (!token || strategyBusy) return;
     const automationPrompt = strategyPrompt.trim() || brief.trim() || title.trim();
@@ -725,33 +757,7 @@ export default function FeedPage() {
       });
       setAutomationRun(run);
       setNotice("自动化任务已创建，正在生成可编辑内容草稿。");
-      for (let attempt = 0; attempt < 60; attempt += 1) {
-        await new Promise<void>((resolve, reject) => {
-          const timeout = window.setTimeout(() => {
-            controller.signal.removeEventListener("abort", abortWait);
-            resolve();
-          }, 2_000);
-          const abortWait = () => {
-            window.clearTimeout(timeout);
-            reject(new DOMException("Automation monitoring stopped", "AbortError"));
-          };
-          controller.signal.addEventListener("abort", abortWait, { once: true });
-        });
-        if (controller.signal.aborted) return;
-        const status = await fetchFeedAutomation(token, run.id);
-        if (controller.signal.aborted) return;
-        setAutomationRun(status);
-        if (status.status === "failed") throw new Error(status.errorMessage || "Feed 自动化生成失败");
-        if (status.status === "draft_ready") {
-          const created = await fetchFeedPackage(token, status.packageId);
-          await hydratePackage(created);
-          setPackages((current) => [created, ...current.filter((item) => item.id !== created.id)]);
-          setStep(2);
-          setNotice("自动草稿已生成，可以编辑结构和平台版本。");
-          return;
-        }
-      }
-      throw new Error("Feed 自动化任务超时");
+      await monitorFeedAutomation(run, controller);
     } catch (cause) {
       if (controller.signal.aborted) return;
       setError(cause instanceof Error ? cause.message : "Feed 自动化任务失败");
@@ -771,15 +777,21 @@ export default function FeedPage() {
   }
 
   async function retryAutomation() {
-    if (!token || !automationRun) return;
+    if (!token || !automationRun || strategyBusy) return;
+    automationAbortRef.current?.abort();
+    const controller = new AbortController();
+    automationAbortRef.current = controller;
     setStrategyBusy(true); setError("");
     try {
       const next = await retryFeedAutomation(token, automationRun.id);
       setAutomationRun(next);
       setNotice("自动化任务已重新排队。");
+      await monitorFeedAutomation(next, controller);
     } catch (cause) {
+      if (controller.signal.aborted) return;
       setError(cause instanceof Error ? cause.message : "重试阶段失败");
     } finally {
+      if (automationAbortRef.current === controller) automationAbortRef.current = null;
       setStrategyBusy(false);
     }
   }
