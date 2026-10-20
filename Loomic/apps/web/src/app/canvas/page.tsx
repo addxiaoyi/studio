@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, Suspense } from "react";
 
@@ -355,8 +356,16 @@ function CanvasPageContent() {
 
   if (!canvasId) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-sm text-muted-foreground">No canvas ID specified.</p>
+      <div className="flex min-h-screen items-center justify-center bg-background px-6">
+        <div className="w-full max-w-md rounded-2xl border border-border/60 bg-card p-8 text-center shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Helstera Canvas</p>
+          <h1 className="mt-3 text-xl font-semibold text-foreground">没有指定画布</h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">请从项目列表或工作台打开一个具体画布。</p>
+          <div className="mt-6 flex justify-center gap-3">
+            <Link href="/projects" className="rounded-lg border border-border/60 px-4 py-2 text-sm hover:bg-muted">返回项目</Link>
+            <Link href="/home" className="rounded-lg bg-foreground px-4 py-2 text-sm text-background hover:opacity-90">返回工作台</Link>
+          </div>
+        </div>
       </div>
     );
   }

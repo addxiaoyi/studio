@@ -160,6 +160,13 @@ export default function HomePage() {
   }, [loadProjects]);
 
   useEffect(() => {
+    const selectedPrompt = window.sessionStorage.getItem("helstera_selected_prompt");
+    if (!selectedPrompt) return;
+    window.sessionStorage.removeItem("helstera_selected_prompt");
+    promptRef.current?.fill(selectedPrompt);
+  }, []);
+
+  useEffect(() => {
     const token = session?.access_token;
     if (!token) {
       setHomeOverview(null);

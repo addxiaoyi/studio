@@ -82,8 +82,30 @@ const THUMBNAIL_DEBOUNCE_MS = 10_000;
 const THUMBNAIL_INITIAL_REFRESH_DELAY_MS = 1500;
 const THUMBNAIL_MAX_SIZE = 400;
 
+export function getThumbnailElements(elements: readonly Record<string, unknown>[], appState: Record<string, unknown>) {
+  const visible = elements.filter((element) => element.isDeleted !== true);
+  const zoom = Number((appState.zoom as { value?: number } | undefined)?.value) || 1;
+  const width = Number(appState.width) || 0;
+  const height = Number(appState.height) || 0;
+  if (!visible.length || width <= 0 || height <= 0) return visible;
+
+  const viewportLeft = -(Number(appState.scrollX) || 0);
+  const viewportTop = -(Number(appState.scrollY) || 0);
+  const viewportRight = viewportLeft + width / zoom;
+  const viewportBottom = viewportTop + height / zoom;
+  const inViewport = visible.filter((element) => {
+    const left = Number(element.x) || 0;
+    const top = Number(element.y) || 0;
+    const right = left + Math.abs(Number(element.width) || 0);
+    const bottom = top + Math.abs(Number(element.height) || 0);
+    return right >= viewportLeft && left <= viewportRight && bottom >= viewportTop && top <= viewportBottom;
+  });
+
+  return inViewport.length > 0 ? inViewport : visible;
+}
+
 async function buildThumbnailBlob(api: any): Promise<Blob | null> {
-  const sceneElements = api.getSceneElements().filter((element: any) => !element.isDeleted);
+  const sceneElements = getThumbnailElements(api.getSceneElements(), api.getAppState());
   if (!sceneElements.length) return null;
 
   const { exportToBlob } = await import("@excalidraw/excalidraw");
