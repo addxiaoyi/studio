@@ -104,7 +104,10 @@ export default function AssetsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [errorAction, setErrorAction] = useState<
-    { type: "load" } | { type: "editor"; assetId: string } | null
+    | { type: "load" }
+    | { type: "editor"; assetId: string }
+    | { type: "publish" | "unpublish" | "restore"; assetId: string }
+    | null
   >(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [previewRetry, setPreviewRetry] = useState(0);
@@ -117,12 +120,15 @@ export default function AssetsPage() {
     if (!window.confirm("取消公开后，其他用户将无法在作品库中看到该作品。继续吗？")) return;
     setPublishingId(asset.id);
     setPublishNotice("");
+    setError("");
+    setErrorAction(null);
     try {
       await unpublishAsset(session.access_token, asset.id);
       setAssets((current) => current.map((item) => item.id === asset.id ? { ...item, published: false } : item));
       setPublishNotice("作品已取消公开");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "取消公开失败");
+      setErrorAction({ type: "unpublish", assetId: asset.id });
     } finally {
       setPublishingId(null);
     }
@@ -134,6 +140,8 @@ export default function AssetsPage() {
     if (!window.confirm(`确认公开“${displayName}”？图片、标题、作者和生成信息会展示在公共作品库。`)) return;
     setPublishingId(asset.id);
     setPublishNotice("");
+    setError("");
+    setErrorAction(null);
     try {
       const details = {
         title: displayName,
@@ -144,6 +152,7 @@ export default function AssetsPage() {
       setPublishNotice("作品已公开到作品库");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "公开作品失败");
+      setErrorAction({ type: "publish", assetId: asset.id });
     } finally {
       setPublishingId(null);
     }
@@ -183,12 +192,14 @@ export default function AssetsPage() {
   const restore = useCallback(async (asset: GeneratedAsset) => {
     if (!session?.access_token || asset.retentionState !== "soft_deleted") return;
     setError("");
+    setErrorAction(null);
     try {
       await restoreGeneratedAsset(session.access_token, asset.id);
       setPublishNotice("资产已恢复，可在普通资产列表中继续使用。");
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "恢复资产失败，请重试。");
+      setErrorAction({ type: "restore", assetId: asset.id });
     }
   }, [load, session?.access_token]);
 
@@ -262,6 +273,15 @@ export default function AssetsPage() {
       if (asset) void openEditor(asset);
       return;
     }
+    if (errorAction?.type === "publish" || errorAction?.type === "unpublish" || errorAction?.type === "restore") {
+      const asset = assets.find((item) => item.id === errorAction.assetId);
+      if (asset) {
+        if (errorAction.type === "publish") void publish(asset);
+        if (errorAction.type === "unpublish") void unpublish(asset);
+        if (errorAction.type === "restore") void restore(asset);
+      }
+      return;
+    }
     void load();
   };
 
@@ -281,7 +301,7 @@ export default function AssetsPage() {
         <div className="space-y-2 p-4"><div className="h-3 w-3/5 animate-pulse rounded bg-muted-foreground/10" /><div className="h-2.5 w-2/5 animate-pulse rounded bg-muted-foreground/10" /><div className="h-8 w-20 animate-pulse rounded-md bg-muted-foreground/10" /></div>
       </div>)}
     </div>}
-    {!loading && error && <div role="alert" className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive"><span>{error}</span><button type="button" onClick={retryErrorAction} className="inline-flex h-9 items-center gap-2 rounded-md border border-destructive/30 px-3 text-xs font-medium hover:bg-destructive/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><RefreshCw className="size-3.5" />{errorAction?.type === "editor" ? "重试打开画布" : "重试加载"}</button></div>}
+    {!loading && error && <div role="alert" className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive"><span>{error}</span><button type="button" onClick={retryErrorAction} className="inline-flex h-9 items-center gap-2 rounded-md border border-destructive/30 px-3 text-xs font-medium hover:bg-destructive/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><RefreshCw className="size-3.5" />{errorAction?.type === "editor" ? "重试打开画布" : errorAction?.type === "publish" ? "重试公开作品" : errorAction?.type === "unpublish" ? "重试取消公开" : errorAction?.type === "restore" ? "重试恢复" : "重试加载"}</button></div>}
     {!loading && !error && visible.length === 0 && <div className="mt-8 flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed text-center"><Images className="size-10 text-muted-foreground/40" /><h2 className="mt-4 font-medium">还没有资产</h2><p className="mt-1 text-sm text-muted-foreground">从图片或视频创作页开始生成。</p></div>}
     {publishNotice && <p role="status" className="mt-5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">{publishNotice}，可在左侧“作品库”查看。</p>}
     {!loading && !error && visible.length > 0 && (

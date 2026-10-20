@@ -191,3 +191,7 @@ and retry states; a component regression covers all four labels.
 Asset-to-canvas editor failures now retain the selected asset and offer an action-specific
 “重试打开画布” instead of reloading the asset list; Chromium covers failed project
 creation followed by successful editor navigation.
+
+Asset publish, unpublish, and restore failures now retain the operation context and
+expose action-specific retries instead of incorrectly retrying list loading; Chromium
+covers a failed publish followed by successful retry.

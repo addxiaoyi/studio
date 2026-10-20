@@ -326,6 +326,31 @@ test.describe("UX 100 visual safeguards", () => {
     expect(projectAttempts).toBe(2);
   });
 
+  test("asset publish failure retries the publish action", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockWorkspace(page);
+    await page.on("dialog", (dialog) => dialog.accept());
+    await page.route("**/api/assets/history**", (route: Route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [{ id: "asset-publish", media_type: "image", title: "公开测试资产", description: null, prompt: "公开", mime_type: "image/png", created_at: "2026-10-19T00:00:00.000Z", asset_object_id: "upload-publish", published: false, retention_state: "active" }], pagination: { page: 1, pageSize: 12, total: 1, hasMore: false } }) }),
+    );
+    await page.route("**/api/uploads/upload-publish/file**", (route: Route) =>
+      route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64") }),
+    );
+    let publishAttempts = 0;
+    await page.route("**/api/gallery/asset-publish/publish", (route: Route) => {
+      publishAttempts += 1;
+      if (publishAttempts === 1) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { message: "作品库暂时不可用" } }) });
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { id: "gallery-1", asset_id: "asset-publish", status: "published" } }) });
+    });
+
+    await page.goto("/assets");
+    await page.getByRole("button", { name: "公开作品" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "作品库暂时不可用" })).toBeVisible();
+    await page.getByRole("button", { name: "重试公开作品" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "作品已公开到作品库" })).toBeVisible();
+    expect(publishAttempts).toBe(2);
+  });
+
   test("asset loading reserves stable preview tiles", async ({ page }) => {
     await mockWorkspace(page);
     await page.route("**/api/assets/history**", async (route: Route) => {
