@@ -158,9 +158,9 @@ function MobileNavigation({ isAdmin, pathname }: { isAdmin: boolean; pathname: s
 
   return (
     <>
-      <nav className="pointer-events-auto fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-border/40 bg-background/90 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="主导航">
+      <nav className="pointer-events-auto fixed inset-x-0 bottom-0 z-40 flex min-h-14 items-center justify-around border-t border-border/40 bg-background/90 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="主导航">
         {primaryItems.map((item) => <NavLink key={item.href} item={item} active={isPathActive(pathname, item.href)} compact />)}
-        <button ref={moreButtonRef} type="button" onClick={() => setMoreOpen((value) => !value)} aria-expanded={moreOpen} aria-controls="workspace-more-navigation" aria-label={"\u66f4\u591a\u5de5\u4f5c\u533a\u5bfc\u822a"} className={cn("flex min-h-12 min-w-[68px] flex-col items-center justify-center gap-0.5 text-[10px]", moreOpen ? "text-foreground" : "text-muted-foreground")}><Wrench className="size-5" /><span>更多</span></button>
+        <button ref={moreButtonRef} type="button" onClick={() => setMoreOpen((value) => !value)} aria-expanded={moreOpen} aria-controls="workspace-more-navigation" aria-label={"\u66f4\u591a\u5de5\u4f5c\u533a\u5bfc\u822a"} className={cn("flex min-h-14 min-w-[68px] flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1", moreOpen ? "text-foreground" : "text-muted-foreground")}><Wrench className="size-5" /><span>更多</span></button>
       </nav>
       {moreOpen && <div ref={moreMenuRef} id="workspace-more-navigation" role="region" aria-label="更多工作区导航" className="fixed inset-x-3 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 max-h-[65vh] overflow-y-auto rounded-lg border border-border/50 bg-background p-2 shadow-xl md:hidden"><div className="grid grid-cols-2 gap-1">{navGroups.flatMap((group) => group.items).map((item) => <NavLink key={item.href} item={item} active={isPathActive(pathname, item.href)} />)}{isAdmin && <NavLink item={adminItem} active={isPathActive(pathname, adminItem.href)} />}<NavLink item={settingsItem} active={isPathActive(pathname, settingsItem.href)} /></div></div>}
     </>

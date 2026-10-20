@@ -351,6 +351,27 @@ test.describe("UX 100 visual safeguards", () => {
     expect(publishAttempts).toBe(2);
   });
 
+  test("mobile Feed shell reflows at 320px and keeps More focus visible", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.route("**/api/feed/trends**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { items: [], total: 0, page: 1, pageSize: 10, totalPages: 1, sort: "heat", query: "" } }) }));
+    await page.route("**/api/feed/packages", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [] }) }));
+    await page.route("**/api/feed/accounts", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [] }) }));
+    await page.route("**/api/feed/sources", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [] }) }));
+    await page.route("**/api/video-models", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [], unavailableModels: [] }) }));
+
+    await page.setViewportSize({ width: 320, height: 844 });
+    await page.goto("/feed");
+    const dimensions = await page.locator("body").evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
+    expect(dimensions.scrollWidth, "Feed has no horizontal overflow at 320px").toBeLessThanOrEqual(dimensions.clientWidth);
+    const more = page.getByRole("button", { name: "更多工作区导航" });
+    await more.focus();
+    await expect(more).toHaveClass(/focus-visible:ring-ring/);
+    await more.click();
+    await expect(page.getByRole("region", { name: "更多工作区导航" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(more).toBeFocused();
+  });
+
   test("asset loading reserves stable preview tiles", async ({ page }) => {
     await mockWorkspace(page);
     await page.route("**/api/assets/history**", async (route: Route) => {

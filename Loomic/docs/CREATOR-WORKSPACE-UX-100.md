@@ -192,6 +192,10 @@ Asset-to-canvas editor failures now retain the selected asset and offer an actio
 “重试打开画布” instead of reloading the asset list; Chromium covers failed project
 creation followed by successful editor navigation.
 
+Mobile workspace navigation now reserves a stable 56px control lane above the safe-area
+inset, and the More trigger has a visible focus ring; Chromium covers the Feed shell at
+320px without horizontal overflow and verifies More focus/escape behavior.
+
 Asset publish, unpublish, and restore failures now retain the operation context and
 expose action-specific retries instead of incorrectly retrying list loading; Chromium
 covers a failed publish followed by successful retry.
