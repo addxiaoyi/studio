@@ -33,7 +33,7 @@ export function ProjectThumbnail({ src, alt, className }: ProjectThumbnailProps)
         <img
           src={safeSrc ?? undefined}
           alt={alt}
-          className={cn("h-full w-full object-cover", state === "ready" ? "opacity-100" : "opacity-0")}
+          className={cn("h-full w-full object-contain", state === "ready" ? "opacity-100" : "opacity-0")}
           loading="lazy"
           decoding="async"
           onLoad={() => setState("ready")}

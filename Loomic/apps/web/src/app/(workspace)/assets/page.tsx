@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { GradualBlur } from "@/components/gradual-blur";
 import { createProject, deleteGeneratedAssets, fetchGeneratedAssets, publishAsset, unpublishAsset, restoreGeneratedAsset, type GeneratedAsset } from "@/lib/server-api";
+import { isCompatibleAssetPreviewMime } from "@/lib/asset-preview";
 
 const PREVIEW_CONCURRENCY = 4;
 const PREVIEW_TIMEOUT_MS = 12_000;
@@ -66,8 +67,7 @@ async function loadPreviewEntries(
           continue;
         }
         const mimeType = response.headers.get("content-type")?.split(";", 1)[0] ?? "";
-        const expectedType = asset.mediaType === "video" ? "video/" : "image/";
-        if (!mimeType.startsWith(expectedType)) {
+        if (!isCompatibleAssetPreviewMime(asset.mediaType, mimeType)) {
           onEntry([asset.id, "", "文件类型与资产记录不一致"]);
           continue;
         }
@@ -325,11 +325,10 @@ export default function AssetsPage() {
                 {selectedIds.has(asset.id) ? <Check className="size-4" /> : null}
               </button>
               <div className="relative flex aspect-square items-center justify-center bg-muted" aria-busy={!previewUrl && !previewError}>
-                {previewUrl ? asset.mediaType === "video" ? (
-                  <video src={previewUrl} controls playsInline preload="metadata" aria-label={`${displayName} 视频预览`} className="h-full w-full object-contain" />
-                ) : (
+                {previewUrl ? (
                   <button type="button" onClick={() => void openEditor(asset)} disabled={!editable} aria-label={`在画布中编辑 ${displayName}`} className="group h-full w-full disabled:cursor-not-allowed">
-                    <img src={previewUrl} alt={displayName} loading="lazy" className="h-full w-full object-cover transition-opacity group-hover:opacity-85" />
+                    <img src={previewUrl} alt={asset.mediaType === "video" ? `${displayName} 视频预览图` : displayName} loading="lazy" className="h-full w-full object-cover transition-opacity group-hover:opacity-85" />
+                    {asset.mediaType === "video" && <span className="pointer-events-none absolute bottom-3 left-3 rounded-md bg-black/65 px-2 py-1 text-[11px] text-white">视频预览图</span>}
                   </button>
                 ) : previewError ? (
                   <div className="flex flex-col items-center gap-2 px-5 text-center">
