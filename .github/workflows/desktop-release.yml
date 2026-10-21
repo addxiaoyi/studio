@@ -69,8 +69,8 @@ jobs:
           mkdir -p desktop-release
           case "${{ matrix.artifact }}" in
             windows) cp apps/desktop/release/*.exe "desktop-release/Helstera-${DESKTOP_VERSION}-Windows-x64.exe" ;;
-            macos-x64) cp apps/desktop/release/*.dmg "desktop-release/Helstera-${DESKTOP_VERSION}-macOS-x64.dmg" ;;
-            macos-arm64) cp apps/desktop/release/*.dmg "desktop-release/Helstera-${DESKTOP_VERSION}-macOS-arm64.dmg" ;;
+            macos-x64) cp "apps/desktop/release/Helstera-${DESKTOP_VERSION}.dmg" "desktop-release/Helstera-${DESKTOP_VERSION}-macOS-x64.dmg" ;;
+            macos-arm64) cp "apps/desktop/release/Helstera-${DESKTOP_VERSION}-arm64.dmg" "desktop-release/Helstera-${DESKTOP_VERSION}-macOS-arm64.dmg" ;;
             linux) cp apps/desktop/release/*.AppImage "desktop-release/Helstera-${DESKTOP_VERSION}.AppImage" ;;
           esac
           if [ "$RUNNER_OS" = "macOS" ]; then shasum -a 256 desktop-release/*; else sha256sum desktop-release/*; fi > desktop-release/SHA256SUMS-${{ matrix.artifact }}.txt
