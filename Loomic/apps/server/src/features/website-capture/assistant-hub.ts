@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Pool } from "pg";
 import type { WebSocket } from "ws";
 
-import { desktopAgentEventSchema, type DesktopAgentAction, type DesktopAgentTaskRequest, type WebsiteCaptureAssistantConnection, type WebsiteCapturePairing, type WebsiteCapturePage } from "@helstera/shared";
+import { desktopAgentEventSchema, isDesktopActionAuthorized, type DesktopAgentAction, type DesktopAgentTaskRequest, type DesktopCapability, type WebsiteCaptureAssistantConnection, type WebsiteCapturePairing, type WebsiteCapturePage } from "@helstera/shared";
 import { hashToken } from "../../local-db/auth.js";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import {
@@ -532,15 +532,15 @@ export class WebsiteAssistantHub {
       return;
     }
     const event = parsed.data;
-    const result = await this.options.db.query<{ id: string; status: string; workspace_id: string; created_by: string; target_url: string | null; goal: string }>(
-      `select id,status,workspace_id,created_by,target_url,goal from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3`,
+    const result = await this.options.db.query<{ id: string; status: string; workspace_id: string; created_by: string; target_url: string | null; goal: string; capabilities: DesktopCapability[] }>(
+      `select id,status,workspace_id,created_by,target_url,goal,capabilities from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3`,
       [event.taskId, live.userId, live.id],
     );
     const task = result.rows[0];
     if (!task || !["queued", "running"].includes(task.status)) return;
     if (event.eventType === "approval_required") {
       const action = event.action;
-      if (!action || !["click", "type"].includes(action.kind) || isDesktopCredentialField(action.fieldType) || action.approvalToken) {
+      if (!action || !["click", "type"].includes(action.kind) || !isDesktopActionAuthorized(action, task.capabilities) || isDesktopCredentialField(action.fieldType) || action.approvalToken) {
         await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail) values($1,'failed',$2)", [event.taskId, "拒绝不支持或涉及凭据的桌面动作"]);
         this.send(live, { type: "desktop_agent.action_denied", taskId: event.taskId, requestId: action?.requestId, reason: "凭据字段或该动作类型禁止自动化。" });
         return;

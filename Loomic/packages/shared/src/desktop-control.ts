@@ -83,6 +83,23 @@ export type DesktopAgentTask = z.infer<typeof desktopAgentTaskSchema>;
 export type DesktopAgentAction = z.infer<typeof desktopAgentActionSchema>;
 export type DesktopAgentEvent = z.infer<typeof desktopAgentEventSchema>;
 
+const actionCapabilities: Record<DesktopActionKind, DesktopCapability | null> = {
+  focus_window: "window.focus",
+  read_page: "browser.read",
+  navigate: "browser.navigate",
+  scroll: "browser.scroll",
+  capture_screen: "browser.capture",
+  start_recording: "browser.record",
+  stop_recording: "browser.record",
+  click: "browser.click",
+  type: "browser.type",
+};
+
+export function isDesktopActionAuthorized(action: DesktopAgentAction, capabilities: readonly DesktopCapability[]) {
+  const capability = actionCapabilities[action.kind];
+  return capability !== null && capabilities.includes(capability);
+}
+
 const alwaysDeniedFieldTypes = new Set(["password", "otp", "one-time-code", "verification-code"]);
 const approvalActions = new Set<DesktopActionKind>(["click", "type", "start_recording", "stop_recording"]);
 
