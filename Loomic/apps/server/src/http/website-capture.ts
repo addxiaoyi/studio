@@ -115,6 +115,20 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     }
   });
 
+  for (const [decision, operation] of [["approve", "approveDesktopAction"], ["reject", "rejectDesktopAction"]] as const) {
+    app.post<{ Params: { approvalId: string } }>(`/api/website-capture/assistant/desktop-approvals/:approvalId/${decision}`, async (request, reply) => {
+      const user = await options.auth.authenticate(request);
+      if (!user) return unauthorized(reply);
+      try {
+        const viewer = await options.viewerService.ensureViewer(user);
+        const result = await options.assistantHub[operation](user.id, viewer.workspace.id, request.params.approvalId);
+        return reply.send({ ok: true, data: result });
+      } catch (error) {
+        return sendWebsiteCaptureError(error, reply);
+      }
+    });
+  }
+
   for (const [path, paused] of [["/api/website-capture/assistant/pause", true], ["/api/website-capture/assistant/resume", false]] as const) {
     app.post(path, async (request, reply) => {
       const user = await options.auth.authenticate(request);

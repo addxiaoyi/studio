@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Pool } from "pg";
 import type { WebSocket } from "ws";
 
-import { desktopAgentEventSchema, type DesktopAgentTaskRequest, type WebsiteCaptureAssistantConnection, type WebsiteCapturePairing, type WebsiteCapturePage } from "@helstera/shared";
+import { desktopAgentEventSchema, type DesktopAgentAction, type DesktopAgentTaskRequest, type WebsiteCaptureAssistantConnection, type WebsiteCapturePairing, type WebsiteCapturePage } from "@helstera/shared";
 import { hashToken } from "../../local-db/auth.js";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import {
@@ -199,13 +199,24 @@ export class WebsiteAssistantHub {
       created_at: string | Date;
       updated_at: string | Date;
       completed_at: string | Date | null;
-      events: Array<{ eventType: string; detail: string | null; createdAt: string }>;
+      events: Array<{ eventType: string; detail: string | null; createdAt: string; approvalId?: string; action?: DesktopAgentAction }>;
+      pending_approvals: Array<{ approvalId: string; action: DesktopAgentAction; expiresAt: string }>;
     }>(
       `select t.id,t.goal,t.role,t.capabilities,t.target_url,t.status,t.result,t.error_message,t.created_at,t.updated_at,t.completed_at,
               coalesce((
-                select json_agg(json_build_object('eventType',event_type,'detail',detail,'createdAt',created_at) order by created_at desc)
-                  from (select event_type,detail,created_at from desktop_agent_events e where e.task_id=t.id order by created_at desc limit 6) recent
-              ),'[]'::json) as events
+                select json_agg(json_build_object(
+                  'eventType',event_type,
+                  'detail',detail,
+                  'createdAt',created_at,
+                  'approvalId',payload->>'approvalId',
+                  'action',payload->'action'
+                ) order by created_at desc)
+                  from (select event_type,detail,payload,created_at from desktop_agent_events e where e.task_id=t.id order by created_at desc limit 6) recent
+              ),'[]'::json) as events,
+              coalesce((
+                select json_agg(json_build_object('approvalId',a.id,'action',a.action,'expiresAt',a.expires_at) order by a.created_at desc)
+                  from desktop_agent_approvals a where a.task_id=t.id and a.status='pending' and a.expires_at>now()
+              ),'[]'::json) as pending_approvals
          from desktop_agent_tasks t where t.created_by=$1 and t.workspace_id=$2 order by t.created_at desc limit 30`,
       [userId, workspaceId],
     );
@@ -222,6 +233,7 @@ export class WebsiteAssistantHub {
       updatedAt: new Date(row.updated_at).toISOString(),
       ...(row.completed_at ? { completedAt: new Date(row.completed_at).toISOString() } : {}),
       events: row.events,
+      pendingApprovals: row.pending_approvals,
     }));
   }
 
@@ -237,8 +249,55 @@ export class WebsiteAssistantHub {
     const live = this.connections.get(row.connection_id);
     if (live) this.send(live, { type: "desktop_agent.stop", taskId, reason: "用户取消了任务。" });
     this.clearDesktopTaskTimer(taskId);
+    await this.options.db.query("update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'", [taskId]);
     await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail) values($1,'canceled',$2)", [taskId, "用户取消了任务"]);
     return { taskId, status: "canceled" as const };
+  }
+
+  async listPendingDesktopApprovals(userId: string, workspaceId: string, taskId: string) {
+    const { rows } = await this.options.db.query<{ id: string; action: DesktopAgentAction; expires_at: string | Date }>(
+      `select a.id,a.action,a.expires_at from desktop_agent_approvals a
+        join desktop_agent_tasks t on t.id=a.task_id
+       where a.task_id=$1 and a.user_id=$2 and a.workspace_id=$3 and a.status='pending' and a.expires_at>now()
+       order by a.created_at desc`,
+      [taskId, userId, workspaceId],
+    );
+    return rows.map((row) => ({ approvalId: row.id, action: row.action, expiresAt: new Date(row.expires_at).toISOString() }));
+  }
+
+  async approveDesktopAction(userId: string, workspaceId: string, approvalId: string) {
+    const token = randomBytes(32).toString("base64url");
+    const { rows } = await this.options.db.query<{ task_id: string; connection_id: string; action: DesktopAgentAction }>(
+      `update desktop_agent_approvals set status='approved',approved_at=now(),approval_token_hash=$4
+        where id=$1 and user_id=$2 and workspace_id=$3 and status='pending' and expires_at>now()
+        returning task_id,connection_id,action`,
+      [approvalId, userId, workspaceId, hashToken(token)],
+    );
+    const approval = rows[0];
+    if (!approval) throw new Error("桌面动作审批已过期或不存在。");
+    const live = this.connections.get(approval.connection_id);
+    if (!live || live.ws.readyState !== 1 || live.paused) {
+      await this.options.db.query("update desktop_agent_approvals set status='pending',approved_at=null,approval_token_hash=null where id=$1 and status='approved'", [approvalId]);
+      throw new Error("桌面助手未连接或已暂停。");
+    }
+    this.send(live, { type: "desktop_agent.action", action: { ...approval.action, approvalToken: token } });
+    await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,'action_approved',$2,$3::jsonb)", [approval.task_id, "用户批准了桌面动作", JSON.stringify({ approvalId, action: { ...approval.action, approvalToken: undefined } })]);
+    return { approvalId, status: "approved" as const };
+  }
+
+  async rejectDesktopAction(userId: string, workspaceId: string, approvalId: string) {
+    const { rows } = await this.options.db.query<{ task_id: string; connection_id: string }>(
+      `update desktop_agent_approvals set status='rejected',rejected_at=now()
+        where id=$1 and user_id=$2 and workspace_id=$3 and status='pending'
+        returning task_id,connection_id`,
+      [approvalId, userId, workspaceId],
+    );
+    const approval = rows[0];
+    if (!approval) throw new Error("桌面动作审批已过期或不存在。");
+    const live = this.connections.get(approval.connection_id);
+    if (live) this.send(live, { type: "desktop_agent.action_denied", approvalId, taskId: approval.task_id, reason: "用户拒绝了该动作。" });
+    await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,'action_rejected',$2,$3::jsonb)", [approval.task_id, "用户拒绝了桌面动作", JSON.stringify({ approvalId })]);
+    return { approvalId, status: "rejected" as const };
   }
 
   async revokeTask(taskId: string): Promise<void> {
@@ -465,21 +524,64 @@ export class WebsiteAssistantHub {
       [event.taskId, live.userId, live.id],
     );
     if (!result.rows[0] || !["queued", "running"].includes(result.rows[0].status)) return;
+    if (event.eventType === "approval_required") {
+      const action = event.action;
+      if (!action || !["click", "type"].includes(action.kind) || isDesktopCredentialField(action.fieldType) || action.approvalToken) {
+        await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail) values($1,'failed',$2)", [event.taskId, "拒绝不支持或涉及凭据的桌面动作"]);
+        this.send(live, { type: "desktop_agent.action_denied", taskId: event.taskId, requestId: action?.requestId, reason: "凭据字段或该动作类型禁止自动化。" });
+        return;
+      }
+      const approval = await this.options.db.query<{ id: string; expires_at: string | Date }>(
+        `insert into desktop_agent_approvals(task_id,workspace_id,user_id,connection_id,request_id,action)
+         select t.id,t.workspace_id,t.created_by,t.connection_id,$2,$3::jsonb
+           from desktop_agent_tasks t where t.id=$1 and t.status in ('queued','running')
+         on conflict(task_id,request_id) do update set request_id=excluded.request_id
+          where desktop_agent_approvals.status='pending' and desktop_agent_approvals.expires_at>now()
+            and desktop_agent_approvals.action=excluded.action
+         returning id,expires_at`,
+        [event.taskId, action.requestId, JSON.stringify(action)],
+      );
+      const approvalRow = approval.rows[0];
+      if (!approvalRow) return;
+      const approvalId = approvalRow.id;
+      const expiresAt = new Date(approvalRow.expires_at).toISOString();
+      const detail = event.detail ?? "桌面 Agent 请求执行一个需要批准的动作。";
+      await this.options.db.query(
+        "insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,'approval_required',$2,$3::jsonb)",
+        [event.taskId, detail, JSON.stringify({ approvalId, action, expiresAt })],
+      );
+      this.send(live, { type: "desktop_agent.approval_pending", taskId: event.taskId, approvalId, action, expiresAt, detail });
+      return;
+    }
     const safeResult = event.result ? { ...event.result, screenshotBase64: undefined, recordingBase64: undefined } : {};
+    const safeAction = event.action ? { ...event.action, approvalToken: undefined } : undefined;
+    if (event.approvalId && event.action?.approvalToken) {
+      const consumed = await this.options.db.query<{ id: string }>(
+        `update desktop_agent_approvals set status='executed',consumed_at=now()
+          where id=$1 and task_id=$2 and connection_id=$3 and status='approved' and expires_at>now() and approval_token_hash=$4
+          returning id`,
+        [event.approvalId, event.taskId, live.id, hashToken(event.action.approvalToken)],
+      );
+      if (!consumed.rows[0]) return;
+    }
     await this.options.db.query(
       "insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,$2,$3,$4::jsonb)",
-      [event.taskId, event.eventType, event.detail ?? null, JSON.stringify({ progress: event.progress, result: safeResult })],
+      [event.taskId, event.eventType, event.detail ?? null, JSON.stringify({ progress: event.progress, result: safeResult, action: safeAction, approvalId: event.approvalId })],
     );
     const terminal = event.eventType === "completed" || event.eventType === "failed";
     await this.options.db.query(
       `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb else result end,error_message=case when $2='failed' then $5 else null end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1`,
       [event.taskId, event.eventType === "failed" ? "failed" : event.eventType === "completed" ? "succeeded" : "running", terminal, JSON.stringify(safeResult), event.detail ?? null],
     );
-    if (terminal) this.clearDesktopTaskTimer(event.taskId);
+    if (terminal) {
+      this.clearDesktopTaskTimer(event.taskId);
+      await this.options.db.query("update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'", [event.taskId]);
+    }
   }
 
   private async failDesktopTask(taskId: string, message: string) {
     await this.options.db.query("update desktop_agent_tasks set status='failed',error_message=$2,updated_at=now(),completed_at=now() where id=$1 and status in ('queued','running')", [taskId, message]);
+    await this.options.db.query("update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'", [taskId]);
     await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail) values($1,'failed',$2)", [taskId, message]);
     this.clearDesktopTaskTimer(taskId);
   }
@@ -601,6 +703,7 @@ export class WebsiteAssistantHub {
     const desktopTasks = await this.options.db.query<{ id: string }>("update desktop_agent_tasks set status='failed',error_message='本地桌面助手已断开，任务已中止',updated_at=now(),completed_at=now() where connection_id=$1 and status in ('queued','running') returning id", [live.id]);
     for (const task of desktopTasks.rows) {
       this.clearDesktopTaskTimer(task.id);
+      await this.options.db.query("update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'", [task.id]);
       await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail) values($1,'failed',$2)", [task.id, "本地桌面助手已断开，任务已中止"]);
     }
     const tasks = await this.options.db.query<{ id: string }>("update website_capture_tasks set status='failed', stage='failed', error_message='本地浏览器助手已断开，任务已中止', updated_at=now() where assistant_connection_id=$1 and status in ('queued','running') returning id", [live.id]);
@@ -657,6 +760,10 @@ export class WebsiteAssistantHub {
     const text = String(value ?? "").toLowerCase();
     return text.includes("windows") ? "windows" : text.includes("mac") || text.includes("darwin") ? "macos" : text.includes("linux") ? "linux" : "unknown";
   }
+}
+
+function isDesktopCredentialField(fieldType: string | undefined) {
+  return ["password", "otp", "one-time-code", "verification-code"].includes((fieldType ?? "").toLowerCase());
 }
 
 export function validateLocalExactUrl(input: string): URL {

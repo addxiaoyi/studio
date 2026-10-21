@@ -53,6 +53,7 @@ export const desktopAgentActionSchema = z.object({
 export const desktopAgentEventSchema = z.object({
   taskId: z.string().uuid(),
   eventType: z.enum(["started", "progress", "page", "approval_required", "completed", "failed"]),
+  approvalId: z.string().uuid().optional(),
   detail: z.string().max(2_000).optional(),
   progress: z.number().int().min(0).max(100).optional(),
   action: desktopAgentActionSchema.optional(),
