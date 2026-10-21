@@ -4,6 +4,7 @@ import { join } from "path";
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let embeddedBrowserWindow: BrowserWindow | null = null;
+let recorderWindow: BrowserWindow | null = null;
 let assistantSocket: any = null;
 let assistantSessionToken = "";
 const desktopTaskTabs = new Map<string, BrowserWindow>();
@@ -51,14 +52,77 @@ function sendAssistant(message: Record<string, unknown>) {
   if (assistantSocket?.readyState === 1) assistantSocket.send(JSON.stringify(message));
 }
 
+async function ensureRecorderWindow() {
+  if (recorderWindow && !recorderWindow.isDestroyed()) return recorderWindow;
+  recorderWindow = new BrowserWindow({
+    width: 1280,
+    height: 720,
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: join(__dirname, "recorder-preload.js"),
+    },
+  });
+  recorderWindow.on("closed", () => { recorderWindow = null; });
+  await recorderWindow.loadURL("data:text/html,<canvas id=canvas width=1280 height=720></canvas>");
+  return recorderWindow;
+}
+
+async function startDesktopRecording(browser: BrowserWindow) {
+  const recorder = await ensureRecorderWindow();
+  recorder.webContents.send("recorder.start");
+  let busy = false;
+  const timer = setInterval(() => {
+    if (busy || recorder.isDestroyed() || browser.isDestroyed()) return;
+    busy = true;
+    void browser.webContents.capturePage()
+      .then((image) => {
+        if (!recorder.isDestroyed()) recorder.webContents.send("recorder.frame", image.toJPEG(70).toString("base64"));
+      })
+      .catch(() => undefined)
+      .finally(() => { busy = false; });
+  }, 200);
+  return { recorder, timer };
+}
+
+async function stopDesktopRecording(active: { recorder: BrowserWindow; timer: ReturnType<typeof setInterval> }) {
+  clearInterval(active.timer);
+  if (active.recorder.isDestroyed()) return null;
+  return new Promise<string | null>((resolve) => {
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout>;
+    const onComplete = (_event: Electron.IpcMainEvent, base64: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      ipcMain.removeListener("recorder.complete", onComplete);
+      resolve(typeof base64 === "string" && base64.length > 0 ? base64 : null);
+    };
+    timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      ipcMain.removeListener("recorder.complete", onComplete);
+      resolve(null);
+    }, 8_000);
+    ipcMain.once("recorder.complete", onComplete);
+    active.recorder.webContents.send("recorder.stop");
+  });
+}
+
 async function captureEmbeddedPage(task: any) {
   const browser = embeddedBrowserWindow;
   if (!browser || browser.isDestroyed()) throw new Error("桌面内嵌浏览器未打开。");
   desktopTaskTabs.set(String(task.taskId), browser);
+  const recording = task.recordVideo ? await startDesktopRecording(browser) : null;
+  let recordingBase64: string | null = null;
   const startUrl = new URL(String(task.startUrl));
   const queue = [startUrl.toString()];
   const visited = new Set<string>();
-  while (queue.length && visited.size < Number(task.pageLimit) && !browser.isDestroyed()) {
+  let recordingStopped = false;
+  try {
+    while (queue.length && visited.size < Number(task.pageLimit) && !browser.isDestroyed()) {
     const next = queue.shift();
     if (!next || visited.has(next)) continue;
     visited.add(next);
@@ -86,10 +150,17 @@ async function captureEmbeddedPage(task: any) {
       } catch { /* malformed links are ignored */ }
       if (queue.length >= Number(task.pageLimit) * 3) break;
     }
+    }
+    if (recording) {
+      recordingBase64 = await stopDesktopRecording(recording);
+      recordingStopped = true;
+    }
+    if (task.recordVideo && !recordingBase64) sendAssistant({ type: "website_capture.recording_failed", taskId: task.taskId, message: "桌面内嵌浏览器录屏编码失败，已保存页面截图。" });
+    sendAssistant({ type: "website_capture.complete", taskId: task.taskId, ...(recordingBase64 ? { recordingBase64: `data:video/webm;base64,${recordingBase64}` } : {}) });
+  } finally {
+    if (recording && !recordingStopped) await stopDesktopRecording(recording);
+    desktopTaskTabs.delete(String(task.taskId));
   }
-  if (task.recordVideo) sendAssistant({ type: "website_capture.recording_failed", taskId: task.taskId, message: "桌面内嵌浏览器当前未启用录屏权限，已保存页面截图。" });
-  sendAssistant({ type: "website_capture.complete", taskId: task.taskId });
-  desktopTaskTabs.delete(String(task.taskId));
 }
 
 function isPrivateDesktopHost(value: string) {
@@ -382,5 +453,6 @@ app.on("activate", () => {
 app.on("before-quit", () => {
   tray?.destroy();
   assistantSocket?.close();
+  recorderWindow?.destroy();
   embeddedBrowserWindow?.destroy();
 });

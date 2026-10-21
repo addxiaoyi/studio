@@ -36,6 +36,20 @@ export default defineConfig({
           },
         },
       },
+      {
+        entry: "electron/recorder-preload.ts",
+        onstart(args) {
+          args.reload();
+        },
+        vite: {
+          build: {
+            outDir: "dist-electron",
+            rollupOptions: {
+              external: ["electron"],
+            },
+          },
+        },
+      },
     ]),
     renderer(),
   ],

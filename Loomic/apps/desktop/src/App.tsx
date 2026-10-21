@@ -9,7 +9,6 @@
  * via the Electron BrowserWindow.
  */
 import React from "react";
-import { NextRouter, useRouter } from "next/router";
 
 /**
  * App — Desktop shell that renders the web application.
@@ -17,13 +16,11 @@ import { NextRouter, useRouter } from "next/router";
  * and dispatches them to the Next.js router.
  */
 function AppShell() {
-  const router = useRouter();
-
   React.useEffect(() => {
     if (typeof window === "undefined" || !window.electronAPI) return;
 
     window.electronAPI.onNavigate((path: string) => {
-      router.push(path);
+      window.location.hash = path;
     });
 
     window.electronAPI.onNewProject(() => {
@@ -34,16 +31,20 @@ function AppShell() {
     window.electronAPI.onExportCanvas(() => {
       window.dispatchEvent(new CustomEvent("desktop:export-canvas"));
     });
-  }, [router]);
+  }, []);
 
-  // Render the actual web app component tree
-  // In practice, this imports from the shared @/apps/web package
   return (
-    <div className="h-screen w-screen overflow-hidden">
-      {/* @ts-ignore */}
-      <NextRouter.Provider>
-        <App />
-      </NextRouter.Provider>
+    <div style={{ minHeight: "100vh", padding: 32, background: "#f7f7f4", color: "#191918", fontFamily: "system-ui, sans-serif" }}>
+      <main style={{ maxWidth: 760, margin: "0 auto" }}>
+        <p style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", opacity: 0.6 }}>Helstera Desktop</p>
+        <h1 style={{ margin: "12px 0 8px", fontSize: 28 }}>本地浏览助手已就绪</h1>
+        <p style={{ maxWidth: 600, lineHeight: 1.7, color: "#666660" }}>
+          通过设置页生成一次性配对码后，可以连接桌面内嵌浏览器，读取用户明确选择的网站页面并生成截图、录屏和中文介绍。
+        </p>
+        <button type="button" onClick={() => { window.location.hash = "/settings"; }} style={{ marginTop: 20, minHeight: 40, border: 0, borderRadius: 8, padding: "0 16px", background: "#191918", color: "white", cursor: "pointer" }}>
+          打开助手设置
+        </button>
+      </main>
     </div>
   );
 }
