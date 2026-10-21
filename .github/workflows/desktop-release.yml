@@ -81,8 +81,8 @@ jobs:
   publish-server:
     name: Publish installers to studio.0st.top
     needs: build
-    runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' || github.event.inputs.publish == 'true' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
