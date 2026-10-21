@@ -7,10 +7,10 @@ export const metadata = {
 };
 
 const DESKTOP_DOWNLOADS = [
-  { label: "Linux AppImage", detail: "x64 · 版本 0.1.0", href: "/downloads/Helstera-0.1.0.AppImage" },
-  { label: "Windows 安装包", detail: "x64 · 版本 0.1.0", href: "/downloads/Helstera-0.1.0-Windows-x64.exe" },
-  { label: "macOS 安装包", detail: "Intel · 版本 0.1.0", href: "/downloads/Helstera-0.1.0-macOS-x64.dmg" },
-  { label: "macOS 安装包", detail: "Apple Silicon · 版本 0.1.0", href: "/downloads/Helstera-0.1.0-macOS-arm64.dmg" },
+  { label: "Linux AppImage", detail: "x64 · 版本 0.2.0", href: "/downloads/Helstera-0.2.0.AppImage" },
+  { label: "Windows 安装包", detail: "x64 · 版本 0.2.0", href: "/downloads/Helstera-0.2.0-Windows-x64.exe" },
+  { label: "macOS 安装包", detail: "Intel · 版本 0.2.0", href: "/downloads/Helstera-0.2.0-macOS-x64.dmg" },
+  { label: "macOS 安装包", detail: "Apple Silicon · 版本 0.2.0", href: "/downloads/Helstera-0.2.0-macOS-arm64.dmg" },
 ] as const;
 
 export default function DownloadPage() {
@@ -27,6 +27,9 @@ export default function DownloadPage() {
           <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">下载桌面端</h1>
           <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
             安装包由 studio.0st.top 直接提供。桌面端包含本地浏览助手，可在授权后读取选定标签页的页面证据并生成网站介绍。
+          </p>
+          <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
+            Windows 与 Linux 桌面端会自动检查并下载更新；下载完成后可在应用内重启安装。macOS 更新目前请下载并安装新版本。
           </p>
 
           <div className="mt-10 grid gap-3 sm:grid-cols-2">

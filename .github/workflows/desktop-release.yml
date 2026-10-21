@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "同步安装包到生产服务器"
+        description: "Publish desktop installers and update manifests to studio.0st.top"
         required: true
         default: true
         type: boolean
@@ -14,9 +14,6 @@ on:
 
 permissions:
   contents: read
-
-env:
-  DESKTOP_VERSION: "0.1.0"
 
 jobs:
   build:
@@ -28,19 +25,19 @@ jobs:
           - name: Windows x64
             os: windows-latest
             args: "--win nsis"
-            artifact: windows
+            artifact: windows-x64
           - name: macOS Intel
             os: macos-14
-            args: "--mac dmg --x64"
+            args: "--mac dmg zip --x64"
             artifact: macos-x64
           - name: macOS Apple Silicon
             os: macos-14
-            args: "--mac dmg --arm64"
+            args: "--mac dmg zip --arm64"
             artifact: macos-arm64
           - name: Linux x64
             os: ubuntu-latest
             args: "--linux AppImage"
-            artifact: linux
+            artifact: linux-x64
 
     runs-on: ${{ matrix.os }}
     defaults:
@@ -54,6 +51,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Resolve release version
+        shell: bash
+        env:
+          DESKTOP_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${DESKTOP_TAG#desktop-v}"
+          if [[ "$VERSION" == "$DESKTOP_TAG" ]]; then VERSION="$(node -p "require('./apps/desktop/package.json').version")"; fi
+          echo "DESKTOP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          node -e 'const fs=require("node:fs"); const p="apps/desktop/package.json"; const pkg=JSON.parse(fs.readFileSync(p,"utf8")); pkg.version=process.env.DESKTOP_VERSION; fs.writeFileSync(p, JSON.stringify(pkg,null,2)+"\n")'
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
       - name: Build shared package
@@ -61,27 +67,53 @@ jobs:
       - name: Disable macOS signing auto-discovery
         if: runner.os == 'macOS'
         run: echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
-      - name: Build desktop package
-        run: pnpm --filter @helstera/desktop build -- ${{ matrix.args }}
-      - name: Normalize installer names
+      - name: Build desktop package and updater metadata
+        run: pnpm --filter @helstera/desktop build -- ${{ matrix.args }} --publish never
+      - name: Prepare public downloads and updater feed
         shell: bash
+        env:
+          DESKTOP_CHANNEL: ${{ matrix.artifact }}
+          DESKTOP_TAG: ${{ github.ref_name }}
         run: |
-          mkdir -p desktop-release
-          case "${{ matrix.artifact }}" in
-            windows) cp apps/desktop/release/*.exe "desktop-release/Helstera-${DESKTOP_VERSION}-Windows-x64.exe" ;;
-            macos-x64) cp "apps/desktop/release/Helstera-${DESKTOP_VERSION}.dmg" "desktop-release/Helstera-${DESKTOP_VERSION}-macOS-x64.dmg" ;;
-            macos-arm64) cp "apps/desktop/release/Helstera-${DESKTOP_VERSION}-arm64.dmg" "desktop-release/Helstera-${DESKTOP_VERSION}-macOS-arm64.dmg" ;;
-            linux) cp apps/desktop/release/*.AppImage "desktop-release/Helstera-${DESKTOP_VERSION}.AppImage" ;;
+          VERSION="${DESKTOP_TAG#desktop-v}"
+          if [[ "$VERSION" == "$DESKTOP_TAG" ]]; then VERSION="$(node -p "require('./apps/desktop/package.json').version")"; fi
+          mkdir -p "desktop-release/downloads" "desktop-release/updates/${DESKTOP_CHANNEL}"
+
+          case "$DESKTOP_CHANNEL" in
+            windows-x64)
+              cp apps/desktop/release/*.exe "desktop-release/downloads/Helstera-${VERSION}-Windows-x64.exe"
+              cp apps/desktop/release/latest.yml "desktop-release/updates/${DESKTOP_CHANNEL}/latest.yml"
+              cp apps/desktop/release/*.exe apps/desktop/release/*.blockmap "desktop-release/updates/${DESKTOP_CHANNEL}/"
+              ;;
+            macos-x64)
+              cp "apps/desktop/release/Helstera-${VERSION}.dmg" "desktop-release/downloads/Helstera-${VERSION}-macOS-x64.dmg"
+              cp apps/desktop/release/latest-mac.yml "desktop-release/updates/${DESKTOP_CHANNEL}/latest-mac.yml"
+              cp apps/desktop/release/*.dmg apps/desktop/release/*.zip apps/desktop/release/*.blockmap "desktop-release/updates/${DESKTOP_CHANNEL}/"
+              ;;
+            macos-arm64)
+              cp "apps/desktop/release/Helstera-${VERSION}-arm64.dmg" "desktop-release/downloads/Helstera-${VERSION}-macOS-arm64.dmg"
+              cp apps/desktop/release/latest-mac.yml "desktop-release/updates/${DESKTOP_CHANNEL}/latest-mac.yml"
+              cp apps/desktop/release/*.dmg apps/desktop/release/*.zip apps/desktop/release/*.blockmap "desktop-release/updates/${DESKTOP_CHANNEL}/"
+              ;;
+            linux-x64)
+              cp apps/desktop/release/*.AppImage "desktop-release/downloads/Helstera-${VERSION}.AppImage"
+              cp apps/desktop/release/latest-linux.yml "desktop-release/updates/${DESKTOP_CHANNEL}/latest-linux.yml"
+              cp apps/desktop/release/*.AppImage apps/desktop/release/*.blockmap "desktop-release/updates/${DESKTOP_CHANNEL}/"
+              ;;
           esac
-          if [ "$RUNNER_OS" = "macOS" ]; then shasum -a 256 desktop-release/*; else sha256sum desktop-release/*; fi > desktop-release/SHA256SUMS-${{ matrix.artifact }}.txt
+
+          test -n "$(find "desktop-release/updates/${DESKTOP_CHANNEL}" -maxdepth 1 -type f -print -quit)"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then shasum -a 256 desktop-release/downloads/* > "desktop-release/downloads/SHA256SUMS-${DESKTOP_CHANNEL}.txt"; else sha256sum desktop-release/downloads/* > "desktop-release/downloads/SHA256SUMS-${DESKTOP_CHANNEL}.txt"; fi
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.artifact }}
-          path: Loomic/desktop-release/*
+          path: |
+            Loomic/desktop-release/downloads/*
+            Loomic/desktop-release/updates/${{ matrix.artifact }}/*
           if-no-files-found: error
 
   publish-server:
-    name: Publish installers to studio.0st.top
+    name: Publish installers and updater feeds
     needs: build
     if: ${{ github.event_name == 'push' || github.event.inputs.publish == 'true' }}
     runs-on: ubuntu-latest
@@ -90,8 +122,8 @@ jobs:
         with:
           pattern: desktop-*
           path: desktop-release
-          merge-multiple: true
-      - name: Upload installers to production server
+          merge-multiple: false
+      - name: Upload versioned downloads and platform feeds
         env:
           HELT_DEPLOY_HOST: ${{ secrets.HELT_DEPLOY_HOST }}
           HELT_DEPLOY_USER: ${{ secrets.HELT_DEPLOY_USER }}
@@ -102,13 +134,27 @@ jobs:
           test -n "$SSHPASS"
           sudo apt-get update -qq
           sudo apt-get install -y -qq sshpass
-          sshpass -e scp -o StrictHostKeyChecking=no desktop-release/* "$HELT_DEPLOY_USER@$HELT_DEPLOY_HOST:/www/helstera/apps/web/out/downloads/"
-      - name: Verify public downloads
+          sshpass -e ssh -o StrictHostKeyChecking=no "$HELT_DEPLOY_USER@$HELT_DEPLOY_HOST" 'mkdir -p /www/helstera/apps/web/out/downloads/updates/windows-x64 /www/helstera/apps/web/out/downloads/updates/macos-x64 /www/helstera/apps/web/out/downloads/updates/macos-arm64 /www/helstera/apps/web/out/downloads/updates/linux-x64'
+          for artifact in desktop-release/*; do
+            downloads="$artifact/downloads"
+            [[ ! -d "$downloads" ]] || sshpass -e scp -o StrictHostKeyChecking=no "$downloads"/* "$HELT_DEPLOY_USER@$HELT_DEPLOY_HOST:/www/helstera/apps/web/out/downloads/"
+            updates="$artifact/updates"
+            [[ ! -d "$updates" ]] || find "$updates" -mindepth 2 -maxdepth 2 -type f -print0 | while IFS= read -r -d '' file; do
+              relative="${file#*/updates/}"
+              target_dir="/www/helstera/apps/web/out/downloads/updates/$(dirname "$relative")"
+              sshpass -e ssh -o StrictHostKeyChecking=no "$HELT_DEPLOY_USER@$HELT_DEPLOY_HOST" "mkdir -p '$target_dir'"
+              sshpass -e scp -o StrictHostKeyChecking=no "$file" "$HELT_DEPLOY_USER@$HELT_DEPLOY_HOST:$target_dir/"
+            done
+          done
+      - name: Verify updater manifests and installers
+        env:
+          DESKTOP_TAG: ${{ github.ref_name }}
         run: |
-          for asset in \
-            Helstera-${DESKTOP_VERSION}.AppImage \
-            Helstera-${DESKTOP_VERSION}-Windows-x64.exe \
-            Helstera-${DESKTOP_VERSION}-macOS-x64.dmg \
-            Helstera-${DESKTOP_VERSION}-macOS-arm64.dmg; do
+          DESKTOP_VERSION="${DESKTOP_TAG#desktop-v}"
+          if [[ "$DESKTOP_VERSION" == "$DESKTOP_TAG" ]]; then DESKTOP_VERSION="0.2.0"; fi
+          for feed in windows-x64/latest.yml macos-x64/latest-mac.yml macos-arm64/latest-mac.yml linux-x64/latest-linux.yml; do
+            curl --fail --location --silent --show-error --head "https://studio.0st.top/downloads/updates/$feed" | grep -i '^content-length:'
+          done
+          for asset in "Helstera-${DESKTOP_VERSION}.AppImage" "Helstera-${DESKTOP_VERSION}-Windows-x64.exe" "Helstera-${DESKTOP_VERSION}-macOS-x64.dmg" "Helstera-${DESKTOP_VERSION}-macOS-arm64.dmg"; do
             curl --fail --location --silent --show-error --head "https://studio.0st.top/downloads/$asset" | grep -i '^content-length:'
           done

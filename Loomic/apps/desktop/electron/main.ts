@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu, Tray, shell, nativeImage, ipcMain } from "electron";
 import { classifyDesktopAction, desktopAgentActionSchema, desktopAgentTaskSchema, type DesktopAgentAction, type DesktopAgentTask } from "@helstera/shared";
+import { autoUpdater } from "electron-updater";
 import { join } from "path";
 
 let mainWindow: BrowserWindow | null = null;
@@ -10,6 +11,69 @@ let assistantSocket: any = null;
 let assistantSessionToken = "";
 const desktopTaskTabs = new Map<string, BrowserWindow>();
 const desktopAgentTasks = new Map<string, DesktopAgentTask>();
+type UpdateState = {
+  status: "idle" | "checking" | "available" | "downloading" | "downloaded" | "not-available" | "error";
+  currentVersion: string;
+  version?: string;
+  percent?: number;
+  message?: string;
+};
+type UpdateStateInput = Omit<UpdateState, "currentVersion">;
+let updateState: UpdateState = { status: "idle", currentVersion: app.getVersion() };
+let updateCheckActive = false;
+let updateTimer: ReturnType<typeof setInterval> | null = null;
+
+function publishUpdateState(next: UpdateStateInput) {
+  updateState = { ...next, currentVersion: app.getVersion() };
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send("desktop:update-state", updateState);
+  }
+}
+
+function updateFeedUrl() {
+  const platform = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux";
+  const architecture = process.arch === "arm64" ? "arm64" : "x64";
+  return `https://studio.0st.top/downloads/updates/${platform}-${architecture}/`;
+}
+
+async function checkForDesktopUpdate() {
+  if (!app.isPackaged || updateCheckActive) return updateState;
+  updateCheckActive = true;
+  publishUpdateState({ status: "checking" });
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (error) {
+    publishUpdateState({ status: "error", message: error instanceof Error ? error.message : "更新检查失败" });
+  } finally {
+    updateCheckActive = false;
+  }
+  return updateState;
+}
+
+function configureAutoUpdates() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.allowDowngrade = false;
+  autoUpdater.setFeedURL({ provider: "generic", url: updateFeedUrl() });
+  autoUpdater.on("checking-for-update", () => publishUpdateState({ status: "checking" }));
+  autoUpdater.on("update-available", (info) => publishUpdateState({ status: "available", version: info.version, message: "发现新版本，正在后台下载" }));
+  autoUpdater.on("download-progress", (progress) => publishUpdateState({ status: "downloading", percent: Math.max(0, Math.min(100, Math.round(progress.percent))), ...(updateState.version ? { version: updateState.version } : {}), message: "正在下载更新" }));
+  autoUpdater.on("update-downloaded", (info) => publishUpdateState({ status: "downloaded", version: info.version, message: "更新已下载，重启后安装" }));
+  autoUpdater.on("update-not-available", () => publishUpdateState({ status: "not-available", message: "当前已是最新版本" }));
+  autoUpdater.on("error", (error) => publishUpdateState({ status: "error", message: error.message.slice(0, 240) }));
+  setTimeout(() => void checkForDesktopUpdate(), 8_000);
+  updateTimer = setInterval(() => void checkForDesktopUpdate(), 6 * 60 * 60 * 1000);
+}
+
+ipcMain.handle("desktop.update-state", () => updateState);
+ipcMain.handle("desktop.check-updates", () => checkForDesktopUpdate());
+ipcMain.handle("app-version", () => app.getVersion());
+ipcMain.handle("desktop.install-update", () => {
+  if (updateState.status !== "downloaded") return { ok: false };
+  autoUpdater.quitAndInstall(false, true);
+  return { ok: true };
+});
 
 function isSafeBrowserUrl(value: string): boolean {
   try {
@@ -413,6 +477,7 @@ function createWindow() {
     {
       label: "Helstera",
       submenu: [
+        { label: "检查更新…", click: () => void checkForDesktopUpdate() },
         { label: "关于 Helstera", role: "about" },
         { type: "separator" },
         {
@@ -539,6 +604,7 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  configureAutoUpdates();
   createWindow();
   if (process.platform !== "linux") {
     createTray();
@@ -567,6 +633,7 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
+  if (updateTimer) clearInterval(updateTimer);
   tray?.destroy();
   assistantSocket?.close();
   recorderWindow?.destroy();

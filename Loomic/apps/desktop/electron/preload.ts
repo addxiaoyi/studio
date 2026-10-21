@@ -26,11 +26,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // App info
   getAppVersion: () => ipcRenderer.invoke("app-version"),
   getPlatform: () => process.platform,
+  getUpdateState: () => ipcRenderer.invoke("desktop.update-state"),
+  checkForUpdates: () => ipcRenderer.invoke("desktop.check-updates"),
+  installUpdate: () => ipcRenderer.invoke("desktop.install-update"),
+  onUpdateState: (callback: (state: DesktopUpdateState) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: DesktopUpdateState) => callback(state);
+    ipcRenderer.on("desktop:update-state", listener);
+    return () => ipcRenderer.removeListener("desktop:update-state", listener);
+  },
   openEmbeddedBrowser: (url: string) => ipcRenderer.invoke("assistant.open-embedded", url),
   connectEmbeddedAssistant: (input: { wssUrl: string; code: string }) => ipcRenderer.invoke("assistant.connect-embedded", input),
   disconnectEmbeddedAssistant: () => ipcRenderer.invoke("assistant.disconnect-embedded"),
   closeEmbeddedBrowser: () => ipcRenderer.invoke("assistant.close-embedded"),
 });
+
+type DesktopUpdateState = {
+  status: "idle" | "checking" | "available" | "downloading" | "downloaded" | "not-available" | "error";
+  currentVersion: string;
+  version?: string;
+  percent?: number;
+  message?: string;
+};
 
 // Type declarations for the exposed API
 declare global {
@@ -44,6 +60,10 @@ declare global {
       closeWindow: () => Promise<void>;
       getAppVersion: () => Promise<string>;
       getPlatform: () => string;
+      getUpdateState: () => Promise<DesktopUpdateState>;
+      checkForUpdates: () => Promise<DesktopUpdateState>;
+      installUpdate: () => Promise<{ ok: boolean }>;
+      onUpdateState: (callback: (state: DesktopUpdateState) => void) => () => void;
       openEmbeddedBrowser: (url: string) => Promise<{ ok: boolean }>;
       connectEmbeddedAssistant: (input: { wssUrl: string; code: string }) => Promise<{ ok: boolean; message?: string }>;
       disconnectEmbeddedAssistant: () => Promise<{ ok: boolean }>;

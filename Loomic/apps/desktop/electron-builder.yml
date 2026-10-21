@@ -41,4 +41,4 @@ nsis:
 
 publish:
   provider: generic
-  url: https://releases.helstera.com
+  url: https://studio.0st.top/downloads/updates/
