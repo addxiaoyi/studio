@@ -113,20 +113,21 @@ def deploy(args: argparse.Namespace) -> None:
         stage = shlex.quote(staging)
         backup_q = shlex.quote(backup)
         remote_run(target, f"mkdir -p {stage}/candidate && unzip -q {stage}/candidate.zip -d {stage}/candidate")
-        remote_run(target, f"test -f {stage}/candidate/apps/web/out/index.html && test -f {stage}/candidate/apps/web/out/download/index.html && test -f {stage}/candidate/apps/web/out/downloads/Helstera-0.1.0.AppImage && test -d {stage}/candidate/apps/web/out/_next/static && test -f {stage}/candidate/RELEASE-MANIFEST.json")
+        remote_run(target, f"test -f {stage}/candidate/apps/web/out/index.html && test -f {stage}/candidate/apps/web/out/download/index.html && test -f {stage}/candidate/apps/web/out/downloads/Helstera-0.1.0.AppImage && test -f {stage}/candidate/apps/desktop/package.json && test -d {stage}/candidate/apps/web/out/_next/static && test -f {stage}/candidate/RELEASE-MANIFEST.json")
         remote_run(
             target,
-            f"cd {root} && tar -czf {backup_q}/current.tgz apps/server/src apps/server/package.json apps/server/tsconfig.json apps/web/out packages/shared/dist package.json pnpm-lock.yaml pnpm-workspace.yaml",
+            f"cd {root} && tar -czf {backup_q}/current.tgz apps/server/src apps/server/package.json apps/server/tsconfig.json apps/desktop/package.json apps/web/out packages/shared/dist package.json pnpm-lock.yaml pnpm-workspace.yaml",
             timeout=300,
         )
 
         remote_run(
             target,
             f"set -eu; cd {root}; "
-            f"rm -rf .codex-next; mkdir -p .codex-next/apps/server .codex-next/apps/web .codex-next/packages/shared; "
+            f"rm -rf .codex-next; mkdir -p .codex-next/apps/server .codex-next/apps/desktop .codex-next/apps/web .codex-next/packages/shared; "
             f"cp -a {stage}/candidate/apps/server/src .codex-next/apps/server/src; "
             f"cp -a {stage}/candidate/apps/server/package.json .codex-next/apps/server/package.json; "
             f"cp -a {stage}/candidate/apps/server/tsconfig.json .codex-next/apps/server/tsconfig.json; "
+            f"cp -a {stage}/candidate/apps/desktop/package.json .codex-next/apps/desktop/package.json; "
             f"cp -a {stage}/candidate/apps/web/out .codex-next/apps/web/out; "
             f"cp -a {stage}/candidate/packages/shared/dist .codex-next/packages/shared/dist; "
             f"cp -a {stage}/candidate/package.json .codex-next/package.json; "
@@ -138,6 +139,7 @@ def deploy(args: argparse.Namespace) -> None:
             f"mv .codex-next/packages/shared/dist packages/shared/dist; "
             f"cp .codex-next/apps/server/package.json apps/server/package.json; "
             f"cp .codex-next/apps/server/tsconfig.json apps/server/tsconfig.json; "
+            f"cp .codex-next/apps/desktop/package.json apps/desktop/package.json; "
             f"cp .codex-next/package.json package.json; cp .codex-next/pnpm-lock.yaml pnpm-lock.yaml; cp .codex-next/pnpm-workspace.yaml pnpm-workspace.yaml; "
             f"rm -rf .codex-next",
             timeout=300,
