@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyDesktopAction, desktopAgentTaskRequestSchema } from "./desktop-control.js";
+import { classifyDesktopAction, desktopAgentEventSchema, desktopAgentTaskRequestSchema } from "./desktop-control.js";
 
 describe("desktop control policy", () => {
   it("limits tasks to declared roles and capabilities", () => {
@@ -18,5 +18,13 @@ describe("desktop control policy", () => {
     expect(classifyDesktopAction({ requestId: "b", taskId: "00000000-0000-0000-0000-000000000001", kind: "click", target: "#buy" })).toBe("deny");
     expect(classifyDesktopAction({ requestId: "c", taskId: "00000000-0000-0000-0000-000000000001", kind: "type", fieldType: "password", value: "secret", approvalToken: "abcdefghijklmnop" })).toBe("deny");
     expect(classifyDesktopAction({ requestId: "d", taskId: "00000000-0000-0000-0000-000000000001", kind: "click", target: "#buy", approvalToken: "abcdefghijklmnop" })).toBe("confirm");
+  });
+
+  it("only accepts bounded HTTP page evidence without URL credentials", () => {
+    const base = { taskId: "00000000-0000-0000-0000-000000000001", eventType: "page" as const };
+    expect(desktopAgentEventSchema.safeParse({ ...base, result: { page: { url: "javascript:alert(1)" } } }).success).toBe(false);
+    expect(desktopAgentEventSchema.safeParse({ ...base, result: { page: { url: "https://user:pass@example.test/" } } }).success).toBe(false);
+    expect(desktopAgentEventSchema.safeParse({ ...base, result: { screenshotBase64: "a".repeat(11_200_001) } }).success).toBe(false);
+    expect(desktopAgentEventSchema.safeParse({ ...base, result: { page: { url: "https://example.test/", title: "Site" } } }).success).toBe(true);
   });
 });

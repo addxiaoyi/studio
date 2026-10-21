@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+function isCredentialFreeHttpUrl(value: string) {
+  const authority = value.match(/^https?:\/\/([^/?#]*)/i)?.[1] ?? "";
+  return /^https?:\/\//i.test(value) && !authority.includes("@");
+}
+
 export const desktopAgentRoleSchema = z.enum(["planner", "researcher", "operator", "reviewer"]);
 export const desktopCapabilitySchema = z.enum([
   "screen.read",
@@ -28,7 +33,7 @@ export const desktopAgentTaskRequestSchema = z.object({
   goal: z.string().trim().min(1).max(4_000),
   role: desktopAgentRoleSchema,
   capabilities: z.array(desktopCapabilitySchema).min(1).max(8),
-  targetUrl: z.string().url().optional(),
+  targetUrl: z.string().url().refine(isCredentialFreeHttpUrl, "Target URL must be HTTP(S) and contain no credentials.").optional(),
   maxDurationSeconds: z.number().int().min(10).max(900).default(300),
   pageLimit: z.number().int().min(1).max(10).default(3),
 });
@@ -57,7 +62,16 @@ export const desktopAgentEventSchema = z.object({
   detail: z.string().max(2_000).optional(),
   progress: z.number().int().min(0).max(100).optional(),
   action: desktopAgentActionSchema.optional(),
-  result: z.record(z.string(), z.unknown()).optional(),
+  result: z.object({
+    page: z.object({
+      url: z.string().url().max(2048).refine(isCredentialFreeHttpUrl),
+      title: z.string().max(500).optional(),
+      description: z.string().max(1_000).optional(),
+      headings: z.array(z.string().max(500)).max(16).optional(),
+      navigation: z.array(z.string().max(300)).max(24).optional(),
+    }).optional(),
+    screenshotBase64: z.string().max(11_200_000).optional(),
+  }).strict().optional(),
 });
 
 export type DesktopAgentRole = z.infer<typeof desktopAgentRoleSchema>;

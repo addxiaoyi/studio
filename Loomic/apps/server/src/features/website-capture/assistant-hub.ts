@@ -199,7 +199,7 @@ export class WebsiteAssistantHub {
       created_at: string | Date;
       updated_at: string | Date;
       completed_at: string | Date | null;
-      events: Array<{ eventType: string; detail: string | null; createdAt: string; approvalId?: string; action?: DesktopAgentAction }>;
+      events: Array<{ eventType: string; detail: string | null; createdAt: string; approvalId?: string; action?: DesktopAgentAction; result?: Record<string, unknown> }>;
       pending_approvals: Array<{ approvalId: string; action: DesktopAgentAction; expiresAt: string }>;
     }>(
       `select t.id,t.goal,t.role,t.capabilities,t.target_url,t.status,t.result,t.error_message,t.created_at,t.updated_at,t.completed_at,
@@ -209,7 +209,8 @@ export class WebsiteAssistantHub {
                   'detail',detail,
                   'createdAt',created_at,
                   'approvalId',payload->>'approvalId',
-                  'action',payload->'action'
+                  'action',payload->'action',
+                  'result',payload->'result'
                 ) order by created_at desc)
                   from (select event_type,detail,payload,created_at from desktop_agent_events e where e.task_id=t.id order by created_at desc limit 6) recent
               ),'[]'::json) as events,
@@ -410,10 +411,21 @@ export class WebsiteAssistantHub {
       commands: ["capture", "navigate", "scroll", "pause", "stop", "disconnect"],
     });
     socket.on("message", (raw) => {
+      const messageBytes = typeof raw === "string" ? Buffer.byteLength(raw) : (raw as Buffer).byteLength;
+      if (messageBytes > 64 * 1024 * 1024) {
+        socket.close(1009, "Message exceeds the assistant limit");
+        return;
+      }
       void this.handleMessage(live, raw as Buffer).catch((error) => {
         let taskId = "";
-        try { taskId = JSON.parse(Buffer.from(raw as any).toString("utf8"))?.taskId ?? ""; } catch { /* malformed messages are ignored below */ }
-        if (taskId) void this.failTask(live, taskId, error instanceof Error ? error.message : "本地浏览器消息处理失败");
+        let messageType = "";
+        try {
+          const parsed = JSON.parse(Buffer.from(raw as any).toString("utf8"));
+          taskId = parsed?.taskId ?? "";
+          messageType = parsed?.type ?? "";
+        } catch { /* malformed messages are ignored below */ }
+        if (taskId && messageType === "desktop_agent.event") void this.failDesktopTask(taskId, error instanceof Error ? error.message : "桌面协作事件处理失败");
+        else if (taskId) void this.failTask(live, taskId, error instanceof Error ? error.message : "本地浏览器消息处理失败");
         this.send(live, { type: "assistant.error", message: error instanceof Error ? error.message : "助手消息处理失败" });
       });
     });
@@ -519,11 +531,12 @@ export class WebsiteAssistantHub {
       return;
     }
     const event = parsed.data;
-    const result = await this.options.db.query<{ id: string; status: string }>(
-      `select id,status from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3`,
+    const result = await this.options.db.query<{ id: string; status: string; workspace_id: string; created_by: string; target_url: string | null; goal: string }>(
+      `select id,status,workspace_id,created_by,target_url,goal from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3`,
       [event.taskId, live.userId, live.id],
     );
-    if (!result.rows[0] || !["queued", "running"].includes(result.rows[0].status)) return;
+    const task = result.rows[0];
+    if (!task || !["queued", "running"].includes(task.status)) return;
     if (event.eventType === "approval_required") {
       const action = event.action;
       if (!action || !["click", "type"].includes(action.kind) || isDesktopCredentialField(action.fieldType) || action.approvalToken) {
@@ -553,7 +566,39 @@ export class WebsiteAssistantHub {
       this.send(live, { type: "desktop_agent.approval_pending", taskId: event.taskId, approvalId, action, expiresAt, detail });
       return;
     }
-    const safeResult = event.result ? { ...event.result, screenshotBase64: undefined, recordingBase64: undefined } : {};
+    let screenshotAsset: { assetId: string; url: string } | undefined;
+    const screenshotBase64 = event.result?.screenshotBase64;
+    if (screenshotBase64) {
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(screenshotBase64)) throw new Error("桌面截图数据格式无效。");
+      const screenshot = Buffer.from(screenshotBase64, "base64");
+      if (!screenshot.length || screenshot.length > MAX_SCREENSHOT_BYTES) throw new Error("桌面截图超过 8 MB 限制。");
+      if (screenshot.length < 3 || screenshot[0] !== 0xff || screenshot[1] !== 0xd8 || screenshot[2] !== 0xff) throw new Error("桌面截图不是有效的 JPEG 图像。");
+      const sourceUrl = event.result?.page?.url ?? task.target_url ?? "";
+      const asset = await persistCaptureAsset({
+        db: this.options.db,
+        storage: this.options.storage,
+        storageRoot: this.options.storageRoot,
+        webOrigin: this.options.webOrigin,
+        task: {
+          id: task.id,
+          workspace_id: task.workspace_id,
+          created_by: task.created_by,
+          start_url: sourceUrl,
+          page_limit: 1,
+          record_video: false,
+        },
+        bytes: screenshot,
+        mimeType: "image/jpeg",
+        mediaType: "image",
+        title: `Desktop Agent screenshot: ${String(event.result?.page?.title ?? task.goal).slice(0, 120)}`,
+        metadata: { ...(sourceUrl ? { sourceUrl } : {}), captureMode: "desktop_agent", taskId: task.id },
+      });
+      screenshotAsset = { assetId: asset.id, url: asset.url };
+    }
+    const safeResult = {
+      ...(event.result?.page ? { page: event.result.page } : {}),
+      ...(screenshotAsset ? { screenshotAsset } : {}),
+    };
     const safeAction = event.action ? { ...event.action, approvalToken: undefined } : undefined;
     if (event.approvalId && event.action?.approvalToken) {
       const consumed = await this.options.db.query<{ id: string }>(
@@ -570,8 +615,8 @@ export class WebsiteAssistantHub {
     );
     const terminal = event.eventType === "completed" || event.eventType === "failed";
     await this.options.db.query(
-      `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb else result end,error_message=case when $2='failed' then $5 else null end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1`,
-      [event.taskId, event.eventType === "failed" ? "failed" : event.eventType === "completed" ? "succeeded" : "running", terminal, JSON.stringify(safeResult), event.detail ?? null],
+      `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb when $6::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $6::jsonb else result end,error_message=case when $2='failed' then $5 else null end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1`,
+      [event.taskId, event.eventType === "failed" ? "failed" : event.eventType === "completed" ? "succeeded" : "running", terminal, JSON.stringify(safeResult), event.detail ?? null, JSON.stringify(safeResult)],
     );
     if (terminal) {
       this.clearDesktopTaskTimer(event.taskId);

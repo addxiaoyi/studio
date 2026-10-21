@@ -2170,7 +2170,7 @@ export type DesktopAgentTaskResponse = {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
-  events: Array<{ eventType: string; detail: string | null; createdAt: string }>;
+  events: Array<{ eventType: string; detail: string | null; createdAt: string; result?: Record<string, unknown>; approvalId?: string }>;
   pendingApprovals: Array<{ approvalId: string; action: { kind: string; target?: string; targetUrl?: string; value?: string; fieldType?: string }; expiresAt: string }>;
 };
 
