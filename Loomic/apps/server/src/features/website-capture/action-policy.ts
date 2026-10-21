@@ -1,20 +1,18 @@
-export type WebsiteActionKind = "navigate" | "scroll" | "click" | "fill" | "upload" | "download" | "submit" | "publish" | "purchase" | "payment" | "authorize";
-
-export type WebsiteActionRequest = {
-  kind: WebsiteActionKind;
-  target?: string;
-  targetUrl?: string;
-  targetRole?: string;
-  sideEffect?: boolean;
-  fieldType?: string;
-};
+import type { WebsiteActionRequest } from "@helstera/shared";
+export type { WebsiteActionRequest } from "@helstera/shared";
 
 export type WebsiteActionDecision =
   | { state: "allow"; reason: string }
   | { state: "confirm"; reason: string }
   | { state: "deny"; reason: string };
 
-export function classifyWebsiteAction(action: WebsiteActionRequest): WebsiteActionDecision {
+export function classifyWebsiteAction(action: WebsiteActionRequest | null | undefined): WebsiteActionDecision {
+  if (!action || typeof action !== "object" || typeof action.kind !== "string") {
+    return { state: "deny", reason: "动作格式无效。" };
+  }
+  if (!["navigate", "scroll", "click", "fill", "upload", "download", "submit", "publish", "purchase", "payment", "authorize"].includes(action.kind)) {
+    return { state: "deny", reason: "动作类型不受支持。" };
+  }
   if (["password", "otp", "one-time-code", "verification-code"].includes((action.fieldType ?? "").toLowerCase())) {
     return { state: "deny", reason: "Helstera 不代输密码、验证码或 OTP。" };
   }
@@ -29,6 +27,9 @@ export function classifyWebsiteAction(action: WebsiteActionRequest): WebsiteActi
   }
   if (action.kind === "click" && action.targetRole && /submit|buy|pay|publish|upload|download/i.test(action.targetRole)) {
     return { state: "confirm", reason: "目标控件可能触发外部副作用，需要当前用户确认。" };
+  }
+  if (action.kind === "click" && !/link|navigation|menu|tab/i.test(action.targetRole ?? "")) {
+    return { state: "confirm", reason: "无法确认点击目标是否产生外部副作用，需要当前用户确认。" };
   }
   return { state: "allow", reason: "未检测到表单提交或外部副作用。" };
 }

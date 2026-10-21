@@ -168,6 +168,82 @@ export class WebsiteAssistantHub {
     if (live) this.send(live, { type: "website_capture.stop", taskId });
   }
 
+  async listPendingActions(userId: string, taskId: string) {
+    const { rows } = await this.options.db.query<{ id: string; action: WebsiteActionRequest; reason: string; expires_at: string }>(
+      `select id,action,reason,expires_at from website_capture_actions
+        where task_id=$1 and user_id=$2 and status='pending' and expires_at > now()
+        order by created_at desc`,
+      [taskId, userId],
+    );
+    return rows.map((row) => ({ actionId: row.id, action: row.action, reason: row.reason, expiresAt: new Date(row.expires_at).toISOString() }));
+  }
+
+  async approveAction(userId: string, actionId: string) {
+    const token = randomBytes(32).toString("base64url");
+    const { rows } = await this.options.db.query<{ task_id: string; connection_id: string; action: WebsiteActionRequest }>(
+      `update website_capture_actions set status='approved', approved_at=now(), approval_token_hash=$3
+        where id=$1 and user_id=$2 and status='pending' and expires_at > now()
+        returning task_id,connection_id,action`,
+      [actionId, userId, hashToken(token)],
+    );
+    const row = rows[0];
+    if (!row) throw new Error("动作确认已过期或不存在。");
+    const live = this.connections.get(row.connection_id);
+    if (!live || live.ws.readyState !== 1) {
+      await this.options.db.query("update website_capture_actions set status='pending', approved_at=null, approval_token_hash=null where id=$1 and status='approved'", [actionId]);
+      throw new Error("本地浏览器助手已断开。");
+    }
+    this.send(live, { type: "website_capture.action_execute", actionId, taskId: row.task_id, action: row.action, approvalToken: token });
+    await this.event(row.task_id, "action_approved", `用户已确认动作：${row.action.kind}`);
+    return { actionId, status: "approved" as const };
+  }
+
+  async rejectAction(userId: string, actionId: string) {
+    const { rows } = await this.options.db.query<{ task_id: string; connection_id: string }>(
+      "update website_capture_actions set status='rejected', rejected_at=now() where id=$1 and user_id=$2 and status='pending' returning task_id,connection_id",
+      [actionId, userId],
+    );
+    const row = rows[0];
+    if (!row) throw new Error("动作确认已过期或不存在。");
+    const live = this.connections.get(row.connection_id);
+    if (live) this.send(live, { type: "website_capture.action_denied", actionId, taskId: row.task_id, reason: "用户拒绝了动作。" });
+    await this.event(row.task_id, "action_rejected", "用户拒绝了网页动作");
+    return { actionId, status: "rejected" as const };
+  }
+
+  private async consumeApprovedAction(live: LiveConnection, message: any) {
+    const actionId = String(message.actionId ?? "");
+    const approvalToken = String(message.approvalToken ?? "");
+    if (!actionId) {
+      this.send(live, { type: "website_capture.action_denied", actionId, taskId: message.taskId, reason: "动作缺少一次性确认令牌。" });
+      return;
+    }
+    if (!approvalToken) {
+      const decision = classifyWebsiteAction(message.action as WebsiteActionRequest);
+      if (decision.state === "allow") {
+        const task = await this.loadLocalTask(live, String(message.taskId ?? ""));
+        if (task) await this.event(task.id, "action_executed", JSON.stringify({ actionId, ok: Boolean(message.ok), message: String(message.message ?? "").slice(0, 500) }));
+        return;
+      }
+      this.send(live, { type: "website_capture.action_denied", actionId, taskId: message.taskId, reason: "副作用动作必须携带一次性确认令牌。" });
+      return;
+    }
+    const result = await this.options.db.query<{ task_id: string }>(
+      `update website_capture_actions
+          set status='executed', consumed_at=now()
+        where id=$1 and connection_id=$2 and status='approved'
+          and expires_at > now() and approval_token_hash=$3
+        returning task_id`,
+      [actionId, live.id, hashToken(approvalToken)],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      this.send(live, { type: "website_capture.action_denied", actionId, taskId: message.taskId, reason: "动作确认令牌无效、已过期或已使用。" });
+      return;
+    }
+    await this.event(row.task_id, "action_executed", JSON.stringify({ actionId, ok: Boolean(message.ok), message: String(message.message ?? "").slice(0, 500) }));
+  }
+
   async accept(socket: WebSocket, request: FastifyRequest): Promise<void> {
     const url = new URL(request.url, `http://${request.headers.host}`);
     const code = url.searchParams.get("code");
@@ -265,17 +341,31 @@ export class WebsiteAssistantHub {
     if (message?.type === "website_capture.complete") return this.completeTask(live, message);
     if (message?.type === "website_capture.recording_failed") return this.event(String(message.taskId ?? ""), "recording_failed", String(message.message ?? "本地录屏不可用"));
     if (message?.type === "website_capture.failed") return this.failTask(live, String(message.taskId ?? ""), String(message.message ?? "本地浏览器任务失败"));
+    if (message?.type === "website_capture.action_result") return this.consumeApprovedAction(live, message);
     if (message?.type === "website_capture.side_effect") {
       this.send(live, { type: "website_capture.action_denied", taskId: message.taskId, reason: "副作用动作必须由当前用户在确认卡中明确批准。" });
     }
     if (message?.type === "website_capture.action_request") {
       const decision = classifyWebsiteAction(message.action as WebsiteActionRequest);
-      this.send(live, {
-        type: decision.state === "allow" ? "website_capture.action_execute" : "website_capture.action_confirmation_required",
-        taskId: message.taskId,
-        action: message.action,
-        reason: decision.reason,
-      });
+      const task = await this.loadLocalTask(live, String(message.taskId ?? ""));
+      if (!task) return;
+      if (decision.state === "deny") {
+        this.send(live, { type: "website_capture.action_denied", taskId: task.id, action: message.action, reason: decision.reason });
+        return;
+      }
+      if (decision.state === "allow") {
+        this.send(live, { type: "website_capture.action_execute", taskId: task.id, action: message.action });
+        return;
+      }
+      const action = await this.options.db.query<{ id: string }>(
+        `insert into website_capture_actions(task_id,workspace_id,user_id,connection_id,action,reason)
+         values($1,$2,$3,$4,$5::jsonb,$6) returning id`,
+        [task.id, task.workspace_id, live.userId, live.id, JSON.stringify(message.action), decision.reason],
+      );
+      const actionId = action.rows[0]?.id;
+      if (!actionId) throw new Error("无法创建动作确认。");
+      await this.event(task.id, "action_confirmation", JSON.stringify({ actionId, action: message.action, reason: decision.reason }));
+      this.send(live, { type: "website_capture.action_confirmation_required", actionId, taskId: task.id, action: message.action, reason: decision.reason });
     }
   }
 
@@ -351,6 +441,7 @@ export class WebsiteAssistantHub {
       completedAt: new Date().toISOString(),
     };
     await this.options.db.query("update website_capture_tasks set status='succeeded', progress=100, stage='completed', result=$2::jsonb, completed_at=now(), updated_at=now() where id=$1 and status='running'", [task.id, JSON.stringify(result)]);
+    await this.options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status='pending'", [task.id]);
     await this.event(task.id, "completed", "本地浏览证据与中文介绍已保存");
     this.pages.delete(task.id);
     this.clearTaskTimer(task.id);
@@ -368,6 +459,7 @@ export class WebsiteAssistantHub {
   private async failTask(live: LiveConnection, taskId: string, message: string) {
     if (!taskId) return;
     await this.options.db.query("update website_capture_tasks set status='failed', stage='failed', error_message=$2, updated_at=now() where id=$1 and assistant_connection_id=$3 and status in ('queued','running')", [taskId, message.slice(0, 1000), live.id]);
+    await this.options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status='pending'", [taskId]);
     await this.event(taskId, "failed", message);
     this.pages.delete(taskId);
     this.clearTaskTimer(taskId);
@@ -437,7 +529,7 @@ export class WebsiteAssistantHub {
 
   private parsePlatform(value: unknown): LiveConnection["platform"] {
     const text = String(value ?? "").toLowerCase();
-    return text.includes("windows") ? "windows" : text.includes("mac") ? "macos" : text.includes("linux") ? "linux" : "unknown";
+    return text.includes("windows") ? "windows" : text.includes("mac") || text.includes("darwin") ? "macos" : text.includes("linux") ? "linux" : "unknown";
   }
 }
 
@@ -453,7 +545,15 @@ export function validateLocalExactUrl(input: string): URL {
 function validateLocalCapturedUrl(input: string, startUrl: string, followExternal: boolean): URL {
   const url = validateLocalExactUrl(input);
   const start = new URL(startUrl);
-  const isPrivateHost = (hostname: string) => hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal") || hostname === "127.0.0.1" || hostname === "::1";
+  const isPrivateHost = (hostname: string) => {
+    const value = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (value === "localhost" || value.endsWith(".localhost") || value.endsWith(".local") || value.endsWith(".internal")) return true;
+    if (value === "::1" || value === "0.0.0.0" || value.startsWith("127.")) return true;
+    if (/^10\./.test(value) || /^192\.168\./.test(value) || /^169\.254\./.test(value)) return true;
+    const private172 = value.match(/^172\.(\d{1,3})\./);
+    if (private172 && Number(private172[1]) >= 16 && Number(private172[1]) <= 31) return true;
+    return /^(fc|fd|fe80):/i.test(value);
+  };
   if (isPrivateHost(url.hostname) && url.hostname.toLowerCase() !== start.hostname.toLowerCase()) throw new Error("自动跟链不得扩展到新的本地主机。");
   if (!followExternal && url.hostname.toLowerCase() !== start.hostname.toLowerCase()) throw new Error("当前任务未授权跟随外域页面。");
   return url;

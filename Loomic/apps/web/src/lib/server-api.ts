@@ -31,6 +31,7 @@ import type {
   WebsiteCaptureTask,
   WebsiteCaptureAssistantConnection,
   WebsiteCapturePairing,
+  WebsiteActionRequest,
 } from "@helstera/shared";
 
 import { dedupeRequest } from "./dedupe-request";
@@ -2090,6 +2091,41 @@ export async function retryWebsiteCapture(accessToken: string, taskId: string): 
   });
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json() as { ok: true; data: { task: WebsiteCaptureTask } }).data;
+}
+
+export type PendingWebsiteAction = {
+  actionId: string;
+  action: WebsiteActionRequest;
+  reason: string;
+  expiresAt: string;
+};
+
+export async function fetchWebsiteCaptureActions(accessToken: string, taskId: string): Promise<PendingWebsiteAction[]> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/${encodeURIComponent(taskId)}/actions`, {
+    headers: authHeaders(accessToken),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: PendingWebsiteAction[] }).data;
+}
+
+export async function approveWebsiteCaptureAction(accessToken: string, actionId: string): Promise<{ actionId: string; status: "approved" }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/actions/${encodeURIComponent(actionId)}/approve`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: "{}",
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { actionId: string; status: "approved" } }).data;
+}
+
+export async function rejectWebsiteCaptureAction(accessToken: string, actionId: string): Promise<{ actionId: string; status: "rejected" }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/actions/${encodeURIComponent(actionId)}/reject`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: "{}",
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { actionId: string; status: "rejected" } }).data;
 }
 
 export async function prepareWebsitePromo(accessToken: string, taskId: string): Promise<{ state: string; request?: { approvalId: string; model: string; estimatedCredits: number; duration?: number; resolution?: string; hasReferenceImage: boolean; expiresAt: string }; jobId?: string }> {

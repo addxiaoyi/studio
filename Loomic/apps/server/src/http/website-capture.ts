@@ -191,6 +191,30 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     }
   });
 
+  app.get<{ Params: { taskId: string } }>("/api/website-capture/:taskId/actions", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    try {
+      await options.viewerService.ensureViewer(user);
+      return reply.send({ ok: true, data: await options.assistantHub.listPendingActions(user.id, request.params.taskId) });
+    } catch (error) {
+      return sendWebsiteCaptureError(error, reply);
+    }
+  });
+
+  for (const [suffix, operation] of [["approve", "approveAction"], ["reject", "rejectAction"]] as const) {
+    app.post<{ Params: { actionId: string } }>(`/api/website-capture/actions/:actionId/${suffix}`, async (request, reply) => {
+      const user = await options.auth.authenticate(request);
+      if (!user) return unauthorized(reply);
+      try {
+        const result = await options.assistantHub[operation](user.id, request.params.actionId);
+        return reply.send({ ok: true, data: result });
+      } catch (error) {
+        return sendWebsiteCaptureError(error, reply);
+      }
+    });
+  }
+
   app.post<{ Params: { taskId: string } }>("/api/website-capture/:taskId/cancel", async (request, reply) => {
     const user = await options.auth.authenticate(request);
     if (!user) return unauthorized(reply);
@@ -203,6 +227,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         [request.params.taskId, viewer.workspace.id, user.id],
       );
       if (!updated.rows[0]) return reply.code(409).send({ ok: false, error: { code: "task_not_cancelable", message: "任务不存在或已经结束。" } });
+      await options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status='pending'", [updated.rows[0].id]);
       const jobId = updated.rows[0].background_job_id;
       if (jobId) await options.db.query("update background_jobs set status='canceled', canceled_at=now(), updated_at=now() where id=$1 and status in ('queued','running')", [jobId]);
       if (updated.rows[0].mode === "local") await options.assistantHub.revokeTask(updated.rows[0].id);

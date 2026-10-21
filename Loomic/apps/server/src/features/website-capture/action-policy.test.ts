@@ -12,5 +12,7 @@ describe("website action policy", () => {
     expect(classifyWebsiteAction({ kind: "submit", target: "checkout" }).state).toBe("confirm");
     expect(classifyWebsiteAction({ kind: "fill", fieldType: "password" }).state).toBe("deny");
     expect(classifyWebsiteAction({ kind: "click", targetRole: "submit button" }).state).toBe("confirm");
+    expect(classifyWebsiteAction({ kind: "click", target: "#unknown" }).state).toBe("confirm");
+    expect(classifyWebsiteAction({ kind: "click", targetRole: "link" }).state).toBe("allow");
   });
 });

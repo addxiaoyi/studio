@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getAppVersion: () => ipcRenderer.invoke("app-version"),
   getPlatform: () => process.platform,
   openEmbeddedBrowser: (url: string) => ipcRenderer.invoke("assistant.open-embedded", url),
+  connectEmbeddedAssistant: (input: { wssUrl: string; code: string }) => ipcRenderer.invoke("assistant.connect-embedded", input),
+  disconnectEmbeddedAssistant: () => ipcRenderer.invoke("assistant.disconnect-embedded"),
   closeEmbeddedBrowser: () => ipcRenderer.invoke("assistant.close-embedded"),
 });
 
@@ -43,6 +45,8 @@ declare global {
       getAppVersion: () => Promise<string>;
       getPlatform: () => string;
       openEmbeddedBrowser: (url: string) => Promise<{ ok: boolean }>;
+      connectEmbeddedAssistant: (input: { wssUrl: string; code: string }) => Promise<{ ok: boolean; message?: string }>;
+      disconnectEmbeddedAssistant: () => Promise<{ ok: boolean }>;
       closeEmbeddedBrowser: () => Promise<{ ok: boolean }>;
     };
   }

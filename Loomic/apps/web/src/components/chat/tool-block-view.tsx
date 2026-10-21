@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 
 import type { ToolBlock, WebsiteCaptureTask } from "@helstera/shared";
 import { useAuth } from "../../lib/auth-context";
-import { cancelJob, cancelWebsiteCapture, exportJob, fetchJob, fetchJobs, fetchJobTimeline, fetchWebsiteCapture, prepareWebsitePromo, retryWebsiteCapture, syncJob } from "../../lib/server-api";
+import { approveWebsiteCaptureAction, cancelJob, cancelWebsiteCapture, exportJob, fetchJob, fetchJobs, fetchJobTimeline, fetchWebsiteCapture, fetchWebsiteCaptureActions, prepareWebsitePromo, rejectWebsiteCaptureAction, retryWebsiteCapture, syncJob, type PendingWebsiteAction } from "../../lib/server-api";
 import { canRetryGeneration, formatGenerationError, shouldFailoverVideoError } from "../../lib/generation-error-policy";
 import { ChatImage } from "./image-lightbox";
 import { AgentWorkflowCard } from "./agent-workflow-card";
@@ -585,6 +585,8 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
   const [task, setTask] = useState<WebsiteCaptureTask | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [canceling, setCanceling] = useState(false);
+  const [pendingActions, setPendingActions] = useState<PendingWebsiteAction[]>([]);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [promoApproval, setPromoApproval] = useState<{ approvalId: string; model: string; estimatedCredits: number; duration?: number; resolution?: string; hasReferenceImage: boolean; expiresAt: string } | null>(null);
 
   useEffect(() => {
@@ -593,8 +595,10 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
     const load = async () => {
       try {
         const data = await fetchWebsiteCapture(session.access_token, taskId);
+        const actions = await fetchWebsiteCaptureActions(session.access_token, taskId);
         if (!stopped) {
           setTask(data.task);
+          setPendingActions(actions);
           if (data.promoApproval) setPromoApproval(data.promoApproval);
           setError(null);
         }
@@ -652,6 +656,20 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
     }
   };
 
+  const resolveAction = async (action: PendingWebsiteAction, decision: "approve" | "reject") => {
+    if (!session?.access_token || actionBusy) return;
+    setActionBusy(action.actionId);
+    try {
+      if (decision === "approve") await approveWebsiteCaptureAction(session.access_token, action.actionId);
+      else await rejectWebsiteCaptureAction(session.access_token, action.actionId);
+      setPendingActions((current) => current.filter((candidate) => candidate.actionId !== action.actionId));
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "动作确认失败");
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
   const progress = Math.max(0, Math.min(100, task?.progress ?? 0));
   const statusText = task?.status === "succeeded"
     ? "网站介绍与素材已完成"
@@ -680,6 +698,21 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
         <div className={`h-full rounded-full transition-[width] ${task?.status === "failed" ? "bg-destructive" : "bg-foreground/60"}`} style={{ width: `${progress}%` }} />
       </div>
       {task?.stage ? <p className="mt-2 text-[11px] text-muted-foreground">阶段：{task.stage}</p> : null}
+      {pendingActions.length > 0 ? (
+        <div className="mt-3 space-y-2" aria-label="待确认的网页动作">
+          <p className="text-xs font-medium text-foreground">网页动作需要你的确认</p>
+          {pendingActions.map((pending) => (
+            <div key={pending.actionId} className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-2.5">
+              <p className="text-xs font-medium text-foreground">{formatWebsiteAction(pending.action)}</p>
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{pending.reason} 网页内容不能替代你的授权。</p>
+              <div className="mt-2 flex gap-2">
+                <button type="button" onClick={() => void resolveAction(pending, "approve")} disabled={actionBusy !== null} className="min-h-8 rounded-md bg-foreground px-2.5 text-[11px] text-background disabled:opacity-50">确认执行</button>
+                <button type="button" onClick={() => void resolveAction(pending, "reject")} disabled={actionBusy !== null} className="min-h-8 rounded-md border border-border/70 px-2.5 text-[11px] text-foreground disabled:opacity-50">拒绝</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {task?.status === "running" || task?.status === "queued" ? <button type="button" onClick={() => void cancel()} disabled={canceling} className="mt-2 rounded-md border border-destructive/30 px-2.5 py-1.5 text-[11px] text-destructive disabled:opacity-50">{canceling ? "正在取消..." : "取消浏览"}</button> : null}
       {task?.status === "failed" ? <button type="button" onClick={() => void retry()} className="mt-2 rounded-md border border-border/70 px-2.5 py-1.5 text-[11px] text-foreground">重试浏览</button> : null}
       {error ? <p role="alert" className="mt-2 text-[11px] text-destructive">{error}</p> : null}
@@ -697,6 +730,21 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
       ) : null}
     </section>
   );
+}
+
+function formatWebsiteAction(action: PendingWebsiteAction["action"]): string {
+  const target = action.target || action.targetUrl || "目标页面";
+  switch (action.kind) {
+    case "fill": return `填写表单：${target}`;
+    case "upload": return `上传文件：${target}`;
+    case "download": return `下载文件：${target}`;
+    case "submit": return `提交表单：${target}`;
+    case "publish": return `发布内容：${target}`;
+    case "purchase": return `购买：${target}`;
+    case "payment": return `支付：${target}`;
+    case "authorize": return `授权：${target}`;
+    default: return `${action.kind}：${target}`;
+  }
 }
 
 /*  MediaShimmer — shimmer placeholder during media generation         */

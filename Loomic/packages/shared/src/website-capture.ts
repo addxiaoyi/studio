@@ -99,3 +99,15 @@ export type WebsiteCapturePage = z.infer<typeof websiteCapturePageSchema>;
 export type WebsiteCaptureResult = z.infer<typeof websiteCaptureResultSchema>;
 export type CreateWebsiteCaptureRequest = z.infer<typeof createWebsiteCaptureRequestSchema>;
 export type WebsiteCaptureTask = z.infer<typeof websiteCaptureTaskSchema>;
+
+export type WebsiteActionKind = "navigate" | "scroll" | "click" | "fill" | "upload" | "download" | "submit" | "publish" | "purchase" | "payment" | "authorize";
+export type WebsiteActionRequest = {
+  kind: WebsiteActionKind;
+  target?: string;
+  targetUrl?: string;
+  targetRole?: string;
+  sideEffect?: boolean;
+  fieldType?: string;
+  value?: string;
+  top?: number;
+};
