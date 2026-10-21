@@ -1,6 +1,5 @@
 import { app, BrowserWindow, Menu, Tray, shell, nativeImage, ipcMain } from "electron";
 import { join } from "path";
-import { is } from "electron-util";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -176,7 +175,7 @@ function createWindow() {
   });
 
   // Load the web app
-  if (is.development) {
+  if (!app.isPackaged) {
     mainWindow.loadURL("http://localhost:3000");
     mainWindow.webContents.openDevTools();
   } else {
