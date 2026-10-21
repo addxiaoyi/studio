@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Menu, X } from "lucide-react";
+import { Sun, Moon, Menu, X, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { HelsteraLogo } from "@/components/icons/helstera-logo";
 
@@ -14,6 +14,8 @@ const NAV_LINKS = [
   { label: "客户案例", href: "#customers" },
   { label: "定价", href: "#pricing" },
 ] as const;
+
+const DESKTOP_DOWNLOAD_URL = "https://github.com/addxiaoyi/studio/releases";
 
 function handleAnchorClick(
   e: React.MouseEvent<HTMLAnchorElement>,
@@ -70,6 +72,26 @@ function NavCTA() {
   );
 }
 
+function DesktopDownloadLink({ mobile = false }: { mobile?: boolean }) {
+  return (
+    <a
+      href={DESKTOP_DOWNLOAD_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn(
+        "inline-flex items-center justify-center gap-1.5 rounded-full text-sm font-medium",
+        mobile
+          ? "h-10 w-full border border-border/70 text-foreground hover:bg-muted"
+          : "hidden h-8 px-3 sm:inline-flex border border-border/70 text-foreground hover:bg-muted",
+        "transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      )}
+    >
+      <Download className="size-3.5" aria-hidden="true" />
+      下载桌面端
+    </a>
+  );
+}
+
 export function FloatingNav() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -120,6 +142,7 @@ export function FloatingNav() {
           {/* Right actions */}
           <div className="flex items-center gap-1.5">
             <ThemeToggle />
+            <DesktopDownloadLink />
             <NavCTA />
             <button
               type="button"
@@ -161,6 +184,7 @@ export function FloatingNav() {
                   {label}
                 </a>
               ))}
+              <DesktopDownloadLink mobile />
               <Link
                 href="/register"
                 onClick={() => setMobileOpen(false)}
