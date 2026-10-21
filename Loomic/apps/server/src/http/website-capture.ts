@@ -104,6 +104,17 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     }
   });
 
+  app.post<{ Params: { taskId: string } }>("/api/website-capture/assistant/desktop-tasks/:taskId/cancel", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      return reply.send({ ok: true, data: await options.assistantHub.cancelDesktopAgentTask(user.id, viewer.workspace.id, request.params.taskId) });
+    } catch (error) {
+      return sendWebsiteCaptureError(error, reply);
+    }
+  });
+
   for (const [path, paused] of [["/api/website-capture/assistant/pause", true], ["/api/website-capture/assistant/resume", false]] as const) {
     app.post(path, async (request, reply) => {
       const user = await options.auth.authenticate(request);

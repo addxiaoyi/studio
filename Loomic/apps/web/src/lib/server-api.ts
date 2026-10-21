@@ -2170,6 +2170,7 @@ export type DesktopAgentTaskResponse = {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  events: Array<{ eventType: string; detail: string | null; createdAt: string }>;
 };
 
 export async function createDesktopAgentTask(accessToken: string, input: DesktopAgentTaskRequest): Promise<{ taskId: string; role: string; status: string; capabilities: string[] }> {
@@ -2186,6 +2187,16 @@ export async function fetchDesktopAgentTasks(accessToken: string): Promise<Deskt
   const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/assistant/desktop-tasks`, { headers: authHeaders(accessToken) });
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json() as { ok: true; data: DesktopAgentTaskResponse[] }).data;
+}
+
+export async function cancelDesktopAgentTask(accessToken: string, taskId: string): Promise<{ taskId: string; status: "canceled" }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/assistant/desktop-tasks/${encodeURIComponent(taskId)}/cancel`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: "{}",
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { taskId: string; status: "canceled" } }).data;
 }
 
 // --- Skills API ---

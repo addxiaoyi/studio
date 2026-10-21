@@ -199,9 +199,14 @@ export class WebsiteAssistantHub {
       created_at: string | Date;
       updated_at: string | Date;
       completed_at: string | Date | null;
+      events: Array<{ eventType: string; detail: string | null; createdAt: string }>;
     }>(
-      `select id,goal,role,capabilities,target_url,status,result,error_message,created_at,updated_at,completed_at
-         from desktop_agent_tasks where created_by=$1 and workspace_id=$2 order by created_at desc limit 30`,
+      `select t.id,t.goal,t.role,t.capabilities,t.target_url,t.status,t.result,t.error_message,t.created_at,t.updated_at,t.completed_at,
+              coalesce((
+                select json_agg(json_build_object('eventType',event_type,'detail',detail,'createdAt',created_at) order by created_at desc)
+                  from (select event_type,detail,created_at from desktop_agent_events e where e.task_id=t.id order by created_at desc limit 6) recent
+              ),'[]'::json) as events
+         from desktop_agent_tasks t where t.created_by=$1 and t.workspace_id=$2 order by t.created_at desc limit 30`,
       [userId, workspaceId],
     );
     return rows.map((row) => ({
@@ -216,7 +221,24 @@ export class WebsiteAssistantHub {
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
       ...(row.completed_at ? { completedAt: new Date(row.completed_at).toISOString() } : {}),
+      events: row.events,
     }));
+  }
+
+  async cancelDesktopAgentTask(userId: string, workspaceId: string, taskId: string) {
+    const { rows } = await this.options.db.query<{ id: string; connection_id: string }>(
+      `update desktop_agent_tasks set status='canceled',error_message=null,updated_at=now(),completed_at=now()
+        where id=$1 and created_by=$2 and workspace_id=$3 and status in ('queued','running')
+        returning id,connection_id`,
+      [taskId, userId, workspaceId],
+    );
+    const row = rows[0];
+    if (!row) throw new Error("桌面任务不存在或已经结束。");
+    const live = this.connections.get(row.connection_id);
+    if (live) this.send(live, { type: "desktop_agent.stop", taskId, reason: "用户取消了任务。" });
+    this.clearDesktopTaskTimer(taskId);
+    await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail) values($1,'canceled',$2)", [taskId, "用户取消了任务"]);
+    return { taskId, status: "canceled" as const };
   }
 
   async revokeTask(taskId: string): Promise<void> {
@@ -438,11 +460,11 @@ export class WebsiteAssistantHub {
       return;
     }
     const event = parsed.data;
-    const result = await this.options.db.query<{ id: string }>(
-      `select id from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3`,
+    const result = await this.options.db.query<{ id: string; status: string }>(
+      `select id,status from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3`,
       [event.taskId, live.userId, live.id],
     );
-    if (!result.rows[0]) return;
+    if (!result.rows[0] || !["queued", "running"].includes(result.rows[0].status)) return;
     const safeResult = event.result ? { ...event.result, screenshotBase64: undefined, recordingBase64: undefined } : {};
     await this.options.db.query(
       "insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,$2,$3,$4::jsonb)",
