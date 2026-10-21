@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Agent, request as httpRequest } from "undici";
-import { chromium, type Route } from "playwright";
+import { chromium, type Route, type WebSocketRoute } from "playwright";
 import type { Pool } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import type { WebsiteCapturePage, WebsiteCaptureResult } from "@helstera/shared";
@@ -74,6 +74,7 @@ export async function captureIsolatedWebsite(options: {
         : {}),
       viewport: { width: 1280, height: 720 },
     });
+    await context.routeWebSocket("**/*", blockIsolatedWebSocket);
     let transferredBytes = 0;
     let requestCount = 0;
 
@@ -295,10 +296,22 @@ export function isPublicAddress(address: string): boolean {
   }
   if (isIP(normalized) === 4) return isPublicIpv4(normalized);
   if (isIP(normalized) !== 6) return false;
-  if (normalized === "::" || normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:") || normalized.startsWith("2001:db8:")) return false;
-  const groups = normalized.split(":");
-  const firstGroup = Number.parseInt(groups[0] || "0", 16);
-  return firstGroup >= 0x2000 && firstGroup <= 0x3fff;
+  const value = ipv6ToBigInt(normalized);
+  if (value === null) return false;
+  const mappedV4 = ipv6PrefixValue(value, 96) === ipv6PrefixValue(ipv6ToBigInt("::ffff:0:0")!, 96);
+  if (mappedV4) return isPublicIpv4(Number(value & 0xffff_ffffn).toString(16).padStart(8, "0").match(/.{2}/g)!.map((part) => Number.parseInt(part, 16)).join("."));
+  if (
+    value === 0n || value === 1n ||
+    isInIpv6Range(value, "fc00::", 7) || isInIpv6Range(value, "fe80::", 10) ||
+    isInIpv6Range(value, "2001::", 23) || isInIpv6Range(value, "2001:db8::", 32) ||
+    isInIpv6Range(value, "2002::", 16) || isInIpv6Range(value, "3fff::", 20) ||
+    isInIpv6Range(value, "64:ff9b::", 96) || isInIpv6Range(value, "64:ff9b:1::", 48)
+  ) return false;
+  return isInIpv6Range(value, "2000::", 3);
+}
+
+export async function blockIsolatedWebSocket(route: WebSocketRoute): Promise<void> {
+  await route.close({ code: 1008, reason: "WebSocket access is disabled in isolated capture." });
 }
 
 export function buildWebsiteIntroduction(startUrl: string, pages: WebsiteCapturePage[]): string {
@@ -346,9 +359,14 @@ async function fulfillPublicReadOnlyRequest(route: Route): Promise<number> {
     connect: {
       lookup: ((
         _host: string,
-        _options: unknown,
-        callback: (error: Error | null, address: string, family: number) => void,
-      ) => callback(null, pinnedAddress.address, pinnedAddress.family)) as never,
+        lookupOptions: unknown,
+        callback: (...args: unknown[]) => void,
+      ) => {
+        const resolved = { address: pinnedAddress.address, family: pinnedAddress.family };
+        const all = typeof lookupOptions === "object" && lookupOptions !== null && "all" in lookupOptions && lookupOptions.all === true;
+        if (all) callback(null, [resolved]);
+        else callback(null, resolved.address, resolved.family);
+      }) as never,
     },
   });
 
@@ -417,11 +435,41 @@ function isPublicIpv4(address: string) {
     (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && (b === 168 || (b === 0 && c === 0) || (b === 0 && c === 2))) ||
+    (a === 192 && ((b === 0 && (c === 0 || c === 2)) || b === 168)) ||
     (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
     (a === 203 && b === 0 && c === 113) ||
     (a === 192 && b === 88 && c === 99)
   );
+}
+
+function ipv6ToBigInt(address: string): bigint | null {
+  let normalized = address.toLowerCase();
+  if (normalized.includes(".")) {
+    const lastColon = normalized.lastIndexOf(":");
+    const ipv4 = normalized.slice(lastColon + 1).split(".").map(Number);
+    if (ipv4.length !== 4 || ipv4.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null;
+    const high = ((ipv4[0]! << 8) | ipv4[1]!).toString(16);
+    const low = ((ipv4[2]! << 8) | ipv4[3]!).toString(16);
+    normalized = `${normalized.slice(0, lastColon)}:${high}:${low}`;
+  }
+  const halves = normalized.split("::");
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves[1] ? halves[1].split(":") : [];
+  const missing = 8 - left.length - right.length;
+  if ((halves.length === 1 && missing !== 0) || (halves.length === 2 && missing < 1)) return null;
+  const groups = [...left, ...Array.from({ length: halves.length === 2 ? missing : 0 }, () => "0"), ...right];
+  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return null;
+  return groups.reduce((value, group) => (value << 16n) | BigInt(`0x${group}`), 0n);
+}
+
+function ipv6PrefixValue(value: bigint, prefixLength: number) {
+  return value >> BigInt(128 - prefixLength);
+}
+
+function isInIpv6Range(value: bigint, prefix: string, prefixLength: number) {
+  const prefixValue = ipv6ToBigInt(prefix);
+  return prefixValue !== null && ipv6PrefixValue(value, prefixLength) === ipv6PrefixValue(prefixValue, prefixLength);
 }
 
 function selectResponseHeaders(input: Record<string, string | string[] | undefined>): Record<string, string> {
