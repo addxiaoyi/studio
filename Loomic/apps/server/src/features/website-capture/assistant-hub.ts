@@ -187,12 +187,36 @@ export class WebsiteAssistantHub {
   }
 
   async listDesktopAgentTasks(userId: string, workspaceId: string) {
-    const { rows } = await this.options.db.query(
+    const { rows } = await this.options.db.query<{
+      id: string;
+      goal: string;
+      role: string;
+      capabilities: string[];
+      target_url: string | null;
+      status: string;
+      result: Record<string, unknown> | null;
+      error_message: string | null;
+      created_at: string | Date;
+      updated_at: string | Date;
+      completed_at: string | Date | null;
+    }>(
       `select id,goal,role,capabilities,target_url,status,result,error_message,created_at,updated_at,completed_at
          from desktop_agent_tasks where created_by=$1 and workspace_id=$2 order by created_at desc limit 30`,
       [userId, workspaceId],
     );
-    return rows;
+    return rows.map((row) => ({
+      taskId: row.id,
+      goal: row.goal,
+      role: row.role,
+      capabilities: row.capabilities,
+      ...(row.target_url ? { targetUrl: row.target_url } : {}),
+      status: row.status,
+      result: row.result,
+      error: row.error_message,
+      createdAt: new Date(row.created_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString(),
+      ...(row.completed_at ? { completedAt: new Date(row.completed_at).toISOString() } : {}),
+    }));
   }
 
   async revokeTask(taskId: string): Promise<void> {

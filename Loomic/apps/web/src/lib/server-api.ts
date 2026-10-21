@@ -32,6 +32,7 @@ import type {
   WebsiteCaptureAssistantConnection,
   WebsiteCapturePairing,
   WebsiteActionRequest,
+  DesktopAgentTaskRequest,
 } from "@helstera/shared";
 
 import { dedupeRequest } from "./dedupe-request";
@@ -2155,6 +2156,36 @@ export async function setWebsiteAssistantPaused(accessToken: string, paused: boo
 export async function revokeWebsiteAssistant(accessToken: string): Promise<void> {
   const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/assistant/revoke`, { method: "POST", headers: authJsonHeaders(accessToken), body: "{}" });
   if (!response.ok) return handleErrorResponse(response);
+}
+
+export type DesktopAgentTaskResponse = {
+  taskId: string;
+  goal: string;
+  role: string;
+  capabilities: string[];
+  targetUrl?: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled";
+  result: Record<string, unknown> | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
+export async function createDesktopAgentTask(accessToken: string, input: DesktopAgentTaskRequest): Promise<{ taskId: string; role: string; status: string; capabilities: string[] }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/assistant/desktop-tasks`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { taskId: string; role: string; status: string; capabilities: string[] } }).data;
+}
+
+export async function fetchDesktopAgentTasks(accessToken: string): Promise<DesktopAgentTaskResponse[]> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/assistant/desktop-tasks`, { headers: authHeaders(accessToken) });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: DesktopAgentTaskResponse[] }).data;
 }
 
 // --- Skills API ---
