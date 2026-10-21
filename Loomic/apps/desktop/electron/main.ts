@@ -179,7 +179,7 @@ async function readEmbeddedPage(browser: BrowserWindow) {
 }
 
 function desktopCapabilityForAction(action: DesktopAgentAction) {
-  return {
+  const capabilities: Record<DesktopAgentAction["kind"], string> = {
     focus_window: "window.focus",
     read_page: "browser.read",
     navigate: "browser.navigate",
@@ -189,7 +189,8 @@ function desktopCapabilityForAction(action: DesktopAgentAction) {
     stop_recording: "browser.record",
     click: "browser.click",
     type: "browser.type",
-  }[action.kind];
+  };
+  return capabilities[action.kind];
 }
 
 async function runDesktopAgentTask(rawTask: unknown) {
