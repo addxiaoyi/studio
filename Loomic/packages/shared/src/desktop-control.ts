@@ -46,6 +46,7 @@ export const desktopAgentTaskSchema = desktopAgentTaskRequestSchema.extend({
 export const desktopAgentActionSchema = z.object({
   requestId: z.string().min(1).max(160),
   taskId: z.string().uuid(),
+  approvalId: z.string().uuid().optional(),
   kind: desktopActionKindSchema,
   target: z.string().max(500).optional(),
   targetUrl: z.string().url().optional(),

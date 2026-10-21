@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyDesktopAction, desktopAgentEventSchema, desktopAgentTaskRequestSchema } from "./desktop-control.js";
+import { classifyDesktopAction, desktopAgentActionSchema, desktopAgentEventSchema, desktopAgentTaskRequestSchema } from "./desktop-control.js";
 
 describe("desktop control policy", () => {
   it("limits tasks to declared roles and capabilities", () => {
@@ -26,5 +26,17 @@ describe("desktop control policy", () => {
     expect(desktopAgentEventSchema.safeParse({ ...base, result: { page: { url: "https://user:pass@example.test/" } } }).success).toBe(false);
     expect(desktopAgentEventSchema.safeParse({ ...base, result: { screenshotBase64: "a".repeat(11_200_001) } }).success).toBe(false);
     expect(desktopAgentEventSchema.safeParse({ ...base, result: { page: { url: "https://example.test/", title: "Site" } } }).success).toBe(true);
+  });
+
+  it("preserves the approval id on the one-time execution action", () => {
+    const action = desktopAgentActionSchema.parse({
+      requestId: "request-1",
+      taskId: "00000000-0000-0000-0000-000000000001",
+      approvalId: "00000000-0000-0000-0000-000000000002",
+      kind: "click",
+      target: "#continue",
+      approvalToken: "abcdefghijklmnop",
+    });
+    expect(action.approvalId).toBe("00000000-0000-0000-0000-000000000002");
   });
 });

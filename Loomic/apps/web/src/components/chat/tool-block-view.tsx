@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 
 import type { ToolBlock, WebsiteCaptureTask } from "@helstera/shared";
 import { useAuth } from "../../lib/auth-context";
-import { approveWebsiteCaptureAction, cancelJob, cancelWebsiteCapture, exportJob, fetchJob, fetchJobs, fetchJobTimeline, fetchWebsiteCapture, fetchWebsiteCaptureActions, prepareWebsitePromo, rejectWebsiteCaptureAction, retryWebsiteCapture, syncJob, type PendingWebsiteAction } from "../../lib/server-api";
+import { approveWebsiteCaptureAction, cancelJob, cancelWebsiteCapture, exportJob, fetchDesktopAgentTasks, fetchJob, fetchJobs, fetchJobTimeline, fetchWebsiteCapture, fetchWebsiteCaptureActions, prepareWebsitePromo, rejectWebsiteCaptureAction, resolveDesktopAgentApproval, retryWebsiteCapture, syncJob, type DesktopAgentTaskResponse, type PendingWebsiteAction } from "../../lib/server-api";
 import { canRetryGeneration, formatGenerationError, shouldFailoverVideoError } from "../../lib/generation-error-policy";
 import { ChatImage } from "./image-lightbox";
 import { AgentWorkflowCard } from "./agent-workflow-card";
@@ -305,7 +305,11 @@ export const ToolBlockView = React.memo(function ToolBlockView({
   const isImageTool = block.toolName === "generate_image";
   const isVideoTool = block.toolName === "generate_video";
   const isWebsiteTool = block.toolName === "website_capture";
+  const isDesktopAgentTool = block.toolName === "desktop_control";
   const websiteTaskId = typeof (block.output as Record<string, unknown> | undefined)?.taskId === "string"
+    ? (block.output as Record<string, unknown>).taskId as string
+    : undefined;
+  const desktopTaskId = isDesktopAgentTool && typeof (block.output as Record<string, unknown> | undefined)?.taskId === "string"
     ? (block.output as Record<string, unknown>).taskId as string
     : undefined;
   const isMediaTool = isImageTool || isVideoTool;
@@ -451,6 +455,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
       )}
 
       {isWebsiteTool && websiteTaskId ? <WebsiteCaptureProgressCard taskId={websiteTaskId} /> : null}
+      {isDesktopAgentTool && desktopTaskId ? <DesktopAgentProgressCard taskId={desktopTaskId} /> : null}
 
       {/* Layer 2b-err: Media generation failed */}
       {isMediaTool && isCompleted && !imageArtifact && mediaError && (
@@ -745,6 +750,73 @@ function formatWebsiteAction(action: PendingWebsiteAction["action"]): string {
     case "authorize": return `授权：${target}`;
     default: return `${action.kind}：${target}`;
   }
+}
+
+function DesktopAgentProgressCard({ taskId }: { taskId: string }) {
+  const { session } = useAuth();
+  const [task, setTask] = useState<DesktopAgentTaskResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busyApproval, setBusyApproval] = useState<string | null>(null);
+
+  useEffect(() => {
+    const accessToken = session?.access_token;
+    if (!accessToken) return;
+    let stopped = false;
+    const load = async () => {
+      try {
+        const tasks = await fetchDesktopAgentTasks(accessToken);
+        const found = tasks.find((candidate) => candidate.taskId === taskId) ?? null;
+        if (!stopped) {
+          setTask(found);
+          setError(null);
+        }
+        return found?.status;
+      } catch (cause) {
+        if (!stopped) setError(cause instanceof Error ? cause.message : "无法读取桌面协作任务状态");
+        return "failed";
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => {
+      if (task && ["succeeded", "failed", "canceled"].includes(task.status) && task.pendingApprovals.length === 0) return;
+      void load();
+    }, 2000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [session?.access_token, taskId, task?.status, task?.pendingApprovals.length]);
+
+  const resolve = async (approvalId: string, decision: "approve" | "reject") => {
+    const accessToken = session?.access_token;
+    if (!accessToken || busyApproval) return;
+    setBusyApproval(approvalId);
+    try {
+      await resolveDesktopAgentApproval(accessToken, approvalId, decision);
+      const tasks = await fetchDesktopAgentTasks(accessToken);
+      setTask(tasks.find((candidate) => candidate.taskId === taskId) ?? null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "处理桌面动作审批失败");
+    } finally {
+      setBusyApproval(null);
+    }
+  };
+
+  if (!task && !error) return <div role="status" className="rounded-md border border-border/50 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">读取桌面协作状态…</div>;
+  const page = task?.result?.page as { url?: string; title?: string; description?: string; headings?: string[] } | undefined;
+  const screenshot = task?.result?.screenshotAsset as { url?: string; assetId?: string } | undefined;
+  const status = task?.status === "succeeded" ? "已完成" : task?.status === "failed" ? "失败" : task?.status === "canceled" ? "已取消" : task?.status === "queued" ? "排队中" : "执行中";
+
+  return <section className="rounded-md border border-border/50 bg-muted/10 p-3" aria-label="桌面 Agent 任务状态">
+    <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold text-foreground">桌面 Agent · {status}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{task?.goal ?? "桌面任务状态暂不可用"}</p></div>{task ? <span className="shrink-0 text-[11px] text-muted-foreground">{task.role}</span> : null}</div>
+    {task?.events?.length ? <ol className="mt-2 space-y-1 border-l border-border/70 pl-2.5" aria-label="桌面任务进度">{task.events.slice(0, 4).map((event, index) => <li key={`${event.createdAt}-${index}`} className="text-[11px] leading-4 text-muted-foreground"><span className="font-medium text-foreground">{event.eventType === "started" ? "已启动" : event.eventType === "page" ? "页面证据" : event.eventType === "approval_required" ? "等待审批" : event.eventType === "completed" ? "已完成" : event.eventType === "failed" ? "失败" : event.eventType}</span>{event.detail ? ` · ${event.detail}` : ""}</li>)}</ol> : null}
+    {task?.pendingApprovals.map((approval) => <div key={approval.approvalId} className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5"><p className="text-[11px] font-semibold text-foreground">确认桌面动作</p><p className="mt-1 break-words text-[11px] text-foreground">{formatDesktopAgentAction(approval.action)}</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">批准只授权这一个动作，十分钟后失效。</p><div className="mt-2 flex gap-2"><button type="button" onClick={() => void resolve(approval.approvalId, "approve")} disabled={busyApproval !== null} className="min-h-8 rounded-md bg-foreground px-2.5 text-[11px] text-background disabled:opacity-50">{busyApproval === approval.approvalId ? "处理中…" : "批准"}</button><button type="button" onClick={() => void resolve(approval.approvalId, "reject")} disabled={busyApproval !== null} className="min-h-8 rounded-md border border-border/70 px-2.5 text-[11px] text-foreground disabled:opacity-50">拒绝</button></div></div>)}
+    {page ? <div className="mt-3 border-t border-border/50 pt-2"><p className="text-xs font-medium text-foreground">{page.title || "已读取页面"}</p>{page.url ? <a href={page.url} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[11px] text-muted-foreground underline underline-offset-2">{page.url}</a> : null}{page.description ? <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{page.description}</p> : null}{page.headings?.length ? <p className="mt-1 text-[11px] leading-4 text-muted-foreground">标题：{page.headings.slice(0, 5).join(" · ")}</p> : null}</div> : null}
+    {screenshot?.url ? <a href={screenshot.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-2 text-[11px] text-muted-foreground underline underline-offset-2"><img src={screenshot.url} alt={`桌面截图${page?.title ? `：${page.title}` : ""}`} className="h-16 w-28 rounded border border-border/60 object-cover" />查看已保存截图</a> : null}
+    {error ? <p role="alert" className="mt-2 text-[11px] text-destructive">{error}</p> : null}
+  </section>;
+}
+
+function formatDesktopAgentAction(action: DesktopAgentTaskResponse["pendingApprovals"][number]["action"]) {
+  const target = action.target || action.targetUrl || "目标页面";
+  return action.kind === "type" ? `在 ${target} 输入：${action.value ?? "(空内容)"}` : `点击 ${target}`;
 }
 
 /*  MediaShimmer — shimmer placeholder during media generation         */

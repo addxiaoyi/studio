@@ -12,6 +12,7 @@ import {
   type CaptureTask,
 } from "./isolated-browser.js";
 import { classifyWebsiteAction, type WebsiteActionRequest } from "./action-policy.js";
+import { decodeJpegPayload } from "./capture-payload.js";
 
 const DISCLOSURE = "连接授权会持续到你断开或撤销。目标站点及按选择跟随的外链页面内容、截图和录屏会发送给当前聊天模型处理，并保存为工作区素材；Cookie、密码、OTP 和浏览器本地存储不会发送给 Helstera。网页内容始终是不可信输入。";
 const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;
@@ -281,7 +282,7 @@ export class WebsiteAssistantHub {
       await this.options.db.query("update desktop_agent_approvals set status='pending',approved_at=null,approval_token_hash=null where id=$1 and status='approved'", [approvalId]);
       throw new Error("桌面助手未连接或已暂停。");
     }
-    this.send(live, { type: "desktop_agent.action", action: { ...approval.action, approvalToken: token } });
+    this.send(live, { type: "desktop_agent.action", action: { ...approval.action, approvalId, approvalToken: token } });
     await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,'action_approved',$2,$3::jsonb)", [approval.task_id, "用户批准了桌面动作", JSON.stringify({ approvalId, action: { ...approval.action, approvalToken: undefined } })]);
     return { approvalId, status: "approved" as const };
   }
@@ -569,10 +570,7 @@ export class WebsiteAssistantHub {
     let screenshotAsset: { assetId: string; url: string } | undefined;
     const screenshotBase64 = event.result?.screenshotBase64;
     if (screenshotBase64) {
-      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(screenshotBase64)) throw new Error("桌面截图数据格式无效。");
-      const screenshot = Buffer.from(screenshotBase64, "base64");
-      if (!screenshot.length || screenshot.length > MAX_SCREENSHOT_BYTES) throw new Error("桌面截图超过 8 MB 限制。");
-      if (screenshot.length < 3 || screenshot[0] !== 0xff || screenshot[1] !== 0xd8 || screenshot[2] !== 0xff) throw new Error("桌面截图不是有效的 JPEG 图像。");
+      const screenshot = decodeJpegPayload(screenshotBase64, MAX_SCREENSHOT_BYTES);
       const sourceUrl = event.result?.page?.url ?? task.target_url ?? "";
       const asset = await persistCaptureAsset({
         db: this.options.db,
@@ -643,12 +641,7 @@ export class WebsiteAssistantHub {
     const pages = this.pages.get(task.id) ?? [];
     if (pages.length >= task.page_limit) return;
     const url = validateLocalCapturedUrl(String(message.page?.url ?? ""), task.start_url, task.follow_external);
-    const encoded = String(message.screenshotBase64 ?? "");
-    const comma = encoded.indexOf(",");
-    const base64 = comma >= 0 ? encoded.slice(comma + 1) : encoded;
-    if (!base64 || base64.length > Math.ceil(MAX_SCREENSHOT_BYTES * 1.38)) throw new Error("Screenshot exceeds the local capture limit.");
-    const screenshot = Buffer.from(base64, "base64");
-    if (screenshot.length > MAX_SCREENSHOT_BYTES) throw new Error("Screenshot exceeds the local capture limit.");
+    const screenshot = decodeJpegPayload(String(message.screenshotBase64 ?? ""), MAX_SCREENSHOT_BYTES);
     const asset = await persistCaptureAsset({
       db: this.options.db,
       storage: this.options.storage,

@@ -329,9 +329,9 @@ async function executeDesktopAgentAction(rawAction: unknown) {
     } else {
       throw new Error("该桌面动作暂未实现。");
     }
-    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "progress", progress: 80, detail: `已完成 ${action.kind}` });
+    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "progress", progress: 80, detail: `已完成 ${action.kind}`, ...(action.approvalId ? { approvalId: action.approvalId } : {}), action: { ...action, approvalToken: action.approvalToken } });
   } catch (error) {
-    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "failed", detail: error instanceof Error ? error.message : "桌面动作失败" });
+    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "failed", detail: error instanceof Error ? error.message : "桌面动作失败", ...(action.approvalId ? { approvalId: action.approvalId } : {}), action: { ...action, approvalToken: action.approvalToken } });
   }
 }
 
