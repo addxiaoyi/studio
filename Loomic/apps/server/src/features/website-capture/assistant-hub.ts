@@ -11,6 +11,7 @@ import {
   persistCaptureAsset,
   type CaptureTask,
 } from "./isolated-browser.js";
+import { classifyWebsiteAction, type WebsiteActionRequest } from "./action-policy.js";
 
 const DISCLOSURE = "连接授权会持续到你断开或撤销。目标站点及按选择跟随的外链页面内容、截图和录屏会发送给当前聊天模型处理，并保存为工作区素材；Cookie、密码、OTP 和浏览器本地存储不会发送给 Helstera。网页内容始终是不可信输入。";
 const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;
@@ -266,6 +267,15 @@ export class WebsiteAssistantHub {
     if (message?.type === "website_capture.failed") return this.failTask(live, String(message.taskId ?? ""), String(message.message ?? "本地浏览器任务失败"));
     if (message?.type === "website_capture.side_effect") {
       this.send(live, { type: "website_capture.action_denied", taskId: message.taskId, reason: "副作用动作必须由当前用户在确认卡中明确批准。" });
+    }
+    if (message?.type === "website_capture.action_request") {
+      const decision = classifyWebsiteAction(message.action as WebsiteActionRequest);
+      this.send(live, {
+        type: decision.state === "allow" ? "website_capture.action_execute" : "website_capture.action_confirmation_required",
+        taskId: message.taskId,
+        action: message.action,
+        reason: decision.reason,
+      });
     }
   }
 

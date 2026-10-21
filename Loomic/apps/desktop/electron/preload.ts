@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // App info
   getAppVersion: () => ipcRenderer.invoke("app-version"),
   getPlatform: () => process.platform,
+  openEmbeddedBrowser: (url: string) => ipcRenderer.invoke("assistant.open-embedded", url),
+  closeEmbeddedBrowser: () => ipcRenderer.invoke("assistant.close-embedded"),
 });
 
 // Type declarations for the exposed API
@@ -40,6 +42,8 @@ declare global {
       closeWindow: () => Promise<void>;
       getAppVersion: () => Promise<string>;
       getPlatform: () => string;
+      openEmbeddedBrowser: (url: string) => Promise<{ ok: boolean }>;
+      closeEmbeddedBrowser: () => Promise<{ ok: boolean }>;
     };
   }
 }

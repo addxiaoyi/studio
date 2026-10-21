@@ -1,9 +1,56 @@
-import { app, BrowserWindow, Menu, Tray, shell, nativeImage } from "electron";
+import { app, BrowserWindow, Menu, Tray, shell, nativeImage, ipcMain } from "electron";
 import { join } from "path";
 import { is } from "electron-util";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let embeddedBrowserWindow: BrowserWindow | null = null;
+
+function isSafeBrowserUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function openEmbeddedBrowser(value: string) {
+  if (!isSafeBrowserUrl(value)) throw new Error("仅允许打开 HTTP(S) 网站地址。");
+  if (!embeddedBrowserWindow || embeddedBrowserWindow.isDestroyed()) {
+    embeddedBrowserWindow = new BrowserWindow({
+      width: 1200,
+      height: 800,
+      title: "Helstera 本地浏览器",
+      webPreferences: {
+        partition: "persist:helstera-website-assistant",
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+      },
+    });
+    embeddedBrowserWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (isSafeBrowserUrl(url)) void embeddedBrowserWindow?.loadURL(url);
+      return { action: "deny" };
+    });
+    embeddedBrowserWindow.webContents.on("will-navigate", (event, url) => {
+      if (!isSafeBrowserUrl(url)) event.preventDefault();
+    });
+    embeddedBrowserWindow.on("closed", () => { embeddedBrowserWindow = null; });
+  }
+  await embeddedBrowserWindow.loadURL(value);
+  embeddedBrowserWindow.show();
+  embeddedBrowserWindow.focus();
+  return { ok: true };
+}
+
+ipcMain.handle("assistant.open-embedded", (_event, url: string) => openEmbeddedBrowser(url));
+ipcMain.handle("assistant.close-embedded", () => {
+  embeddedBrowserWindow?.close();
+  embeddedBrowserWindow = null;
+  return { ok: true };
+});
 
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
@@ -188,4 +235,5 @@ app.on("activate", () => {
 
 app.on("before-quit", () => {
   tray?.destroy();
+  embeddedBrowserWindow?.destroy();
 });
