@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 
 import type { ToolBlock, WebsiteCaptureTask } from "@helstera/shared";
 import { useAuth } from "../../lib/auth-context";
-import { cancelJob, cancelWebsiteCapture, exportJob, fetchJob, fetchJobs, fetchJobTimeline, fetchWebsiteCapture, retryWebsiteCapture, syncJob } from "../../lib/server-api";
+import { cancelJob, cancelWebsiteCapture, exportJob, fetchJob, fetchJobs, fetchJobTimeline, fetchWebsiteCapture, prepareWebsitePromo, retryWebsiteCapture, syncJob } from "../../lib/server-api";
 import { canRetryGeneration, formatGenerationError, shouldFailoverVideoError } from "../../lib/generation-error-policy";
 import { ChatImage } from "./image-lightbox";
 import { AgentWorkflowCard } from "./agent-workflow-card";
@@ -585,6 +585,7 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
   const [task, setTask] = useState<WebsiteCaptureTask | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [canceling, setCanceling] = useState(false);
+  const [promoApproval, setPromoApproval] = useState<{ approvalId: string; model: string; estimatedCredits: number; duration?: number; resolution?: string; hasReferenceImage: boolean; expiresAt: string } | null>(null);
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -594,6 +595,7 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
         const data = await fetchWebsiteCapture(session.access_token, taskId);
         if (!stopped) {
           setTask(data.task);
+          if (data.promoApproval) setPromoApproval(data.promoApproval);
           setError(null);
         }
         return data.task.status;
@@ -637,6 +639,19 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
     }
   };
 
+  const preparePromo = async () => {
+    if (!session?.access_token) return;
+    try {
+      const result = await prepareWebsitePromo(session.access_token, taskId);
+      if (result.request) {
+        setPromoApproval(result.request);
+        setTask((current) => current ? { ...current, promoStatus: "awaiting_approval", promoApprovalId: result.request!.approvalId } : current);
+      }
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "宣传成片准备失败");
+    }
+  };
+
   const progress = Math.max(0, Math.min(100, task?.progress ?? 0));
   const statusText = task?.status === "succeeded"
     ? "网站介绍与素材已完成"
@@ -653,11 +668,11 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
               : "正在连接隔离浏览器";
 
   return (
-    <section className="rounded-xl border border-border/40 bg-muted/10 p-3" aria-live="polite" aria-label="网站浏览进度">
+    <section className="rounded-xl border border-border/40 bg-muted/10 p-3" aria-label="网站浏览进度">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-foreground">网站浏览与介绍</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{statusText}</p>
+          <p role="status" aria-live="polite" aria-atomic="true" className="mt-0.5 text-[11px] text-muted-foreground">{statusText}</p>
         </div>
         <span className="text-xs tabular-nums text-muted-foreground">{progress}%</span>
       </div>
@@ -676,6 +691,8 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
             {task.result.pages.map((page) => <a key={page.assetId} href={page.screenshotUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-border/40"><img src={page.screenshotUrl} alt={`页面截图：${page.title}`} className="aspect-video w-full object-cover" /></a>)}
           </div>
           {task.result.recordingUrl ? <video controls preload="metadata" src={task.result.recordingUrl} className="w-full rounded-lg border border-border/40" aria-label="网站浏览录屏" /> : null}
+          {promoApproval ? <GenerationApprovalCard approvalId={promoApproval.approvalId} jobType="video_generation" model={promoApproval.model} estimatedCredits={promoApproval.estimatedCredits} hasReferenceImage={promoApproval.hasReferenceImage} expiresAt={promoApproval.expiresAt} {...(promoApproval.duration !== undefined ? { duration: promoApproval.duration } : {})} {...(promoApproval.resolution !== undefined ? { resolution: promoApproval.resolution } : {})} /> : null}
+          {task.promo?.enabled ? (task.promoVideoUrl ? <video controls preload="metadata" src={task.promoVideoUrl} className="w-full rounded-lg border border-border/40" aria-label="网站宣传成片" /> : task.promoStatus !== "awaiting_approval" && task.promoStatus !== "queued" && task.promoStatus !== "running" ? <button type="button" onClick={() => void preparePromo()} className="min-h-10 rounded-md border border-border/70 px-3 text-xs">生成宣传成片（需确认费用）</button> : <p className="text-xs text-muted-foreground">宣传成片任务：{task.promoStatus === "awaiting_approval" ? "等待费用确认" : "生成中"}</p>) : null}
         </div>
       ) : null}
     </section>

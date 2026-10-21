@@ -1361,11 +1361,11 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           const idempotencyKey = input.idempotencyKey ?? `agent-website-capture:${randomUUID()}`;
           const taskResult = await options.localDb.query<{ id: string; background_job_id: string | null; status: string; progress: number }>(
             `insert into website_capture_tasks
-              (workspace_id, created_by, mode, start_url, page_limit, record_video, idempotency_key)
-             values ($1,$2,$3,$4,$5,$6,$7)
+              (workspace_id, created_by, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
              on conflict (created_by, idempotency_key) do nothing
              returning id, background_job_id, status, progress`,
-            [workspaceId, userId, input.mode, startUrl.toString(), input.pageLimit ?? 3, input.recordVideo ?? true, idempotencyKey],
+            [workspaceId, userId, input.mode, startUrl.toString(), input.pageLimit ?? 3, input.recordVideo ?? true, input.followExternal ?? false, input.promo?.enabled ? JSON.stringify(input.promo) : null, idempotencyKey],
           );
           let task = taskResult.rows[0];
           if (!task) {

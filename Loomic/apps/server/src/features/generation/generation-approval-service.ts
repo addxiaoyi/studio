@@ -23,6 +23,7 @@ export type GenerationApprovalRequest = {
     sessionId?: string;
     threadId?: string;
     projectId?: string;
+    websiteCaptureTaskId?: string;
   };
   jobId?: string;
 };

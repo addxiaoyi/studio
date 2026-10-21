@@ -19,9 +19,10 @@ registerExecutor("website_capture", async (jobId, rawPayload, ctx: ExecutorConte
     start_url: string;
     page_limit: number;
     record_video: boolean;
+    follow_external: boolean;
     status: string;
   }>(
-    "select id, workspace_id, created_by, start_url, page_limit, record_video, status from website_capture_tasks where id=$1",
+    "select id, workspace_id, created_by, start_url, page_limit, record_video, follow_external, status from website_capture_tasks where id=$1",
     [taskId],
   )).rows[0];
   if (!task) throw Object.assign(new Error("Website capture task was not found."), { code: "invalid_input" });

@@ -8,6 +8,7 @@ import { AgentSection } from "@/components/agent-section";
 import { BillingSection } from "@/components/billing-section";
 import { CreditUsageHistory } from "@/components/credits/credit-usage-history";
 import { ProfileSection } from "@/components/profile-section";
+import { WebsiteAssistantSettings } from "@/components/website-assistant-settings";
 import { SettingsSkeleton } from "@/components/skeletons/settings-skeleton";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -259,15 +260,18 @@ export default function SettingsPage() {
 
       <div id="settings-tabpanel" role="tabpanel" aria-labelledby={`settings-tab-${activeTab}`} tabIndex={0} className={activeTab === "billing" ? "max-w-5xl" : "max-w-2xl"}>
         {activeTab === "profile" ? (
-          <ProfileSection
-            displayName={profile.displayName}
-            email={profile.email}
-            onSave={handleProfileSave}
-            accounts={publishingAccounts}
-            accountBusy={accountBusy}
-            onBindAccount={handleBindAccount}
-            onRevokeAccount={handleRevokeAccount}
-          />
+          <>
+            <ProfileSection
+              displayName={profile.displayName}
+              email={profile.email}
+              onSave={handleProfileSave}
+              accounts={publishingAccounts}
+              accountBusy={accountBusy}
+              onBindAccount={handleBindAccount}
+              onRevokeAccount={handleRevokeAccount}
+            />
+            {session?.access_token ? <WebsiteAssistantSettings accessToken={session.access_token} /> : null}
+          </>
         ) : activeTab === "agent" ? (
           <AgentSection
             defaultModel={defaultModel}

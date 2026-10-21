@@ -29,6 +29,8 @@ import type {
   WorkspaceSkillListResponse,
   CreateWebsiteCaptureRequest,
   WebsiteCaptureTask,
+  WebsiteCaptureAssistantConnection,
+  WebsiteCapturePairing,
 } from "@helstera/shared";
 
 import { dedupeRequest } from "./dedupe-request";
@@ -2064,12 +2066,12 @@ export async function createWebsiteCapture(
 export async function fetchWebsiteCapture(
   accessToken: string,
   taskId: string,
-): Promise<{ task: WebsiteCaptureTask; events: Array<{ id: number; stage: string; detail: string; created_at: string }> }> {
+): Promise<{ task: WebsiteCaptureTask; events: Array<{ id: number; stage: string; detail: string; created_at: string }>; promoApproval?: { approvalId: string; jobType: "video_generation"; model: string; estimatedCredits: number; duration?: number; resolution?: string; hasReferenceImage: boolean; expiresAt: string } }> {
   const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/${encodeURIComponent(taskId)}`, {
     headers: authHeaders(accessToken),
   });
   if (!response.ok) return handleErrorResponse(response);
-  return (await response.json() as { ok: true; data: { task: WebsiteCaptureTask; events: Array<{ id: number; stage: string; detail: string; created_at: string }> } }).data;
+  return (await response.json() as { ok: true; data: { task: WebsiteCaptureTask; events: Array<{ id: number; stage: string; detail: string; created_at: string }>; promoApproval?: { approvalId: string; jobType: "video_generation"; model: string; estimatedCredits: number; duration?: number; resolution?: string; hasReferenceImage: boolean; expiresAt: string } } }).data;
 }
 
 export async function cancelWebsiteCapture(accessToken: string, taskId: string): Promise<{ task: WebsiteCaptureTask }> {
@@ -2088,6 +2090,35 @@ export async function retryWebsiteCapture(accessToken: string, taskId: string): 
   });
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json() as { ok: true; data: { task: WebsiteCaptureTask } }).data;
+}
+
+export async function prepareWebsitePromo(accessToken: string, taskId: string): Promise<{ state: string; request?: { approvalId: string; model: string; estimatedCredits: number; duration?: number; resolution?: string; hasReferenceImage: boolean; expiresAt: string }; jobId?: string }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/${encodeURIComponent(taskId)}/promo/prepare`, { method: "POST", headers: authJsonHeaders(accessToken), body: "{}" });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { state: string; request?: { approvalId: string; model: string; estimatedCredits: number; duration?: number; resolution?: string; hasReferenceImage: boolean; expiresAt: string }; jobId?: string } }).data;
+}
+
+export async function createWebsiteCapturePairing(accessToken: string): Promise<WebsiteCapturePairing> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/pairings`, { method: "POST", headers: authJsonHeaders(accessToken), body: "{}" });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: WebsiteCapturePairing }).data;
+}
+
+export async function fetchWebsiteAssistantConnection(accessToken: string): Promise<WebsiteCaptureAssistantConnection | null> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/assistant`, { headers: authHeaders(accessToken) });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: WebsiteCaptureAssistantConnection | null }).data;
+}
+
+export async function setWebsiteAssistantPaused(accessToken: string, paused: boolean): Promise<WebsiteCaptureAssistantConnection | null> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/assistant/${paused ? "pause" : "resume"}`, { method: "POST", headers: authJsonHeaders(accessToken), body: "{}" });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: WebsiteCaptureAssistantConnection | null }).data;
+}
+
+export async function revokeWebsiteAssistant(accessToken: string): Promise<void> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/assistant/revoke`, { method: "POST", headers: authJsonHeaders(accessToken), body: "{}" });
+  if (!response.ok) return handleErrorResponse(response);
 }
 
 // --- Skills API ---

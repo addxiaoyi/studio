@@ -410,6 +410,7 @@ async function processMessage(
       msg.message as Record<string, unknown>,
       ctx,
     );
+    await syncWebsitePromoTask(jobId, result, ctx);
     await reconcileTokenBilling(jobId, result, ctx, creditService, tag);
     if (result.sync_pending === true) {
       await ctx.jobService.markSyncPending(
@@ -428,6 +429,7 @@ async function processMessage(
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     const errorCode = (err as { code?: string })?.code ?? "executor_error";
+    await failWebsitePromoTask(jobId, errorMessage, ctx);
     let providerCheckpointExists = false;
     try {
       providerCheckpointExists = await ctx.jobService.hasProviderCheckpoint(jobId);
@@ -503,6 +505,25 @@ async function processMessage(
       );
     }
   }
+}
+
+async function syncWebsitePromoTask(jobId: string, result: Record<string, unknown>, ctx: ExecutorContext) {
+  if (!ctx.localDb) return;
+  const { rows } = await ctx.localDb.query<{ payload: Record<string, unknown> }>("select payload from background_jobs where id=$1 and job_type='video_generation'", [jobId]);
+  const taskId = typeof rows[0]?.payload?.website_capture_task_id === "string" ? rows[0].payload.website_capture_task_id : null;
+  if (!taskId) return;
+  await ctx.localDb.query(
+    "update website_capture_tasks set promo_status='succeeded', promo_asset_id=$2, promo_video_url=$3, promo_error=null, updated_at=now() where id=$1",
+    [taskId, typeof result.asset_id === "string" ? result.asset_id : null, typeof result.signed_url === "string" ? result.signed_url : null],
+  );
+}
+
+async function failWebsitePromoTask(jobId: string, message: string, ctx: ExecutorContext) {
+  if (!ctx.localDb) return;
+  const { rows } = await ctx.localDb.query<{ payload: Record<string, unknown> }>("select payload from background_jobs where id=$1 and job_type='video_generation'", [jobId]);
+  const taskId = typeof rows[0]?.payload?.website_capture_task_id === "string" ? rows[0].payload.website_capture_task_id : null;
+  if (!taskId) return;
+  await ctx.localDb.query("update website_capture_tasks set promo_status='failed', promo_error=$2, updated_at=now() where id=$1 and promo_status in ('queued','running','awaiting_approval')", [taskId, message.slice(0, 1000)]);
 }
 
 async function loadJobPayload(

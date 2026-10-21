@@ -1,0 +1,456 @@
+import { randomBytes, randomUUID } from "node:crypto";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { Pool } from "pg";
+import type { WebSocket } from "ws";
+
+import type { WebsiteCaptureAssistantConnection, WebsiteCapturePairing, WebsiteCapturePage } from "@helstera/shared";
+import { hashToken } from "../../local-db/auth.js";
+import type { StorageProvider } from "../../storage/storage-provider.js";
+import {
+  buildWebsiteIntroduction,
+  persistCaptureAsset,
+  type CaptureTask,
+} from "./isolated-browser.js";
+
+const DISCLOSURE = "连接授权会持续到你断开或撤销。目标站点及按选择跟随的外链页面内容、截图和录屏会发送给当前聊天模型处理，并保存为工作区素材；Cookie、密码、OTP 和浏览器本地存储不会发送给 Helstera。网页内容始终是不可信输入。";
+const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;
+const MAX_RECORDING_BYTES = 40 * 1024 * 1024;
+
+type HubOptions = {
+  db: Pool;
+  storage: StorageProvider;
+  webOrigin: string;
+  storageRoot: string;
+};
+
+type LocalTask = CaptureTask & {
+  mode: "local";
+  status: string;
+  assistant_connection_id: string;
+  follow_external: boolean;
+};
+
+type LiveConnection = {
+  id: string;
+  userId: string;
+  ws: WebSocket;
+  sessionToken: string;
+  browser: "chrome" | "edge" | "unknown";
+  platform: "windows" | "macos" | "linux" | "unknown";
+  paused: boolean;
+};
+
+export class WebsiteAssistantHub {
+  private readonly connections = new Map<string, LiveConnection>();
+  private readonly pages = new Map<string, WebsiteCapturePage[]>();
+  private readonly taskTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  constructor(private readonly options: HubOptions) {
+    void this.options.db.query("update website_capture_connections set disconnected_at=coalesce(disconnected_at, now()) where revoked_at is null and disconnected_at is null").catch(() => undefined);
+  }
+
+  async createPairing(userId: string, workspaceId: string): Promise<WebsiteCapturePairing> {
+    const code = randomBytes(18).toString("base64url");
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    const result = await this.options.db.query<{ id: string }>(
+      `insert into website_capture_pairings(workspace_id, created_by, code_hash, expires_at)
+       values($1,$2,$3,$4) returning id`,
+      [workspaceId, userId, hashToken(code), expiresAt],
+    );
+    const pairingId = result.rows[0]?.id;
+    if (!pairingId) throw new Error("Unable to create local assistant pairing.");
+    return {
+      pairingId,
+      code,
+      expiresAt: expiresAt.toISOString(),
+      wssUrl: this.wssUrl(),
+      disclosure: DISCLOSURE,
+    };
+  }
+
+  async getConnection(userId: string, workspaceId: string): Promise<WebsiteCaptureAssistantConnection | null> {
+    const { rows } = await this.options.db.query<{
+      id: string;
+      browser: WebsiteCaptureAssistantConnection["browser"];
+      platform: WebsiteCaptureAssistantConnection["platform"];
+      paused: boolean;
+      connected_at: string | Date;
+      last_seen_at: string | Date;
+      revoked_at: string | Date | null;
+      disconnected_at: string | Date | null;
+    }>(
+      `select id,browser,platform,paused,connected_at,last_seen_at,revoked_at,disconnected_at
+         from website_capture_connections
+        where user_id=$1 and workspace_id=$2
+        order by connected_at desc limit 1`,
+      [userId, workspaceId],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      status: row.revoked_at ? "revoked" : row.disconnected_at || !this.connections.has(row.id) ? "disconnected" : row.paused ? "paused" : "connected",
+      browser: row.browser,
+      platform: row.platform,
+      connectedAt: new Date(row.connected_at).toISOString(),
+      lastSeenAt: new Date(row.last_seen_at).toISOString(),
+      paused: row.paused,
+    };
+  }
+
+  async revoke(userId: string, workspaceId: string): Promise<void> {
+    const result = await this.options.db.query<{ id: string }>(
+      `update website_capture_connections set revoked_at=now(), disconnected_at=coalesce(disconnected_at, now())
+        where user_id=$1 and workspace_id=$2 and revoked_at is null returning id`,
+      [userId, workspaceId],
+    );
+    await this.options.db.query("update website_capture_pairings set revoked_at=now() where created_by=$1 and workspace_id=$2 and revoked_at is null", [userId, workspaceId]);
+    for (const row of result.rows) {
+      const live = this.connections.get(row.id);
+      live?.ws.close(4004, "Revoked");
+      this.connections.delete(row.id);
+    }
+  }
+
+  async setUserPaused(userId: string, workspaceId: string, paused: boolean): Promise<void> {
+    const result = await this.options.db.query<{ id: string }>(
+      `update website_capture_connections set paused=$3,last_seen_at=now()
+        where user_id=$1 and workspace_id=$2 and revoked_at is null returning id`,
+      [userId, workspaceId, paused],
+    );
+    for (const row of result.rows) {
+      const live = this.connections.get(row.id);
+      if (live) {
+        live.paused = paused;
+        this.send(live, { type: paused ? "assistant.pause" : "assistant.resume" });
+      }
+    }
+  }
+
+  async startLocalTask(taskId: string, userId: string): Promise<void> {
+    const { rows } = await this.options.db.query<LocalTask>(
+      `select id,workspace_id,created_by,start_url,page_limit,record_video,status,assistant_connection_id,follow_external
+         from website_capture_tasks where id=$1 and created_by=$2 and mode='local'`,
+      [taskId, userId],
+    );
+    const task = rows[0];
+    if (!task) throw new Error("Local website capture task not found.");
+    const live = this.connections.get(task.assistant_connection_id);
+    if (!live || live.ws.readyState !== 1 || live.paused) throw new Error("Local browser assistant is not connected.");
+    await this.options.db.query(
+      "update website_capture_tasks set status='running', stage='connecting', progress=2, updated_at=now() where id=$1 and status='queued'",
+      [taskId],
+    );
+    await this.event(taskId, "connecting", "正在连接已授权的本地浏览器标签页");
+    this.clearTaskTimer(taskId);
+    this.taskTimers.set(taskId, setTimeout(() => {
+      void this.failTask(live, taskId, "本地浏览任务超过 15 分钟上限。");
+    }, 15 * 60 * 1000));
+    this.send(live, {
+      type: "website_capture.start",
+      taskId,
+      startUrl: task.start_url,
+      pageLimit: task.page_limit,
+      recordVideo: task.record_video,
+      followExternal: task.follow_external,
+      disclosure: DISCLOSURE,
+    });
+  }
+
+  async revokeTask(taskId: string): Promise<void> {
+    const { rows } = await this.options.db.query<{ assistant_connection_id: string | null }>(
+      "select assistant_connection_id from website_capture_tasks where id=$1",
+      [taskId],
+    );
+    const connectionId = rows[0]?.assistant_connection_id;
+    const live = connectionId ? this.connections.get(connectionId) : undefined;
+    if (live) this.send(live, { type: "website_capture.stop", taskId });
+  }
+
+  async accept(socket: WebSocket, request: FastifyRequest): Promise<void> {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const code = url.searchParams.get("code");
+    const sessionToken = url.searchParams.get("session_token");
+    const agent = this.parseAgent(request.headers["user-agent"] ?? "");
+    const authorized = code
+      ? await this.consumePairing(code, agent)
+      : sessionToken
+        ? await this.resumeSession(sessionToken, agent)
+        : null;
+    if (!authorized) {
+      socket.close(4001, "Invalid or expired pairing");
+      return;
+    }
+    const live: LiveConnection = { ...authorized, ws: socket };
+    this.connections.set(live.id, live);
+    this.send(live, {
+      type: "assistant.connected",
+      connectionId: live.id,
+      sessionToken: code ? live.sessionToken : undefined,
+      disclosure: DISCLOSURE,
+      commands: ["capture", "navigate", "scroll", "pause", "stop", "disconnect"],
+    });
+    socket.on("message", (raw) => {
+      void this.handleMessage(live, raw as Buffer).catch((error) => {
+        let taskId = "";
+        try { taskId = JSON.parse(Buffer.from(raw as any).toString("utf8"))?.taskId ?? ""; } catch { /* malformed messages are ignored below */ }
+        if (taskId) void this.failTask(live, taskId, error instanceof Error ? error.message : "本地浏览器消息处理失败");
+        this.send(live, { type: "assistant.error", message: error instanceof Error ? error.message : "助手消息处理失败" });
+      });
+    });
+    socket.on("close", () => void this.handleClose(live));
+    socket.on("error", () => void this.handleClose(live));
+  }
+
+  private async consumePairing(code: string, agent: Pick<LiveConnection, "browser" | "platform">) {
+    const client = await this.options.db.connect();
+    try {
+      await client.query("begin");
+      const pairing = (await client.query<{ id: string; workspace_id: string; created_by: string }>(
+        `select id,workspace_id,created_by from website_capture_pairings
+          where code_hash=$1 and used_at is null and revoked_at is null and expires_at > now() for update`,
+        [hashToken(code)],
+      )).rows[0];
+      if (!pairing) {
+        await client.query("rollback");
+        return null;
+      }
+      const sessionToken = randomBytes(32).toString("base64url");
+      const connectionId = randomUUID();
+      await client.query(
+        `insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash,browser,platform)
+         values($1,$2,$3,$4,$5,$6,$7)`,
+        [connectionId, pairing.id, pairing.workspace_id, pairing.created_by, hashToken(sessionToken), agent.browser, agent.platform],
+      );
+      await client.query("update website_capture_pairings set used_at=now() where id=$1", [pairing.id]);
+      await client.query("commit");
+      return { id: connectionId, userId: pairing.created_by, sessionToken, ...agent, paused: false };
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async resumeSession(sessionToken: string, agent: Pick<LiveConnection, "browser" | "platform">) {
+    const { rows } = await this.options.db.query<{ id: string; user_id: string; browser: LiveConnection["browser"]; platform: LiveConnection["platform"]; paused: boolean }>(
+      `select id,user_id,browser,platform,paused from website_capture_connections
+        where session_token_hash=$1 and revoked_at is null`,
+      [hashToken(sessionToken)],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    await this.options.db.query("update website_capture_connections set last_seen_at=now(), disconnected_at=null where id=$1", [row.id]);
+    return { id: row.id, userId: row.user_id, sessionToken, browser: agent.browser === "unknown" ? row.browser : agent.browser, platform: agent.platform === "unknown" ? row.platform : agent.platform, paused: row.paused };
+  }
+
+  private async handleMessage(live: LiveConnection, raw: Buffer | string) {
+    let message: any;
+    try { message = JSON.parse(typeof raw === "string" ? raw : Buffer.from(raw as any).toString("utf8")); } catch { return; }
+    await this.options.db.query("update website_capture_connections set last_seen_at=now() where id=$1 and revoked_at is null", [live.id]);
+    if (message?.type === "assistant.heartbeat") return;
+    if (message?.type === "assistant.pause") return this.setPaused(live, true);
+    if (message?.type === "assistant.resume") return this.setPaused(live, false);
+    if (message?.type === "assistant.disconnect") return this.revokeConnection(live);
+    if (message?.type === "assistant.ready") {
+      live.browser = this.parseBrowser(message.browser);
+      live.platform = this.parsePlatform(message.platform);
+      await this.options.db.query("update website_capture_connections set browser=$2,platform=$3 where id=$1", [live.id, live.browser, live.platform]);
+      return;
+    }
+    if (message?.type === "website_capture.progress") return this.updateProgress(live, message);
+    if (message?.type === "website_capture.page") return this.capturePage(live, message);
+    if (message?.type === "website_capture.complete") return this.completeTask(live, message);
+    if (message?.type === "website_capture.recording_failed") return this.event(String(message.taskId ?? ""), "recording_failed", String(message.message ?? "本地录屏不可用"));
+    if (message?.type === "website_capture.failed") return this.failTask(live, String(message.taskId ?? ""), String(message.message ?? "本地浏览器任务失败"));
+    if (message?.type === "website_capture.side_effect") {
+      this.send(live, { type: "website_capture.action_denied", taskId: message.taskId, reason: "副作用动作必须由当前用户在确认卡中明确批准。" });
+    }
+  }
+
+  private async capturePage(live: LiveConnection, message: any) {
+    const task = await this.loadLocalTask(live, message.taskId);
+    if (!task || task.status === "canceled") return;
+    const pages = this.pages.get(task.id) ?? [];
+    if (pages.length >= task.page_limit) return;
+    const url = validateLocalCapturedUrl(String(message.page?.url ?? ""), task.start_url, task.follow_external);
+    const encoded = String(message.screenshotBase64 ?? "");
+    const comma = encoded.indexOf(",");
+    const base64 = comma >= 0 ? encoded.slice(comma + 1) : encoded;
+    if (!base64 || base64.length > Math.ceil(MAX_SCREENSHOT_BYTES * 1.38)) throw new Error("Screenshot exceeds the local capture limit.");
+    const screenshot = Buffer.from(base64, "base64");
+    if (screenshot.length > MAX_SCREENSHOT_BYTES) throw new Error("Screenshot exceeds the local capture limit.");
+    const asset = await persistCaptureAsset({
+      db: this.options.db,
+      storage: this.options.storage,
+      storageRoot: this.options.storageRoot,
+      webOrigin: this.options.webOrigin,
+      task,
+      bytes: screenshot,
+      mimeType: "image/jpeg",
+      mediaType: "image",
+      title: `Website screenshot ${pages.length + 1}: ${String(message.page?.title ?? url.hostname).slice(0, 160)}`,
+      metadata: { sourceUrl: url.toString(), captureMode: "local" },
+    });
+    const page: WebsiteCapturePage = {
+      url: url.toString(),
+      title: String(message.page?.title ?? url.hostname).slice(0, 500),
+      description: String(message.page?.description ?? "").slice(0, 500),
+      headings: Array.isArray(message.page?.headings) ? message.page.headings.map(String).slice(0, 16) : [],
+      navigation: Array.isArray(message.page?.navigation) ? message.page.navigation.map(String).slice(0, 24) : [],
+      assetId: asset.id,
+      screenshotUrl: asset.url,
+    };
+    pages.push(page);
+    this.pages.set(task.id, pages);
+    await this.options.db.query("update website_capture_tasks set progress=$2, stage='page_loading', updated_at=now() where id=$1 and status='running'", [task.id, 10 + Math.round((pages.length / task.page_limit) * 65)]);
+    await this.event(task.id, "page_loading", `已保存第 ${pages.length} 个页面证据：${page.url}`);
+  }
+
+  private async completeTask(live: LiveConnection, message: any) {
+    const task = await this.loadLocalTask(live, message.taskId);
+    if (!task || task.status === "canceled") return;
+    const pages = this.pages.get(task.id) ?? [];
+    if (!pages.length) return this.failTask(live, task.id, "本地浏览器没有返回页面证据。");
+    let recordingAsset: { id: string; url: string } | undefined;
+    if (message.recordingBase64) {
+      const encoded = String(message.recordingBase64);
+      if (encoded.length > Math.ceil(MAX_RECORDING_BYTES * 1.38)) return this.failTask(live, task.id, "本地录屏超过 40 MB 限制。");
+      const recording = Buffer.from(encoded.includes(",") ? encoded.slice(encoded.indexOf(",") + 1) : encoded, "base64");
+      if (recording.length > MAX_RECORDING_BYTES) return this.failTask(live, task.id, "本地录屏超过 40 MB 限制。");
+      recordingAsset = await persistCaptureAsset({
+        db: this.options.db,
+        storage: this.options.storage,
+        storageRoot: this.options.storageRoot,
+        webOrigin: this.options.webOrigin,
+        task,
+        bytes: recording,
+        mimeType: "video/webm",
+        mediaType: "video",
+        title: `Website browsing recording: ${pages[0]?.title ?? new URL(task.start_url).hostname}`,
+        metadata: { sourceUrl: task.start_url, captureMode: "local", pageCount: pages.length },
+      });
+    }
+    const result = {
+      title: pages[0]?.title || new URL(task.start_url).hostname,
+      introduction: buildWebsiteIntroduction(task.start_url, pages),
+      startUrl: task.start_url,
+      pages,
+      ...(recordingAsset ? { recordingAssetId: recordingAsset.id, recordingUrl: recordingAsset.url } : {}),
+      completedAt: new Date().toISOString(),
+    };
+    await this.options.db.query("update website_capture_tasks set status='succeeded', progress=100, stage='completed', result=$2::jsonb, completed_at=now(), updated_at=now() where id=$1 and status='running'", [task.id, JSON.stringify(result)]);
+    await this.event(task.id, "completed", "本地浏览证据与中文介绍已保存");
+    this.pages.delete(task.id);
+    this.clearTaskTimer(task.id);
+  }
+
+  private async updateProgress(live: LiveConnection, message: any) {
+    const task = await this.loadLocalTask(live, message.taskId);
+    if (!task || task.status === "canceled") return;
+    const progress = Math.max(0, Math.min(99, Number(message.progress) || 0));
+    const stage = String(message.stage ?? "browsing").slice(0, 80);
+    await this.options.db.query("update website_capture_tasks set progress=$2, stage=$3, updated_at=now() where id=$1 and status='running'", [task.id, progress, stage]);
+    await this.event(task.id, stage, String(message.detail ?? "").slice(0, 500));
+  }
+
+  private async failTask(live: LiveConnection, taskId: string, message: string) {
+    if (!taskId) return;
+    await this.options.db.query("update website_capture_tasks set status='failed', stage='failed', error_message=$2, updated_at=now() where id=$1 and assistant_connection_id=$3 and status in ('queued','running')", [taskId, message.slice(0, 1000), live.id]);
+    await this.event(taskId, "failed", message);
+    this.pages.delete(taskId);
+    this.clearTaskTimer(taskId);
+  }
+
+  private async loadLocalTask(live: LiveConnection, taskId: string): Promise<LocalTask | null> {
+    const { rows } = await this.options.db.query<LocalTask>(
+      `select id,workspace_id,created_by,start_url,page_limit,record_video,status,assistant_connection_id,follow_external
+         from website_capture_tasks where id=$1 and created_by=$2 and assistant_connection_id=$3 and mode='local'`,
+      [taskId, live.userId, live.id],
+    );
+    return rows[0] ?? null;
+  }
+
+  private async handleClose(live: LiveConnection) {
+    this.connections.delete(live.id);
+    await this.options.db.query("update website_capture_connections set disconnected_at=now(), last_seen_at=now() where id=$1 and revoked_at is null", [live.id]);
+    const tasks = await this.options.db.query<{ id: string }>("update website_capture_tasks set status='failed', stage='failed', error_message='本地浏览器助手已断开，任务已中止', updated_at=now() where assistant_connection_id=$1 and status in ('queued','running') returning id", [live.id]);
+    for (const task of tasks.rows) {
+      this.clearTaskTimer(task.id);
+      await this.event(task.id, "failed", "本地浏览器助手已断开，任务已中止");
+    }
+  }
+
+  private async setPaused(live: LiveConnection, paused: boolean) {
+    live.paused = paused;
+    await this.options.db.query("update website_capture_connections set paused=$2,last_seen_at=now() where id=$1", [live.id, paused]);
+    this.send(live, { type: "assistant.state", paused });
+  }
+
+  private async revokeConnection(live: LiveConnection) {
+    await this.options.db.query("update website_capture_connections set revoked_at=now(),disconnected_at=now() where id=$1", [live.id]);
+    this.send(live, { type: "assistant.revoked" });
+    live.ws.close(4004, "Disconnected by user");
+  }
+
+  private async event(taskId: string, stage: string, detail: string) {
+    await this.options.db.query("insert into website_capture_events(task_id,stage,detail) values($1,$2,$3)", [taskId, stage.slice(0, 80), detail.slice(0, 1000)]);
+  }
+
+  private clearTaskTimer(taskId: string) {
+    const timer = this.taskTimers.get(taskId);
+    if (timer) clearTimeout(timer);
+    this.taskTimers.delete(taskId);
+  }
+
+  private send(live: LiveConnection, message: Record<string, unknown>) {
+    if (live.ws.readyState === 1) live.ws.send(JSON.stringify(message));
+  }
+
+  private wssUrl() {
+    const url = new URL(this.options.webOrigin);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.pathname = "/api/website-capture/assistant/ws";
+    url.search = "";
+    return url.toString();
+  }
+
+  private parseAgent(value: string): Pick<LiveConnection, "browser" | "platform"> {
+    return { browser: this.parseBrowser(value), platform: this.parsePlatform(value) };
+  }
+
+  private parseBrowser(value: unknown): LiveConnection["browser"] {
+    const text = String(value ?? "").toLowerCase();
+    return text.includes("edg/") || text.includes("edge") ? "edge" : text.includes("chrome") ? "chrome" : "unknown";
+  }
+
+  private parsePlatform(value: unknown): LiveConnection["platform"] {
+    const text = String(value ?? "").toLowerCase();
+    return text.includes("windows") ? "windows" : text.includes("mac") ? "macos" : text.includes("linux") ? "linux" : "unknown";
+  }
+}
+
+export function validateLocalExactUrl(input: string): URL {
+  let url: URL;
+  try { url = new URL(input); } catch { throw new Error("请输入准确的本地网站 URL。"); }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error("本地助手只允许 HTTP(S) URL。");
+  if (url.username || url.password) throw new Error("URL 不得包含用户名或密码。");
+  url.hash = "";
+  return url;
+}
+
+function validateLocalCapturedUrl(input: string, startUrl: string, followExternal: boolean): URL {
+  const url = validateLocalExactUrl(input);
+  const start = new URL(startUrl);
+  const isPrivateHost = (hostname: string) => hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal") || hostname === "127.0.0.1" || hostname === "::1";
+  if (isPrivateHost(url.hostname) && url.hostname.toLowerCase() !== start.hostname.toLowerCase()) throw new Error("自动跟链不得扩展到新的本地主机。");
+  if (!followExternal && url.hostname.toLowerCase() !== start.hostname.toLowerCase()) throw new Error("当前任务未授权跟随外域页面。");
+  return url;
+}
+
+export async function registerWebsiteAssistantWsRoute(app: FastifyInstance, hub: WebsiteAssistantHub) {
+  app.get("/api/website-capture/assistant/ws", { websocket: true }, (socket: WebSocket, request: FastifyRequest) => {
+    void hub.accept(socket, request);
+  });
+}

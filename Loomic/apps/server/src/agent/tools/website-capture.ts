@@ -6,6 +6,8 @@ export type SubmitWebsiteCaptureFn = (input: {
   mode: "isolated" | "local";
   pageLimit?: number | undefined;
   recordVideo?: boolean | undefined;
+  followExternal?: boolean | undefined;
+  promo?: { enabled: boolean; durationSeconds: number; aspectRatio: "9:16" | "16:9" | "1:1"; narrationLanguage: "zh-CN" | "none"; model?: string | undefined } | undefined;
   idempotencyKey?: string | undefined;
 }) => Promise<{
   taskId: string;
@@ -21,6 +23,14 @@ const websiteCaptureSchema = z.object({
   mode: z.enum(["isolated", "local"]).describe("The user-selected browser mode. Isolated uses a temporary public-web browser; local requires an already connected local assistant."),
   pageLimit: z.number().int().min(1).max(5).optional().default(3),
   recordVideo: z.boolean().optional().default(true),
+  followExternal: z.boolean().optional().default(false).describe("Whether the user explicitly authorized following external-domain links."),
+  promo: z.object({
+    enabled: z.boolean().default(false),
+    durationSeconds: z.number().int().min(5).max(30).default(30),
+    aspectRatio: z.enum(["9:16", "16:9", "1:1"]).default("9:16"),
+    narrationLanguage: z.enum(["zh-CN", "none"]).default("zh-CN"),
+    model: z.string().trim().min(1).max(160).optional(),
+  }).optional().describe("Optional promotional video configuration. Generation always requires a separate cost approval."),
   idempotencyKey: z.string().trim().min(1).max(160).optional(),
 });
 

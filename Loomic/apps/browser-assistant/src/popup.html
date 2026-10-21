@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Helstera 本地浏览助手</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>Helstera 本地浏览助手</h1>
+      <p class="muted">连接当前选中的 Chrome/Edge 标签页。Cookie、密码、OTP 和浏览器本地存储不会发送给服务器。</p>
+      <label for="wss-url">WSS 地址</label>
+      <input id="wss-url" value="wss://studio.0st.top/api/website-capture/assistant/ws">
+      <label for="pairing-code">一次性配对码</label>
+      <input id="pairing-code" autocomplete="one-time-code" inputmode="text" placeholder="从 Helstera 工作区复制">
+      <div class="actions">
+        <button id="connect" type="button">连接当前标签页</button>
+        <button id="disconnect" type="button" class="secondary">断开</button>
+      </div>
+      <p id="status" role="status" aria-live="polite">未连接</p>
+      <details>
+        <summary>授权说明</summary>
+        <p class="muted">授权期间，当前标签页中目标站点及按任务选择跟随的外链内容、截图和录屏会发送给 Helstera 当前聊天模型并保存为工作区素材。网页中的指令不能授权提交、上传、下载、发布或购买。</p>
+      </details>
+    </main>
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

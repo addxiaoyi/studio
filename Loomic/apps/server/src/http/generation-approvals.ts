@@ -51,6 +51,9 @@ export function registerGenerationApprovalRoutes(
         await options.jobService.setCreditsInfo(job.id, approval.estimatedCredits, txId);
       }
       await approvals.attachJob(approvalId, job.id);
+      if (approval.context?.websiteCaptureTaskId) {
+        await options.db.query("update website_capture_tasks set promo_status='queued', promo_job_id=$2, updated_at=now() where id=$1 and workspace_id=$3", [approval.context.websiteCaptureTaskId, job.id, viewer.workspace.id]);
+      }
       return reply.send({ ok: true, data: { state: "approved", approval, jobId: job.id } });
     } catch (error) {
       return approvalError(error, reply);
@@ -230,6 +233,9 @@ export function registerGenerationApprovalRoutes(
       const attachedJobId = await approvals.attachJob(approvalId, job.id);
       if (!attachedJobId) throw new GenerationApprovalError("generation_approval_invalid", "The approved job could not be linked to its confirmation.");
       if (attachedJobId !== job.id) throw new GenerationApprovalError("generation_approval_invalid", "This confirmation is already linked to another job.");
+      if (approval.context?.websiteCaptureTaskId) {
+        await options.db.query("update website_capture_tasks set promo_status='queued', promo_job_id=$2, updated_at=now() where id=$1 and workspace_id=$3", [approval.context.websiteCaptureTaskId, job.id, viewer.workspace.id]);
+      }
       return reply.code(200).send({ ok: true, data: { state: "approved", approval, jobId: job.id } });
     } catch (error) {
       return approvalError(error, reply);
@@ -242,7 +248,10 @@ export function registerGenerationApprovalRoutes(
       if (!user) return unauthorized(reply);
       const viewer = await options.viewerService.ensureViewer(user);
       const { approvalId } = request.params as { approvalId: string };
+      const existing = await options.db.query<{ context: { websiteCaptureTaskId?: string } | null }>("select context from generation_approvals where id=$1 and workspace_id=$2 and user_id=$3", [approvalId, viewer.workspace.id, user.id]);
       await approvals.reject({ approvalId, workspaceId: viewer.workspace.id, userId: user.id });
+      const websiteTaskId = existing.rows[0]?.context?.websiteCaptureTaskId;
+      if (websiteTaskId) await options.db.query("update website_capture_tasks set promo_status='rejected', promo_error='用户取消了宣传成片确认', updated_at=now() where id=$1 and workspace_id=$2", [websiteTaskId, viewer.workspace.id]);
       return reply.code(200).send({ ok: true, data: { state: "rejected" } });
     } catch (error) {
       return approvalError(error, reply);

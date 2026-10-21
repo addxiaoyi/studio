@@ -138,6 +138,7 @@ import { registerDouyinOAuthRoutes } from "./http/douyin-oauth.js";
 import { DouyinCredentialManager } from "./features/douyin/douyin-credentials.js";
 import { registerStorageRoutes } from "./http/storage.js";
 import { registerWebsiteCaptureRoutes } from "./http/website-capture.js";
+import { WebsiteAssistantHub, registerWebsiteAssistantWsRoute } from "./features/website-capture/assistant-hub.js";
 import { CanvasEventBuffer } from "./ws/event-buffer.js";
 import { ConnectionManager } from "./ws/connection-manager.js";
 import { registerWsRoute } from "./ws/handler.js";
@@ -197,21 +198,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   void app.register(multipart, {
     limits: { fileSize: 25 * 1024 * 1024 },
   });
-  void app.register(async (instance) => {
-    await instance.register(websocket);
-    await registerWsRoute(instance, {
-      agentRuns,
-      agentRunMetadataService,
-      auth,
-      chatService,
-      creditService,
-      connectionManager,
-      eventBuffer,
-      settingsService,
-      threadService,
-      viewerService,
-    });
-  });
   const localDb = createLocalDbPool(env.databaseUrl);
   {
     void localDb.query(
@@ -263,6 +249,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   const connectionManager =
     options.connectionManager ?? new ConnectionManager();
+  const websiteAssistantHub = new WebsiteAssistantHub({
+    db: localDb,
+    storage: storageProvider,
+    storageRoot: env.storageRoot ?? "/www/helstera/uploads",
+    webOrigin: env.webOrigin,
+  });
   const eventBuffer = new CanvasEventBuffer();
   setInterval(() => eventBuffer.cleanup(), 5 * 60 * 1000);
   if (localDb) {
@@ -298,6 +290,23 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     tierGuard,
     viewerService,
     storage: storageProvider,
+  });
+
+  void app.register(async (instance) => {
+    await instance.register(websocket);
+    await registerWsRoute(instance, {
+      agentRuns,
+      agentRunMetadataService,
+      auth,
+      chatService,
+      creditService,
+      connectionManager,
+      eventBuffer,
+      settingsService,
+      threadService,
+      viewerService,
+    });
+    await registerWebsiteAssistantWsRoute(instance, websiteAssistantHub);
   });
 
   app.addHook("onRequest", async (request, reply) => {
@@ -511,6 +520,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     db: localDb,
     jobService,
     viewerService,
+    assistantHub: websiteAssistantHub,
+    generationApprovalService: createGenerationApprovalService(localDb),
+    creditService,
+    tierGuard,
   });
   if (localDb) {
     registerGenerationApprovalRoutes(app, {

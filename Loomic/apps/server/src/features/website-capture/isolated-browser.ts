@@ -17,13 +17,14 @@ const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 40 * 1024 * 1024;
 const MAX_HEADINGS = 16;
 
-type CaptureTask = {
+export type CaptureTask = {
   id: string;
   workspace_id: string;
   created_by: string;
   start_url: string;
   page_limit: number;
   record_video: boolean;
+  follow_external?: boolean;
 };
 
 type CaptureProgress = (percent: number, stage: string, detail?: string) => Promise<void>;
@@ -168,6 +169,7 @@ export async function captureIsolatedWebsite(options: {
         for (const link of facts.links) {
           if (pending.length + captured.length >= options.task.page_limit * 3) break;
           const safeUrl = await validatePublicHttpUrl(link).catch(() => null);
+          if (safeUrl && !options.task.follow_external && safeUrl.hostname !== startUrl.hostname) continue;
           if (safeUrl && !visited.has(safeUrl.toString()) && !pending.includes(safeUrl.toString())) {
             pending.push(safeUrl.toString());
           }
@@ -432,7 +434,7 @@ function selectResponseHeaders(input: Record<string, string | string[] | undefin
     .map(([key, value]) => [key.toLowerCase(), value as string]));
 }
 
-async function persistCaptureAsset(input: {
+export async function persistCaptureAsset(input: {
   db: Pool;
   storage: StorageProvider;
   storageRoot: string;

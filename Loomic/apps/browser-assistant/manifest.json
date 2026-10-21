@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Helstera Local Browser Assistant",
+  "version": "0.1.0",
+  "description": "Connect a selected Chrome or Edge tab to Helstera without sending cookies, passwords, OTPs, or browser storage.",
+  "permissions": ["activeTab", "scripting", "storage", "tabs", "webNavigation", "offscreen", "tabCapture"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "src/background.js", "type": "module" },
+  "action": {
+    "default_title": "Helstera 本地浏览助手",
+    "default_popup": "src/popup.html"
+  },
+  "options_page": "src/popup.html",
+  "minimum_chrome_version": "109"
+}
