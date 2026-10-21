@@ -1346,11 +1346,14 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           if (!options.localDb || !options.jobService || !userId) {
             throw new Error("网站浏览后台任务当前不可用。");
           }
-          if (input.mode === "local") {
+          if (false) {
             throw new Error("本地浏览器助手尚未连接；请先选择一次性隔离浏览器。");
           }
           const { validatePublicHttpUrl } = await import("../features/website-capture/isolated-browser.js");
-          const startUrl = await validatePublicHttpUrl(input.url);
+          const { validateLocalExactUrl } = await import("../features/website-capture/assistant-hub.js");
+          const startUrl = input.mode === "local"
+            ? validateLocalExactUrl(input.url)
+            : await validatePublicHttpUrl(input.url);
           const workspaceResult = canvasId
             ? await options.localDb.query(
                 "select p.workspace_id from canvases c join projects p on p.id=c.project_id join workspace_members wm on wm.workspace_id=p.workspace_id where c.id=$1 and wm.user_id=$2",
@@ -1363,6 +1366,22 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           const workspaceId = workspaceResult.rows[0]?.workspace_id as string | undefined;
           if (!workspaceId) throw new Error("No workspace found");
           const idempotencyKey = input.idempotencyKey ?? `agent-website-capture:${randomUUID()}`;
+          if (input.mode === "local") {
+            const connection = await options.desktopAgentHub?.getConnection(userId, workspaceId);
+            if (!connection || connection.status !== "connected") throw new Error("���������������δ���ӣ�����Ӧ����������ҳ��");
+            const localTask = await options.localDb.query<{ id: string; status: string; progress: number }>(
+              `insert into website_capture_tasks
+                (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, assistant_connection_id, promo, idempotency_key)
+               values ($1,$2,$3,'local',$4,$5,$6,$7,$8,$9,$10)
+               on conflict (created_by, idempotency_key) do nothing
+               returning id, status, progress`,
+              [workspaceId, userId, sessionId, startUrl.toString(), input.pageLimit ?? 3, input.recordVideo ?? true, input.followExternal ?? false, connection.id, input.promo?.enabled ? JSON.stringify(input.promo) : null, idempotencyKey],
+            );
+            const task = localTask.rows[0] ?? (await options.localDb.query<{ id: string; status: string; progress: number }>("select id, status, progress from website_capture_tasks where created_by=$1 and idempotency_key=$2", [userId, idempotencyKey])).rows[0];
+            if (!task) throw new Error("��վ������񴴽�ʧ�ܡ�");
+            if (task.status === "queued") await options.desktopAgentHub?.startLocalTask(task.id, userId);
+            return { taskId: task.id, jobId: null, status: task.status, progress: Number(task.progress ?? 0), pending: task.status !== "succeeded" };
+          }
           const taskResult = await options.localDb.query<{ id: string; background_job_id: string | null; status: string; progress: number }>(
             `insert into website_capture_tasks
               (workspace_id, created_by, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key)
