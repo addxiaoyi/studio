@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.electron.json --noEmit"
   },
   "dependencies": {
+    "@helstera/shared": "workspace:*",
     "electron-updater": "^6.3.9",
     "next": "^15.5.28",
     "react": "19.0.0",

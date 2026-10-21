@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Pool } from "pg";
 import type { WebSocket } from "ws";
 
-import type { WebsiteCaptureAssistantConnection, WebsiteCapturePairing, WebsiteCapturePage } from "@helstera/shared";
+import { desktopAgentEventSchema, type DesktopAgentTaskRequest, type WebsiteCaptureAssistantConnection, type WebsiteCapturePairing, type WebsiteCapturePage } from "@helstera/shared";
 import { hashToken } from "../../local-db/auth.js";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import {
@@ -45,6 +45,7 @@ export class WebsiteAssistantHub {
   private readonly connections = new Map<string, LiveConnection>();
   private readonly pages = new Map<string, WebsiteCapturePage[]>();
   private readonly taskTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly desktopTaskTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly options: HubOptions) {
     void this.options.db.query("update website_capture_connections set disconnected_at=coalesce(disconnected_at, now()) where revoked_at is null and disconnected_at is null").catch(() => undefined);
@@ -156,6 +157,42 @@ export class WebsiteAssistantHub {
       followExternal: task.follow_external,
       disclosure: DISCLOSURE,
     });
+  }
+
+  async createDesktopAgentTask(userId: string, workspaceId: string, input: DesktopAgentTaskRequest) {
+    const { rows: connections } = await this.options.db.query<{ id: string }>(
+      `select id from website_capture_connections
+        where user_id=$1 and workspace_id=$2 and revoked_at is null and disconnected_at is null and paused=false
+        order by connected_at desc limit 1`,
+      [userId, workspaceId],
+    );
+    const connectionId = connections[0]?.id;
+    const live = connectionId ? this.connections.get(connectionId) : undefined;
+    if (!connectionId || !live || live.ws.readyState !== 1) throw new Error("本地桌面助手未连接。");
+    const taskId = randomUUID();
+    const task = { ...input, taskId, createdAt: new Date().toISOString() };
+    await this.options.db.query(
+      `insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,target_url)
+       values($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
+      [taskId, workspaceId, userId, connectionId, input.goal, input.role, JSON.stringify(input.capabilities), input.targetUrl ?? null],
+    );
+    await this.options.db.query("update desktop_agent_tasks set status='running',updated_at=now() where id=$1", [taskId]);
+    await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail) values($1,'started',$2)", [taskId, "桌面协作任务已发送"]);
+    this.desktopTaskTimers.set(taskId, setTimeout(() => {
+      this.send(live, { type: "desktop_agent.stop", taskId, reason: "桌面协作任务超过时限。" });
+      void this.failDesktopTask(taskId, "桌面协作任务超过时限。");
+    }, input.maxDurationSeconds * 1000));
+    this.send(live, { type: "desktop_agent.task", task });
+    return task;
+  }
+
+  async listDesktopAgentTasks(userId: string, workspaceId: string) {
+    const { rows } = await this.options.db.query(
+      `select id,goal,role,capabilities,target_url,status,result,error_message,created_at,updated_at,completed_at
+         from desktop_agent_tasks where created_by=$1 and workspace_id=$2 order by created_at desc limit 30`,
+      [userId, workspaceId],
+    );
+    return rows;
   }
 
   async revokeTask(taskId: string): Promise<void> {
@@ -342,6 +379,7 @@ export class WebsiteAssistantHub {
     if (message?.type === "website_capture.recording_failed") return this.event(String(message.taskId ?? ""), "recording_failed", String(message.message ?? "本地录屏不可用"));
     if (message?.type === "website_capture.failed") return this.failTask(live, String(message.taskId ?? ""), String(message.message ?? "本地浏览器任务失败"));
     if (message?.type === "website_capture.action_result") return this.consumeApprovedAction(live, message);
+    if (message?.type === "desktop_agent.event") return this.handleDesktopAgentEvent(live, message);
     if (message?.type === "website_capture.side_effect") {
       this.send(live, { type: "website_capture.action_denied", taskId: message.taskId, reason: "副作用动作必须由当前用户在确认卡中明确批准。" });
     }
@@ -367,6 +405,43 @@ export class WebsiteAssistantHub {
       await this.event(task.id, "action_confirmation", JSON.stringify({ actionId, action: message.action, reason: decision.reason }));
       this.send(live, { type: "website_capture.action_confirmation_required", actionId, taskId: task.id, action: message.action, reason: decision.reason });
     }
+  }
+
+  private async handleDesktopAgentEvent(live: LiveConnection, raw: unknown) {
+    const parsed = desktopAgentEventSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.send(live, { type: "assistant.error", message: "桌面协作事件格式无效。" });
+      return;
+    }
+    const event = parsed.data;
+    const result = await this.options.db.query<{ id: string }>(
+      `select id from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3`,
+      [event.taskId, live.userId, live.id],
+    );
+    if (!result.rows[0]) return;
+    const safeResult = event.result ? { ...event.result, screenshotBase64: undefined, recordingBase64: undefined } : {};
+    await this.options.db.query(
+      "insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,$2,$3,$4::jsonb)",
+      [event.taskId, event.eventType, event.detail ?? null, JSON.stringify({ progress: event.progress, result: safeResult })],
+    );
+    const terminal = event.eventType === "completed" || event.eventType === "failed";
+    await this.options.db.query(
+      `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb else result end,error_message=case when $2='failed' then $5 else null end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1`,
+      [event.taskId, event.eventType === "failed" ? "failed" : event.eventType === "completed" ? "succeeded" : "running", terminal, JSON.stringify(safeResult), event.detail ?? null],
+    );
+    if (terminal) this.clearDesktopTaskTimer(event.taskId);
+  }
+
+  private async failDesktopTask(taskId: string, message: string) {
+    await this.options.db.query("update desktop_agent_tasks set status='failed',error_message=$2,updated_at=now(),completed_at=now() where id=$1 and status in ('queued','running')", [taskId, message]);
+    await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail) values($1,'failed',$2)", [taskId, message]);
+    this.clearDesktopTaskTimer(taskId);
+  }
+
+  private clearDesktopTaskTimer(taskId: string) {
+    const timer = this.desktopTaskTimers.get(taskId);
+    if (timer) clearTimeout(timer);
+    this.desktopTaskTimers.delete(taskId);
   }
 
   private async capturePage(live: LiveConnection, message: any) {
@@ -477,6 +552,11 @@ export class WebsiteAssistantHub {
   private async handleClose(live: LiveConnection) {
     this.connections.delete(live.id);
     await this.options.db.query("update website_capture_connections set disconnected_at=now(), last_seen_at=now() where id=$1 and revoked_at is null", [live.id]);
+    const desktopTasks = await this.options.db.query<{ id: string }>("update desktop_agent_tasks set status='failed',error_message='本地桌面助手已断开，任务已中止',updated_at=now(),completed_at=now() where connection_id=$1 and status in ('queued','running') returning id", [live.id]);
+    for (const task of desktopTasks.rows) {
+      this.clearDesktopTaskTimer(task.id);
+      await this.options.db.query("insert into desktop_agent_events(task_id,event_type,detail) values($1,'failed',$2)", [task.id, "本地桌面助手已断开，任务已中止"]);
+    }
     const tasks = await this.options.db.query<{ id: string }>("update website_capture_tasks set status='failed', stage='failed', error_message='本地浏览器助手已断开，任务已中止', updated_at=now() where assistant_connection_id=$1 and status in ('queued','running') returning id", [live.id]);
     for (const task of tasks.rows) {
       this.clearTaskTimer(task.id);

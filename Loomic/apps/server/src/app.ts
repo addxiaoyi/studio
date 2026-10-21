@@ -290,6 +290,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     tierGuard,
     viewerService,
     storage: storageProvider,
+    desktopAgentHub: websiteAssistantHub,
   });
 
   void app.register(async (instance) => {

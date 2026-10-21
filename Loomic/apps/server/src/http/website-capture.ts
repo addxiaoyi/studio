@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool } from "pg";
 import { z } from "zod";
 
-import { createWebsiteCaptureRequestSchema, type WebsiteCapturePromo, type WebsiteCaptureTask } from "@helstera/shared";
+import { createWebsiteCaptureRequestSchema, desktopAgentTaskRequestSchema, type WebsiteCapturePromo, type WebsiteCaptureTask } from "@helstera/shared";
 import type { RequestAuthenticator } from "../auth/types.js";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
 import { validatePublicHttpUrl, WebsiteCaptureError } from "../features/website-capture/isolated-browser.js";
@@ -75,6 +75,30 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       const viewer = await options.viewerService.ensureViewer(user);
       await options.assistantHub.revoke(user.id, viewer.workspace.id);
       return reply.send({ ok: true, data: null });
+    } catch (error) {
+      return sendWebsiteCaptureError(error, reply);
+    }
+  });
+
+  app.post("/api/website-capture/assistant/desktop-tasks", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      const input = desktopAgentTaskRequestSchema.parse(request.body);
+      const task = await options.assistantHub.createDesktopAgentTask(user.id, viewer.workspace.id, input);
+      return reply.code(202).send({ ok: true, data: task });
+    } catch (error) {
+      return sendWebsiteCaptureError(error, reply);
+    }
+  });
+
+  app.get("/api/website-capture/assistant/desktop-tasks", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      return reply.send({ ok: true, data: await options.assistantHub.listDesktopAgentTasks(user.id, viewer.workspace.id) });
     } catch (error) {
       return sendWebsiteCaptureError(error, reply);
     }

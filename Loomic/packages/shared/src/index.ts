@@ -14,3 +14,4 @@ export * from "./ws-protocol.js";
 export * from "./ecom/mod.js";
 export * from "./automation-contracts.js";
 export * from "./website-capture.js";
+export * from "./desktop-control.js";

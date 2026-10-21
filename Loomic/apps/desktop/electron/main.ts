@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, Tray, shell, nativeImage, ipcMain } from "electron";
+import { classifyDesktopAction, desktopAgentActionSchema, desktopAgentTaskSchema, type DesktopAgentAction, type DesktopAgentTask } from "@helstera/shared";
 import { join } from "path";
 
 let mainWindow: BrowserWindow | null = null;
@@ -8,6 +9,7 @@ let recorderWindow: BrowserWindow | null = null;
 let assistantSocket: any = null;
 let assistantSessionToken = "";
 const desktopTaskTabs = new Map<string, BrowserWindow>();
+const desktopAgentTasks = new Map<string, DesktopAgentTask>();
 
 function isSafeBrowserUrl(value: string): boolean {
   try {
@@ -163,6 +165,111 @@ async function captureEmbeddedPage(task: any) {
   }
 }
 
+async function readEmbeddedPage(browser: BrowserWindow) {
+  return browser.webContents.executeJavaScript(`(() => {
+    const clean = (value) => String(value ?? '').replace(/\\s+/g, ' ').trim().slice(0, 500);
+    return {
+      url: location.href,
+      title: clean(document.title) || location.hostname,
+      description: clean(document.querySelector('meta[name="description"]')?.content ?? document.querySelector('meta[property="og:description"]')?.content),
+      headings: [...document.querySelectorAll('h1,h2,h3')].map((node) => clean(node.textContent)).filter(Boolean).slice(0, 16),
+      navigation: [...document.querySelectorAll('header a,nav a')].map((node) => clean(node.textContent)).filter(Boolean).slice(0, 24),
+    };
+  })()`);
+}
+
+function desktopCapabilityForAction(action: DesktopAgentAction) {
+  return {
+    focus_window: "window.focus",
+    read_page: "browser.read",
+    navigate: "browser.navigate",
+    scroll: "browser.scroll",
+    capture_screen: "browser.capture",
+    start_recording: "browser.record",
+    stop_recording: "browser.record",
+    click: "browser.click",
+    type: "browser.type",
+  }[action.kind];
+}
+
+async function runDesktopAgentTask(rawTask: unknown) {
+  const parsed = desktopAgentTaskSchema.safeParse(rawTask);
+  if (!parsed.success) {
+    sendAssistant({ type: "assistant.error", message: "桌面协作任务格式无效。" });
+    return;
+  }
+  const task = parsed.data;
+  try {
+    const browser = embeddedBrowserWindow;
+    if (!browser || browser.isDestroyed()) throw new Error("请先打开桌面内嵌浏览器。");
+    if (task.targetUrl) await openEmbeddedBrowser(task.targetUrl);
+    desktopAgentTasks.set(task.taskId, task);
+    desktopTaskTabs.set(task.taskId, browser);
+    sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "started", progress: 2, detail: `${task.role} Agent 已开始执行` });
+    const page = task.capabilities.includes("browser.read") ? await readEmbeddedPage(browser) : undefined;
+    const screenshotBase64 = task.capabilities.includes("browser.capture")
+      ? (await browser.webContents.capturePage()).toJPEG(76).toString("base64")
+      : undefined;
+    sendAssistant({
+      type: "desktop_agent.event",
+      taskId: task.taskId,
+      eventType: "completed",
+      progress: 100,
+      detail: "桌面协作任务已完成",
+      result: { ...(page ? { page } : {}), ...(screenshotBase64 ? { screenshotBase64 } : {}) },
+    });
+  } catch (error) {
+    sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "failed", detail: error instanceof Error ? error.message : "桌面协作任务失败" });
+  } finally {
+    desktopAgentTasks.delete(task.taskId);
+    desktopTaskTabs.delete(task.taskId);
+  }
+}
+
+async function executeDesktopAgentAction(rawAction: unknown) {
+  const parsed = desktopAgentActionSchema.safeParse(rawAction);
+  if (!parsed.success) return;
+  const action = parsed.data;
+  const task = desktopAgentTasks.get(action.taskId);
+  const browser = desktopTaskTabs.get(action.taskId);
+  const capability = desktopCapabilityForAction(action);
+  if (!task || !browser || browser.isDestroyed() || !capability || !task.capabilities.includes(capability as DesktopAgentTask["capabilities"][number])) {
+    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "failed", detail: "Agent 没有该桌面能力或任务已结束" });
+    return;
+  }
+  if (classifyDesktopAction(action) === "deny") {
+    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "approval_required", action, detail: "该动作需要用户批准，或涉及禁止的凭据字段" });
+    return;
+  }
+  try {
+    if (action.kind === "navigate") {
+      const targetUrl = String(action.targetUrl ?? "");
+      if (!/^https?:$/i.test(new URL(targetUrl).protocol)) throw new Error("只允许导航到 HTTP(S) 地址。");
+      await browser.loadURL(targetUrl);
+    } else if (action.kind === "scroll") {
+      await browser.webContents.executeJavaScript(`window.scrollTo({ top: ${Number(action.top) || 0}, behavior: 'instant' })`);
+    } else if (action.kind === "read_page") {
+      const page = await readEmbeddedPage(browser);
+      sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "page", detail: "已读取页面", result: { page } });
+    } else if (action.kind === "capture_screen") {
+      const screenshotBase64 = (await browser.webContents.capturePage()).toJPEG(76).toString("base64");
+      sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "page", detail: "已捕获屏幕", result: { screenshotBase64 } });
+    } else if (action.kind === "click") {
+      const selector = JSON.stringify(String(action.target ?? ""));
+      await browser.webContents.executeJavaScript(`(() => { const element = document.querySelector(${selector}); if (!(element instanceof HTMLElement)) throw new Error('点击目标不存在。'); element.click(); })()`);
+    } else if (action.kind === "type") {
+      const selector = JSON.stringify(String(action.target ?? ""));
+      const value = JSON.stringify(action.value ?? "");
+      await browser.webContents.executeJavaScript(`(() => { const element = document.querySelector(${selector}); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) throw new Error('填写目标不存在。'); element.value = ${value}; element.dispatchEvent(new Event('input', { bubbles: true })); element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    } else {
+      throw new Error("该桌面动作暂未实现。");
+    }
+    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "progress", progress: 80, detail: `已完成 ${action.kind}` });
+  } catch (error) {
+    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "failed", detail: error instanceof Error ? error.message : "桌面动作失败" });
+  }
+}
+
 function isPrivateDesktopHost(value: string) {
   const hostname = value.toLowerCase().replace(/^\[|\]$/g, "");
   if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) return true;
@@ -247,6 +354,13 @@ function connectEmbeddedAssistant(wssUrl: string, code: string) {
     }
     if (message.type === "website_capture.start") void captureEmbeddedPage(message).catch((error) => sendAssistant({ type: "website_capture.failed", taskId: message.taskId, message: error instanceof Error ? error.message : "桌面浏览失败" }));
     if (message.type === "website_capture.action_execute") void executeDesktopAction(message);
+    if (message.type === "desktop_agent.task") void runDesktopAgentTask(message.task);
+    if (message.type === "desktop_agent.action") void executeDesktopAgentAction(message.action);
+    if (message.type === "desktop_agent.stop") {
+      desktopAgentTasks.delete(String(message.taskId ?? ""));
+      desktopTaskTabs.delete(String(message.taskId ?? ""));
+      sendAssistant({ type: "desktop_agent.event", taskId: message.taskId, eventType: "failed", detail: String(message.reason ?? "桌面协作任务已停止") });
+    }
     if (message.type === "website_capture.stop") sendAssistant({ type: "website_capture.failed", taskId: message.taskId, message: "用户停止了桌面浏览任务" });
   };
   assistantSocket.onclose = () => { assistantSocket = null; assistantSessionToken = ""; desktopTaskTabs.clear(); };

@@ -31,6 +31,8 @@ import { singleImageSubmission } from "./image-submission.js";
 import { resolveImageReferences } from "./image-references.js";
 import type { SubmitVideoJobFn } from "./tools/video-generate.js";
 import type { SubmitWebsiteCaptureFn } from "./tools/website-capture.js";
+import type { SubmitDesktopAgentTaskFn } from "./tools/desktop-agent.js";
+import type { WebsiteAssistantHub } from "../features/website-capture/assistant-hub.js";
 import type { CreditService } from "../features/credits/credit-service.js";
 import { TierGuardError, type TierGuard } from "../features/credits/tier-guard.js";
 import { type BillingErrorCode, type ImageQualityLevel } from "@helstera/shared";
@@ -401,6 +403,7 @@ type CreateAgentRuntimeOptions = {
   tierGuard?: TierGuard;
   viewerService?: ViewerService;
   storage: StorageProvider;
+  desktopAgentHub?: WebsiteAssistantHub;
 };
 
 export type AgentRunService = ReturnType<typeof createAgentRunService>;
@@ -586,6 +589,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
       let submitImageJob: SubmitImageJobFn | undefined;
       let submitVideoJob: SubmitVideoJobFn | undefined;
       let submitWebsiteCapture: SubmitWebsiteCaptureFn | undefined;
+      let submitDesktopAgentTask: SubmitDesktopAgentTaskFn | undefined;
       let referenceImages: string[] = [];
       if (options.jobService && (options.localDb || options.createUserClient) && run.accessToken && run.userId) {
         const jobSvc = options.jobService;
@@ -1392,6 +1396,19 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           return { taskId: task.id, jobId, status: task.status, progress: Number(task.progress ?? 0), pending: task.status !== "succeeded" };
         };
 
+        const desktopAgentHub = options.desktopAgentHub;
+        if (desktopAgentHub) {
+          submitDesktopAgentTask = async (input) => {
+            const workspaceResult = canvasId
+              ? await options.localDb!.query("select p.workspace_id from canvases c join projects p on p.id=c.project_id join workspace_members wm on wm.workspace_id=p.workspace_id where c.id=$1 and wm.user_id=$2", [canvasId, userId])
+              : await options.localDb!.query("select id as workspace_id from workspaces where owner_user_id=$1 order by created_at limit 1", [userId]);
+            const workspaceId = workspaceResult.rows[0]?.workspace_id as string | undefined;
+            if (!workspaceId) throw new Error("No workspace found");
+            const task = await desktopAgentHub.createDesktopAgentTask(userId, workspaceId, input);
+            return { taskId: task.taskId, role: task.role, status: "running", capabilities: task.capabilities };
+          };
+        }
+
       }
 
       // Load workspace skills (user-installed skills from DB).
@@ -1589,6 +1606,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           ...(submitImageJob ? { submitImageJob } : {}),
           ...(submitVideoJob ? { submitVideoJob } : {}),
           ...(submitWebsiteCapture ? { submitWebsiteCapture } : {}),
+          ...(submitDesktopAgentTask ? { submitDesktopAgentTask } : {}),
           ...(persistence ? { store: persistence.store } : {}),
           ...(workspaceSkills.length > 0 ? { workspaceSkills } : {}),
         });

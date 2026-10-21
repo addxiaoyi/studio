@@ -19,6 +19,7 @@ import {
 import { createPersistSandboxFileTool } from "./persist-sandbox-file.js";
 import { createDouyinPublishDraftTool } from "./douyin-publish.js";
 import { createWebsiteCaptureTool, type SubmitWebsiteCaptureFn } from "./website-capture.js";
+import { createDesktopAgentTool, type SubmitDesktopAgentTaskFn } from "./desktop-agent.js";
 import type { Pool } from "pg";
 
 export { createImageGenerateTool } from "./image-generate.js";
@@ -67,6 +68,7 @@ export function createMainAgentTools(
     submitVideoJob?: SubmitVideoJobFn;
     webOrigin?: string;
     submitWebsiteCapture?: SubmitWebsiteCaptureFn;
+    submitDesktopAgentTask?: SubmitDesktopAgentTaskFn;
   },
 ) {
   const tools: StructuredTool[] = [
@@ -88,6 +90,7 @@ export function createMainAgentTools(
     }),
     ...(deps.localDb && deps.webOrigin ? [createDouyinPublishDraftTool({ localDb: deps.localDb, webOrigin: deps.webOrigin })] : []),
     ...(deps.submitWebsiteCapture ? [createWebsiteCaptureTool({ submitWebsiteCapture: deps.submitWebsiteCapture })] : []),
+    ...(deps.submitDesktopAgentTask ? [createDesktopAgentTool({ submitDesktopAgentTask: deps.submitDesktopAgentTask })] : []),
     // execute 工具由 deepagents FilesystemMiddleware 自动注入，
     // 因为 CompositeBackend 的 default backend 是 LocalShellBackend。
     // 不需要在这里手动注册。
