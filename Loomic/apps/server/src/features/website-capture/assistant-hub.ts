@@ -315,23 +315,23 @@ export class WebsiteAssistantHub {
     if (live) this.send(live, { type: "website_capture.stop", taskId });
   }
 
-  async listPendingActions(userId: string, taskId: string) {
+  async listPendingActions(userId: string, workspaceId: string, taskId: string) {
     const { rows } = await this.options.db.query<{ id: string; action: WebsiteActionRequest; reason: string; expires_at: string }>(
       `select id,action,reason,expires_at from website_capture_actions
-        where task_id=$1 and user_id=$2 and status='pending' and expires_at > now()
+        where task_id=$1 and user_id=$2 and workspace_id=$3 and status='pending' and expires_at > now()
         order by created_at desc`,
-      [taskId, userId],
+      [taskId, userId, workspaceId],
     );
     return rows.map((row) => ({ actionId: row.id, action: row.action, reason: row.reason, expiresAt: new Date(row.expires_at).toISOString() }));
   }
 
-  async approveAction(userId: string, actionId: string) {
+  async approveAction(userId: string, workspaceId: string, actionId: string) {
     const token = randomBytes(32).toString("base64url");
     const { rows } = await this.options.db.query<{ task_id: string; connection_id: string; action: WebsiteActionRequest }>(
-      `update website_capture_actions set status='approved', approved_at=now(), approval_token_hash=$3
-        where id=$1 and user_id=$2 and status='pending' and expires_at > now()
+      `update website_capture_actions set status='approved', approved_at=now(), approval_token_hash=$4
+        where id=$1 and user_id=$2 and workspace_id=$3 and status='pending' and expires_at > now()
         returning task_id,connection_id,action`,
-      [actionId, userId, hashToken(token)],
+      [actionId, userId, workspaceId, hashToken(token)],
     );
     const row = rows[0];
     if (!row) throw new Error("动作确认已过期或不存在。");
@@ -345,10 +345,10 @@ export class WebsiteAssistantHub {
     return { actionId, status: "approved" as const };
   }
 
-  async rejectAction(userId: string, actionId: string) {
+  async rejectAction(userId: string, workspaceId: string, actionId: string) {
     const { rows } = await this.options.db.query<{ task_id: string; connection_id: string }>(
-      "update website_capture_actions set status='rejected', rejected_at=now() where id=$1 and user_id=$2 and status='pending' returning task_id,connection_id",
-      [actionId, userId],
+      "update website_capture_actions set status='rejected', rejected_at=now() where id=$1 and user_id=$2 and workspace_id=$3 and status='pending' and expires_at > now() returning task_id,connection_id",
+      [actionId, userId, workspaceId],
     );
     const row = rows[0];
     if (!row) throw new Error("动作确认已过期或不存在。");

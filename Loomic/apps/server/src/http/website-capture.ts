@@ -265,8 +265,8 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     const user = await options.auth.authenticate(request);
     if (!user) return unauthorized(reply);
     try {
-      await options.viewerService.ensureViewer(user);
-      return reply.send({ ok: true, data: await options.assistantHub.listPendingActions(user.id, request.params.taskId) });
+      const viewer = await options.viewerService.ensureViewer(user);
+      return reply.send({ ok: true, data: await options.assistantHub.listPendingActions(user.id, viewer.workspace.id, request.params.taskId) });
     } catch (error) {
       return sendWebsiteCaptureError(error, reply);
     }
@@ -277,7 +277,8 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       const user = await options.auth.authenticate(request);
       if (!user) return unauthorized(reply);
       try {
-        const result = await options.assistantHub[operation](user.id, request.params.actionId);
+        const viewer = await options.viewerService.ensureViewer(user);
+        const result = await options.assistantHub[operation](user.id, viewer.workspace.id, request.params.actionId);
         return reply.send({ ok: true, data: result });
       } catch (error) {
         return sendWebsiteCaptureError(error, reply);
