@@ -113,7 +113,7 @@ def deploy(args: argparse.Namespace) -> None:
         stage = shlex.quote(staging)
         backup_q = shlex.quote(backup)
         remote_run(target, f"mkdir -p {stage}/candidate && unzip -q {stage}/candidate.zip -d {stage}/candidate")
-        remote_run(target, f"test -f {stage}/candidate/apps/web/out/index.html && test -d {stage}/candidate/apps/web/out/_next/static && test -f {stage}/candidate/RELEASE-MANIFEST.json")
+        remote_run(target, f"test -f {stage}/candidate/apps/web/out/index.html && test -f {stage}/candidate/apps/web/out/download/index.html && test -f {stage}/candidate/apps/web/out/downloads/Helstera-0.1.0.AppImage && test -d {stage}/candidate/apps/web/out/_next/static && test -f {stage}/candidate/RELEASE-MANIFEST.json")
         remote_run(
             target,
             f"cd {root} && tar -czf {backup_q}/current.tgz apps/server/src apps/server/package.json apps/server/tsconfig.json apps/web/out packages/shared/dist package.json pnpm-lock.yaml pnpm-workspace.yaml",

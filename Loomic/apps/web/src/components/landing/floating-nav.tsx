@@ -15,7 +15,7 @@ const NAV_LINKS = [
   { label: "定价", href: "#pricing" },
 ] as const;
 
-const DESKTOP_DOWNLOAD_URL = "https://github.com/addxiaoyi/studio/releases";
+const DESKTOP_DOWNLOAD_URL = "/download/";
 
 function handleAnchorClick(
   e: React.MouseEvent<HTMLAnchorElement>,
@@ -76,8 +76,6 @@ function DesktopDownloadLink({ mobile = false }: { mobile?: boolean }) {
   return (
     <a
       href={DESKTOP_DOWNLOAD_URL}
-      target="_blank"
-      rel="noopener noreferrer"
       className={cn(
         "inline-flex items-center justify-center gap-1.5 rounded-full text-sm font-medium",
         mobile
