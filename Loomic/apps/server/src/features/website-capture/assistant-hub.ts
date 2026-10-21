@@ -140,10 +140,13 @@ export class WebsiteAssistantHub {
     if (!task) throw new Error("Local website capture task not found.");
     const live = this.connections.get(task.assistant_connection_id);
     if (!live || live.ws.readyState !== 1 || live.paused) throw new Error("Local browser assistant is not connected.");
-    await this.options.db.query(
-      "update website_capture_tasks set status='running', stage='connecting', progress=2, updated_at=now() where id=$1 and status='queued'",
+    this.pages.delete(taskId);
+    await this.options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status='pending'", [taskId]);
+    const claimed = await this.options.db.query<{ id: string }>(
+      "update website_capture_tasks set status='running', stage='connecting', progress=2, updated_at=now() where id=$1 and status='queued' returning id",
       [taskId],
     );
+    if (!claimed.rows[0]) return;
     await this.event(taskId, "connecting", "正在连接已授权的本地浏览器标签页");
     this.clearTaskTimer(taskId);
     this.taskTimers.set(taskId, setTimeout(() => {
