@@ -165,6 +165,12 @@ def deploy(args: argparse.Namespace) -> None:
         raise
     finally:
         if target.get_transport() and target.get_transport().is_active():
+            for temporary_path in (staging, backup):
+                if temporary_path:
+                    try:
+                        remote_run(target, f"rm -rf {shlex.quote(temporary_path)}", timeout=120)
+                    except Exception as cleanup_error:
+                        print("CLEANUP_FAILED", str(cleanup_error), file=sys.stderr, flush=True)
             target.close()
         if jump is not None and jump.get_transport() and jump.get_transport().is_active():
             jump.close()
