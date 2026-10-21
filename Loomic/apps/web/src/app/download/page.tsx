@@ -6,7 +6,12 @@ export const metadata = {
   description: "从 studio.0st.top 直接下载 Helstera 桌面端。",
 };
 
-const DESKTOP_APP_URL = "/downloads/Helstera-0.1.0.AppImage";
+const DESKTOP_DOWNLOADS = [
+  { label: "Linux AppImage", detail: "x64 · 版本 0.1.0", href: "/downloads/Helstera-0.1.0.AppImage" },
+  { label: "Windows 安装包", detail: "x64 · 版本 0.1.0", href: "/downloads/Helstera-0.1.0-Windows-x64.exe" },
+  { label: "macOS 安装包", detail: "Intel · 版本 0.1.0", href: "/downloads/Helstera-0.1.0-macOS-x64.dmg" },
+  { label: "macOS 安装包", detail: "Apple Silicon · 版本 0.1.0", href: "/downloads/Helstera-0.1.0-macOS-arm64.dmg" },
+] as const;
 
 export default function DownloadPage() {
   return (
@@ -24,22 +29,23 @@ export default function DownloadPage() {
             安装包由 studio.0st.top 直接提供。桌面端包含本地浏览助手，可在授权后读取选定标签页的页面证据并生成网站介绍。
           </p>
 
-          <div className="mt-10 rounded-2xl border border-border/60 bg-card p-5 shadow-sm sm:p-6">
-            <div className="flex items-start gap-4">
-              <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-foreground text-background">
-                <MonitorDown className="size-5" aria-hidden="true" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold">Linux 桌面端</h2>
-                <p className="mt-1 text-sm text-muted-foreground">AppImage · 版本 0.1.0</p>
-              </div>
-            </div>
-            <a href={DESKTOP_APP_URL} download className="mt-6 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-medium text-background transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-              <Download className="size-4" aria-hidden="true" />
-              下载 Linux AppImage
-            </a>
-            <p className="mt-3 text-center text-xs text-muted-foreground">下载地址与当前网站同源，不跳转第三方站点。</p>
+          <div className="mt-10 grid gap-3 sm:grid-cols-2">
+            {DESKTOP_DOWNLOADS.map((download, index) => (
+              <a key={download.href} href={download.href} download className="group rounded-2xl border border-border/60 bg-card p-5 shadow-sm transition-colors hover:border-foreground/30 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                <div className="flex items-start gap-3">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background">
+                    {index === 0 ? <MonitorDown className="size-5" aria-hidden="true" /> : <Download className="size-5" aria-hidden="true" />}
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-semibold">{download.label}</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">{download.detail}</p>
+                  </div>
+                </div>
+                <span className="mt-5 block text-xs font-medium text-muted-foreground group-hover:text-foreground">从 studio.0st.top 下载 →</span>
+              </a>
+            ))}
           </div>
+          <p className="mt-4 text-center text-xs text-muted-foreground">所有安装包均由 studio.0st.top 直接提供，不跳转第三方站点。</p>
         </section>
       </div>
     </main>
