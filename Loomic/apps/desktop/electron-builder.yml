@@ -10,13 +10,42 @@ files:
   - dist
   - dist-electron
 
+extraResources:
+  - from: resources/icon.png
+    to: icon.png
+
+npmRebuild: false
+
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
+
 win:
+  icon: resources/icon.ico
   target:
     - target: nsis
       arch:
         - x64
+    - target: zip
+      arch:
+        - x64
+
+nsis:
+  artifactName: "${productName}-Setup-${version}-Windows-x64.${ext}"
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Helstera
+
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
+protocols:
+  - name: Helstera Desktop Login
+    schemes:
+      - helstera
 
 mac:
+  icon: resources/icon.icns
   target:
     - target: dmg
       arch:
@@ -31,13 +60,6 @@ linux:
         - x64
   icon: resources/icon.png
   category: Graphics
-
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
-  createDesktopShortcut: true
-  createStartMenuShortcut: true
-  shortcutName: Helstera
 
 publish:
   provider: generic

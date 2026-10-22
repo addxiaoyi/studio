@@ -2,6 +2,320 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+html[data-helstera-desktop="true"] body {
+    padding-top: 46px;
+}
+
+html[data-helstera-desktop="true"] {
+    --desktop-chrome-border: var(--border);
+    --desktop-chrome-hover: color-mix(in srgb, var(--foreground) 6%, transparent);
+    --desktop-chrome-muted: var(--muted-foreground);
+}
+
+.helstera-desktop-titlebar {
+    position: fixed;
+    z-index: 1000;
+    inset: 0 0 auto;
+    display: flex;
+    height: 46px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid var(--desktop-chrome-border);
+    background: var(--background);
+    color: var(--foreground);
+    -webkit-app-region: drag;
+    user-select: none;
+}
+
+.helstera-desktop-titlebar__start,
+.helstera-desktop-titlebar__brand,
+.helstera-desktop-titlebar__history,
+.helstera-desktop-titlebar__nav,
+.helstera-desktop-titlebar__controls {
+    display: flex;
+    align-items: center;
+}
+
+.helstera-desktop-titlebar__start {
+    min-width: 0;
+    height: 100%;
+    gap: 8px;
+    padding-left: 10px;
+}
+
+.helstera-desktop-titlebar__brand {
+    height: 34px;
+    padding: 0 7px;
+    border-radius: 6px;
+    color: inherit;
+    text-decoration: none;
+    -webkit-app-region: no-drag;
+}
+
+.helstera-desktop-titlebar__brand:hover {
+    background: var(--desktop-chrome-hover);
+}
+
+.helstera-desktop-titlebar__history {
+    gap: 2px;
+    padding-right: 7px;
+    border-right: 1px solid var(--desktop-chrome-border);
+}
+
+.helstera-desktop-titlebar__history button,
+.helstera-desktop-titlebar__nav a {
+    display: inline-flex;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--desktop-chrome-muted);
+    font: inherit;
+    font-size: 12px;
+    text-decoration: none;
+    -webkit-app-region: no-drag;
+}
+
+.helstera-desktop-titlebar__history button {
+    width: 30px;
+    cursor: pointer;
+}
+
+.helstera-desktop-titlebar__history button svg {
+    width: 16px;
+    height: 16px;
+}
+
+.helstera-desktop-titlebar__history button:disabled {
+    opacity: 0.48;
+    cursor: default;
+}
+
+.helstera-desktop-titlebar__nav {
+    height: 100%;
+    gap: 2px;
+    padding-left: 2px;
+}
+
+.helstera-desktop-titlebar__nav a {
+    padding: 0 9px;
+}
+
+.helstera-desktop-titlebar__history button:not(:disabled):hover,
+.helstera-desktop-titlebar__nav a:hover,
+.helstera-desktop-titlebar__nav a[aria-current="page"] {
+    background: var(--desktop-chrome-hover);
+    color: var(--foreground);
+}
+
+.helstera-desktop-titlebar__nav a svg {
+    width: 15px;
+    height: 15px;
+}
+
+.helstera-desktop-titlebar__quick-open {
+    display: flex;
+    width: min(280px, 25vw);
+    min-width: 180px;
+    height: 31px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 9px;
+    border: 1px solid var(--desktop-chrome-border);
+    border-radius: 7px;
+    background: var(--desktop-chrome-hover);
+    color: var(--desktop-chrome-muted);
+    cursor: text;
+    font: inherit;
+    font-size: 11px;
+    text-align: left;
+    -webkit-app-region: no-drag;
+}
+
+.helstera-desktop-titlebar__quick-open:hover {
+    border-color: var(--desktop-chrome-muted);
+    background: var(--background);
+    color: var(--foreground);
+}
+
+.helstera-desktop-titlebar__quick-open svg {
+    width: 14px;
+    height: 14px;
+}
+
+.helstera-desktop-titlebar__quick-open span {
+    flex: 1;
+}
+
+.helstera-desktop-titlebar kbd,
+.helstera-desktop-switcher kbd {
+    padding: 2px 5px;
+    border: 1px solid var(--desktop-chrome-border);
+    border-radius: 4px;
+    color: var(--desktop-chrome-muted);
+    font: inherit;
+    font-size: 10px;
+    white-space: nowrap;
+}
+
+.helstera-desktop-titlebar__controls {
+    -webkit-app-region: no-drag;
+}
+
+.helstera-desktop-titlebar__controls button {
+    display: flex;
+    width: 40px;
+    height: 45px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    background: transparent;
+    color: var(--foreground);
+    cursor: pointer;
+}
+
+.helstera-desktop-titlebar__controls button svg {
+    width: 15px;
+    height: 15px;
+}
+
+.helstera-desktop-titlebar__controls button:hover {
+    background: var(--desktop-chrome-hover);
+}
+
+.helstera-desktop-titlebar__controls .helstera-desktop-titlebar__close:hover {
+    background: #c42b35;
+    color: #fff;
+}
+
+.helstera-desktop-switcher {
+    width: min(520px, calc(100vw - 32px));
+    max-height: min(600px, calc(100vh - 80px));
+    margin: 12vh auto auto;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--desktop-chrome-border);
+    border-radius: 10px;
+    background: var(--background);
+    color: var(--foreground);
+    box-shadow: 0 22px 70px rgb(0 0 0 / 24%);
+}
+
+.helstera-desktop-switcher::backdrop {
+    background: rgb(15 15 15 / 34%);
+}
+
+.helstera-desktop-switcher__search {
+    display: flex;
+    min-height: 54px;
+    align-items: center;
+    gap: 11px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--desktop-chrome-border);
+}
+
+.helstera-desktop-switcher__search > svg {
+    width: 17px;
+    height: 17px;
+    color: var(--desktop-chrome-muted);
+}
+
+.helstera-desktop-switcher__search input {
+    min-width: 0;
+    flex: 1;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 14px;
+}
+
+.helstera-desktop-switcher__search input::placeholder {
+    color: var(--desktop-chrome-muted);
+}
+
+.helstera-desktop-switcher__results {
+    max-height: 520px;
+    margin: 0;
+    overflow-y: auto;
+    padding: 7px;
+    list-style: none;
+}
+
+.helstera-desktop-switcher__results button {
+    display: flex;
+    width: 100%;
+    min-height: 42px;
+    align-items: center;
+    gap: 11px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--foreground);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+}
+
+.helstera-desktop-switcher__results button:hover,
+.helstera-desktop-switcher__results button:focus-visible,
+.helstera-desktop-switcher__results button[aria-current="page"] {
+    outline: none;
+    background: var(--desktop-chrome-hover);
+}
+
+.helstera-desktop-switcher__results button > svg {
+    width: 17px;
+    height: 17px;
+    color: var(--desktop-chrome-muted);
+}
+
+.helstera-desktop-switcher__results button span {
+    flex: 1;
+}
+
+.helstera-desktop-switcher__results button small {
+    color: var(--desktop-chrome-muted);
+    font-size: 11px;
+}
+
+.helstera-desktop-switcher__empty {
+    margin: 0;
+    padding: 22px 12px;
+    color: var(--desktop-chrome-muted);
+    font-size: 13px;
+    text-align: center;
+}
+
+.helstera-desktop-chrome-error {
+    position: fixed;
+    z-index: 1001;
+    top: 52px;
+    right: 14px;
+    max-width: min(360px, calc(100vw - 28px));
+    margin: 0;
+    padding: 8px 11px;
+    border: 1px solid color-mix(in srgb, #b42318 28%, var(--border));
+    border-radius: 6px;
+    background: var(--background);
+    color: #b42318;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
+    font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+    .helstera-desktop-titlebar__nav a span { display: none; }
+    .helstera-desktop-titlebar__nav a { width: 34px; padding: 0; }
+    .helstera-desktop-titlebar__quick-open { width: 210px; min-width: 150px; }
+}
+
 @font-face {
   font-family: "Claude Sans";
   src: url("/fonts/claude-sans-bold-italic.ttf") format("truetype");

@@ -29,7 +29,7 @@ export async function verifyPassword(password: string, encoded: string): Promise
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-export async function issueLoginToken(db: Pool, email: string) {
+export async function issueLoginToken(db: Pool, email: string, ttlMs = TOKEN_TTL_MS) {
   const user = await db.query<{ id: string }>(
     `insert into app_users (email) values ($1)
      on conflict (email) do update set updated_at = now()
@@ -42,7 +42,7 @@ export async function issueLoginToken(db: Pool, email: string) {
   await db.query(
     `insert into login_tokens (user_id, token_hash, expires_at)
      values ($1, $2, $3)`,
-    [userId, hashToken(token), new Date(Date.now() + TOKEN_TTL_MS)],
+    [userId, hashToken(token), new Date(Date.now() + ttlMs)],
   );
   return token;
 }
@@ -100,17 +100,23 @@ export async function verifyVerificationCode(db: Pool, email: string, code: stri
   } finally { client.release(); }
 }
 
-export async function exchangeLoginToken(db: Pool, token: string) {
+export async function exchangeLoginToken(db: Pool, token: string, options: { allowReplayGrace?: boolean } = {}) {
   const client = await db.connect();
   try {
     await client.query("begin");
+    const replayFilter = options.allowReplayGrace === false
+      ? "lt.used_at is null"
+      : "(lt.used_at is null or lt.used_at > now() - ($2 * interval '1 millisecond'))";
+    const parameters = options.allowReplayGrace === false
+      ? [hashToken(token)]
+      : [hashToken(token), TOKEN_REPLAY_GRACE_MS];
     const found = await client.query<{ user_id: string; email: string }>(
       `select lt.user_id, u.email from login_tokens lt
        join app_users u on u.id = lt.user_id
        where lt.token_hash = $1 and lt.expires_at > now()
-         and (lt.used_at is null or lt.used_at > now() - ($2 * interval '1 millisecond'))
+         and ${replayFilter}
        for update`,
-      [hashToken(token), TOKEN_REPLAY_GRACE_MS],
+      parameters,
     );
     const row = found.rows[0];
     if (!row) {

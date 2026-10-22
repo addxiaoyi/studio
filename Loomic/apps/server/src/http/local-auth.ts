@@ -7,6 +7,8 @@ import type { ServerEnv } from "../config/env.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const COOKIE = "helstera_session";
+const DESKTOP_LOGIN_TOKEN_TTL_MS = 3 * 60 * 1000;
+const DESKTOP_LOGIN_STATE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 function sessionCookie(value: string, webOrigin: string) {
   const secure = webOrigin.startsWith("https://") ? "; Secure" : "";
@@ -134,6 +136,31 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
     if (!token) return reply.code(400).send({ error: { code: "missing_token", message: "登录链接无效" } });
     const session = await exchangeLoginToken(options.db, token);
     if (!session) return reply.code(401).send({ error: { code: "invalid_token", message: "登录链接已过期或已使用" } });
+    reply.header("set-cookie", sessionCookie(session.token, options.env.webOrigin));
+    return reply.send({ ok: true, access_token: "local-session", user: { id: session.userId, email: session.email } });
+  });
+
+  app.post<{ Body: { state?: string } }>("/api/local-auth/desktop-confirm", async (request, reply) => {
+    const state = request.body?.state?.trim();
+    if (!state || !DESKTOP_LOGIN_STATE_PATTERN.test(state)) {
+      return reply.code(400).send({ error: { code: "invalid_desktop_login", message: "桌面登录请求无效，请返回桌面重新发起。" } });
+    }
+    const sessionToken = request.headers.cookie?.match(/(?:^|;\s*)helstera_session=([^;]+)/)?.[1];
+    const user = sessionToken ? await getLocalSession(options.db, sessionToken) : null;
+    if (!user) return reply.code(401).send({ error: { code: "unauthorized", message: "请先登录网页账户，再确认桌面登录。" } });
+
+    const token = await issueLoginToken(options.db, user.email, DESKTOP_LOGIN_TOKEN_TTL_MS);
+    const callbackUrl = new URL("helstera://auth/callback");
+    callbackUrl.searchParams.set("desktop_token", token);
+    callbackUrl.searchParams.set("state", state);
+    return reply.send({ callbackUrl: callbackUrl.toString() });
+  });
+
+  app.post<{ Body: { token?: string } }>("/api/local-auth/desktop-exchange", async (request, reply) => {
+    const token = request.body?.token?.trim();
+    if (!token) return reply.code(400).send({ error: { code: "missing_token", message: "桌面登录授权码无效。" } });
+    const session = await exchangeLoginToken(options.db, token, { allowReplayGrace: false });
+    if (!session) return reply.code(401).send({ error: { code: "invalid_token", message: "桌面登录授权已过期或已使用，请重新发起。" } });
     reply.header("set-cookie", sessionCookie(session.token, options.env.webOrigin));
     return reply.send({ ok: true, access_token: "local-session", user: { id: session.userId, email: session.email } });
   });

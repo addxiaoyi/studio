@@ -1,54 +1,63 @@
+import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Download, MonitorDown } from "lucide-react";
+import { ArrowLeft, Laptop, ShieldCheck, Sparkles } from "lucide-react";
+
+import { DesktopDownloadList } from "@/components/desktop-download-list";
 
 export const metadata = {
-  title: "下载桌面端 | Helstera",
-  description: "从 studio.0st.top 直接下载 Helstera 桌面端。",
+  title: "Helstera Desktop 下载",
+  description: "下载 Helstera 桌面版。Windows 提供免安装便携包，其他平台按发布状态提供下载。",
 };
-
-const DESKTOP_DOWNLOADS = [
-  { label: "Linux AppImage", detail: "x64 · 版本 0.2.0", href: "/downloads/Helstera-0.2.0.AppImage" },
-  { label: "Windows 安装包", detail: "x64 · 版本 0.2.0", href: "/downloads/Helstera-0.2.0-Windows-x64.exe" },
-  { label: "macOS 安装包", detail: "Intel · 版本 0.2.0", href: "/downloads/Helstera-0.2.0-macOS-x64.dmg" },
-  { label: "macOS 安装包", detail: "Apple Silicon · 版本 0.2.0", href: "/downloads/Helstera-0.2.0-macOS-arm64.dmg" },
-] as const;
 
 export default function DownloadPage() {
   return (
-    <main className="min-h-screen bg-background px-6 py-8 text-foreground sm:py-12">
-      <div className="mx-auto max-w-3xl">
-        <Link href="/" className="inline-flex min-h-10 items-center gap-2 rounded-full px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <main className="min-h-screen bg-background px-5 py-7 text-foreground sm:px-8 sm:py-10">
+      <div className="mx-auto max-w-4xl">
+        <Link href="/" className="inline-flex min-h-9 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <ArrowLeft className="size-4" aria-hidden="true" />
-          返回首页
+          返回 Helstera
         </Link>
 
-        <section className="mt-16 max-w-2xl">
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Helstera Desktop</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">下载桌面端</h1>
-          <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
-            安装包由 studio.0st.top 直接提供。桌面端包含本地浏览助手，可在授权后读取选定标签页的页面证据并生成网站介绍。
-          </p>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
-            Windows 与 Linux 桌面端会自动检查并下载更新；下载完成后可在应用内重启安装。macOS 更新目前请下载并安装新版本。
-          </p>
+        <section className="mt-10 grid gap-9 border-y border-border/70 py-8 sm:mt-14 sm:grid-cols-[minmax(0,1fr)_17rem] sm:gap-12 sm:py-10">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <Image src="/icons/icon-192.png" alt="" width={44} height={44} className="size-11 rounded-xl" priority unoptimized />
+              <div>
+                <p className="text-xs font-medium uppercase text-muted-foreground">Helstera Desktop</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">AI 创作工作台</p>
+              </div>
+            </div>
+            <h1 className="mt-7 text-3xl font-semibold sm:text-4xl">桌面端下载</h1>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
+              在桌面使用 Helstera 网页工作区与本地浏览助手。安装包从 studio.0st.top 提供；尚未发布的平台会清楚标明状态。
+            </p>
 
-          <div className="mt-10 grid gap-3 sm:grid-cols-2">
-            {DESKTOP_DOWNLOADS.map((download, index) => (
-              <a key={download.href} href={download.href} download className="group rounded-2xl border border-border/60 bg-card p-5 shadow-sm transition-colors hover:border-foreground/30 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                <div className="flex items-start gap-3">
-                  <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background">
-                    {index === 0 ? <MonitorDown className="size-5" aria-hidden="true" /> : <Download className="size-5" aria-hidden="true" />}
-                  </div>
-                  <div className="min-w-0">
-                    <h2 className="text-sm font-semibold">{download.label}</h2>
-                    <p className="mt-1 text-xs text-muted-foreground">{download.detail}</p>
-                  </div>
-                </div>
-                <span className="mt-5 block text-xs font-medium text-muted-foreground group-hover:text-foreground">从 studio.0st.top 下载 →</span>
-              </a>
-            ))}
+            <DesktopDownloadList />
           </div>
-          <p className="mt-4 text-center text-xs text-muted-foreground">所有安装包均由 studio.0st.top 直接提供，不跳转第三方站点。</p>
+
+          <aside className="space-y-5 border-t border-border/70 pt-5 sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0" aria-label="桌面端信息">
+            <div className="flex gap-3">
+              <Laptop className="mt-0.5 size-4 shrink-0 text-emerald-700" aria-hidden="true" />
+              <div>
+                <h2 className="text-sm font-medium">Windows 免安装</h2>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">下载 ZIP，解压后运行 Helstera.exe。无需管理员权限；应用数据保存在当前用户目录。</p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-teal-700" aria-hidden="true" />
+              <div>
+                <h2 className="text-sm font-medium">本机数据</h2>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">登录凭据和浏览器配置保留在本机。仅在授权后，选中标签页的页面证据才会用于当前任务。</p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <Sparkles className="mt-0.5 size-4 shrink-0 text-amber-700" aria-hidden="true" />
+              <div>
+                <h2 className="text-sm font-medium">安装版更新</h2>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Windows 安装版与 Linux 安装包支持应用内更新。便携 ZIP 请在下载新版后重新解压。</p>
+              </div>
+            </div>
+          </aside>
         </section>
       </div>
     </main>

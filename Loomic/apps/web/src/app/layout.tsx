@@ -7,6 +7,7 @@ import { getServerPreconnectUrl } from "@/lib/env";
 
 import { Providers } from "../components/providers";
 import { PWAInstallPrompt } from "../components/pwa-install-prompt";
+import { DesktopTitlebar } from "../components/desktop-titlebar";
 
 import "./globals.css";
 
@@ -134,6 +135,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <meta name="format-detection" content="telephone=no" />
       </head>
       <body className="min-h-screen bg-background font-sans antialiased">
+        <DesktopTitlebar />
         <Providers>{children}</Providers>
         <PWAInstallPrompt />
 

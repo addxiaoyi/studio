@@ -4,8 +4,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect } from "react";
 
 import { AuthShell } from "../../components/auth/auth-shell";
-import { LoginForm } from "../../components/login-form";
 import { LoadingScreen } from "../../components/loading-screen";
+import { LoginForm } from "../../components/login-form";
 import { useAuth } from "../../lib/auth-context";
 import { t, useLocale } from "../../lib/i18n";
 import { getSafeRedirect, loginPath } from "../../lib/navigation";
@@ -26,6 +26,7 @@ function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackError = searchParams.get("error");
+  const desktopMode = searchParams.get("desktop") === "1";
   const redirectTo = getSafeRedirect(searchParams.get("redirect"));
   const initialErrorMessage = callbackError
     ? (CALLBACK_ERROR_MESSAGES[callbackError] ??
@@ -34,12 +35,18 @@ function LoginPageContent() {
 
   useEffect(() => {
     if (callbackError) {
-      router.replace(redirectTo === "/home" ? "/login/" : loginPath(redirectTo));
+      const loginUrl =
+        redirectTo === "/home" ? "/login/" : loginPath(redirectTo);
+      router.replace(
+        desktopMode
+          ? `${loginUrl}${loginUrl.includes("?") ? "&" : "?"}desktop=1`
+          : loginUrl,
+      );
     }
     if (!loading && user) {
       router.replace(redirectTo);
     }
-  }, [callbackError, redirectTo, user, loading, router]);
+  }, [callbackError, desktopMode, redirectTo, user, loading, router]);
 
   if (loading || user) return <LoadingScreen />;
 
@@ -49,7 +56,11 @@ function LoginPageContent() {
       description={copy.signInDescription}
       features={copy.signInFeatures}
     >
-      <LoginForm initialErrorMessage={initialErrorMessage} redirectTo={redirectTo} />
+      <LoginForm
+        initialErrorMessage={initialErrorMessage}
+        redirectTo={redirectTo}
+        desktopMode={desktopMode}
+      />
     </AuthShell>
   );
 }

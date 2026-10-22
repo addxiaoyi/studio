@@ -17,13 +17,23 @@ const {
   mockRequestLocalCode,
   mockVerifyLocalCode,
   mockSignInLocalWithPassword,
+  mockStartBrowserLogin,
+  mockCancelBrowserLogin,
+  mockOnBrowserLoginState,
   mockReplace,
   mockSearchParams,
 } = vi.hoisted(() => ({
   mockFetchLocalSession: vi.fn().mockResolvedValue({ session: null }),
   mockRequestLocalCode: vi.fn().mockResolvedValue(undefined),
-  mockVerifyLocalCode: vi.fn().mockResolvedValue({ access_token: "session-token" }),
-  mockSignInLocalWithPassword: vi.fn().mockResolvedValue({ access_token: "session-token" }),
+  mockVerifyLocalCode: vi
+    .fn()
+    .mockResolvedValue({ access_token: "session-token" }),
+  mockSignInLocalWithPassword: vi
+    .fn()
+    .mockResolvedValue({ access_token: "session-token" }),
+  mockStartBrowserLogin: vi.fn().mockResolvedValue({ ok: true }),
+  mockCancelBrowserLogin: vi.fn().mockResolvedValue({ ok: true }),
+  mockOnBrowserLoginState: vi.fn().mockReturnValue(vi.fn()),
   mockReplace: vi.fn(),
   mockSearchParams: vi.fn(() => new URLSearchParams()),
 }));
@@ -46,11 +56,14 @@ import { AuthProvider } from "../src/lib/auth-context";
 describe("Login page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete document.documentElement.dataset.helsteraDesktop;
     mockSearchParams.mockReturnValue(new URLSearchParams());
   });
 
   afterEach(() => {
     cleanup();
+    delete document.documentElement.dataset.helsteraDesktop;
+    Reflect.deleteProperty(window, "electronAPI");
   });
 
   it("renders split screen with brand panel and login form", async () => {
@@ -127,13 +140,18 @@ describe("Login page", () => {
     fireEvent.click(screen.getByRole("button", { name: /^(sign in|登录)$/i }));
 
     await waitFor(() => {
-      expect(mockSignInLocalWithPassword).toHaveBeenCalledWith("user@example.com", mockPassword);
+      expect(mockSignInLocalWithPassword).toHaveBeenCalledWith(
+        "user@example.com",
+        mockPassword,
+      );
       expect(mockReplace).toHaveBeenCalledWith("/home");
     });
   });
 
   it("returns to the requested workspace path after sign-in", async () => {
-    mockSearchParams.mockReturnValue(new URLSearchParams("redirect=%2Ffeed%3Fstep%3D2"));
+    mockSearchParams.mockReturnValue(
+      new URLSearchParams("redirect=%2Ffeed%3Fstep%3D2"),
+    );
     render(
       <AuthProvider>
         <LoginPage />
@@ -141,11 +159,66 @@ describe("Login page", () => {
     );
 
     await screen.findByRole("button", { name: /send code|发送验证码/i });
-    fireEvent.click(screen.getByRole("button", { name: /use password instead|使用密码登录/i }));
-    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "user@example.com" } });
-    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "MOCK_PASSWORD" } });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /use password instead|使用密码登录/i,
+      }),
+    );
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: "user@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: "MOCK_PASSWORD" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /^(sign in|登录)$/i }));
 
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/feed?step=2"));
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith("/feed?step=2"),
+    );
+  });
+
+  it("uses only the system browser login flow in the desktop shell", async () => {
+    document.documentElement.dataset.helsteraDesktop = "true";
+    Object.defineProperty(window, "electronAPI", {
+      configurable: true,
+      value: {
+        startBrowserLogin: mockStartBrowserLogin,
+        cancelBrowserLogin: mockCancelBrowserLogin,
+        onBrowserLoginState: mockOnBrowserLoginState,
+      },
+    });
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+
+    const login = await screen.findByRole("button", { name: /^登录$/ });
+    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /create one|创建账户/ }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(login);
+    await waitFor(() => expect(mockStartBrowserLogin).toHaveBeenCalledOnce());
+    const cancel = await screen.findByRole("button", { name: /取消登录/ });
+    fireEvent.click(cancel);
+    await waitFor(() => expect(mockCancelBrowserLogin).toHaveBeenCalledOnce());
+  });
+
+  it("renders the dedicated desktop login from the explicit desktop URL mode", async () => {
+    mockSearchParams.mockReturnValue(new URLSearchParams("desktop=1"));
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: /^登录$/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
   });
 });

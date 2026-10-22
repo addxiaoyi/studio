@@ -1,6 +1,6 @@
 {
   "name": "@helstera/desktop",
-  "version": "0.2.0",
+  "version": "0.2.4",
   "private": true,
   "description": "Helstera Desktop — AI Design Studio",
   "author": "Helstera",
@@ -14,7 +14,6 @@
   "dependencies": {
     "@helstera/shared": "workspace:*",
     "electron-updater": "^6.3.9",
-    "next": "^15.5.28",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },

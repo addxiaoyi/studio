@@ -1,42 +1,24 @@
 # Helstera Desktop
 
-Helstera 的原生桌面应用，基于 Electron 构建。
+Helstera Desktop opens the production website at `https://studio.0st.top/` in its main window. The trusted site receives the Electron preload bridge for local browser assistance and desktop update controls. External links open in the system browser.
 
-## 系统要求
+## Development
 
-- **Windows**: Windows 10 及以上（64-bit）
-- **macOS**: macOS 11 Big Sur 及以上
-- **Linux**: Ubuntu 20.04+ / Debian 10+（AppImage）
-
-## 开发
+Install the workspace dependencies, then run the desktop app:
 
 ```bash
-# 安装依赖
 pnpm install
-
-# 启动开发服务器（热重载）
-pnpm dev
-
-# 构建生产版本
-pnpm build
+pnpm --filter @helstera/shared build
+pnpm --filter @helstera/desktop dev
 ```
 
-## 功能
+To point an unpackaged development build at a local or staging website, set `HELSTERA_DESKTOP_URL` to that site's origin before starting Electron.
 
-- 🖥️ 原生 macOS / Windows / Linux 应用
-- 📋 菜单栏（文件、编辑、视图、窗口、帮助）
-- 🔔 系统托盘（macOS / Windows）
-- ⌨️ 键盘快捷键
-- 📦 离线可用（需要先联网激活授权）
-- 🔄 自动更新
+## Build
 
-## 技术栈
+```bash
+pnpm --filter @helstera/shared build
+pnpm --filter @helstera/desktop build
+```
 
-- Electron 33
-- Vite + React
-- electron-builder
-- electron-updater
-
-## 构建说明
-
-构建前需先生成 macOS 应用图标（.icns）、Windows 图标（.ico）和 Linux 图标（.png），放入 `resources/` 目录。
+Release packages and publish updater manifests with `scripts/release-desktop.py` from the repository root. See `docs/tech/desktop-release.md` for platform requirements.
