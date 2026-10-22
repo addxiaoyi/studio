@@ -349,21 +349,28 @@ function isAllowedDesktopDestination(url: URL, start: URL, followExternal: boole
 }
 
 function isCredentialField(action: any) {
-  return ["password", "otp", "one-time-code", "verification-code"].includes(String(action?.fieldType ?? "").toLowerCase());
+  const fieldType = String(action?.fieldType ?? "").toLowerCase().replace(/[\s_]+/g, "-");
+  return /password|passcode|one-time-code|otp|verification-code|auth-code|\bmfa\b/.test(fieldType);
 }
 
 function desktopActionNeedsApproval(action: any) {
   return ["upload", "download", "publish", "purchase", "payment", "authorize", "submit"].includes(action?.kind)
     || action?.kind === "fill"
     || action?.sideEffect === true
-    || (action?.kind === "click" && !/link|navigation|menu|tab/i.test(String(action?.targetRole ?? "")));
+    || action?.kind === "click";
+}
+
+function websiteActionReceipt(action: any) {
+  const receipt = { ...action };
+  delete receipt.value;
+  return receipt;
 }
 
 async function executeDesktopAction(message: any) {
   const browser = desktopTaskTabs.get(String(message.taskId ?? ""));
   const action = message.action;
   if (!browser || browser.isDestroyed() || !action || isCredentialField(action) || (desktopActionNeedsApproval(action) && !message.approvalToken)) {
-    if (message.actionId) sendAssistant({ type: "website_capture.action_result", actionId: message.actionId, taskId: message.taskId, approvalToken: message.approvalToken, action, ok: false, message: "桌面端禁止执行凭据字段动作。" });
+    if (message.actionId) sendAssistant({ type: "website_capture.action_result", actionId: message.actionId, taskId: message.taskId, approvalToken: message.approvalToken, action: websiteActionReceipt(action), ok: false, message: "桌面端禁止执行凭据字段动作。" });
     return;
   }
   let ok = false;
@@ -385,7 +392,16 @@ async function executeDesktopAction(message: any) {
     } else if (action.kind === "fill" && String(action.target ?? "").length <= 500 && typeof action.value === "string") {
       const selector = JSON.stringify(String(action.target));
       const value = JSON.stringify(action.value);
-      await browser.webContents.executeJavaScript(`(() => { const element = document.querySelector(${selector}); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) throw new Error('填写目标不存在。'); element.value = ${value}; element.dispatchEvent(new Event('input', { bubbles: true })); element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+      await browser.webContents.executeJavaScript(`(() => {
+        const element = document.querySelector(${selector});
+        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) throw new Error('填写目标不存在。');
+        const autocomplete = String(element.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/);
+        const hints = [element instanceof HTMLInputElement ? element.type : '', element.getAttribute('name'), element.id, element.getAttribute('aria-label'), element.getAttribute('placeholder'), ...autocomplete].filter(Boolean).join(' ').toLowerCase().replace(/[\\s_]+/g, '-');
+        if ((element instanceof HTMLInputElement && element.type.toLowerCase() === 'password') || autocomplete.some(value => ['current-password', 'new-password', 'one-time-code'].includes(value)) || /password|passcode|one-time-code|otp|verification-code|auth-code|\\bmfa\\b/.test(hints)) throw new Error('密码、OTP 和验证码字段始终禁止自动填写。');
+        element.value = ${value};
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+      })()`);
       ok = true;
       resultMessage = "已填写";
     } else {
@@ -394,7 +410,7 @@ async function executeDesktopAction(message: any) {
   } catch (error) {
     resultMessage = error instanceof Error ? error.message : "动作执行失败";
   }
-  if (message.actionId) sendAssistant({ type: "website_capture.action_result", actionId: message.actionId, taskId: message.taskId, approvalToken: message.approvalToken, action, ok, message: resultMessage });
+  if (message.actionId) sendAssistant({ type: "website_capture.action_result", actionId: message.actionId, taskId: message.taskId, approvalToken: message.approvalToken, action: websiteActionReceipt(action), ok, message: resultMessage });
 }
 
 function connectEmbeddedAssistant(wssUrl: string, code: string) {

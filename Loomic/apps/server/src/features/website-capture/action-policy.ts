@@ -13,7 +13,8 @@ export function classifyWebsiteAction(action: WebsiteActionRequest | null | unde
   if (!["navigate", "scroll", "click", "fill", "upload", "download", "submit", "publish", "purchase", "payment", "authorize"].includes(action.kind)) {
     return { state: "deny", reason: "动作类型不受支持。" };
   }
-  if (["password", "otp", "one-time-code", "verification-code"].includes((action.fieldType ?? "").toLowerCase())) {
+  const fieldType = (action.fieldType ?? "").toLowerCase().replace(/[\s_]+/g, "-");
+  if (/password|passcode|one-time-code|otp|verification-code|auth-code|\bmfa\b/.test(fieldType)) {
     return { state: "deny", reason: "Helstera 不代输密码、验证码或 OTP。" };
   }
   if (["upload", "download", "publish", "purchase", "payment", "authorize", "submit"].includes(action.kind)) {
@@ -25,11 +26,8 @@ export function classifyWebsiteAction(action: WebsiteActionRequest | null | unde
   if (action.kind === "navigate" || action.kind === "scroll") {
     return { state: "allow", reason: "导航和滚动不会提交外部副作用。" };
   }
-  if (action.kind === "click" && action.targetRole && /submit|buy|pay|publish|upload|download/i.test(action.targetRole)) {
-    return { state: "confirm", reason: "目标控件可能触发外部副作用，需要当前用户确认。" };
-  }
-  if (action.kind === "click" && !/link|navigation|menu|tab/i.test(action.targetRole ?? "")) {
-    return { state: "confirm", reason: "无法确认点击目标是否产生外部副作用，需要当前用户确认。" };
+  if (action.kind === "click") {
+    return { state: "confirm", reason: "页面提供的控件描述未经验证，点击前需要当前用户确认。" };
   }
   return { state: "allow", reason: "未检测到表单提交或外部副作用。" };
 }
