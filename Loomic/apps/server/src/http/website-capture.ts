@@ -160,7 +160,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
           `insert into website_capture_tasks
             (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, assistant_connection_id, promo, idempotency_key)
            values ($1,$2,$3,'local',$4,$5,$6,$7,$8,$9,$10)
-           on conflict (created_by, idempotency_key) do nothing
+           on conflict (workspace_id, created_by, idempotency_key) do nothing
            returning id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
                      error_message, created_at, updated_at, follow_external, assistant_connection_id`,
           [viewer.workspace.id, user.id, input.sessionId ?? null, startUrl.toString(), input.pageLimit, input.recordVideo, input.followExternal, connection.id, input.promo?.enabled ? JSON.stringify(input.promo) : null, input.idempotencyKey],
@@ -168,8 +168,8 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         const task = inserted.rows[0] ?? (await options.db.query<TaskRow>(
           `select id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
                   error_message, created_at, updated_at, follow_external, assistant_connection_id
-             from website_capture_tasks where created_by=$1 and idempotency_key=$2`,
-          [user.id, input.idempotencyKey],
+             from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3`,
+          [viewer.workspace.id, user.id, input.idempotencyKey],
         )).rows[0];
         if (!task) return reply.code(500).send({ ok: false, error: { code: "task_create_failed", message: "无法创建本地浏览任务。" } });
         if (task.status === "queued") await options.assistantHub.startLocalTask(task.id, user.id);
@@ -179,7 +179,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         `insert into website_capture_tasks
           (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-         on conflict (created_by, idempotency_key) do nothing
+         on conflict (workspace_id, created_by, idempotency_key) do nothing
          returning id, background_job_id, status, mode, start_url, progress, stage, result,
                    error_message, created_at, updated_at`,
         [viewer.workspace.id, user.id, input.sessionId ?? null, input.mode, startUrl.toString(), input.pageLimit, input.recordVideo, input.followExternal, input.promo?.enabled ? JSON.stringify(input.promo) : null, input.idempotencyKey],
@@ -187,8 +187,8 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       const task = inserted.rows[0] ?? (await options.db.query<TaskRow>(
           `select id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
                 error_message, created_at, updated_at, follow_external, assistant_connection_id
-           from website_capture_tasks where created_by=$1 and idempotency_key=$2`,
-        [user.id, input.idempotencyKey],
+           from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3`,
+        [viewer.workspace.id, user.id, input.idempotencyKey],
       )).rows[0];
       if (!task) return reply.code(500).send({ ok: false, error: { code: "task_create_failed", message: "无法创建网站浏览任务。" } });
 
@@ -199,7 +199,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
           const job = await options.jobService.createJob(user, {
             workspaceId: viewer.workspace.id,
             ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-            idempotencyKey: `website-capture:${input.idempotencyKey}`,
+            idempotencyKey: `website-capture:${viewer.workspace.id}:${input.idempotencyKey}`,
             jobType: "website_capture",
             payload: { task_id: task.id },
           });
