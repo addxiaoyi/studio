@@ -11,6 +11,7 @@ import { canRetryGeneration, formatGenerationError, shouldFailoverVideoError } f
 import { ChatImage } from "./image-lightbox";
 import { AgentWorkflowCard } from "./agent-workflow-card";
 import { GenerationApprovalCard } from "./generation-approval-card";
+import { formatWebsiteCaptureEventTime, formatWebsiteCaptureStage } from "./website-capture-progress";
 import {
   formatModelDisplayName,
   formatOutputPreview,
@@ -588,6 +589,7 @@ function JobTimeline({ events }: { events: Array<{ key: string; label: string; s
 function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
   const { session } = useAuth();
   const [task, setTask] = useState<WebsiteCaptureTask | null>(null);
+  const [events, setEvents] = useState<Array<{ id: number; stage: string; detail: string; created_at: string }>>([]);
   const [error, setError] = useState<string | null>(null);
   const [canceling, setCanceling] = useState(false);
   const [pendingActions, setPendingActions] = useState<PendingWebsiteAction[]>([]);
@@ -603,6 +605,7 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
         const actions = await fetchWebsiteCaptureActions(session.access_token, taskId);
         if (!stopped) {
           setTask(data.task);
+          setEvents(data.events);
           setPendingActions(actions);
           if (data.promoApproval) setPromoApproval(data.promoApproval);
           setError(null);
@@ -702,7 +705,20 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
         <div className={`h-full rounded-full transition-[width] ${task?.status === "failed" ? "bg-destructive" : "bg-foreground/60"}`} style={{ width: `${progress}%` }} />
       </div>
-      {task?.stage ? <p className="mt-2 text-[11px] text-muted-foreground">阶段：{task.stage}</p> : null}
+      {task?.stage ? <p className="mt-2 text-[11px] text-muted-foreground">阶段：{formatWebsiteCaptureStage(task.stage)}</p> : null}
+      {events.length > 0 ? (
+        <ol className="mt-2 space-y-1 border-l border-border/60 pl-2.5" aria-label="最近任务进度事件">
+          {events.slice(-5).map((event) => (
+            <li key={event.id} className="grid grid-cols-[auto_1fr] gap-x-2 text-[10px] leading-4">
+              <time className="tabular-nums text-muted-foreground" dateTime={event.created_at}>{formatWebsiteCaptureEventTime(event.created_at)}</time>
+              <span className="min-w-0 break-words text-foreground">
+                <span className="font-medium">{formatWebsiteCaptureStage(event.stage)}</span>
+                {event.detail ? <span className="ml-1 text-muted-foreground">{event.detail}</span> : null}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
       {pendingActions.length > 0 ? (
         <div className="mt-3 space-y-2" aria-label="待确认的网页动作">
           <p className="text-xs font-medium text-foreground">网页动作需要你的确认</p>
