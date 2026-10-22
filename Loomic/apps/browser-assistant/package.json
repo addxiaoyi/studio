@@ -2,6 +2,7 @@
   "name": "@helstera/browser-assistant",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Helstera Chrome and Edge MV3 local browsing assistant",
   "scripts": {
     "test": "node --test test/*.test.mjs"

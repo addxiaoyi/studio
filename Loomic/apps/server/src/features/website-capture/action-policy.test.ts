@@ -11,8 +11,10 @@ describe("website action policy", () => {
   it("requires confirmation for side effects and denies credentials", () => {
     expect(classifyWebsiteAction({ kind: "submit", target: "checkout" }).state).toBe("confirm");
     expect(classifyWebsiteAction({ kind: "fill", fieldType: "password" }).state).toBe("deny");
+    expect(classifyWebsiteAction({ kind: "fill", fieldType: "one_time_code" }).state).toBe("deny");
+    expect(classifyWebsiteAction({ kind: "fill", fieldType: "mfa" }).state).toBe("deny");
     expect(classifyWebsiteAction({ kind: "click", targetRole: "submit button" }).state).toBe("confirm");
     expect(classifyWebsiteAction({ kind: "click", target: "#unknown" }).state).toBe("confirm");
-    expect(classifyWebsiteAction({ kind: "click", targetRole: "link" }).state).toBe("allow");
+    expect(classifyWebsiteAction({ kind: "click", targetRole: "link" }).state).toBe("confirm");
   });
 });

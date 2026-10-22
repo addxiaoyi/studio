@@ -10,4 +10,5 @@ test("MV3 assistant never requests cookie or storage permissions", async () => {
   assert.ok(!manifest.permissions.includes("cookies"));
   assert.ok(!manifest.permissions.includes("webRequest"));
   assert.match(await readFile(new URL("../src/background.js", import.meta.url), "utf8"), /website_capture\.page/);
+  assert.match(await readFile(new URL("../src/background.js", import.meta.url), "utf8"), /from "\.\/action-safety\.js"/);
 });

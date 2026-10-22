@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { DesktopAgentRole, DesktopCapability, WebsiteCaptureAssistantConnection, WebsiteCapturePairing } from "@helstera/shared";
-import { createDesktopAgentTask, createWebsiteCapturePairing, fetchDesktopAgentTasks, fetchWebsiteAssistantConnection, revokeWebsiteAssistant, setWebsiteAssistantPaused, type DesktopAgentTaskResponse } from "@/lib/server-api";
+import { cancelDesktopAgentTask, createDesktopAgentTask, createWebsiteCapturePairing, fetchDesktopAgentTasks, fetchWebsiteAssistantConnection, resolveDesktopAgentApproval, revokeWebsiteAssistant, setWebsiteAssistantPaused, type DesktopAgentTaskResponse } from "@/lib/server-api";
 
 export function WebsiteAssistantSettings({ accessToken }: { accessToken: string }) {
   const [connection, setConnection] = useState<WebsiteCaptureAssistantConnection | null>(null);
@@ -15,6 +15,8 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
   const [desktopRole, setDesktopRole] = useState<DesktopAgentRole>("researcher");
   const [desktopCapabilities, setDesktopCapabilities] = useState<DesktopCapability[]>(["browser.read", "browser.capture"]);
   const [taskBusy, setTaskBusy] = useState(false);
+  const [cancelingTaskId, setCancelingTaskId] = useState<string | null>(null);
+  const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const electronApi = typeof window !== "undefined"
     ? (window as Window & { electronAPI?: { openEmbeddedBrowser: (url: string) => Promise<{ ok: boolean }>; connectEmbeddedAssistant: (input: { wssUrl: string; code: string }) => Promise<{ ok: boolean }> } }).electronAPI
     : undefined;
@@ -58,6 +60,22 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
 
   const taskStatusText = (status: DesktopAgentTaskResponse["status"]) => ({ queued: "排队中", running: "执行中", succeeded: "已完成", failed: "失败", canceled: "已取消" })[status];
 
+  const cancelTask = async (taskId: string) => {
+    setCancelingTaskId(taskId); setError(null);
+    try {
+      await cancelDesktopAgentTask(accessToken, taskId);
+      await refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "取消桌面任务失败"); } finally { setCancelingTaskId(null); }
+  };
+
+  const resolveApproval = async (approvalId: string, decision: "approve" | "reject") => {
+    setResolvingApprovalId(approvalId); setError(null);
+    try {
+      await resolveDesktopAgentApproval(accessToken, approvalId, decision);
+      await refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "处理动作审批失败"); } finally { setResolvingApprovalId(null); }
+  };
+
   return (
     <section className="mt-8 rounded-xl border border-border/60 bg-card p-5" aria-labelledby="website-assistant-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -89,9 +107,37 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
           </div>
           <button type="submit" disabled={taskBusy || !desktopGoal.trim() || desktopCapabilities.length === 0 || connection?.status !== "connected"} className="min-h-9 rounded-md bg-foreground px-3 text-xs font-medium text-background disabled:opacity-50">{taskBusy ? "正在提交…" : "开始桌面任务"}</button>
         </form>
-        {desktopTasks.length > 0 ? <div className="mt-3 space-y-2" aria-label="桌面 Agent 任务列表">{desktopTasks.slice(0, 5).map((task) => <article key={task.taskId} className="rounded-md border border-border/50 bg-background/60 p-2.5"><div className="flex items-start justify-between gap-2"><p className="min-w-0 truncate text-xs font-medium">{task.goal}</p><span className="shrink-0 text-[11px] text-muted-foreground">{taskStatusText(task.status)}</span></div><p className="mt-1 text-[11px] text-muted-foreground">{task.role} · {task.capabilities.join("、")}</p>{task.error ? <p role="alert" className="mt-1 text-[11px] text-destructive">{task.error}</p> : null}</article>)}</div> : null}
+        {desktopTasks.length > 0 ? <div className="mt-3 space-y-2" aria-label="桌面 Agent 任务列表">{desktopTasks.slice(0, 5).map((task) => {
+          const page = task.result?.page as { url?: string; title?: string; description?: string; headings?: string[]; navigation?: string[] } | undefined;
+          const finalScreenshot = task.result?.screenshotAsset as { assetId?: string; url?: string } | undefined;
+          return <article key={task.taskId} className="rounded-md border border-border/50 bg-background/60 p-2.5"><div className="flex items-start justify-between gap-2"><p className="min-w-0 text-xs font-medium">{task.goal}</p><span className="shrink-0 text-[11px] text-muted-foreground">{taskStatusText(task.status)}</span></div><p className="mt-1 text-[11px] text-muted-foreground">{task.role} · {task.capabilities.join("、")}</p>
+            {task.status === "running" || task.status === "queued" ? <button type="button" onClick={() => void cancelTask(task.taskId)} disabled={cancelingTaskId !== null} className="mt-2 min-h-8 rounded-md border border-destructive/40 px-2.5 text-[11px] text-destructive disabled:opacity-50">{cancelingTaskId === task.taskId ? "正在取消…" : "取消任务"}</button> : null}
+            {task.events.length > 0 ? <ol className="mt-2 space-y-2 border-l border-border/70 pl-2.5" aria-label="任务进度">{task.events.slice(0, 4).map((event, index) => {
+              const eventResult = event.result;
+              const eventPage = eventResult?.page as { title?: string; url?: string } | undefined;
+              const eventScreenshot = eventResult?.screenshotAsset as { url?: string } | undefined;
+              return <li key={`${event.createdAt}-${index}`} className="text-[11px] leading-4 text-muted-foreground"><span className="font-medium text-foreground">{eventTypeLabel(event.eventType)}</span>{event.detail ? ` · ${event.detail}` : ""}{eventPage?.title ? <p className="mt-0.5 text-foreground">{eventPage.title}{eventPage.url ? ` · ${eventPage.url}` : ""}</p> : null}{eventScreenshot?.url ? <a href={eventScreenshot.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-2 underline underline-offset-2"><img src={eventScreenshot.url} alt={`桌面截图${eventPage?.title ? `：${eventPage.title}` : ""}`} className="h-16 w-28 rounded border border-border/60 object-cover" />查看截图</a> : null}</li>;
+            })}</ol> : null}
+            {task.pendingApprovals.map((approval) => <div key={approval.approvalId} className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5"><p className="text-[11px] font-semibold text-foreground">动作审批待处理</p><p className="mt-1 break-words text-[11px] text-foreground">{desktopActionLabel(approval.action)}</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">仅批准你看到的这一项操作。审批十分钟后失效。</p><div className="mt-2 flex gap-2"><button type="button" onClick={() => void resolveApproval(approval.approvalId, "approve")} disabled={resolvingApprovalId !== null} className="min-h-8 rounded-md bg-foreground px-2.5 text-[11px] text-background disabled:opacity-50">{resolvingApprovalId === approval.approvalId ? "处理中…" : "批准此动作"}</button><button type="button" onClick={() => void resolveApproval(approval.approvalId, "reject")} disabled={resolvingApprovalId !== null} className="min-h-8 rounded-md border border-border/70 px-2.5 text-[11px] text-foreground disabled:opacity-50">拒绝</button></div></div>)}
+            {page ? <div className="mt-2 border-t border-border/50 pt-2"><p className="text-xs font-medium">{page.title || "已读取页面"}</p>{page.url ? <a href={page.url} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[11px] text-muted-foreground underline underline-offset-2">{page.url}</a> : null}{page.description ? <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{page.description}</p> : null}{page.headings?.length ? <p className="mt-1 text-[11px] leading-4 text-muted-foreground">标题：{page.headings.slice(0, 5).join(" · ")}</p> : null}{finalScreenshot?.url ? <a href={finalScreenshot.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-2 text-[11px] underline underline-offset-2"><img src={finalScreenshot.url} alt={`桌面截图：${page.title || "页面"}`} className="h-16 w-28 rounded border border-border/60 object-cover" />查看素材库截图</a> : null}</div> : null}
+            {task.error ? <p role="alert" className="mt-1 text-[11px] text-destructive">{task.error}</p> : null}</article>;
+        })}</div> : <p className="mt-3 text-[11px] text-muted-foreground">尚无桌面协作任务</p>}
       </section>
       {error ? <p role="alert" className="mt-3 text-xs text-destructive">{error}</p> : null}
     </section>
   );
+}
+
+function eventTypeLabel(eventType: string) {
+  const labels: Record<string, string> = { started: "已启动", progress: "处理中", page: "页面证据", approval_required: "等待审批", completed: "已完成", failed: "失败", canceled: "已取消" };
+  return labels[eventType] ?? eventType;
+}
+
+function desktopActionLabel(action: DesktopAgentTaskResponse["pendingApprovals"][number]["action"]) {
+  const target = action.target || action.targetUrl || "目标页面";
+  switch (action.kind) {
+    case "click": return `点击 ${target}`;
+    case "type": return `在 ${target} 输入：${action.value ?? "(空内容)"}`;
+    default: return `${action.kind} · ${target}`;
+  }
 }

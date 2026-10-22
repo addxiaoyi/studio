@@ -1,3 +1,5 @@
+import { fillPageField, isCredentialAction, websiteActionReceipt } from "./action-safety.js";
+
 let socket = null;
 let currentState = { connected: false, message: "未连接" };
 let pendingRecording = null;
@@ -167,15 +169,11 @@ function isAllowedDestination(url, expected, followExternal) {
   return url.hostname.toLowerCase() === expected.hostname.toLowerCase();
 }
 
-function isCredentialField(action) {
-  return ["password", "otp", "one-time-code", "verification-code"].includes(String(action?.fieldType ?? "").toLowerCase());
-}
-
 function needsApproval(action) {
   return ["upload", "download", "publish", "purchase", "payment", "authorize", "submit"].includes(action?.kind)
     || action?.kind === "fill"
     || action?.sideEffect === true
-    || (action?.kind === "click" && !/link|navigation|menu|tab/i.test(String(action?.targetRole ?? "")));
+    || action?.kind === "click";
 }
 
 function safeHttpUrl(value) {
@@ -192,8 +190,8 @@ async function executeApprovedAction(message) {
   const actionId = String(message.actionId ?? "");
   const tabId = taskTabs.get(String(message.taskId ?? ""));
   if (!action || !tabId || (needsApproval(action) && !message.approvalToken) || (actionId && consumedApprovalIds.has(actionId))) return;
-  if (isCredentialField(action)) {
-    if (actionId) send({ type: "website_capture.action_result", actionId, taskId: message.taskId, approvalToken: message.approvalToken, action, ok: false, message: "密码、OTP 和验证码字段始终禁止自动填写。" });
+  if (isCredentialAction(action)) {
+    if (actionId) send({ type: "website_capture.action_result", actionId, taskId: message.taskId, approvalToken: message.approvalToken, action: websiteActionReceipt(action), ok: false, message: "密码、OTP 和验证码字段始终禁止自动填写。" });
     return;
   }
   if (actionId) consumedApprovalIds.add(actionId);
@@ -223,13 +221,12 @@ async function executeApprovedAction(message) {
     } else if (action.kind === "fill") {
       const selector = String(action.target ?? "");
       if (!selector || selector.length > 500 || typeof action.value !== "string") throw new Error("缺少安全的填写目标或内容。");
-      await chrome.scripting.executeScript({ target: { tabId }, func: (input) => {
-        const element = document.querySelector(input.selector);
-        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) throw new Error("填写目标不存在。");
-        element.value = input.value;
-        element.dispatchEvent(new Event("input", { bubbles: true }));
-        element.dispatchEvent(new Event("change", { bubbles: true }));
-      }, args: [{ selector, value: action.value }] });
+      const [execution] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: fillPageField,
+        args: [{ selector, value: action.value }],
+      });
+      if (!execution?.result?.ok) throw new Error(execution?.result?.message ?? "填写目标不存在。");
       ok = true;
       resultMessage = "已填写";
     } else {
@@ -238,7 +235,7 @@ async function executeApprovedAction(message) {
   } catch (error) {
     resultMessage = error instanceof Error ? error.message : "动作执行失败";
   }
-  if (actionId) send({ type: "website_capture.action_result", actionId, taskId: message.taskId, approvalToken: message.approvalToken, action, ok, message: resultMessage });
+  if (actionId) send({ type: "website_capture.action_result", actionId, taskId: message.taskId, approvalToken: message.approvalToken, action: websiteActionReceipt(action), ok, message: resultMessage });
 }
 
 async function handleServerMessage(message) {

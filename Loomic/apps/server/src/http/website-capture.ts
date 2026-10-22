@@ -7,6 +7,7 @@ import type { RequestAuthenticator } from "../auth/types.js";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
 import { validatePublicHttpUrl, WebsiteCaptureError } from "../features/website-capture/isolated-browser.js";
 import { WebsiteAssistantHub, validateLocalExactUrl } from "../features/website-capture/assistant-hub.js";
+import { claimWebsiteCaptureRetry } from "../features/website-capture/retry.js";
 import type { JobService } from "../features/jobs/job-service.js";
 import type { CreditService } from "../features/credits/credit-service.js";
 import type { TierGuard } from "../features/credits/tier-guard.js";
@@ -104,6 +105,31 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     }
   });
 
+  app.post<{ Params: { taskId: string } }>("/api/website-capture/assistant/desktop-tasks/:taskId/cancel", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      return reply.send({ ok: true, data: await options.assistantHub.cancelDesktopAgentTask(user.id, viewer.workspace.id, request.params.taskId) });
+    } catch (error) {
+      return sendWebsiteCaptureError(error, reply);
+    }
+  });
+
+  for (const [decision, operation] of [["approve", "approveDesktopAction"], ["reject", "rejectDesktopAction"]] as const) {
+    app.post<{ Params: { approvalId: string } }>(`/api/website-capture/assistant/desktop-approvals/:approvalId/${decision}`, async (request, reply) => {
+      const user = await options.auth.authenticate(request);
+      if (!user) return unauthorized(reply);
+      try {
+        const viewer = await options.viewerService.ensureViewer(user);
+        const result = await options.assistantHub[operation](user.id, viewer.workspace.id, request.params.approvalId);
+        return reply.send({ ok: true, data: result });
+      } catch (error) {
+        return sendWebsiteCaptureError(error, reply);
+      }
+    });
+  }
+
   for (const [path, paused] of [["/api/website-capture/assistant/pause", true], ["/api/website-capture/assistant/resume", false]] as const) {
     app.post(path, async (request, reply) => {
       const user = await options.auth.authenticate(request);
@@ -134,7 +160,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
           `insert into website_capture_tasks
             (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, assistant_connection_id, promo, idempotency_key)
            values ($1,$2,$3,'local',$4,$5,$6,$7,$8,$9,$10)
-           on conflict (created_by, idempotency_key) do nothing
+           on conflict (workspace_id, created_by, idempotency_key) do nothing
            returning id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
                      error_message, created_at, updated_at, follow_external, assistant_connection_id`,
           [viewer.workspace.id, user.id, input.sessionId ?? null, startUrl.toString(), input.pageLimit, input.recordVideo, input.followExternal, connection.id, input.promo?.enabled ? JSON.stringify(input.promo) : null, input.idempotencyKey],
@@ -142,8 +168,8 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         const task = inserted.rows[0] ?? (await options.db.query<TaskRow>(
           `select id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
                   error_message, created_at, updated_at, follow_external, assistant_connection_id
-             from website_capture_tasks where created_by=$1 and idempotency_key=$2`,
-          [user.id, input.idempotencyKey],
+             from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3`,
+          [viewer.workspace.id, user.id, input.idempotencyKey],
         )).rows[0];
         if (!task) return reply.code(500).send({ ok: false, error: { code: "task_create_failed", message: "无法创建本地浏览任务。" } });
         if (task.status === "queued") await options.assistantHub.startLocalTask(task.id, user.id);
@@ -153,7 +179,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         `insert into website_capture_tasks
           (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-         on conflict (created_by, idempotency_key) do nothing
+         on conflict (workspace_id, created_by, idempotency_key) do nothing
          returning id, background_job_id, status, mode, start_url, progress, stage, result,
                    error_message, created_at, updated_at`,
         [viewer.workspace.id, user.id, input.sessionId ?? null, input.mode, startUrl.toString(), input.pageLimit, input.recordVideo, input.followExternal, input.promo?.enabled ? JSON.stringify(input.promo) : null, input.idempotencyKey],
@@ -161,8 +187,8 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       const task = inserted.rows[0] ?? (await options.db.query<TaskRow>(
           `select id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
                 error_message, created_at, updated_at, follow_external, assistant_connection_id
-           from website_capture_tasks where created_by=$1 and idempotency_key=$2`,
-        [user.id, input.idempotencyKey],
+           from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3`,
+        [viewer.workspace.id, user.id, input.idempotencyKey],
       )).rows[0];
       if (!task) return reply.code(500).send({ ok: false, error: { code: "task_create_failed", message: "无法创建网站浏览任务。" } });
 
@@ -173,7 +199,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
           const job = await options.jobService.createJob(user, {
             workspaceId: viewer.workspace.id,
             ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-            idempotencyKey: `website-capture:${input.idempotencyKey}`,
+            idempotencyKey: `website-capture:${viewer.workspace.id}:${input.idempotencyKey}`,
             jobType: "website_capture",
             payload: { task_id: task.id },
           });
@@ -200,9 +226,34 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     if (!user) return unauthorized(reply);
     try {
       const viewer = await options.viewerService.ensureViewer(user);
-      const task = await loadTask(options.db, request.params.taskId, viewer.workspace.id);
+      let task = await loadTask(options.db, request.params.taskId, viewer.workspace.id);
       if (!task) return reply.code(404).send({ ok: false, error: { code: "task_not_found", message: "网站浏览任务不存在。" } });
-      const events = await options.db.query("select id, stage, detail, created_at from website_capture_events where task_id=$1 order by id", [task.id]);
+      if (task.backgroundJobId && (task.status === "queued" || task.status === "running")) {
+        const job = (await options.db.query<{ status: string; error_message: string | null }>(
+          "select status,error_message from background_jobs where id=$1 and created_by=$2",
+          [task.backgroundJobId, user.id],
+        )).rows[0];
+        if (job && ["failed", "dead_letter"].includes(job.status)) {
+          const errorMessage = job.error_message ?? "后台浏览任务已失败，可重试。";
+          const failed = await options.db.query<TaskRow>(
+            `update website_capture_tasks set status='failed',stage='failed',error_message=$4,updated_at=now()
+              where id=$1 and workspace_id=$2 and created_by=$3 and status in ('queued','running')
+              returning id,background_job_id,status,mode,start_url,progress,stage,result,error_message,created_at,updated_at`,
+            [task.id, viewer.workspace.id, user.id, errorMessage],
+          );
+          if (failed.rows[0]) {
+            await options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')", [task.id]);
+            await options.db.query("insert into website_capture_events(task_id,stage,detail) values($1,'failed',$2)", [task.id, errorMessage]);
+            task = toTask(failed.rows[0]);
+          }
+        }
+      }
+      const events = await options.db.query(
+        `select id,stage,detail,created_at from (
+           select id,stage,detail,created_at from website_capture_events where task_id=$1 order by id desc limit 100
+         ) recent order by id`,
+        [task.id],
+      );
       const approval = task.promoApprovalId
         ? (await options.db.query<{ id: string; job_type: "video_generation"; model: string; estimated_credits: number; expires_at: string; payload: { duration?: number; resolution?: string; input_asset_ids?: string[] } }>(
             `select id,job_type,model,estimated_credits,expires_at,payload from generation_approvals where id=$1 and workspace_id=$2 and user_id=$3`,
@@ -219,8 +270,8 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     const user = await options.auth.authenticate(request);
     if (!user) return unauthorized(reply);
     try {
-      await options.viewerService.ensureViewer(user);
-      return reply.send({ ok: true, data: await options.assistantHub.listPendingActions(user.id, request.params.taskId) });
+      const viewer = await options.viewerService.ensureViewer(user);
+      return reply.send({ ok: true, data: await options.assistantHub.listPendingActions(user.id, viewer.workspace.id, request.params.taskId) });
     } catch (error) {
       return sendWebsiteCaptureError(error, reply);
     }
@@ -231,7 +282,8 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       const user = await options.auth.authenticate(request);
       if (!user) return unauthorized(reply);
       try {
-        const result = await options.assistantHub[operation](user.id, request.params.actionId);
+        const viewer = await options.viewerService.ensureViewer(user);
+        const result = await options.assistantHub[operation](user.id, viewer.workspace.id, request.params.actionId);
         return reply.send({ ok: true, data: result });
       } catch (error) {
         return sendWebsiteCaptureError(error, reply);
@@ -251,7 +303,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         [request.params.taskId, viewer.workspace.id, user.id],
       );
       if (!updated.rows[0]) return reply.code(409).send({ ok: false, error: { code: "task_not_cancelable", message: "任务不存在或已经结束。" } });
-      await options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status='pending'", [updated.rows[0].id]);
+      await options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')", [updated.rows[0].id]);
       const jobId = updated.rows[0].background_job_id;
       if (jobId) await options.db.query("update background_jobs set status='canceled', canceled_at=now(), updated_at=now() where id=$1 and status in ('queued','running')", [jobId]);
       if (updated.rows[0].mode === "local") await options.assistantHub.revokeTask(updated.rows[0].id);
@@ -267,18 +319,47 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     if (!user) return unauthorized(reply);
     try {
       const viewer = await options.viewerService.ensureViewer(user);
-      const found = await options.db.query<{ id: string; background_job_id: string | null; mode: WebsiteCaptureTask["mode"] }>(
-        "select id, background_job_id, mode from website_capture_tasks where id=$1 and workspace_id=$2 and created_by=$3 and status='failed'",
-        [request.params.taskId, viewer.workspace.id, user.id],
-      );
-      const row = found.rows[0];
-      if (!row || (row.mode !== "local" && !row.background_job_id)) return reply.code(409).send({ ok: false, error: { code: "task_not_retryable", message: "任务不存在或当前不可重试。" } });
-      await options.db.query("update website_capture_tasks set status='queued', progress=0, stage='queued', error_message=null, updated_at=now() where id=$1", [row.id]);
-      if (row.mode === "local") await options.assistantHub.startLocalTask(row.id, user.id);
-      else await options.jobService.retryJob(user, row.background_job_id!);
-      await options.db.query("insert into website_capture_events(task_id, stage, detail) values($1,'queued','用户请求重试')", [row.id]);
-      const task = await loadTask(options.db, row.id, viewer.workspace.id);
-      return reply.send({ ok: true, data: { task } });
+      let taskRow: { id: string; background_job_id: string | null; status: string; mode: WebsiteCaptureTask["mode"] } | undefined = (await claimWebsiteCaptureRetry(options.db, request.params.taskId, viewer.workspace.id, user.id)) ?? undefined;
+      if (!taskRow) {
+        taskRow = (await options.db.query<{ id: string; background_job_id: string | null; status: string; mode: WebsiteCaptureTask["mode"] }>(
+          `select id,background_job_id,status,mode
+             from website_capture_tasks where id=$1 and workspace_id=$2 and created_by=$3`,
+          [request.params.taskId, viewer.workspace.id, user.id],
+        )).rows[0];
+        if (taskRow && (taskRow.status === "queued" || taskRow.status === "running")) {
+          if (taskRow.status === "queued" && taskRow.mode === "local") {
+            await options.assistantHub.startLocalTask(taskRow.id, user.id);
+          } else if (taskRow.status === "queued" && taskRow.background_job_id) {
+            const job = await options.db.query<{ status: string }>("select status from background_jobs where id=$1 and created_by=$2", [taskRow.background_job_id, user.id]);
+            if (job.rows[0] && ["failed", "dead_letter"].includes(job.rows[0].status)) {
+              try {
+                await options.jobService.retryJob(user, taskRow.background_job_id);
+              } catch (retryError) {
+                const latestJob = await options.db.query<{ status: string }>("select status from background_jobs where id=$1 and created_by=$2", [taskRow.background_job_id, user.id]);
+                if (!latestJob.rows[0] || !["queued", "running", "succeeded"].includes(latestJob.rows[0].status)) throw retryError;
+              }
+              await options.db.query("insert into website_capture_events(task_id,stage,detail) values($1,'retry_recovered','恢复未完成的后台重试')", [taskRow.id]);
+            }
+          }
+          return reply.send({ ok: true, data: { task: await loadTask(options.db, taskRow.id, viewer.workspace.id), reused: true } });
+        }
+        return reply.code(409).send({ ok: false, error: { code: "task_not_retryable", message: "任务不存在或当前不可重试。" } });
+      }
+      if (taskRow.mode !== "local" && !taskRow.background_job_id) {
+        await options.db.query("update website_capture_tasks set status='failed',stage='failed',error_message='缺少后台任务记录，无法安全重试',updated_at=now() where id=$1 and status='queued'", [taskRow.id]);
+        return reply.code(409).send({ ok: false, error: { code: "task_not_retryable", message: "缺少后台任务记录，无法安全重试。" } });
+      }
+      try {
+        if (taskRow.mode === "local") await options.assistantHub.startLocalTask(taskRow.id, user.id);
+        else await options.jobService.retryJob(user, taskRow.background_job_id!);
+      } catch (error) {
+        const message = error instanceof Error ? error.message.slice(0, 1000) : "网站任务重新排队失败。";
+        await options.db.query("update website_capture_tasks set status='failed',stage='failed',error_message=$2,updated_at=now() where id=$1 and status in ('queued','running')", [taskRow.id, message]);
+        await options.db.query("insert into website_capture_events(task_id,stage,detail) values($1,'retry_failed',$2)", [taskRow.id, message]);
+        throw error;
+      }
+      await options.db.query("insert into website_capture_events(task_id,stage,detail) values($1,'queued','用户请求重试')", [taskRow.id]);
+      return reply.send({ ok: true, data: { task: await loadTask(options.db, taskRow.id, viewer.workspace.id), reused: false } });
     } catch (error) {
       return sendWebsiteCaptureError(error, reply);
     }

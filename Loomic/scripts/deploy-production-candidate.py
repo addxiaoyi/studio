@@ -101,8 +101,9 @@ def deploy(args: argparse.Namespace) -> None:
         if jobs:
             raise RuntimeError("Active queued/running jobs detected; deployment stopped before upload")
 
-        staging = remote_run(target, "mktemp -d /tmp/helstera-candidate.XXXXXX")
-        backup = remote_run(target, "mktemp -d /tmp/helstera-backup.XXXXXX")
+        root_path = shlex.quote(args.root)
+        staging = remote_run(target, f"mktemp -d {root_path}/.helstera-candidate.XXXXXX")
+        backup = remote_run(target, f"mktemp -d {root_path}/.helstera-backup.XXXXXX")
         print("BACKUP", backup, flush=True)
         print("LOCAL_SHA256", local_hash, flush=True)
 
@@ -113,6 +114,12 @@ def deploy(args: argparse.Namespace) -> None:
         stage = shlex.quote(staging)
         backup_q = shlex.quote(backup)
         remote_run(target, f"mkdir -p {stage}/candidate && unzip -q {stage}/candidate.zip -d {stage}/candidate")
+        remote_run(
+            target,
+            f"mkdir -p {stage}/candidate/apps/web/out/downloads; "
+            f"if test -d {root}/apps/web/out/downloads; then "
+            f"cp -an {root}/apps/web/out/downloads/. {stage}/candidate/apps/web/out/downloads/; fi",
+        )
         remote_run(target, f"test -f {stage}/candidate/apps/web/out/index.html && test -f {stage}/candidate/apps/web/out/download/index.html && test -f {stage}/candidate/apps/web/out/downloads/Helstera-0.1.0.AppImage && test -f {stage}/candidate/apps/desktop/package.json && test -d {stage}/candidate/apps/web/out/_next/static && test -f {stage}/candidate/RELEASE-MANIFEST.json")
         remote_run(
             target,
