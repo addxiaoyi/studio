@@ -673,7 +673,8 @@ function createWindow() {
     mainWindow = null;
   });
 
-  void mainWindow.loadURL(desktopWebsiteUrl());
+  const desktopHome = new URL("/desktop/", desktopWebsiteUrl());
+  void mainWindow.loadURL(desktopHome.toString());
   if (!app.isPackaged && process.env.HELSTERA_DESKTOP_URL) mainWindow.webContents.openDevTools();
 }
 

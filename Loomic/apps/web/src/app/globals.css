@@ -2,6 +2,96 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+.desktop-home {
+    min-height: calc(100dvh - 46px);
+    padding: 52px clamp(28px, 6vw, 92px) 72px;
+    background: var(--background);
+    color: var(--foreground);
+}
+
+.desktop-home--loading,
+.desktop-home--login {
+    display: grid;
+    place-items: center;
+}
+
+.desktop-home__skeleton {
+    width: min(720px, 70vw);
+    height: 180px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--foreground) 5%, transparent), transparent);
+}
+
+.desktop-login-panel {
+    width: min(520px, 100%);
+    padding: 52px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 8%);
+}
+
+.desktop-login-panel__mark {
+    display: grid;
+    width: 46px;
+    height: 46px;
+    place-items: center;
+    margin-bottom: 28px;
+    border-radius: 12px;
+    background: var(--foreground);
+    color: var(--background);
+}
+
+.desktop-login-panel__mark svg { width: 21px; height: 21px; }
+.desktop-eyebrow { margin: 0 0 10px; color: var(--muted-foreground); font-size: 11px; letter-spacing: .16em; }
+.desktop-login-panel h1, .desktop-home__header h1 { margin: 0; font-size: clamp(28px, 3vw, 44px); font-weight: 550; letter-spacing: -.03em; line-height: 1.1; }
+.desktop-login-panel > p:not(.desktop-eyebrow):not(.desktop-login-panel__note) { margin: 18px 0 28px; color: var(--muted-foreground); font-size: 14px; line-height: 1.8; }
+.desktop-login-panel button { width: 100%; justify-content: space-between; }
+.desktop-login-panel button svg { width: 17px; height: 17px; }
+.desktop-login-panel__note { margin: 18px 0 0; color: var(--muted-foreground); font-size: 11px; text-align: center; }
+.desktop-home__error { margin: 14px 0 0; color: var(--destructive); font-size: 12px; }
+
+.desktop-home__header { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; max-width: 1160px; margin: 0 auto 60px; }
+.desktop-home__header > div > p:last-child { margin: 14px 0 0; color: var(--muted-foreground); font-size: 14px; }
+.desktop-home__account { display: grid; gap: 4px; min-width: 180px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; color: var(--foreground); font-size: 12px; text-decoration: none; }
+.desktop-home__account span { color: var(--muted-foreground); font-size: 11px; }
+.desktop-home__section { max-width: 1160px; margin: 0 auto 48px; }
+.desktop-home__section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.desktop-home__section-heading h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.desktop-home__section-heading > span { color: var(--muted-foreground); font-size: 11px; }
+.desktop-home__section-heading a { display: inline-flex; align-items: center; gap: 5px; color: var(--muted-foreground); font-size: 12px; text-decoration: none; }
+.desktop-home__section-heading a svg { width: 13px; height: 13px; }
+.desktop-workspace-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.desktop-workspace-card { display: flex; min-height: 112px; align-items: flex-start; gap: 13px; padding: 18px; border: 1px solid var(--border); border-radius: 10px; color: var(--foreground); text-decoration: none; transition: border-color .16s, transform .16s, background .16s; }
+.desktop-workspace-card:hover { border-color: color-mix(in srgb, var(--foreground) 35%, var(--border)); background: color-mix(in srgb, var(--foreground) 3%, transparent); transform: translateY(-2px); }
+.desktop-workspace-card__icon { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 8px; }
+.desktop-workspace-card__icon svg { width: 17px; height: 17px; }
+.desktop-workspace-card > span:nth-child(2) { display: grid; gap: 7px; min-width: 0; }
+.desktop-workspace-card strong { font-size: 13px; font-weight: 600; }
+.desktop-workspace-card small { color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
+.desktop-workspace-card__arrow { width: 14px; height: 14px; margin-left: auto; color: var(--muted-foreground); }
+.desktop-task-list { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; }
+.desktop-task-row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); color: var(--foreground); text-decoration: none; }
+.desktop-task-row:last-child { border-bottom: 0; }
+.desktop-task-row:hover { background: color-mix(in srgb, var(--foreground) 3%, transparent); }
+.desktop-task-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--muted-foreground); }
+.desktop-task-dot--running { background: #0f9f6e; }
+.desktop-task-dot--failed { background: #c2413b; }
+.desktop-task-row__body { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.desktop-task-row__body strong { overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-task-row__body small { color: var(--muted-foreground); font-size: 11px; }
+.desktop-task-row > svg { width: 14px; height: 14px; color: var(--muted-foreground); }
+.desktop-empty { display: flex; min-height: 96px; align-items: center; justify-content: center; gap: 9px; border: 1px dashed var(--border); border-radius: 10px; color: var(--muted-foreground); font-size: 12px; }
+.desktop-empty svg { width: 16px; height: 16px; }
+
+@media (max-width: 820px) {
+    .desktop-home { padding: 34px 22px 60px; }
+    .desktop-home__header { display: grid; align-items: start; margin-bottom: 38px; }
+    .desktop-workspace-grid { grid-template-columns: 1fr; }
+    .desktop-login-panel { padding: 32px 24px; }
+}
+
 html[data-helstera-desktop="true"] body {
     padding-top: 46px;
 }
