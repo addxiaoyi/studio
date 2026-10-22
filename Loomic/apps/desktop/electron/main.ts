@@ -560,16 +560,18 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     show: false,
-    frame: true,
-    autoHideMenuBar: false,
+    frame: false,
+    autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false,
+      sandbox: true,
       webSecurity: true,
+      preload: join(__dirname, "preload.js"),
     },
     icon: join(__dirname, "../resources/icon.png"),
   });
+  mainWindow.setMenuBarVisibility(false);
 
   // Build application menu
   const menu = Menu.buildFromTemplate([

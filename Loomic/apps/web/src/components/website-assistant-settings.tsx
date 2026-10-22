@@ -4,12 +4,29 @@ import { useEffect, useState } from "react";
 import type { DesktopAgentRole, DesktopCapability, WebsiteCaptureAssistantConnection, WebsiteCapturePairing } from "@helstera/shared";
 import { cancelDesktopAgentTask, createDesktopAgentTask, createWebsiteCapturePairing, fetchDesktopAgentTasks, fetchWebsiteAssistantConnection, resolveDesktopAgentApproval, revokeWebsiteAssistant, setWebsiteAssistantPaused, type DesktopAgentTaskResponse } from "@/lib/server-api";
 
+type DesktopUpdateState = {
+  status: "idle" | "checking" | "available" | "downloading" | "downloaded" | "not-available" | "error";
+  currentVersion: string;
+  version?: string;
+  percent?: number;
+  message?: string;
+};
+
+type DesktopElectronApi = {
+  openEmbeddedBrowser: (url: string) => Promise<{ ok: boolean }>;
+  connectEmbeddedAssistant: (input: { wssUrl: string; code: string }) => Promise<{ ok: boolean }>;
+  getUpdateState: () => Promise<DesktopUpdateState>;
+  checkForUpdates: () => Promise<DesktopUpdateState>;
+  installUpdate: () => Promise<{ ok: boolean }>;
+  onUpdateState: (callback: (state: DesktopUpdateState) => void) => () => void;
+};
+
 export function WebsiteAssistantSettings({ accessToken }: { accessToken: string }) {
   const [connection, setConnection] = useState<WebsiteCaptureAssistantConnection | null>(null);
   const [pairing, setPairing] = useState<WebsiteCapturePairing | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [embeddedUrl, setEmbeddedUrl] = useState("http://localhost:3000");
+  const [embeddedUrl, setEmbeddedUrl] = useState("https://studio.0st.top/");
   const [desktopTasks, setDesktopTasks] = useState<DesktopAgentTaskResponse[]>([]);
   const [desktopGoal, setDesktopGoal] = useState("");
   const [desktopRole, setDesktopRole] = useState<DesktopAgentRole>("researcher");
@@ -17,8 +34,10 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
   const [taskBusy, setTaskBusy] = useState(false);
   const [cancelingTaskId, setCancelingTaskId] = useState<string | null>(null);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
+  const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const electronApi = typeof window !== "undefined"
-    ? (window as Window & { electronAPI?: { openEmbeddedBrowser: (url: string) => Promise<{ ok: boolean }>; connectEmbeddedAssistant: (input: { wssUrl: string; code: string }) => Promise<{ ok: boolean }> } }).electronAPI
+    ? (window as Window & { electronAPI?: DesktopElectronApi }).electronAPI
     : undefined;
 
   const refresh = async () => {
@@ -29,6 +48,27 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
     } catch (cause) { setError(cause instanceof Error ? cause.message : "无法读取助手状态"); }
   };
   useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 5000); return () => window.clearInterval(timer); }, [accessToken]);
+  useEffect(() => {
+    if (!electronApi) return;
+    void electronApi.getUpdateState().then(setUpdateState);
+    return electronApi.onUpdateState(setUpdateState);
+  }, [electronApi]);
+
+  const checkForUpdates = async () => {
+    if (!electronApi || updateBusy) return;
+    setUpdateBusy(true);
+    try { setUpdateState(await electronApi.checkForUpdates()); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "更新检查失败"); }
+    finally { setUpdateBusy(false); }
+  };
+
+  const installUpdate = async () => {
+    if (!electronApi || updateBusy) return;
+    setUpdateBusy(true);
+    try { await electronApi.installUpdate(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "无法重启安装更新"); }
+    finally { setUpdateBusy(false); }
+  };
 
   const createPairing = async () => {
     setBusy(true); setError(null);
@@ -93,6 +133,24 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
         {connection ? <button type="button" onClick={() => void revoke()} disabled={busy} className="min-h-10 rounded-md border border-destructive/30 px-3 text-xs text-destructive">撤销并断开</button> : null}
       </div>
       {electronApi ? <div className="mt-4 rounded-lg border border-border/50 bg-muted/20 p-3"><p className="text-xs font-medium">桌面内嵌浏览器</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">使用独立浏览器分区打开本地站点；登录态留在桌面端，不会发送给服务器。</p><div className="mt-2 flex gap-2"><input aria-label="桌面内嵌浏览器 URL" value={embeddedUrl} onChange={(event) => setEmbeddedUrl(event.target.value)} className="h-9 min-w-0 flex-1 rounded-md border border-border/60 bg-background px-2 text-sm" /><button type="button" onClick={() => void electronApi.openEmbeddedBrowser(embeddedUrl).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "无法打开内嵌浏览器"))} className="min-h-9 rounded-md border border-border/70 px-2.5 text-xs">打开</button>{pairing?.code ? <button type="button" onClick={() => void electronApi.connectEmbeddedAssistant({ wssUrl: pairing.wssUrl, code: pairing.code! }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "桌面助手连接失败"))} className="min-h-9 rounded-md border border-primary/40 px-2.5 text-xs">连接桌面助手</button> : null}</div></div> : null}
+      {electronApi && updateState ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5" aria-live="polite">
+          <div className="min-w-0">
+            <p className="text-xs font-medium">桌面端自动更新 · 当前版本 {updateState.currentVersion}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {updateState.message ?? (updateState.status === "checking" ? "正在检查更新" : "Windows / Linux 支持自动更新")}
+              {updateState.version ? ` · v${updateState.version}` : ""}
+              {updateState.status === "downloading" && typeof updateState.percent === "number" ? ` · ${updateState.percent}%` : ""}
+            </p>
+            {updateState.status === "downloading" && typeof updateState.percent === "number" ? <progress max={100} value={updateState.percent} aria-label="更新下载进度" className="mt-2 block h-1 w-full accent-foreground" /> : null}
+          </div>
+          {updateState.status === "downloaded" ? (
+            <button type="button" onClick={() => void installUpdate()} disabled={updateBusy} className="min-h-9 rounded-md bg-foreground px-3 text-xs font-medium text-background disabled:opacity-50">重启安装</button>
+          ) : (
+            <button type="button" onClick={() => void checkForUpdates()} disabled={updateBusy || updateState.status === "checking" || updateState.status === "downloading"} className="min-h-9 rounded-md border border-border/70 px-3 text-xs disabled:opacity-50">{updateBusy || updateState.status === "checking" ? "检查中" : "检查更新"}</button>
+          )}
+        </div>
+      ) : null}
       <section className="mt-4 rounded-lg border border-border/50 bg-muted/20 p-3" aria-labelledby="desktop-agent-title">
         <div className="flex items-start justify-between gap-3">
           <div><h3 id="desktop-agent-title" className="text-xs font-semibold">桌面 Agent 协作</h3><p className="mt-1 text-[11px] leading-5 text-muted-foreground">仅开放你声明的浏览器能力；点击和输入等副作用仍需单独批准。</p></div>
