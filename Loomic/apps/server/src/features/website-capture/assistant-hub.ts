@@ -47,6 +47,7 @@ export class WebsiteAssistantHub {
   private readonly pages = new Map<string, WebsiteCapturePage[]>();
   private readonly taskTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly desktopTaskTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly lastProgressEventAt = new Map<string, number>();
 
   constructor(private readonly options: HubOptions) {
     void this.options.db.query("update website_capture_connections set disconnected_at=coalesce(disconnected_at, now()) where revoked_at is null and disconnected_at is null").catch(() => undefined);
@@ -141,7 +142,8 @@ export class WebsiteAssistantHub {
     const live = this.connections.get(task.assistant_connection_id);
     if (!live || live.ws.readyState !== 1 || live.paused) throw new Error("Local browser assistant is not connected.");
     this.pages.delete(taskId);
-    await this.options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status='pending'", [taskId]);
+    this.lastProgressEventAt.delete(taskId);
+    await this.options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')", [taskId]);
     const claimed = await this.options.db.query<{ id: string }>(
       "update website_capture_tasks set status='running', stage='connecting', progress=2, updated_at=now() where id=$1 and status='queued' returning id",
       [taskId],
@@ -306,6 +308,7 @@ export class WebsiteAssistantHub {
   }
 
   async revokeTask(taskId: string): Promise<void> {
+    this.lastProgressEventAt.delete(taskId);
     const { rows } = await this.options.db.query<{ assistant_connection_id: string | null }>(
       "select assistant_connection_id from website_capture_tasks where id=$1",
       [taskId],
@@ -319,6 +322,7 @@ export class WebsiteAssistantHub {
     const { rows } = await this.options.db.query<{ id: string; action: WebsiteActionRequest; reason: string; expires_at: string }>(
       `select id,action,reason,expires_at from website_capture_actions
         where task_id=$1 and user_id=$2 and workspace_id=$3 and status='pending' and expires_at > now()
+          and exists (select 1 from website_capture_tasks t where t.id=website_capture_actions.task_id and t.workspace_id=website_capture_actions.workspace_id and t.status='running')
         order by created_at desc`,
       [taskId, userId, workspaceId],
     );
@@ -330,6 +334,7 @@ export class WebsiteAssistantHub {
     const { rows } = await this.options.db.query<{ task_id: string; connection_id: string; action: WebsiteActionRequest }>(
       `update website_capture_actions set status='approved', approved_at=now(), approval_token_hash=$4
         where id=$1 and user_id=$2 and workspace_id=$3 and status='pending' and expires_at > now()
+          and exists (select 1 from website_capture_tasks t where t.id=website_capture_actions.task_id and t.workspace_id=website_capture_actions.workspace_id and t.status='running' and t.assistant_connection_id=website_capture_actions.connection_id)
         returning task_id,connection_id,action`,
       [actionId, userId, workspaceId, hashToken(token)],
     );
@@ -337,7 +342,14 @@ export class WebsiteAssistantHub {
     if (!row) throw new Error("动作确认已过期或不存在。");
     const live = this.connections.get(row.connection_id);
     if (!live || live.ws.readyState !== 1) {
-      await this.options.db.query("update website_capture_actions set status='pending', approved_at=null, approval_token_hash=null where id=$1 and status='approved'", [actionId]);
+      await this.options.db.query(
+        `update website_capture_actions set status=case when exists (
+            select 1 from website_capture_tasks t where t.id=website_capture_actions.task_id and t.workspace_id=website_capture_actions.workspace_id and t.status='running'
+              and t.assistant_connection_id=website_capture_actions.connection_id
+          ) then 'pending' else 'expired' end,
+          approved_at=null, approval_token_hash=null where id=$1 and status='approved'`,
+        [actionId],
+      );
       throw new Error("本地浏览器助手已断开。");
     }
     this.send(live, { type: "website_capture.action_execute", actionId, taskId: row.task_id, action: row.action, approvalToken: token });
@@ -347,7 +359,10 @@ export class WebsiteAssistantHub {
 
   async rejectAction(userId: string, workspaceId: string, actionId: string) {
     const { rows } = await this.options.db.query<{ task_id: string; connection_id: string }>(
-      "update website_capture_actions set status='rejected', rejected_at=now() where id=$1 and user_id=$2 and workspace_id=$3 and status='pending' and expires_at > now() returning task_id,connection_id",
+      `update website_capture_actions set status='rejected', rejected_at=now()
+        where id=$1 and user_id=$2 and workspace_id=$3 and status='pending' and expires_at > now()
+          and exists (select 1 from website_capture_tasks t where t.id=website_capture_actions.task_id and t.workspace_id=website_capture_actions.workspace_id and t.status='running')
+        returning task_id,connection_id`,
       [actionId, userId, workspaceId],
     );
     const row = rows[0];
@@ -369,18 +384,20 @@ export class WebsiteAssistantHub {
       const decision = classifyWebsiteAction(message.action as WebsiteActionRequest);
       if (decision.state === "allow") {
         const task = await this.loadLocalTask(live, String(message.taskId ?? ""));
-        if (task) await this.event(task.id, "action_executed", JSON.stringify({ actionId, ok: Boolean(message.ok), message: String(message.message ?? "").slice(0, 500) }));
+        if (task?.status === "running") await this.event(task.id, "action_executed", JSON.stringify({ actionId, ok: Boolean(message.ok), message: String(message.message ?? "").slice(0, 500) }));
         return;
       }
       this.send(live, { type: "website_capture.action_denied", actionId, taskId: message.taskId, reason: "副作用动作必须携带一次性确认令牌。" });
       return;
     }
     const result = await this.options.db.query<{ task_id: string }>(
-      `update website_capture_actions
+      `update website_capture_actions a
           set status='executed', consumed_at=now()
-        where id=$1 and connection_id=$2 and status='approved'
-          and expires_at > now() and approval_token_hash=$3
-        returning task_id`,
+        from website_capture_tasks t
+        where a.id=$1 and a.connection_id=$2 and a.status='approved'
+          and a.expires_at > now() and a.approval_token_hash=$3
+          and t.id=a.task_id and t.workspace_id=a.workspace_id and t.status='running' and t.assistant_connection_id=$2
+        returning a.task_id`,
       [actionId, live.id, hashToken(approvalToken)],
     );
     const row = result.rows[0];
@@ -497,7 +514,7 @@ export class WebsiteAssistantHub {
     if (message?.type === "website_capture.progress") return this.updateProgress(live, message);
     if (message?.type === "website_capture.page") return this.capturePage(live, message);
     if (message?.type === "website_capture.complete") return this.completeTask(live, message);
-    if (message?.type === "website_capture.recording_failed") return this.event(String(message.taskId ?? ""), "recording_failed", String(message.message ?? "本地录屏不可用"));
+    if (message?.type === "website_capture.recording_failed") return this.recordingFailed(live, message);
     if (message?.type === "website_capture.failed") return this.failTask(live, String(message.taskId ?? ""), String(message.message ?? "本地浏览器任务失败"));
     if (message?.type === "website_capture.action_result") return this.consumeApprovedAction(live, message);
     if (message?.type === "desktop_agent.event") return this.handleDesktopAgentEvent(live, message);
@@ -507,7 +524,7 @@ export class WebsiteAssistantHub {
     if (message?.type === "website_capture.action_request") {
       const decision = classifyWebsiteAction(message.action as WebsiteActionRequest);
       const task = await this.loadLocalTask(live, String(message.taskId ?? ""));
-      if (!task) return;
+      if (!task || task.status !== "running") return;
       if (decision.state === "deny") {
         this.send(live, { type: "website_capture.action_denied", taskId: task.id, action: message.action, reason: decision.reason });
         return;
@@ -640,7 +657,7 @@ export class WebsiteAssistantHub {
 
   private async capturePage(live: LiveConnection, message: any) {
     const task = await this.loadLocalTask(live, message.taskId);
-    if (!task || task.status === "canceled") return;
+    if (!task || task.status !== "running") return;
     const pages = this.pages.get(task.id) ?? [];
     if (pages.length >= task.page_limit) return;
     const url = validateLocalCapturedUrl(String(message.page?.url ?? ""), task.start_url, task.follow_external);
@@ -668,13 +685,14 @@ export class WebsiteAssistantHub {
     };
     pages.push(page);
     this.pages.set(task.id, pages);
-    await this.options.db.query("update website_capture_tasks set progress=$2, stage='page_loading', updated_at=now() where id=$1 and status='running'", [task.id, 10 + Math.round((pages.length / task.page_limit) * 65)]);
+    const updated = await this.options.db.query<{ id: string }>("update website_capture_tasks set progress=$2, stage='page_loading', updated_at=now() where id=$1 and status='running' returning id", [task.id, 10 + Math.round((pages.length / task.page_limit) * 65)]);
+    if (!updated.rows[0]) return;
     await this.event(task.id, "page_loading", `已保存第 ${pages.length} 个页面证据：${page.url}`);
   }
 
   private async completeTask(live: LiveConnection, message: any) {
     const task = await this.loadLocalTask(live, message.taskId);
-    if (!task || task.status === "canceled") return;
+    if (!task || task.status !== "running") return;
     const pages = this.pages.get(task.id) ?? [];
     if (!pages.length) return this.failTask(live, task.id, "本地浏览器没有返回页面证据。");
     let recordingAsset: { id: string; url: string } | undefined;
@@ -704,27 +722,50 @@ export class WebsiteAssistantHub {
       ...(recordingAsset ? { recordingAssetId: recordingAsset.id, recordingUrl: recordingAsset.url } : {}),
       completedAt: new Date().toISOString(),
     };
-    await this.options.db.query("update website_capture_tasks set status='succeeded', progress=100, stage='completed', result=$2::jsonb, completed_at=now(), updated_at=now() where id=$1 and status='running'", [task.id, JSON.stringify(result)]);
-    await this.options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status='pending'", [task.id]);
+    const completed = await this.options.db.query<{ id: string }>("update website_capture_tasks set status='succeeded', progress=100, stage='completed', result=$2::jsonb, completed_at=now(), updated_at=now() where id=$1 and status='running' returning id", [task.id, JSON.stringify(result)]);
+    if (!completed.rows[0]) {
+      this.pages.delete(task.id);
+      this.lastProgressEventAt.delete(task.id);
+      this.clearTaskTimer(task.id);
+      return;
+    }
+    await this.options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')", [task.id]);
     await this.event(task.id, "completed", "本地浏览证据与中文介绍已保存");
+    this.lastProgressEventAt.delete(task.id);
     this.pages.delete(task.id);
     this.clearTaskTimer(task.id);
   }
 
   private async updateProgress(live: LiveConnection, message: any) {
     const task = await this.loadLocalTask(live, message.taskId);
-    if (!task || task.status === "canceled") return;
+    if (!task || task.status !== "running") return;
     const progress = Math.max(0, Math.min(99, Number(message.progress) || 0));
-    const stage = String(message.stage ?? "browsing").slice(0, 80);
-    await this.options.db.query("update website_capture_tasks set progress=$2, stage=$3, updated_at=now() where id=$1 and status='running'", [task.id, progress, stage]);
-    await this.event(task.id, stage, String(message.detail ?? "").slice(0, 500));
+    const requestedStage = String(message.stage ?? "browsing");
+    const allowedStages = ["connecting", "browsing", "page_loading", "screenshot", "recording", "summarizing", "writing_report"];
+    const stage = allowedStages.includes(requestedStage) ? requestedStage : "browsing";
+    const updated = await this.options.db.query<{ id: string }>("update website_capture_tasks set progress=$2, stage=$3, updated_at=now() where id=$1 and status='running' returning id", [task.id, progress, stage]);
+    if (!updated.rows[0]) return;
+    const now = Date.now();
+    const lastEventAt = this.lastProgressEventAt.get(task.id) ?? 0;
+    if (now - lastEventAt >= 1000) {
+      this.lastProgressEventAt.set(task.id, now);
+      await this.event(task.id, stage, String(message.detail ?? "").slice(0, 500));
+    }
+  }
+
+  private async recordingFailed(live: LiveConnection, message: any) {
+    const task = await this.loadLocalTask(live, String(message.taskId ?? ""));
+    if (!task || task.status !== "running") return;
+    await this.event(task.id, "recording_failed", String(message.message ?? "本地录屏不可用").slice(0, 500));
   }
 
   private async failTask(live: LiveConnection, taskId: string, message: string) {
     if (!taskId) return;
-    await this.options.db.query("update website_capture_tasks set status='failed', stage='failed', error_message=$2, updated_at=now() where id=$1 and assistant_connection_id=$3 and status in ('queued','running')", [taskId, message.slice(0, 1000), live.id]);
-    await this.options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status='pending'", [taskId]);
+    const failed = await this.options.db.query<{ id: string }>("update website_capture_tasks set status='failed', stage='failed', error_message=$2, updated_at=now() where id=$1 and assistant_connection_id=$3 and status in ('queued','running') returning id", [taskId, message.slice(0, 1000), live.id]);
+    if (!failed.rows[0]) return;
+    await this.options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')", [taskId]);
     await this.event(taskId, "failed", message);
+    this.lastProgressEventAt.delete(taskId);
     this.pages.delete(taskId);
     this.clearTaskTimer(taskId);
   }
@@ -750,6 +791,8 @@ export class WebsiteAssistantHub {
     const tasks = await this.options.db.query<{ id: string }>("update website_capture_tasks set status='failed', stage='failed', error_message='本地浏览器助手已断开，任务已中止', updated_at=now() where assistant_connection_id=$1 and status in ('queued','running') returning id", [live.id]);
     for (const task of tasks.rows) {
       this.clearTaskTimer(task.id);
+      this.lastProgressEventAt.delete(task.id);
+      await this.options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')", [task.id]);
       await this.event(task.id, "failed", "本地浏览器助手已断开，任务已中止");
     }
   }

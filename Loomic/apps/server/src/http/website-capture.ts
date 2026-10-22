@@ -242,13 +242,18 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
             [task.id, viewer.workspace.id, user.id, errorMessage],
           );
           if (failed.rows[0]) {
-            await options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status='pending'", [task.id]);
+            await options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')", [task.id]);
             await options.db.query("insert into website_capture_events(task_id,stage,detail) values($1,'failed',$2)", [task.id, errorMessage]);
             task = toTask(failed.rows[0]);
           }
         }
       }
-      const events = await options.db.query("select id, stage, detail, created_at from website_capture_events where task_id=$1 order by id", [task.id]);
+      const events = await options.db.query(
+        `select id,stage,detail,created_at from (
+           select id,stage,detail,created_at from website_capture_events where task_id=$1 order by id desc limit 100
+         ) recent order by id`,
+        [task.id],
+      );
       const approval = task.promoApprovalId
         ? (await options.db.query<{ id: string; job_type: "video_generation"; model: string; estimated_credits: number; expires_at: string; payload: { duration?: number; resolution?: string; input_asset_ids?: string[] } }>(
             `select id,job_type,model,estimated_credits,expires_at,payload from generation_approvals where id=$1 and workspace_id=$2 and user_id=$3`,
@@ -298,7 +303,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         [request.params.taskId, viewer.workspace.id, user.id],
       );
       if (!updated.rows[0]) return reply.code(409).send({ ok: false, error: { code: "task_not_cancelable", message: "任务不存在或已经结束。" } });
-      await options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status='pending'", [updated.rows[0].id]);
+      await options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')", [updated.rows[0].id]);
       const jobId = updated.rows[0].background_job_id;
       if (jobId) await options.db.query("update background_jobs set status='canceled', canceled_at=now(), updated_at=now() where id=$1 and status in ('queued','running')", [jobId]);
       if (updated.rows[0].mode === "local") await options.assistantHub.revokeTask(updated.rows[0].id);
