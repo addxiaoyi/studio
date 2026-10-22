@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, Tray, shell, nativeImage, ipcMain } from "electron";
 import { classifyDesktopAction, desktopAgentActionSchema, desktopAgentTaskSchema, type DesktopAgentAction, type DesktopAgentTask } from "@helstera/shared";
 import { autoUpdater } from "electron-updater";
+import { randomBytes } from "node:crypto";
 import { join } from "path";
 
 let mainWindow: BrowserWindow | null = null;
@@ -22,6 +23,45 @@ type UpdateStateInput = Omit<UpdateState, "currentVersion">;
 let updateState: UpdateState = { status: "idle", currentVersion: app.getVersion() };
 let updateCheckActive = false;
 let updateTimer: ReturnType<typeof setInterval> | null = null;
+const PRODUCTION_WEBSITE_URL = "https://studio.0st.top/";
+const DESKTOP_AUTH_SCHEME = "helstera:";
+const DESKTOP_LOGIN_TTL_MS = 5 * 60 * 1000;
+const pendingDesktopLogins = new Map<string, number>();
+const desktopLoginTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function desktopWebsiteUrl() {
+  return app.isPackaged ? PRODUCTION_WEBSITE_URL : process.env.HELSTERA_DESKTOP_URL?.trim() || PRODUCTION_WEBSITE_URL;
+}
+
+function publishDesktopLoginState(status: "waiting" | "exchanging" | "completed" | "failed" | "canceled" | "expired") {
+  if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send("desktop:login-state", { status });
+}
+
+function clearPendingDesktopLogin(state: string) {
+  pendingDesktopLogins.delete(state);
+  const timer = desktopLoginTimers.get(state);
+  if (timer) clearTimeout(timer);
+  desktopLoginTimers.delete(state);
+}
+
+function receiveDesktopLoginUrl(value: string) {
+  let callback: URL;
+  try { callback = new URL(value); } catch { return false; }
+  if (callback.protocol !== DESKTOP_AUTH_SCHEME || callback.hostname !== "auth" || callback.pathname !== "/callback") return false;
+  const state = callback.searchParams.get("state") ?? "";
+  const token = callback.searchParams.get("desktop_token") ?? "";
+  const expiresAt = pendingDesktopLogins.get(state);
+  if (!expiresAt || expiresAt <= Date.now() || !/^[A-Za-z0-9_-]{43}$/.test(token)) return false;
+  clearPendingDesktopLogin(state);
+  publishDesktopLoginState("exchanging");
+  const callbackPage = new URL("/auth/callback/", desktopWebsiteUrl());
+  callbackPage.searchParams.set("desktop_token", token);
+  callbackPage.searchParams.set("state", state);
+  void mainWindow?.loadURL(callbackPage.toString());
+  mainWindow?.show();
+  mainWindow?.focus();
+  return true;
+}
 
 function publishUpdateState(next: UpdateStateInput) {
   updateState = { ...next, currentVersion: app.getVersion() };
@@ -72,6 +112,49 @@ ipcMain.handle("app-version", () => app.getVersion());
 ipcMain.handle("desktop.install-update", () => {
   if (updateState.status !== "downloaded") return { ok: false };
   autoUpdater.quitAndInstall(false, true);
+  return { ok: true };
+});
+
+ipcMain.handle("desktop.browser-login-available", (event) => {
+  const sender = BrowserWindow.fromWebContents(event.sender);
+  if (!sender || sender !== mainWindow) throw new Error("Desktop login is only available in the main window.");
+  return app.isPackaged;
+});
+ipcMain.handle("desktop.start-browser-login", async (event) => {
+  const sender = BrowserWindow.fromWebContents(event.sender);
+  if (!sender || sender !== mainWindow) throw new Error("Desktop login is only available in the main window.");
+  if (!app.isPackaged) return { ok: false, message: "请在正式桌面版中使用浏览器登录。" };
+  app.setAsDefaultProtocolClient("helstera");
+  for (const [state, expiresAt] of pendingDesktopLogins) if (expiresAt <= Date.now()) clearPendingDesktopLogin(state);
+  const state = randomBytes(32).toString("base64url");
+  pendingDesktopLogins.set(state, Date.now() + DESKTOP_LOGIN_TTL_MS);
+  desktopLoginTimers.set(state, setTimeout(() => {
+    if (!pendingDesktopLogins.has(state)) return;
+    clearPendingDesktopLogin(state);
+    publishDesktopLoginState("expired");
+  }, DESKTOP_LOGIN_TTL_MS));
+  const confirmation = new URL("/auth/desktop-confirm/", desktopWebsiteUrl());
+  confirmation.searchParams.set("state", state);
+  const login = new URL("/login/", desktopWebsiteUrl());
+  login.searchParams.set("redirect", `${confirmation.pathname}${confirmation.search}`);
+  login.searchParams.set("desktop", "1");
+  try {
+    await shell.openExternal(login.toString());
+    publishDesktopLoginState("waiting");
+    return { ok: true };
+  } catch (error) {
+    clearPendingDesktopLogin(state);
+    publishDesktopLoginState("failed");
+    throw new Error("无法打开系统浏览器完成登录。", { cause: error });
+  }
+});
+ipcMain.handle("desktop.cancel-browser-login", () => {
+  for (const state of pendingDesktopLogins.keys()) clearPendingDesktopLogin(state);
+  publishDesktopLoginState("canceled");
+  return { ok: true };
+});
+ipcMain.handle("desktop.finish-browser-login", (_event, success: unknown) => {
+  publishDesktopLoginState(success === true ? "completed" : "failed");
   return { ok: true };
 });
 
@@ -588,13 +671,8 @@ function createWindow() {
     mainWindow = null;
   });
 
-  // Load the web app
-  if (!app.isPackaged) {
-    mainWindow.loadURL("http://localhost:3000");
-    mainWindow.webContents.openDevTools();
-  } else {
-    mainWindow.loadFile(join(__dirname, "../dist/index.html"));
-  }
+  void mainWindow.loadURL(desktopWebsiteUrl());
+  if (!app.isPackaged && process.env.HELSTERA_DESKTOP_URL) mainWindow.webContents.openDevTools();
 }
 
 function createTray() {
@@ -620,14 +698,24 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  app.setAsDefaultProtocolClient("helstera");
   configureAutoUpdates();
   createWindow();
+  const startupAuthUrl = process.argv.find((argument) => argument.startsWith(`${DESKTOP_AUTH_SCHEME}//`));
+  if (startupAuthUrl) receiveDesktopLoginUrl(startupAuthUrl);
   if (process.platform !== "linux") {
     createTray();
   }
 });
 
-app.on("second-instance", () => {
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  receiveDesktopLoginUrl(url);
+});
+
+app.on("second-instance", (_event, commandLine) => {
+  const authUrl = commandLine.find((argument) => argument.startsWith(`${DESKTOP_AUTH_SCHEME}//`));
+  if (authUrl) receiveDesktopLoginUrl(authUrl);
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
@@ -650,6 +738,9 @@ app.on("activate", () => {
 
 app.on("before-quit", () => {
   if (updateTimer) clearInterval(updateTimer);
+  for (const timer of desktopLoginTimers.values()) clearTimeout(timer);
+  desktopLoginTimers.clear();
+  pendingDesktopLogins.clear();
   tray?.destroy();
   assistantSocket?.close();
   recorderWindow?.destroy();
