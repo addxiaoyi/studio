@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Agent, request as httpRequest } from "undici";
 import { chromium, type Route, type WebSocketRoute } from "playwright";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import type { WebsiteCapturePage, WebsiteCaptureResult } from "@helstera/shared";
 
@@ -502,23 +502,30 @@ export async function persistCaptureAsset(input: {
   });
   if (upload.error) throw new Error(`Could not save capture asset: ${upload.error.message}`);
 
+  let client: PoolClient | undefined;
   try {
-    const asset = await input.db.query<{ id: string }>(
+    client = await input.db.connect();
+    await client.query("begin");
+    const asset = await client.query<{ id: string }>(
       `insert into asset_objects(workspace_id, bucket, object_path, mime_type, byte_size, created_by)
        values($1, 'project-assets', $2, $3, $4, $5) returning id`,
       [input.task.workspace_id, objectPath, input.mimeType, input.bytes.length, input.task.created_by],
     );
     const assetId = asset.rows[0]?.id;
     if (!assetId) throw new Error("Asset metadata could not be saved.");
-    await input.db.query(
-      `insert into generated_assets(workspace_id, created_by, media_type, object_path, mime_type, title, description, prompt, metadata)
-       values($1, $2, $3, $4, $5, $6, $7, '', $8::jsonb)`,
-      [input.task.workspace_id, input.task.created_by, input.mediaType, objectPath, input.mimeType, input.title, "Captured from a website selected by the workspace user.", JSON.stringify(input.metadata)],
+    await client.query(
+      `insert into generated_assets(workspace_id, created_by, media_type, object_path, mime_type, title, description, prompt, metadata, website_capture_task_id)
+       values($1, $2, $3, $4, $5, $6, $7, '', $8::jsonb, $9)`,
+      [input.task.workspace_id, input.task.created_by, input.mediaType, objectPath, input.mimeType, input.title, "Captured from a website selected by the workspace user.", JSON.stringify(input.metadata), input.task.id],
     );
+    await client.query("commit");
     return { id: assetId, url: `${input.webOrigin}/api/uploads/${assetId}/file` };
   } catch (error) {
-    await input.storage.remove("project-assets", [objectPath]);
+    await client?.query("rollback").catch(() => undefined);
+    await input.storage.remove("project-assets", [objectPath]).catch(() => undefined);
     throw error;
+  } finally {
+    client?.release();
   }
 }
 
