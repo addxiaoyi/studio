@@ -2,7 +2,7 @@
   "name": "helstera",
   "version": "0.0.0",
   "private": true,
-  "packageManager": "pnpm@10.26.2",
+  "packageManager": "pnpm@11.25.0",
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
