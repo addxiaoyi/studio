@@ -89,4 +89,5 @@ packages/ui/.next/
 
 # Lock files (keep pnpm-lock.yaml for reproducibility)
 pnpm-lock.yaml
+!Loomic/pnpm-lock.yaml
 bun.lock
