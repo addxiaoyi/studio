@@ -100,7 +100,10 @@ jobs:
         if: runner.os == 'macOS'
         run: echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
       - name: Build native package and updater metadata
-        run: pnpm --filter @helstera/desktop exec electron-builder ${{ matrix.args }} --publish never
+        run: |
+          pnpm --filter @helstera/desktop exec tsc -p tsconfig.electron.json
+          pnpm --filter @helstera/desktop exec vite build
+          pnpm --filter @helstera/desktop exec electron-builder ${{ matrix.args }} --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.artifact }}
