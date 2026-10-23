@@ -58,7 +58,6 @@ jobs:
 
   build:
     name: Build ${{ matrix.name }}
-    if: ${{ github.event_name != 'workflow_dispatch' || contains(github.event.inputs.platforms, matrix.artifact) }}
     strategy:
       fail-fast: false
       matrix:
