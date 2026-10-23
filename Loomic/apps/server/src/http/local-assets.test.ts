@@ -43,6 +43,29 @@ describe("local project thumbnail route", () => {
     expect(response.rawPayload).toEqual(Buffer.from([1, 2, 3]));
   });
 
+  it("serves a cloud asset without extending its retention deadline", async () => {
+    const root = await mkdtemp(join(tmpdir(), "helstera-asset-download-"));
+    const objectPath = "workspace-1/generated/image.png";
+    await mkdir(join(root, "project-assets", "workspace-1", "generated"), { recursive: true });
+    await writeFile(join(root, "project-assets", objectPath), Buffer.from([7, 8, 9]));
+    const dbQuery = vi.fn().mockResolvedValue({ rows: [{ bucket: "project-assets", object_path: objectPath, mime_type: "image/png" }] });
+    const app = Fastify();
+    apps.push(app);
+    registerLocalAssetRoutes(app, {
+      db: { query: dbQuery } as never,
+      auth: { authenticate: vi.fn().mockResolvedValue({ id: "user-1" }) } as never,
+      root,
+    });
+    await app.ready();
+
+    const response = await app.inject({ method: "GET", url: "/api/uploads/object-1/file", headers: { authorization: "Bearer session" } });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.rawPayload).toEqual(Buffer.from([7, 8, 9]));
+    expect(dbQuery).toHaveBeenCalledOnce();
+    expect(String(dbQuery.mock.calls[0]?.[0])).not.toContain("update generated_assets");
+  });
+
   it("does not serve an unregistered legacy thumbnail", async () => {
     const root = await mkdtemp(join(tmpdir(), "helstera-project-preview-"));
     await mkdir(join(root, "workspace-1", "project-1"), { recursive: true });

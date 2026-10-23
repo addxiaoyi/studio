@@ -77,6 +77,7 @@ class DeployCandidateTests(unittest.TestCase):
 
     def test_production_candidate_requires_both_additive_desktop_migrations(self):
         script = pathlib.Path(__file__).with_name("deploy-production-candidate.py").read_text(encoding="utf-8")
+        self.assertIn("20261024000000_cloud_asset_retention_3_days.sql", script)
         self.assertIn("20261023000001_desktop_mcp_tool_calls.sql", script)
         self.assertIn("20261023000002_desktop_agent_canvas_link.sql", script)
 

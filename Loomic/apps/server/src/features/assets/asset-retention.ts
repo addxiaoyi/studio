@@ -2,8 +2,7 @@ import type { Pool } from "pg";
 
 import type { StorageProvider } from "../../storage/storage-provider.js";
 
-export const ASSET_RETENTION_DAYS = 30;
-export const ASSET_RECOVERY_DAYS = 7;
+export const ASSET_RETENTION_DAYS = 3;
 export const ASSET_RETENTION_BATCH_SIZE = 100;
 
 type ExpiredAsset = {
@@ -41,12 +40,9 @@ export async function cleanExpiredGeneratedAssets({
      join generated_assets ga
        on ga.workspace_id = ao.workspace_id
       and ga.object_path = ao.object_path
-      and (
-        (ga.retention_state = 'active' and ao.created_at < now() - make_interval(days => $1::int))
-        or (ga.retention_state = 'soft_deleted' and ga.purge_after <= now())
-      )
+      and ((ga.retention_state = 'active' and ga.retention_until <= now())
+        or (ga.retention_state = 'soft_deleted' and ga.purge_after <= now()))
      where (ao.mime_type like 'image/%' or ao.mime_type like 'video/%')
-       and not exists (select 1 from asset_favorites af where af.asset_id = ga.id)
        -- Keep implementation screenshots out of this lifecycle task.
        and ao.object_path not like '%/gen-canvas-screenshot-%'
      order by ao.created_at asc
@@ -59,38 +55,6 @@ export async function cleanExpiredGeneratedAssets({
   let failed = 0;
 
   for (const asset of rows) {
-    if (asset.retention_state === "active") {
-      try {
-        await db.query(
-          `update generated_assets
-           set deleted_at = now(), retention_state = 'soft_deleted',
-               retention_until = coalesce(retention_until, now()),
-               purge_after = now() + make_interval(days => $2::int), updated_at = now()
-           where workspace_id = $1 and object_path = $3 and retention_state = 'active'`,
-          [asset.workspace_id, ASSET_RECOVERY_DAYS, asset.object_path],
-        );
-        if (asset.created_by) {
-          await db.query(
-            `insert into notifications(workspace_id,user_id,type,title,body,metadata)
-             values($1,$2,'asset_soft_deleted',$3,$4,$5::jsonb)`,
-            [asset.workspace_id, asset.created_by, "Asset moved to recovery", "This generated asset is in a 7-day recovery period.", JSON.stringify({ assetId: asset.generated_asset_id, purgeAfterDays: ASSET_RECOVERY_DAYS })],
-          );
-        }
-        await db.query(
-          `update gallery_items set status = 'removed', deleted_at = now(), updated_at = now()
-           where workspace_id = $1 and asset_id in (
-             select id from generated_assets where workspace_id = $1 and object_path = $2
-           )`,
-          [asset.workspace_id, asset.object_path],
-        );
-        softDeleted += 1;
-      } catch (error) {
-        failed += 1;
-        log.error(`[asset-retention] could not soft-delete ${asset.object_path}:`, error);
-      }
-      continue;
-    }
-
     const { error } = await storage.remove(asset.bucket, [asset.object_path]);
     if (error) {
       failed += 1;
@@ -105,7 +69,7 @@ export async function cleanExpiredGeneratedAssets({
         await client.query(
           `insert into notifications(workspace_id,user_id,type,title,body,metadata)
            values($1,$2,'asset_purged',$3,$4,$5::jsonb)`,
-          [asset.workspace_id, asset.created_by, "Asset permanently removed", "The recovery period ended and this generated asset was permanently removed.", JSON.stringify({ assetId: asset.generated_asset_id })],
+          [asset.workspace_id, asset.created_by, "Cloud asset removed", "This cloud asset reached its retention deadline and was removed. A copy saved to your computer is unaffected.", JSON.stringify({ assetId: asset.generated_asset_id })],
         );
       }
       await client.query(
@@ -114,14 +78,14 @@ export async function cleanExpiredGeneratedAssets({
          where workspace_id = $1
            and asset_id in (
              select id from generated_assets
-             where workspace_id = $1 and object_path = $2 and deleted_at is null
+             where workspace_id = $1 and object_path = $2
            )`,
         [asset.workspace_id, asset.object_path],
       );
       await client.query(
         `update generated_assets
          set deleted_at = now(), retention_state = 'purged', purge_after = now(), updated_at = now()
-         where workspace_id = $1 and object_path = $2 and deleted_at is null`,
+         where workspace_id = $1 and object_path = $2`,
         [asset.workspace_id, asset.object_path],
       );
       await client.query("delete from asset_objects where id = $1", [asset.object_id]);

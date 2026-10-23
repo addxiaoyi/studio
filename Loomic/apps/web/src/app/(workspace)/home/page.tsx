@@ -364,7 +364,7 @@ export default function HomePage() {
         >
           <Clock3 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           <p>
-            生成的图片与视频将在 30 天后自动清理，请及时下载或在画布中继续编辑。
+            云端图片与视频保留 3 天。建议在素材库选择本地文件夹保存，副本只写入你的电脑。
             <Link href="/assets" className="ml-1 font-medium text-foreground underline-offset-4 hover:underline">
               查看我的资产
             </Link>

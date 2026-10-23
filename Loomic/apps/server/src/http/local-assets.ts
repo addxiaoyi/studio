@@ -93,13 +93,6 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
     const { rows } = await options.db.query("select bucket, object_path, mime_type from asset_objects where id = $1 and exists (select 1 from workspace_members wm where wm.workspace_id = asset_objects.workspace_id and wm.user_id = $2)", [request.params.assetId, user.id]);
     const asset = rows[0];
     if (!asset) return reply.code(404).send({ error: { code: "asset_not_found", message: "Asset not found." } });
-    await options.db.query(
-      `update generated_assets set retention_until = now() + interval '30 days', purge_after = null,
-              retention_state = 'active', deleted_at = null
-       where object_path = (select object_path from asset_objects where id = $1)
-         and workspace_id = (select workspace_id from asset_objects where id = $1)`,
-      [request.params.assetId],
-    );
     try {
       const bucketPath = join(options.root, asset.bucket, asset.object_path);
       const rootPath = join(options.root, asset.object_path);

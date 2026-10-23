@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Download, Images, RefreshCw, Search, Share2, Trash2, Undo2, Video, X } from "lucide-react";
+import { Check, Download, FolderOpen, Images, RefreshCw, Save, Search, Share2, Trash2, Undo2, Video, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { GradualBlur } from "@/components/gradual-blur";
 import { createProject, deleteGeneratedAssets, fetchGeneratedAssets, publishAsset, unpublishAsset, restoreGeneratedAsset, type GeneratedAsset } from "@/lib/server-api";
 import { isCompatibleAssetPreviewMime } from "@/lib/asset-preview";
+import { chooseLocalAssetFolder, getLocalAssetFolderName, saveAssetToLocalFolder } from "@/lib/local-asset-storage";
 
 const PREVIEW_CONCURRENCY = 4;
 const PREVIEW_TIMEOUT_MS = 12_000;
@@ -114,6 +115,46 @@ export default function AssetsPage() {
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [publishNotice, setPublishNotice] = useState("");
   const [showRecovery, setShowRecovery] = useState(false);
+  const [localFolder, setLocalFolder] = useState<string | null>(null);
+  const [localSaveBusy, setLocalSaveBusy] = useState(false);
+  const [localSaveError, setLocalSaveError] = useState("");
+
+  const chooseLocalFolder = async () => {
+    setLocalSaveError("");
+    try {
+      setLocalFolder(await chooseLocalAssetFolder());
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      setLocalSaveError(cause instanceof Error ? cause.message : "Could not choose a local folder.");
+    }
+  };
+
+  const saveLocally = async (selectedAssets: GeneratedAsset[]) => {
+    const token = session?.access_token;
+    if (!token || selectedAssets.length === 0 || localSaveBusy) return;
+    setLocalSaveBusy(true);
+    setLocalSaveError("");
+    let savedCount = 0;
+    try {
+      for (const asset of selectedAssets) {
+        if (!asset.url || asset.retentionState === "soft_deleted") continue;
+        await saveAssetToLocalFolder({ url: asset.url, accessToken: token, fileName: assetDisplayName(asset), mediaType: asset.mediaType });
+        savedCount += 1;
+      }
+      setPublishNotice(`Saved ${savedCount} asset${savedCount === 1 ? "" : "s"} to this computer${localFolder ? ` (${localFolder})` : ""}.`);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : "Could not save assets locally. Try again.";
+      setLocalSaveError(savedCount ? `Saved ${savedCount} item${savedCount === 1 ? "" : "s"}; the next save failed: ${detail}` : detail);
+    } finally {
+      setLocalSaveBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    void getLocalAssetFolderName().then(setLocalFolder).catch((cause: unknown) => {
+      setLocalSaveError(cause instanceof Error ? cause.message : "Could not read the local folder setting.");
+    });
+  }, []);
 
   const unpublish = useCallback(async (asset: GeneratedAsset) => {
     if (!session?.access_token || !asset.published || publishingId) return;
@@ -288,13 +329,15 @@ export default function AssetsPage() {
   return <main data-assets-scroll aria-busy={loading} className="relative mx-auto max-h-[calc(100vh-4rem)] min-h-full max-w-7xl overflow-y-auto p-6 pb-24 md:p-10 md:pb-28">
     {!loading && !error && visible.length > 0 && <GradualBlur autoHide height="4rem" className="bottom-24 z-0" />}
     {showRecovery && <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs"><span>恢复区资产将在 7 天后清理</span><button type="button" onClick={() => void restoreSelected()} disabled={selectedIds.size === 0} className="rounded-md border px-2 py-1 disabled:opacity-40">恢复所选</button></div>}
-    <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-muted-foreground">图片与视频生成记录 · 保存 30 天</p><h1 className="mt-1 text-3xl font-semibold">我的资产</h1><p className="mt-2 text-sm text-muted-foreground">资产将在生成后 30 天自动清理，请及时下载或继续在画布中编辑。</p></div><button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm disabled:opacity-50"><RefreshCw className="size-4" />刷新</button></header>
+    <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-muted-foreground">图片与视频云端副本 · 保留 3 天</p><h1 className="mt-1 text-3xl font-semibold">我的资产</h1><p className="mt-2 text-sm text-muted-foreground">推荐保存到电脑上的文件夹；本地副本只保存在你的设备，云端副本 3 天后自动清理。</p></div><div className="flex gap-2"><button type="button" onClick={() => void chooseLocalFolder()} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm"><FolderOpen className="size-4" />{localFolder ? `本地：${localFolder}` : "选择本地文件夹"}</button><button type="button" onClick={() => void load()} disabled={loading} aria-label="刷新资产" className="flex size-10 items-center justify-center rounded-lg border disabled:opacity-50"><RefreshCw className="size-4" /></button></div></header>
+    <p className="mt-3 text-xs text-muted-foreground" role="note">{localFolder ? `本地保存位置：${localFolder}` : "尚未选择本地保存位置"}</p>
+    {localSaveError && <p role="alert" className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{localSaveError}</p>}
     <div className="mt-7 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <button type="button" onClick={() => { setShowRecovery((value) => !value); setPage(1); }} aria-pressed={showRecovery} className={`self-start rounded-lg border px-3 py-2 text-xs ${showRecovery ? "border-foreground bg-foreground text-background" : "border-border/60 text-muted-foreground"}`}>{showRecovery ? "返回我的资产" : "查看恢复区"}</button>
       <div className="flex flex-wrap items-center gap-1" aria-label="资产类型">{(["all", "image", "video"] as const).map((item) => <button key={item} type="button" aria-pressed={filter === item} onClick={() => { setFilter(item); setPage(1); }} className={`rounded-lg px-4 py-2 text-sm ${filter === item ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"}`}>{item === "all" ? "全部" : item === "image" ? "图片" : "视频"}</button>)}</div>
       <div className="relative block w-full max-w-sm"><Search aria-hidden="true" className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" /><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="搜索标题或提示词" aria-label="搜索资产标题或提示词" className="h-9 w-full rounded-lg border border-border/60 bg-background pl-9 pr-9 text-sm outline-none focus:border-foreground/40" />{query && <button type="button" onClick={() => { setQuery(""); setPage(1); }} aria-label="清除资产搜索" className="absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"><X className="size-4" /></button>}</div>
     </div>
-    {!loading && visible.length > 0 && <div className="relative z-10 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs" role="region" aria-label="资产批量操作" aria-live="polite"><button type="button" onClick={selectAll} aria-pressed={selectedIds.size === visible.length} className="inline-flex items-center gap-1.5 font-medium">{selectedIds.size === visible.length ? <Check className="size-3.5" /> : null}全选本页</button><span className="text-muted-foreground">已选 {selectedIds.size} 项 · 当前页 {visible.length} 项 · 共 {pagination.total} 项</span>{selectedIds.size > 0 && <button type="button" onClick={() => void removeSelected()} disabled={loading} className="ml-auto inline-flex items-center gap-1.5 text-destructive disabled:opacity-50"><Trash2 className="size-3.5" />删除所选</button>}</div>}
+    {!loading && visible.length > 0 && <div className="relative z-10 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs" role="region" aria-label="资产批量操作" aria-live="polite"><button type="button" onClick={selectAll} aria-pressed={selectedIds.size === visible.length} className="inline-flex items-center gap-1.5 font-medium">{selectedIds.size === visible.length ? <Check className="size-3.5" /> : null}全选本页</button><span className="text-muted-foreground">已选 {selectedIds.size} 项 · 当前页 {visible.length} 项 · 共 {pagination.total} 项</span>{selectedIds.size > 0 && <><button type="button" onClick={() => void saveLocally(assets.filter((asset) => selectedIds.has(asset.id)))} disabled={localSaveBusy || !localFolder} className="ml-auto inline-flex items-center gap-1.5 font-medium disabled:opacity-40"><Save className="size-3.5" />{localSaveBusy ? "保存中…" : "保存所选到本地"}</button><button type="button" onClick={() => void removeSelected()} disabled={loading} className="inline-flex items-center gap-1.5 text-destructive disabled:opacity-50"><Trash2 className="size-3.5" />删除所选</button></>}</div>}
     {loading && <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" role="status" aria-label="正在加载资产">
       {Array.from({ length: 8 }, (_, index) => <div key={index} className="overflow-hidden rounded-lg border border-border/60 bg-card" aria-hidden="true">
         <div className="aspect-square animate-pulse bg-muted-foreground/10" />
@@ -346,7 +389,7 @@ export default function AssetsPage() {
                   {daysLeft !== null ? <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{asset.retentionState === "soft_deleted" ? "恢复期剩余" : "保留期剩余"} {daysLeft} 天</p> : null}
                   {editable && <button type="button" onClick={() => void openEditor(asset)} disabled={openingId === asset.id} className="mt-2 text-xs font-medium text-foreground underline underline-offset-2 disabled:opacity-50">{openingId === asset.id ? "正在打开…" : "在画布中编辑"}</button>}
                 </div>
-                {previewUrl ? <a href={previewUrl} download aria-label={`下载 ${displayName}`} className="flex size-8 shrink-0 items-center justify-center rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Download className="size-4" /></a> : previewError ? <button type="button" onClick={() => setPreviewRetry((value) => value + 1)} aria-label={`重试加载 ${displayName}`} className="shrink-0 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">重试预览</button> : <span className="size-8 shrink-0" aria-hidden="true" />}
+                <div className="flex shrink-0 gap-1">{localFolder && asset.url && asset.retentionState !== "soft_deleted" && <button type="button" onClick={() => void saveLocally([asset])} disabled={localSaveBusy} aria-label={`保存 ${displayName} 到本地文件夹`} title="保存到本地文件夹" className="flex size-8 items-center justify-center rounded-md border disabled:opacity-50"><Save className="size-4" /></button>}{previewUrl ? <a href={previewUrl} download aria-label={`下载 ${displayName}`} className="flex size-8 items-center justify-center rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Download className="size-4" /></a> : previewError ? <button type="button" onClick={() => setPreviewRetry((value) => value + 1)} aria-label={`重试加载 ${displayName}`} className="shrink-0 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">重试预览</button> : <span className="size-8 shrink-0" aria-hidden="true" />}</div>
               </div>
               <div className="relative z-10 flex items-center justify-between border-t border-border/50 bg-card px-4 py-3">
                 <span className="text-[11px] text-muted-foreground">{asset.retentionState === "soft_deleted" ? "恢复区资产" : asset.published ? "已公开到作品库" : "仅自己可见"}</span>

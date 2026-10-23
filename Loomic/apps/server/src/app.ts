@@ -271,7 +271,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       }
     };
     void runAssetRetention();
-    setInterval(() => void runAssetRetention(), 24 * 60 * 60 * 1000);
+    setInterval(() => void runAssetRetention(), 60 * 60 * 1000);
   }
   const agentRuns = createAgentRunService({
     agentPersistenceService,

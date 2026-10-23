@@ -182,6 +182,7 @@ def deploy(args: argparse.Namespace) -> None:
             "apps/web/out/desktop-app/index.html",
             "apps/desktop/package.json",
             "apps/server/src/local-db/migrate.ts",
+            "apps/server/src/local-db/migrations/20261024000000_cloud_asset_retention_3_days.sql",
             "apps/server/src/local-db/migrations/20261023000001_desktop_mcp_tool_calls.sql",
             "apps/server/src/local-db/migrations/20261023000002_desktop_agent_canvas_link.sql",
             "RELEASE-MANIFEST.json",

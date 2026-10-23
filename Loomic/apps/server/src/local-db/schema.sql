@@ -638,8 +638,9 @@ alter table generated_assets add column if not exists retention_until timestampt
 alter table generated_assets add column if not exists purge_after timestamptz;
 alter table generated_assets add column if not exists retention_state text not null default 'active' check (retention_state in ('active','soft_deleted','purged'));
 alter table generated_assets add column if not exists updated_at timestamptz not null default now();
-alter table generated_assets alter column retention_until set default (now() + interval '30 days');
+alter table generated_assets alter column retention_until set default (now() + interval '3 days');
 create index if not exists generated_assets_retention_idx on generated_assets(retention_state, purge_after) where retention_state <> 'purged';
+create index if not exists generated_assets_active_retention_idx on generated_assets(retention_until) where retention_state = 'active';
 
 create table if not exists gallery_items (
   id uuid primary key default gen_random_uuid(), asset_id uuid not null unique references generated_assets(id) on delete cascade,

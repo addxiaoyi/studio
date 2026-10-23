@@ -89,8 +89,8 @@ export function registerLocalGrowthRoutes(
     const includeDeleted = request.query?.includeDeleted === "1";
     const generatedJoin = includeDeleted ? "" : " and ga.deleted_at is null";
     const retentionWindow = includeDeleted
-      ? "and (ao.created_at >= now() - interval '30 days' or (ga.retention_state = 'soft_deleted' and ga.purge_after > now()))"
-      : "and ao.created_at >= now() - interval '30 days'";
+      ? "and ((coalesce(ga.retention_until, ao.created_at + interval '3 days') > now() and coalesce(ga.retention_state, 'active') = 'active') or (ga.retention_state = 'soft_deleted' and ga.purge_after > now()))"
+      : "and coalesce(ga.retention_until, ao.created_at + interval '3 days') > now() and coalesce(ga.retention_state, 'active') = 'active'";
     const { rows } = await options.db.query(`select coalesce(ga.id, ao.id) as id, ao.project_id,
       ga.source_job_id, ga.retention_state, ga.retention_until, ga.purge_after, ga.deleted_at, case when ao.mime_type like 'video/%' then 'video' else 'image' end as media_type,
       exists(select 1 from gallery_items gi where gi.asset_id=ga.id and gi.status='published' and gi.deleted_at is null) as published,
@@ -129,7 +129,7 @@ export function registerLocalGrowthRoutes(
   app.post("/api/assets/:assetId/restore", async (request: any, reply: any) => {
     const session = await requireSession(request, reply); if (!session) return;
     const { rows } = await options.db.query(
-      `update generated_assets set deleted_at=null, retention_state='active', retention_until=now() + interval '30 days', purge_after=null, updated_at=now()
+      `update generated_assets set deleted_at=null, retention_state='active', retention_until=now() + interval '3 days', purge_after=null, updated_at=now()
        where id=$1 and workspace_id=$2 and created_by=$3 and retention_state='soft_deleted' returning id,retention_state,retention_until,purge_after`,
       [request.params.assetId, session.viewer.workspace.id, session.user.id],
     );
@@ -137,7 +137,7 @@ export function registerLocalGrowthRoutes(
     await options.db.query(
       `insert into notifications(workspace_id,user_id,type,title,body,metadata)
        values($1,$2,'asset_restored',$3,$4,$5::jsonb)`,
-      [session.viewer.workspace.id, session.user.id, "Asset restored", "The generated asset is available again for 30 days.", JSON.stringify({ assetId: rows[0].id })],
+      [session.viewer.workspace.id, session.user.id, "Asset restored", "The cloud copy is available again for 3 days. Save a copy to your computer to keep it longer.", JSON.stringify({ assetId: rows[0].id })],
     );
     return { ok: true, data: { assetId: rows[0].id, state: rows[0].retention_state, retentionUntil: rows[0].retention_until, purgeAfter: rows[0].purge_after } };
   });
