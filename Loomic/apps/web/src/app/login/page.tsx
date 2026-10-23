@@ -59,7 +59,6 @@ function LoginPageContent() {
       <LoginForm
         initialErrorMessage={initialErrorMessage}
         redirectTo={redirectTo}
-        desktopMode={desktopMode}
       />
     </AuthShell>
   );

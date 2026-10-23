@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import type { ReactNode } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { DesktopWorkspaceSidebar } from "@/components/desktop-workspace-sidebar";
 import { CreditHeaderButton } from "@/components/credits/credit-header-button";
 import { LoadingScreen } from "@/components/loading-screen";
 import { PageTransition } from "@/components/page-transition";
@@ -65,7 +66,7 @@ export default function WorkspaceLayout({
   }
 
   return (
-    <div className="flex h-[100dvh] flex-col md:flex-row">
+    <div className="workspace-shell flex h-[100dvh] flex-col md:flex-row">
       {/* Skip navigation link -- visible only on keyboard focus for a11y */}
       <a
         href="#main"
@@ -73,6 +74,7 @@ export default function WorkspaceLayout({
       >
         跳到主内容
       </a>
+      <DesktopWorkspaceSidebar />
       <AppSidebar />
       {/* pb-14 on mobile for the fixed bottom navigation bar, reset on md+ */}
       <main

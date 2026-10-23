@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams, useRouter } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, Suspense } from "react";
 
 import type { ImageArtifact, VideoArtifact } from "@helstera/shared";
@@ -25,6 +25,7 @@ import { CanvasFilesPanel } from "../../components/canvas-files-panel";
 import { CanvasLayersPanel } from "../../components/canvas-layers-panel";
 import { CanvasTimelinePanel } from "../../components/canvas-timeline-panel";
 import { CreditHeaderButton } from "../../components/credits/credit-header-button";
+import type { DesktopExecutionContext } from "@helstera/shared";
 
 function isBlankCanvasContent(content: {
   elements: Record<string, unknown>[];
@@ -36,6 +37,7 @@ function isBlankCanvasContent(content: {
 
 function CanvasPageContent() {
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const canvasId = searchParams.get("id");
   const assetId = searchParams.get("assetId");
   const assetMediaType = searchParams.get("mediaType");
@@ -43,6 +45,12 @@ function CanvasPageContent() {
   // Capture prompt once — router.replace will strip it from URL, but the
   // value must survive for the auto-send effect in ChatSidebar.
   const [initialPrompt] = useState(() => searchParams.get("prompt") ?? undefined);
+  const browserMode = searchParams.get("browserMode");
+  const desktopExecutionContext: DesktopExecutionContext | undefined =
+    pathname.startsWith("/desktop-app/") &&
+    (browserMode === "isolated_browser" || browserMode === "connected_browser_tab")
+      ? { browserMode, executionMode: "automatic" }
+      : undefined;
   const { user, session, loading: authLoading, signOut } = useAuth();
   const router = useRouter();
 
@@ -269,10 +277,14 @@ function CanvasPageContent() {
   const handleSessionChange = useCallback(
     (sessionId: string) => {
       if (!canvasId) return;
-      // Update URL: set session param, remove prompt param to prevent re-send on refresh
-      routerRef.current.replace(`/canvas?id=${canvasId}&session=${sessionId}`);
+      const route = pathname.startsWith("/desktop-app/")
+        ? "/desktop-app/canvas/"
+        : "/canvas/";
+      const params = new URLSearchParams({ id: canvasId, session: sessionId });
+      if (desktopExecutionContext) params.set("browserMode", desktopExecutionContext.browserMode);
+      routerRef.current.replace(`${route}?${params.toString()}`);
     },
-    [canvasId],
+    [canvasId, pathname, desktopExecutionContext],
   );
 
   const handleRequestCanvasImages = useCallback((): CanvasImageItem[] => {
@@ -479,6 +491,7 @@ function CanvasPageContent() {
         currentBrandKitId={brandKitId}
         ws={ws}
         selectedCanvasElements={selectedCanvasElements}
+        {...(desktopExecutionContext ? { desktopExecutionContext } : {})}
       />
     </div>
   );

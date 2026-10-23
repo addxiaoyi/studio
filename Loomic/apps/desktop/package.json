@@ -1,6 +1,6 @@
 {
   "name": "@helstera/desktop",
-  "version": "0.2.6",
+  "version": "0.2.14",
   "private": true,
   "description": "Helstera Desktop — AI Design Studio",
   "author": "Helstera",
@@ -9,22 +9,27 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.electron.json && vite build && electron-builder",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.electron.json --noEmit"
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit",
+    "test": "vitest run --config vitest.config.ts electron/local-workspace.test.ts electron/mcp-registry.test.ts electron/window-controls.test.ts electron/browser-pairing.test.ts electron/desktop-login.test.ts electron/native-automation.test.ts"
   },
   "dependencies": {
-    "@helstera/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@nut-tree/nut-js": "^4.2.0",
     "electron-updater": "^6.3.9",
     "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.0.0",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@helstera/shared": "workspace:*",
     "@vitejs/plugin-react": "^4.7.0",
     "electron": "^33.4.0",
     "electron-builder": "^25.1.8",
     "typescript": "^5.7.3",
     "vite": "^5.4.11",
     "vite-plugin-electron": "^0.28.8",
-    "vite-plugin-electron-renderer": "^0.14.6"
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^3.2.4"
   },
   "build": {
     "extends": "./electron-builder.yml"

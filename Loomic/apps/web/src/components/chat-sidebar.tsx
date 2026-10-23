@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBreakpoint } from "../hooks/use-breakpoint";
 import type {
   ContentBlock,
+  DesktopExecutionContext,
   ImageArtifact,
   ImageGenerationPreference,
   MessageMention,
@@ -69,6 +70,7 @@ type ChatSidebarProps = {
   currentBrandKitId?: string | null;
   ws: WebSocketHandle;
   selectedCanvasElements?: CanvasSelectedElement[];
+  desktopExecutionContext?: DesktopExecutionContext;
 };
 
 function explicitVideoDuration(text: string): number | undefined {
@@ -93,6 +95,7 @@ export function ChatSidebar({
   currentBrandKitId,
   ws,
   selectedCanvasElements,
+  desktopExecutionContext,
 }: ChatSidebarProps) {
   const breakpoint = useBreakpoint();
   const isOverlay = breakpoint !== "desktop";
@@ -951,6 +954,7 @@ export function ChatSidebar({
               ...(agentModelRef.current
                 ? { model: agentModelRef.current }
                 : {}),
+              ...(desktopExecutionContext ? { desktopExecutionContext } : {}),
             },
             (ack) => {
               clearTimeout(timeout);
@@ -1031,6 +1035,7 @@ export function ChatSidebar({
       autoTitleSession,
       accessTokenRef,
       activeSessionIdRef,
+      desktopExecutionContext,
     ],
   );
 

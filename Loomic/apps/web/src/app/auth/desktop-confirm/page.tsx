@@ -17,6 +17,7 @@ function DesktopConfirmContent() {
   const params = useSearchParams();
   const { user, loading } = useAuth();
   const state = params.get("state") ?? "";
+  const requestedCallbackUrl = params.get("callback") ?? undefined;
   const [busy, setBusy] = useState(false);
   const [callbackUrl, setCallbackUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,12 +33,17 @@ function DesktopConfirmContent() {
     }
   }, [loading, router, state, user]);
 
+  useEffect(() => {
+    if (!callbackUrl) return;
+    window.location.assign(callbackUrl);
+  }, [callbackUrl]);
+
   async function confirm() {
     if (!STATE_PATTERN.test(state) || busy) return;
     setBusy(true);
     setError(null);
     try {
-      setCallbackUrl(await confirmDesktopLogin(state));
+      setCallbackUrl(await confirmDesktopLogin(state, requestedCallbackUrl));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "无法确认桌面登录，请重试。");
     } finally {
@@ -49,6 +55,7 @@ function DesktopConfirmContent() {
 
   return (
     <AuthShell
+      variant="desktop"
       title="确认桌面端登录"
       description="确认后，Helstera Desktop 会在本机完成登录。"
       features={["不会复制浏览器 Cookie", "授权码短时有效且只能使用一次", "仅将登录会话写入 Helstera Desktop"]}

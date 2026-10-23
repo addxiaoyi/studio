@@ -1,26 +1,33 @@
 import type { StructuredTool } from "@langchain/core/tools";
 import type { BackendFactory, BackendProtocol } from "deepagents";
 
+import type { Pool } from "pg";
 import type { ConnectionManager } from "../../ws/connection-manager.js";
 import { createBrandKitTool } from "./brand-kit.js";
-import { createInspectCanvasTool } from "./inspect-canvas.js";
-import { createManipulateCanvasTool } from "./manipulate-canvas.js";
 import {
-  createImageGenerateTool,
+  type SubmitDesktopAgentTaskFn,
+  createDesktopAgentTool,
+} from "./desktop-agent.js";
+import { createDesktopMcpTools } from "./desktop-mcp.js";
+import { createDouyinPublishDraftTool } from "./douyin-publish.js";
+import {
   type PersistImageFn,
   type SubmitImageJobFn,
+  createImageGenerateTool,
 } from "./image-generate.js";
+import { createInspectCanvasTool } from "./inspect-canvas.js";
+import { createManipulateCanvasTool } from "./manipulate-canvas.js";
+import { createPersistSandboxFileTool } from "./persist-sandbox-file.js";
 import { createProjectSearchTool } from "./project-search.js";
 import { createScreenshotCanvasTool } from "./screenshot-canvas.js";
 import {
-  createVideoGenerateTool,
   type SubmitVideoJobFn,
+  createVideoGenerateTool,
 } from "./video-generate.js";
-import { createPersistSandboxFileTool } from "./persist-sandbox-file.js";
-import { createDouyinPublishDraftTool } from "./douyin-publish.js";
-import { createWebsiteCaptureTool, type SubmitWebsiteCaptureFn } from "./website-capture.js";
-import { createDesktopAgentTool, type SubmitDesktopAgentTaskFn } from "./desktop-agent.js";
-import type { Pool } from "pg";
+import {
+  type SubmitWebsiteCaptureFn,
+  createWebsiteCaptureTool,
+} from "./website-capture.js";
 
 export { createImageGenerateTool } from "./image-generate.js";
 export { createVideoGenerateTool } from "./video-generate.js";
@@ -69,6 +76,7 @@ export function createMainAgentTools(
     webOrigin?: string;
     submitWebsiteCapture?: SubmitWebsiteCaptureFn;
     submitDesktopAgentTask?: SubmitDesktopAgentTaskFn;
+    desktopMcpTools?: StructuredTool[];
   },
 ) {
   const tools: StructuredTool[] = [
@@ -84,13 +92,35 @@ export function createMainAgentTools(
       allowDynamicModelIds: true,
     }),
     createPersistSandboxFileTool({
-      ...(deps.createUserClient ? { createUserClient: deps.createUserClient } : {}),
+      ...(deps.createUserClient
+        ? { createUserClient: deps.createUserClient }
+        : {}),
       ...(deps.localDb ? { localDb: deps.localDb } : {}),
       ...(deps.sandboxDir ? { sandboxDir: deps.sandboxDir } : {}),
     }),
-    ...(deps.localDb && deps.webOrigin ? [createDouyinPublishDraftTool({ localDb: deps.localDb, webOrigin: deps.webOrigin })] : []),
-    ...(deps.submitWebsiteCapture ? [createWebsiteCaptureTool({ submitWebsiteCapture: deps.submitWebsiteCapture })] : []),
-    ...(deps.submitDesktopAgentTask ? [createDesktopAgentTool({ submitDesktopAgentTask: deps.submitDesktopAgentTask })] : []),
+    ...(deps.localDb && deps.webOrigin
+      ? [
+          createDouyinPublishDraftTool({
+            localDb: deps.localDb,
+            webOrigin: deps.webOrigin,
+          }),
+        ]
+      : []),
+    ...(deps.submitWebsiteCapture
+      ? [
+          createWebsiteCaptureTool({
+            submitWebsiteCapture: deps.submitWebsiteCapture,
+          }),
+        ]
+      : []),
+    ...(deps.submitDesktopAgentTask
+      ? [
+          createDesktopAgentTool({
+            submitDesktopAgentTask: deps.submitDesktopAgentTask,
+          }),
+        ]
+      : []),
+    ...(deps.desktopMcpTools ?? []),
     // execute 工具由 deepagents FilesystemMiddleware 自动注入，
     // 因为 CompositeBackend 的 default backend 是 LocalShellBackend。
     // 不需要在这里手动注册。
@@ -99,10 +129,12 @@ export function createMainAgentTools(
     tools.push(createBrandKitTool(deps, deps.brandKitId));
   }
   if (deps.connectionManager) {
-    tools.push(createScreenshotCanvasTool({
-      connectionManager: deps.connectionManager,
-      ...(deps.persistImage ? { persistImage: deps.persistImage } : {}),
-    }));
+    tools.push(
+      createScreenshotCanvasTool({
+        connectionManager: deps.connectionManager,
+        ...(deps.persistImage ? { persistImage: deps.persistImage } : {}),
+      }),
+    );
   }
   return tools;
 }

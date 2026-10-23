@@ -25,7 +25,7 @@ describe("DesktopDownloadList", () => {
 
     render(<DesktopDownloadList />);
 
-    const portableLink = await screen.findByRole("link", { name: /Windows 免安装版/ });
+    const portableLink = await screen.findByRole("link", { name: /Windows 便携包.*免安装/ });
     expect(portableLink.getAttribute("href")).toBe("/downloads/Helstera-0.2.2-win-x64.zip");
     expect(portableLink.textContent).toContain("v0.2.2");
     expect(portableLink.textContent).toContain("免安装");

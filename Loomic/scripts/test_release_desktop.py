@@ -31,6 +31,13 @@ class ReleasePathTests(unittest.TestCase):
         self.assertEqual(release_desktop.resolve_stage_path(self.root, stage), stage.resolve())
         self.assertEqual(release_desktop.resolve_build_output(self.root, output), output.resolve())
 
+    def test_platform_installer_patterns_match_electron_builder_arch_names(self) -> None:
+        version = "0.2.14"
+        self.assertEqual(release_desktop.installer_pattern("windows-x64", version), "Helstera-Setup-0.2.14-Windows-x64.exe")
+        self.assertEqual(release_desktop.installer_pattern("macos-x64", version), "Helstera-0.2.14-mac-x64.dmg")
+        self.assertEqual(release_desktop.installer_pattern("macos-arm64", version), "Helstera-0.2.14-mac-arm64.dmg")
+        self.assertEqual(release_desktop.installer_pattern("linux-x64", version), "*.AppImage")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useState,
+  useCallback,
   type ReactNode,
 } from "react";
 
@@ -25,6 +26,8 @@ interface AuthContextValue {
   user: LocalUser | null;
   session: LocalSession | null;
   loading: boolean;
+  refreshSession: () => Promise<void>;
+  acceptSession: (next: LocalSession) => void;
   signOut: () => Promise<void>;
 }
 
@@ -35,13 +38,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<LocalUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    void fetchLocalSession().then(({ session: localSession }) => {
+  const refreshSession = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { session: localSession } = await fetchLocalSession();
       setSession(localSession);
       setUser(localSession?.user ?? null);
+    } finally {
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }
   }, []);
+
+  const acceptSession = useCallback((next: LocalSession) => {
+    setSession(next);
+    setUser(next.user);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void refreshSession().catch((error) => {
+      console.error("[auth] Initial session lookup failed:", error);
+    });
+  }, [refreshSession]);
 
   async function signOut() {
     await signOutLocal();
@@ -50,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, refreshSession, acceptSession, signOut }}>
       {children}
     </AuthContext.Provider>
   );

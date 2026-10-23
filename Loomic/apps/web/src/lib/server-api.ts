@@ -2164,13 +2164,15 @@ export type DesktopAgentTaskResponse = {
   role: string;
   capabilities: string[];
   targetUrl?: string;
+  canvasId?: string;
+  executionMode?: "automatic" | "isolated_browser" | "connected_browser_tab" | "windows_ui" | "visual_ocr";
   status: "queued" | "running" | "succeeded" | "failed" | "canceled";
   result: Record<string, unknown> | null;
   error: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
-  events: Array<{ eventType: string; detail: string | null; createdAt: string; result?: Record<string, unknown>; approvalId?: string }>;
+  events: Array<{ eventType: string; detail: string | null; createdAt: string; result?: Record<string, unknown>; approvalId?: string; stepId?: string }>;
   pendingApprovals: Array<{ approvalId: string; action: { kind: string; target?: string; targetUrl?: string; value?: string; fieldType?: string }; expiresAt: string }>;
 };
 

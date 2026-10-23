@@ -140,7 +140,7 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
     return reply.send({ ok: true, access_token: "local-session", user: { id: session.userId, email: session.email } });
   });
 
-  app.post<{ Body: { state?: string } }>("/api/local-auth/desktop-confirm", async (request, reply) => {
+  app.post<{ Body: { state?: string; callbackUrl?: string } }>("/api/local-auth/desktop-confirm", async (request, reply) => {
     const state = request.body?.state?.trim();
     if (!state || !DESKTOP_LOGIN_STATE_PATTERN.test(state)) {
       return reply.code(400).send({ error: { code: "invalid_desktop_login", message: "桌面登录请求无效，请返回桌面重新发起。" } });
@@ -149,8 +149,26 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
     const user = sessionToken ? await getLocalSession(options.db, sessionToken) : null;
     if (!user) return reply.code(401).send({ error: { code: "unauthorized", message: "请先登录网页账户，再确认桌面登录。" } });
 
+    let callbackUrl: URL;
+    try {
+      callbackUrl = new URL(request.body?.callbackUrl?.trim() || "helstera://auth/callback");
+    } catch {
+      return reply.code(400).send({ error: { code: "invalid_callback", message: "桌面回调地址无效，请重新发起登录。" } });
+    }
+    const hasNoCredentials = !callbackUrl.username && !callbackUrl.password;
+    const hasNoEmbeddedCallback = !callbackUrl.search && !callbackUrl.hash;
+    const isProtocolCallback = callbackUrl.protocol === "helstera:"
+      && callbackUrl.hostname === "auth"
+      && callbackUrl.pathname === "/callback"
+      && !callbackUrl.port;
+    const isLocalCallback = callbackUrl.protocol === "http:"
+      && callbackUrl.hostname === "127.0.0.1"
+      && callbackUrl.pathname === "/callback"
+      && callbackUrl.port !== "";
+    if (!hasNoCredentials || !hasNoEmbeddedCallback || (!isProtocolCallback && !isLocalCallback)) {
+      return reply.code(400).send({ error: { code: "invalid_callback", message: "桌面回调地址不受支持，请重新发起登录。" } });
+    }
     const token = await issueLoginToken(options.db, user.email, DESKTOP_LOGIN_TOKEN_TTL_MS);
-    const callbackUrl = new URL("helstera://auth/callback");
     callbackUrl.searchParams.set("desktop_token", token);
     callbackUrl.searchParams.set("state", state);
     return reply.send({ callbackUrl: callbackUrl.toString() });

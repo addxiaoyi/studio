@@ -1,5 +1,26 @@
 # Helstera Local Development
 
+## Production Web Static Update
+
+The desktop Web shell loads `https://studio.0st.top/`. Publish only the exported Web tree with the isolated static updater; it does not install dependencies, run database migrations, or restart PM2 services.
+
+Build and verify locally first:
+
+```powershell
+pnpm --filter @helstera/shared build
+pnpm --filter @helstera/web build
+python -m unittest scripts.test_deploy_web_static
+python scripts/deploy-web-static.py --dry-run
+```
+
+The publisher requires the production password in `HELT_DEPLOY_PASSWORD`, and the jump/target host keys must already be trusted in `known_hosts`. Do not pass credentials on the command line or paste them into chat. After credentials are provisioned in the secure shell environment, run:
+
+```powershell
+python scripts/deploy-web-static.py
+```
+
+It archives the current `/www/helstera/apps/web/out`, uploads the candidate beside that directory, verifies the uploaded SHA-256, and atomically exchanges directories with Linux `renameat2`. It verifies the public `/desktop/` JS contains the canvas-first and code/MCP secondary-entry markers. A failed public verification triggers an atomic exchange back; the dated backup under `/www/helstera/backups` is retained. No server API, database, worker, PM2, or Nginx config is changed.
+
 The development stack uses only local PostgreSQL, local filesystem storage, the Fastify API, the local Worker, and the Next.js web app.
 
 ## Quick Start

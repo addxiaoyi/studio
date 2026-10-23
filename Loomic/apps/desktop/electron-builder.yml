@@ -14,6 +14,10 @@ extraResources:
   - from: resources/icon.png
     to: icon.png
 
+asarUnpack:
+  - node_modules/tesseract.js/**
+  - node_modules/tesseract.js-core/**
+
 npmRebuild: false
 
 electronDownload:

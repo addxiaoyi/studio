@@ -1,26 +1,74 @@
-import { app, BrowserWindow, Menu, Tray, shell, nativeImage, ipcMain } from "electron";
-import { classifyDesktopAction, desktopAgentActionSchema, desktopAgentTaskSchema, type DesktopAgentAction, type DesktopAgentTask } from "@helstera/shared";
-import { autoUpdater } from "electron-updater";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:http";
 import { join } from "path";
+import {
+  type DesktopAgentAction,
+  type DesktopAgentTask,
+  classifyDesktopAction,
+  desktopAgentActionSchema,
+  desktopAgentTaskSchema,
+  desktopMcpToolCallSchema,
+  desktopMcpToolCatalogSchema,
+} from "@helstera/shared";
+import { buildBrowserPairingUrl } from "./browser-pairing.js";
+import {
+  clickNativeText,
+  inspectNativeDesktop,
+  typeIntoNativeControl,
+} from "./native-automation.js";
+import {
+  DesktopLoginCallbackQueue,
+  type DesktopLoginCallback,
+} from "./desktop-login.js";
+import {
+  BrowserWindow,
+  Menu,
+  Tray,
+  app,
+  dialog,
+  ipcMain,
+  nativeImage,
+  safeStorage,
+  shell,
+} from "electron";
+import { autoUpdater } from "electron-updater";
+import { LocalWorkspace } from "./local-workspace.js";
+import { McpRegistry, type McpServerInput } from "./mcp-registry.js";
+import {
+  observeMainWindowLifecycle,
+  registerWindowControlHandlers,
+} from "./window-controls.js";
 
 let mainWindow: BrowserWindow | null = null;
+let mainWindowReady = false;
 let tray: Tray | null = null;
 let embeddedBrowserWindow: BrowserWindow | null = null;
 let recorderWindow: BrowserWindow | null = null;
 let assistantSocket: any = null;
 let assistantSessionToken = "";
-const desktopTaskTabs = new Map<string, BrowserWindow>();
+let assistantConnectionId = "";
+const desktopTaskTabs = new Map<string, BrowserWindow | null>();
 const desktopAgentTasks = new Map<string, DesktopAgentTask>();
+const desktopAgentPlans = new Map<string, DesktopAgentAction[]>();
 type UpdateState = {
-  status: "idle" | "checking" | "available" | "downloading" | "downloaded" | "not-available" | "error";
+  status:
+    | "idle"
+    | "checking"
+    | "available"
+    | "downloading"
+    | "downloaded"
+    | "not-available"
+    | "error";
   currentVersion: string;
   version?: string;
   percent?: number;
   message?: string;
 };
 type UpdateStateInput = Omit<UpdateState, "currentVersion">;
-let updateState: UpdateState = { status: "idle", currentVersion: app.getVersion() };
+let updateState: UpdateState = {
+  status: "idle",
+  currentVersion: app.getVersion(),
+};
 let updateCheckActive = false;
 let updateTimer: ReturnType<typeof setInterval> | null = null;
 const PRODUCTION_WEBSITE_URL = "https://studio.0st.top/";
@@ -28,50 +76,221 @@ const DESKTOP_AUTH_SCHEME = "helstera:";
 const DESKTOP_LOGIN_TTL_MS = 5 * 60 * 1000;
 const pendingDesktopLogins = new Map<string, number>();
 const desktopLoginTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const desktopLoginCallbacks = new DesktopLoginCallbackQueue();
+let desktopLoginStatus:
+  | "waiting"
+  | "exchanging"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "expired" = "failed";
+let desktopCallbackServer: Server | null = null;
+let desktopCallbackUrl = "";
+let localWorkspace: LocalWorkspace | null = null;
+let localWorkspaceSessionId = "";
+const workspaceRuns = new Map<string, AbortController>();
+let mcpRegistry: McpRegistry | null = null;
+const desktopMcpCalls = new Map<string, AbortController>();
 
-function desktopWebsiteUrl() {
-  return app.isPackaged ? PRODUCTION_WEBSITE_URL : process.env.HELSTERA_DESKTOP_URL?.trim() || PRODUCTION_WEBSITE_URL;
+registerWindowControlHandlers(ipcMain, {
+  getMainWindow: () => mainWindow,
+  resolveWindow: (sender) =>
+    BrowserWindow.fromWebContents(sender as Electron.WebContents),
+  platform: process.platform,
+});
+
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  void receiveDesktopLoginUrl(url).then(focusMainWindow);
+});
+
+app.on("second-instance", (_event, commandLine) => {
+  const authUrl = commandLine.find((argument) =>
+    argument.startsWith(`${DESKTOP_AUTH_SCHEME}//`),
+  );
+  if (authUrl) void receiveDesktopLoginUrl(authUrl).then(focusMainWindow);
+  else focusMainWindow();
+});
+
+function requireMainWindow(event: Electron.IpcMainInvokeEvent) {
+  const sender = BrowserWindow.fromWebContents(event.sender);
+  if (!sender || sender !== mainWindow || sender.isDestroyed())
+    throw new Error(
+      "This action is only available in the Helstera main window.",
+    );
+  return sender;
 }
 
-function publishDesktopLoginState(status: "waiting" | "exchanging" | "completed" | "failed" | "canceled" | "expired") {
-  if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send("desktop:login-state", { status });
+function requireLocalWorkspace(event: Electron.IpcMainInvokeEvent) {
+  requireMainWindow(event);
+  if (!localWorkspace) throw new Error("Select a local project folder first.");
+  return localWorkspace;
+}
+
+function requireMcpRegistry(event: Electron.IpcMainInvokeEvent) {
+  requireMainWindow(event);
+  if (!mcpRegistry) throw new Error("MCP registry is not ready yet.");
+  return mcpRegistry;
+}
+
+function desktopWebsiteUrl() {
+  if (app.isPackaged) {
+    const localPreviewUrl = process.env.HELSTERA_DESKTOP_LOCAL_URL?.trim();
+    if (!localPreviewUrl) return PRODUCTION_WEBSITE_URL;
+    const preview = new URL(localPreviewUrl);
+    const isLoopback = ["localhost", "127.0.0.1", "[::1]"].includes(
+      preview.hostname,
+    );
+    if (preview.protocol !== "http:" || !isLoopback) {
+      throw new Error(
+        "HELSTERA_DESKTOP_LOCAL_URL only allows an HTTP loopback URL.",
+      );
+    }
+    return preview.toString();
+  }
+  return process.env.HELSTERA_DESKTOP_URL?.trim() || PRODUCTION_WEBSITE_URL;
+}
+
+function publishDesktopLoginState(
+  status:
+    | "waiting"
+    | "exchanging"
+    | "completed"
+    | "failed"
+    | "canceled"
+    | "expired",
+) {
+  desktopLoginStatus = status;
+  if (!mainWindow?.isDestroyed())
+    mainWindow?.webContents.send("desktop:login-state", { status });
 }
 
 function clearPendingDesktopLogin(state: string) {
   pendingDesktopLogins.delete(state);
+  desktopLoginCallbacks.discard(state);
   const timer = desktopLoginTimers.get(state);
   if (timer) clearTimeout(timer);
   desktopLoginTimers.delete(state);
 }
 
-function receiveDesktopLoginUrl(value: string) {
-  let callback: URL;
-  try { callback = new URL(value); } catch { return false; }
-  if (callback.protocol !== DESKTOP_AUTH_SCHEME || callback.hostname !== "auth" || callback.pathname !== "/callback") return false;
-  const state = callback.searchParams.get("state") ?? "";
-  const token = callback.searchParams.get("desktop_token") ?? "";
-  const expiresAt = pendingDesktopLogins.get(state);
-  if (!expiresAt || expiresAt <= Date.now() || !/^[A-Za-z0-9_-]{43}$/.test(token)) return false;
-  clearPendingDesktopLogin(state);
-  publishDesktopLoginState("exchanging");
+async function ensureDesktopCallbackServer(): Promise<string> {
+  if (desktopCallbackServer && desktopCallbackUrl) return desktopCallbackUrl;
+  const server = createServer((request, response) => {
+    if (request.method !== "GET") {
+      response.writeHead(405, {
+        allow: "GET",
+        "cache-control": "no-store",
+      }).end();
+      return;
+    }
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (url.pathname !== "/callback") {
+      response.writeHead(404).end();
+      return;
+    }
+    const token = url.searchParams.get("desktop_token") ?? "";
+    const state = url.searchParams.get("state") ?? "";
+    const callbackUrl = `helstera://auth/callback?desktop_token=${encodeURIComponent(token)}&state=${encodeURIComponent(state)}`;
+    void receiveDesktopLoginUrl(callbackUrl).then((accepted) => {
+      response.writeHead(accepted ? 200 : 503, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
+        "x-content-type-options": "nosniff",
+      });
+      response.end(accepted
+        ? "<!doctype html><meta charset=utf-8><title>Helstera Desktop</title><h1>登录已交给 Helstera Desktop</h1><p>可以关闭此页面。</p>"
+        : "<!doctype html><meta charset=utf-8><title>Helstera Desktop</title><h1>桌面暂未确认登录</h1><p>请返回桌面重试，登录请求仍然有效。</p>");
+    }).catch((error) => {
+      console.error("[desktop-auth] Loopback callback failed:", error);
+      if (!response.headersSent) response.writeHead(503, { "cache-control": "no-store" }).end();
+      else response.destroy();
+    }).finally(() => {
+      const callback = desktopLoginCallbacks.pending().find((item) => item.state === state);
+      if (!callback) {
+      server.close();
+      if (desktopCallbackServer === server) desktopCallbackServer = null;
+      desktopCallbackUrl = "";
+      }
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("无法启动桌面登录回调服务。");
+  }
+  desktopCallbackServer = server;
+  desktopCallbackUrl = `http://127.0.0.1:${address.port}/callback`;
+  return desktopCallbackUrl;
+}
+
+async function deliverDesktopLoginCallback(callback: DesktopLoginCallback) {
+  const window = mainWindow;
+  if (!window || window.isDestroyed() || !mainWindowReady) {
+    throw new Error("The Helstera Desktop window is not ready.");
+  }
+
   const callbackPage = new URL("/auth/callback/", desktopWebsiteUrl());
-  callbackPage.searchParams.set("desktop_token", token);
-  callbackPage.searchParams.set("state", state);
-  void mainWindow?.loadURL(callbackPage.toString());
-  mainWindow?.show();
-  mainWindow?.focus();
-  return true;
+  callbackPage.searchParams.set("desktop_token", callback.token);
+  callbackPage.searchParams.set("state", callback.state);
+  publishDesktopLoginState("exchanging");
+  await window.loadURL(callbackPage.toString());
+  if (window.isDestroyed() || mainWindow !== window) {
+    throw new Error("The Helstera Desktop window closed during login handoff.");
+  }
+
+  clearPendingDesktopLogin(callback.state);
+  window.show();
+  window.focus();
+}
+
+async function receiveDesktopLoginUrl(value: string): Promise<boolean> {
+  const callback = desktopLoginCallbacks.enqueue(value, pendingDesktopLogins);
+  if (!callback) return false;
+
+  const delivered = await desktopLoginCallbacks.deliver(
+    callback.state,
+    deliverDesktopLoginCallback,
+  );
+  if (!delivered && mainWindow && !mainWindow.isDestroyed()) {
+    publishDesktopLoginState("failed");
+    console.error("[desktop-auth] Callback navigation failed; callback remains retryable.");
+  }
+  return delivered;
+}
+
+async function deliverPendingDesktopLoginCallbacks() {
+  for (const callback of desktopLoginCallbacks.pending()) {
+    const value = `helstera://auth/callback?desktop_token=${encodeURIComponent(callback.token)}&state=${encodeURIComponent(callback.state)}`;
+    await receiveDesktopLoginUrl(value);
+  }
+}
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
 }
 
 function publishUpdateState(next: UpdateStateInput) {
   updateState = { ...next, currentVersion: app.getVersion() };
   for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) window.webContents.send("desktop:update-state", updateState);
+    if (!window.isDestroyed())
+      window.webContents.send("desktop:update-state", updateState);
   }
 }
 
 function updateFeedUrl() {
-  const platform = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux";
+  const platform =
+    process.platform === "win32"
+      ? "windows"
+      : process.platform === "darwin"
+        ? "macos"
+        : "linux";
   const architecture = process.arch === "arm64" ? "arm64" : "x64";
   return `https://studio.0st.top/downloads/updates/${platform}-${architecture}/`;
 }
@@ -83,7 +302,10 @@ async function checkForDesktopUpdate() {
   try {
     await autoUpdater.checkForUpdates();
   } catch (error) {
-    publishUpdateState({ status: "error", message: error instanceof Error ? error.message : "更新检查失败" });
+    publishUpdateState({
+      status: "error",
+      message: error instanceof Error ? error.message : "更新检查失败",
+    });
   } finally {
     updateCheckActive = false;
   }
@@ -96,14 +318,48 @@ function configureAutoUpdates() {
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowDowngrade = false;
   autoUpdater.setFeedURL({ provider: "generic", url: updateFeedUrl() });
-  autoUpdater.on("checking-for-update", () => publishUpdateState({ status: "checking" }));
-  autoUpdater.on("update-available", (info) => publishUpdateState({ status: "available", version: info.version, message: "发现新版本，正在后台下载" }));
-  autoUpdater.on("download-progress", (progress) => publishUpdateState({ status: "downloading", percent: Math.max(0, Math.min(100, Math.round(progress.percent))), ...(updateState.version ? { version: updateState.version } : {}), message: "正在下载更新" }));
-  autoUpdater.on("update-downloaded", (info) => publishUpdateState({ status: "downloaded", version: info.version, message: "更新已下载，重启后安装" }));
-  autoUpdater.on("update-not-available", () => publishUpdateState({ status: "not-available", message: "当前已是最新版本" }));
-  autoUpdater.on("error", (error) => publishUpdateState({ status: "error", message: error.message.slice(0, 240) }));
+  autoUpdater.on("checking-for-update", () =>
+    publishUpdateState({ status: "checking" }),
+  );
+  autoUpdater.on("update-available", (info) =>
+    publishUpdateState({
+      status: "available",
+      version: info.version,
+      message: "发现新版本，正在后台下载",
+    }),
+  );
+  autoUpdater.on("download-progress", (progress) =>
+    publishUpdateState({
+      status: "downloading",
+      percent: Math.max(0, Math.min(100, Math.round(progress.percent))),
+      ...(updateState.version ? { version: updateState.version } : {}),
+      message: "正在下载更新",
+    }),
+  );
+  autoUpdater.on("update-downloaded", (info) =>
+    publishUpdateState({
+      status: "downloaded",
+      version: info.version,
+      message: "更新已下载，重启后安装",
+    }),
+  );
+  autoUpdater.on("update-not-available", () =>
+    publishUpdateState({
+      status: "not-available",
+      message: "当前已是最新版本",
+    }),
+  );
+  autoUpdater.on("error", (error) =>
+    publishUpdateState({
+      status: "error",
+      message: error.message.slice(0, 240),
+    }),
+  );
   setTimeout(() => void checkForDesktopUpdate(), 8_000);
-  updateTimer = setInterval(() => void checkForDesktopUpdate(), 6 * 60 * 60 * 1000);
+  updateTimer = setInterval(
+    () => void checkForDesktopUpdate(),
+    6 * 60 * 60 * 1000,
+  );
 }
 
 ipcMain.handle("desktop.update-state", () => updateState);
@@ -115,32 +371,50 @@ ipcMain.handle("desktop.install-update", () => {
   return { ok: true };
 });
 
+ipcMain.handle("desktop.open-browser-pairing", async (event, input: unknown) => {
+  requireMainWindow(event);
+  const url = buildBrowserPairingUrl(input, desktopWebsiteUrl());
+  await shell.openExternal(url);
+  return { ok: true, url };
+});
+
 ipcMain.handle("desktop.browser-login-available", (event) => {
-  const sender = BrowserWindow.fromWebContents(event.sender);
-  if (!sender || sender !== mainWindow) throw new Error("Desktop login is only available in the main window.");
+  requireMainWindow(event);
   return app.isPackaged;
 });
+ipcMain.handle("desktop.browser-login-status", (event) => {
+  requireMainWindow(event);
+  return { status: desktopLoginStatus };
+});
 ipcMain.handle("desktop.start-browser-login", async (event) => {
-  const sender = BrowserWindow.fromWebContents(event.sender);
-  if (!sender || sender !== mainWindow) throw new Error("Desktop login is only available in the main window.");
-  if (!app.isPackaged) return { ok: false, message: "请在正式桌面版中使用浏览器登录。" };
+  requireMainWindow(event);
+  if (!app.isPackaged)
+    return { ok: false, message: "请在正式桌面版中使用浏览器登录。" };
   app.setAsDefaultProtocolClient("helstera");
-  for (const [state, expiresAt] of pendingDesktopLogins) if (expiresAt <= Date.now()) clearPendingDesktopLogin(state);
+  for (const [state, expiresAt] of pendingDesktopLogins)
+    if (expiresAt <= Date.now()) clearPendingDesktopLogin(state);
   const state = randomBytes(32).toString("base64url");
   pendingDesktopLogins.set(state, Date.now() + DESKTOP_LOGIN_TTL_MS);
-  desktopLoginTimers.set(state, setTimeout(() => {
-    if (!pendingDesktopLogins.has(state)) return;
-    clearPendingDesktopLogin(state);
-    publishDesktopLoginState("expired");
-  }, DESKTOP_LOGIN_TTL_MS));
-  const confirmation = new URL("/auth/desktop-confirm/", desktopWebsiteUrl());
-  confirmation.searchParams.set("state", state);
-  const login = new URL("/login/", desktopWebsiteUrl());
-  login.searchParams.set("redirect", `${confirmation.pathname}${confirmation.search}`);
-  login.searchParams.set("desktop", "1");
+  desktopLoginTimers.set(
+    state,
+    setTimeout(() => {
+      if (!pendingDesktopLogins.has(state)) return;
+      clearPendingDesktopLogin(state);
+      publishDesktopLoginState("expired");
+    }, DESKTOP_LOGIN_TTL_MS),
+  );
   try {
-    await shell.openExternal(login.toString());
+    const confirmation = new URL("/auth/desktop-confirm/", desktopWebsiteUrl());
+    confirmation.searchParams.set("state", state);
+    confirmation.searchParams.set("callback", await ensureDesktopCallbackServer());
+    const login = new URL("/login/", desktopWebsiteUrl());
+    login.searchParams.set(
+      "redirect",
+      `${confirmation.pathname}${confirmation.search}`,
+    );
+    login.searchParams.set("desktop", "1");
     publishDesktopLoginState("waiting");
+    await shell.openExternal(login.toString());
     return { ok: true };
   } catch (error) {
     clearPendingDesktopLogin(state);
@@ -148,14 +422,463 @@ ipcMain.handle("desktop.start-browser-login", async (event) => {
     throw new Error("无法打开系统浏览器完成登录。", { cause: error });
   }
 });
-ipcMain.handle("desktop.cancel-browser-login", () => {
-  for (const state of pendingDesktopLogins.keys()) clearPendingDesktopLogin(state);
+ipcMain.handle("desktop.cancel-browser-login", (event) => {
+  requireMainWindow(event);
+  for (const state of pendingDesktopLogins.keys())
+    clearPendingDesktopLogin(state);
+  desktopLoginCallbacks.clear();
   publishDesktopLoginState("canceled");
   return { ok: true };
 });
-ipcMain.handle("desktop.finish-browser-login", (_event, success: unknown) => {
+ipcMain.handle("desktop.finish-browser-login", (event, success: unknown) => {
+  requireMainWindow(event);
+  if (typeof success !== "boolean")
+    throw new Error("Desktop login result must be a boolean.");
   publishDesktopLoginState(success === true ? "completed" : "failed");
   return { ok: true };
+});
+
+ipcMain.handle("workspace.select", async (event) => {
+  requireMainWindow(event);
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    title: "选择本地项目目录",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const nextWorkspace = await LocalWorkspace.open(
+    result.filePaths[0],
+    join(app.getPath("userData"), "workspace-snapshots"),
+  );
+  for (const [requestId, controller] of desktopMcpCalls) {
+    controller.abort();
+    desktopMcpCalls.delete(requestId);
+  }
+  localWorkspace = nextWorkspace;
+  localWorkspaceSessionId = randomUUID();
+  publishDesktopMcpTools();
+  return { root: localWorkspace.root, entries: await localWorkspace.tree() };
+});
+ipcMain.handle("workspace.tree", async (event) =>
+  requireLocalWorkspace(event).tree(),
+);
+ipcMain.handle("workspace.read", async (event, path: unknown) => {
+  if (typeof path !== "string")
+    throw new Error("A relative project file path is required.");
+  return requireLocalWorkspace(event).read(path);
+});
+ipcMain.handle(
+  "workspace.write",
+  async (event, input: { path?: unknown; content?: unknown }) => {
+    if (typeof input?.path !== "string" || typeof input.content !== "string")
+      throw new Error("A file path and text content are required.");
+    return requireLocalWorkspace(event).write(input.path, input.content);
+  },
+);
+ipcMain.handle("workspace.restore", async (event, snapshotId: unknown) => {
+  if (typeof snapshotId !== "string")
+    throw new Error("A snapshot id is required.");
+  return requireLocalWorkspace(event).restore(snapshotId);
+});
+ipcMain.handle("workspace.git-status", (event) =>
+  requireLocalWorkspace(event).gitStatus(),
+);
+ipcMain.handle("workspace.git-diff", (event, path?: unknown) => {
+  if (path !== undefined && typeof path !== "string")
+    throw new Error("Git diff path must be a relative path.");
+  return requireLocalWorkspace(event).gitDiff(path);
+});
+ipcMain.handle("workspace.scripts", (event) =>
+  requireLocalWorkspace(event).scripts(),
+);
+ipcMain.handle("workspace.run-script", (event, scriptName: unknown) => {
+  const sender = requireMainWindow(event);
+  if (typeof scriptName !== "string")
+    throw new Error("A declared project script is required.");
+  const workspace = requireLocalWorkspace(event);
+  const runId = randomBytes(16).toString("hex");
+  const controller = new AbortController();
+  workspaceRuns.set(runId, controller);
+  void workspace
+    .runScript(
+      scriptName,
+      runId,
+      (chunk) =>
+        sender.webContents.send("workspace:script-output", { runId, chunk }),
+      controller.signal,
+    )
+    .then((result) =>
+      sender.webContents.send("workspace:script-finished", {
+        runId,
+        ok: true,
+        exitCode: result.exitCode,
+      }),
+    )
+    .catch((error: unknown) =>
+      sender.webContents.send("workspace:script-finished", {
+        runId,
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "Project script failed.",
+      }),
+    )
+    .finally(() => workspaceRuns.delete(runId));
+  return { runId };
+});
+ipcMain.handle("workspace.cancel-script", (event, runId: unknown) => {
+  requireMainWindow(event);
+  if (typeof runId !== "string") return { canceled: false };
+  const controller = workspaceRuns.get(runId);
+  if (!controller) return { canceled: false };
+  controller.abort();
+  localWorkspace?.cancelScript(runId);
+  return { canceled: true };
+});
+
+function publishDesktopMcpTools() {
+  if (
+    !assistantConnectionId ||
+    assistantSocket?.readyState !== 1 ||
+    !mcpRegistry
+  )
+    return;
+  void mcpRegistry
+    .list()
+    .then((servers) => {
+      const tools = servers
+        .filter((server) => server.connected)
+        .flatMap((server) =>
+          server.tools.map((tool) => ({
+            serverId: server.id,
+            serverName: server.name,
+            name: tool.name,
+            ...(tool.description ? { description: tool.description } : {}),
+            inputSchema: tool.inputSchema,
+          })),
+        );
+      if (localWorkspace && localWorkspaceSessionId) {
+        tools.push(...createLocalProjectToolCatalog(localWorkspaceSessionId));
+      }
+      const catalog = desktopMcpToolCatalogSchema.parse({
+        type: "desktop.mcp.tools",
+        connectionId: assistantConnectionId,
+        tools,
+      });
+      sendAssistant(catalog);
+    })
+    .catch((error: unknown) => {
+      sendAssistant({
+        type: "assistant.error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not publish the desktop MCP tool catalog.",
+      });
+    });
+}
+
+function createLocalProjectToolCatalog(serverId: string) {
+  const objectSchema = (
+    properties: Record<string, object>,
+    required: string[] = [],
+  ) => ({
+    type: "object" as const,
+    properties,
+    ...(required.length ? { required } : {}),
+    additionalProperties: false,
+  });
+  const stringField = (description: string) => ({
+    type: "string",
+    description,
+  });
+  const numberField = (
+    description: string,
+    minimum: number,
+    maximum: number,
+  ) => ({ type: "integer", minimum, maximum, description });
+  return [
+    {
+      name: "list_files",
+      description:
+        "List non-secret project files. Use pathPrefix to narrow results.",
+      inputSchema: objectSchema({
+        pathPrefix: stringField("Optional project-relative path prefix."),
+        limit: numberField("Maximum entries, default 100.", 1, 500),
+        offset: numberField("Entry offset for pagination.", 0, 20_000),
+      }),
+    },
+    {
+      name: "read_file",
+      description:
+        "Read a text slice from an authorized project file. The returned code is sent to the active Helstera chat model for reasoning.",
+      inputSchema: objectSchema(
+        {
+          path: stringField("Project-relative file path."),
+          offset: numberField("Character offset, default 0.", 0, 2_000_000),
+          limit: numberField("Characters to read, default 25000.", 1, 25_000),
+        },
+        ["path"],
+      ),
+    },
+    {
+      name: "write_file",
+      description:
+        "Write a project-relative text file after saving a recoverable snapshot. Never use for deletion or paths outside the selected folder.",
+      inputSchema: objectSchema(
+        {
+          path: stringField("Project-relative file path."),
+          content: stringField("Complete replacement text for the file."),
+        },
+        ["path", "content"],
+      ),
+    },
+    {
+      name: "git_status",
+      description: "Read the current Git branch and working-tree status.",
+      inputSchema: objectSchema({}),
+    },
+    {
+      name: "git_diff",
+      description:
+        "Read the current unstaged Git diff, optionally for one project-relative file.",
+      inputSchema: objectSchema({
+        path: stringField("Optional project-relative file path."),
+      }),
+    },
+    {
+      name: "run_project_script",
+      description:
+        "Run a declared project test, build, typecheck, lint, or check script. Arbitrary shell commands and dependency installation are not available.",
+      inputSchema: objectSchema(
+        { name: stringField("Name of a declared safe project script.") },
+        ["name"],
+      ),
+    },
+  ].map((tool) => ({ serverId, serverName: "Local Project", ...tool }));
+}
+
+function clippedUtf8(value: string, maxBytes = 100_000) {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.byteLength <= maxBytes) return { text: value, truncated: false };
+  let text = bytes.subarray(0, maxBytes).toString("utf8");
+  if (text.endsWith("\uFFFD")) text = text.slice(0, -1);
+  return { text, truncated: true };
+}
+
+function requiredString(input: Record<string, unknown>, key: string) {
+  const value = input[key];
+  if (typeof value !== "string")
+    throw new Error(`A ${key} string is required.`);
+  return value;
+}
+
+async function runLocalProjectTool(
+  serverId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  signal: AbortSignal,
+) {
+  const workspace = localWorkspace;
+  if (!workspace || !serverId || serverId !== localWorkspaceSessionId)
+    throw new Error("The selected local project authorization has changed.");
+  if (signal.aborted) throw new Error("The Agent request was canceled.");
+  switch (toolName) {
+    case "list_files": {
+      const prefix =
+        typeof args.pathPrefix === "string"
+          ? args.pathPrefix.replaceAll("\\", "/")
+          : "";
+      const offset = Number.isInteger(args.offset) ? Number(args.offset) : 0;
+      const limit = Number.isInteger(args.limit) ? Number(args.limit) : 100;
+      if (offset < 0 || offset > 20_000 || limit < 1 || limit > 500)
+        throw new Error(
+          "File listing pagination is outside the allowed range.",
+        );
+      const entries = (await workspace.tree()).filter(
+        (entry) =>
+          !prefix || entry.path.replaceAll("\\", "/").startsWith(prefix),
+      );
+      return JSON.stringify({
+        entries: entries.slice(offset, offset + limit),
+        total: entries.length,
+        nextOffset: offset + limit < entries.length ? offset + limit : null,
+      });
+    }
+    case "read_file": {
+      const path = requiredString(args, "path");
+      const offset = Number.isInteger(args.offset) ? Number(args.offset) : 0;
+      const limit = Number.isInteger(args.limit) ? Number(args.limit) : 25_000;
+      if (offset < 0 || offset > 2_000_000 || limit < 1 || limit > 25_000)
+        throw new Error("File read range is outside the allowed limit.");
+      const file = await workspace.read(path);
+      return JSON.stringify({
+        path: file.path,
+        content: file.content.slice(offset, offset + limit),
+        offset,
+        nextOffset:
+          offset + limit < file.content.length ? offset + limit : null,
+      });
+    }
+    case "write_file": {
+      const saved = await workspace.write(
+        requiredString(args, "path"),
+        requiredString(args, "content"),
+      );
+      return JSON.stringify({
+        ...saved,
+        snapshot: "A recoverable snapshot was saved before the write.",
+      });
+    }
+    case "git_status":
+      return workspace.gitStatus();
+    case "git_diff":
+      return workspace.gitDiff(
+        typeof args.path === "string" ? args.path : undefined,
+      );
+    case "run_project_script": {
+      const name = requiredString(args, "name");
+      if (!(await workspace.scripts()).some((script) => script.name === name))
+        throw new Error(
+          "Only declared test/build/typecheck/lint/check scripts can run.",
+        );
+      const runId = randomUUID();
+      let output = "";
+      let failure: string | undefined;
+      try {
+        await workspace.runScript(
+          name,
+          runId,
+          (chunk) => {
+            output += chunk;
+          },
+          signal,
+        );
+      } catch (error) {
+        failure =
+          error instanceof Error ? error.message : "Project script failed.";
+      }
+      const clipped = clippedUtf8(output);
+      return JSON.stringify({
+        name,
+        output: clipped.text,
+        ...(clipped.truncated ? { outputTruncated: true } : {}),
+        ...(failure ? { error: failure } : { exitCode: 0 }),
+      });
+    }
+    default:
+      throw new Error("The local project tool is not available.");
+  }
+}
+
+async function runDesktopMcpCall(input: unknown) {
+  const parsed = desktopMcpToolCallSchema.safeParse(input);
+  if (
+    !parsed.success ||
+    parsed.data.connectionId !== assistantConnectionId ||
+    !mcpRegistry
+  )
+    return;
+  const call = parsed.data;
+  const controller = new AbortController();
+  desktopMcpCalls.set(call.requestId, controller);
+  try {
+    const isLocalWorkspaceCall = call.serverId === localWorkspaceSessionId;
+    const rawOutput = isLocalWorkspaceCall
+      ? await runLocalProjectTool(
+          call.serverId,
+          call.toolName,
+          call.arguments,
+          controller.signal,
+        )
+      : await mcpRegistry.call(
+          call.serverId,
+          call.toolName,
+          JSON.stringify(call.arguments),
+          controller.signal,
+        );
+    if (
+      !isLocalWorkspaceCall &&
+      (JSON.parse(rawOutput) as { isError?: boolean }).isError
+    ) {
+      const output = clippedUtf8(rawOutput, 2_000).text;
+      sendAssistant({
+        type: "desktop.mcp.result",
+        requestId: call.requestId,
+        connectionId: call.connectionId,
+        ok: false,
+        error: output.slice(0, 2_000),
+      });
+      return;
+    }
+    const output = clippedUtf8(rawOutput, 110_000).text;
+    sendAssistant({
+      type: "desktop.mcp.result",
+      requestId: call.requestId,
+      connectionId: call.connectionId,
+      ok: true,
+      result: output,
+    });
+  } catch (error) {
+    sendAssistant({
+      type: "desktop.mcp.result",
+      requestId: call.requestId,
+      connectionId: call.connectionId,
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message.slice(0, 2_000)
+          : "MCP tool call failed.",
+    });
+  } finally {
+    desktopMcpCalls.delete(call.requestId);
+  }
+}
+
+ipcMain.handle("mcp.list", (event) => requireMcpRegistry(event).list());
+ipcMain.handle("mcp.add", async (event, input: unknown) => {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new Error("MCP server settings are required.");
+  const saved = await requireMcpRegistry(event).add(input as McpServerInput);
+  publishDesktopMcpTools();
+  return saved;
+});
+ipcMain.handle("mcp.connect", (event, id: unknown) => {
+  if (typeof id !== "string") throw new Error("An MCP server id is required.");
+  return requireMcpRegistry(event)
+    .connect(id)
+    .then((servers) => {
+      publishDesktopMcpTools();
+      return servers;
+    });
+});
+ipcMain.handle("mcp.disconnect", (event, id: unknown) => {
+  if (typeof id !== "string") throw new Error("An MCP server id is required.");
+  return requireMcpRegistry(event)
+    .disconnect(id)
+    .then((servers) => {
+      publishDesktopMcpTools();
+      return servers;
+    });
+});
+ipcMain.handle("mcp.remove", (event, id: unknown) => {
+  if (typeof id !== "string") throw new Error("An MCP server id is required.");
+  return requireMcpRegistry(event)
+    .remove(id)
+    .then((servers) => {
+      publishDesktopMcpTools();
+      return servers;
+    });
+});
+ipcMain.handle("mcp.call", (event, input: unknown) => {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new Error("An MCP tool call is required.");
+  const call = input as { id?: unknown; name?: unknown; arguments?: unknown };
+  if (
+    typeof call.id !== "string" ||
+    typeof call.name !== "string" ||
+    typeof call.arguments !== "string"
+  )
+    throw new Error("MCP tool call fields are invalid.");
+  return requireMcpRegistry(event).call(call.id, call.name, call.arguments);
 });
 
 function isSafeBrowserUrl(value: string): boolean {
@@ -168,7 +891,8 @@ function isSafeBrowserUrl(value: string): boolean {
 }
 
 async function openEmbeddedBrowser(value: string) {
-  if (!isSafeBrowserUrl(value)) throw new Error("仅允许打开 HTTP(S) 网站地址。");
+  if (!isSafeBrowserUrl(value))
+    throw new Error("仅允许打开 HTTP(S) 网站地址。");
   if (!embeddedBrowserWindow || embeddedBrowserWindow.isDestroyed()) {
     embeddedBrowserWindow = new BrowserWindow({
       width: 1200,
@@ -189,7 +913,9 @@ async function openEmbeddedBrowser(value: string) {
     embeddedBrowserWindow.webContents.on("will-navigate", (event, url) => {
       if (!isSafeBrowserUrl(url)) event.preventDefault();
     });
-    embeddedBrowserWindow.on("closed", () => { embeddedBrowserWindow = null; });
+    embeddedBrowserWindow.on("closed", () => {
+      embeddedBrowserWindow = null;
+    });
   }
   await embeddedBrowserWindow.loadURL(value);
   embeddedBrowserWindow.show();
@@ -198,7 +924,8 @@ async function openEmbeddedBrowser(value: string) {
 }
 
 function sendAssistant(message: Record<string, unknown>) {
-  if (assistantSocket?.readyState === 1) assistantSocket.send(JSON.stringify(message));
+  if (assistantSocket?.readyState === 1)
+    assistantSocket.send(JSON.stringify(message));
 }
 
 async function ensureRecorderWindow() {
@@ -214,8 +941,12 @@ async function ensureRecorderWindow() {
       preload: join(__dirname, "recorder-preload.js"),
     },
   });
-  recorderWindow.on("closed", () => { recorderWindow = null; });
-  await recorderWindow.loadURL("data:text/html,<canvas id=canvas width=1280 height=720></canvas>");
+  recorderWindow.on("closed", () => {
+    recorderWindow = null;
+  });
+  await recorderWindow.loadURL(
+    "data:text/html,<canvas id=canvas width=1280 height=720></canvas>",
+  );
   return recorderWindow;
 }
 
@@ -226,17 +957,27 @@ async function startDesktopRecording(browser: BrowserWindow) {
   const timer = setInterval(() => {
     if (busy || recorder.isDestroyed() || browser.isDestroyed()) return;
     busy = true;
-    void browser.webContents.capturePage()
+    void browser.webContents
+      .capturePage()
       .then((image) => {
-        if (!recorder.isDestroyed()) recorder.webContents.send("recorder.frame", image.toJPEG(70).toString("base64"));
+        if (!recorder.isDestroyed())
+          recorder.webContents.send(
+            "recorder.frame",
+            image.toJPEG(70).toString("base64"),
+          );
       })
       .catch(() => undefined)
-      .finally(() => { busy = false; });
+      .finally(() => {
+        busy = false;
+      });
   }, 200);
   return { recorder, timer };
 }
 
-async function stopDesktopRecording(active: { recorder: BrowserWindow; timer: ReturnType<typeof setInterval> }) {
+async function stopDesktopRecording(active: {
+  recorder: BrowserWindow;
+  timer: ReturnType<typeof setInterval>;
+}) {
   clearInterval(active.timer);
   if (active.recorder.isDestroyed()) return null;
   return new Promise<string | null>((resolve) => {
@@ -262,23 +1003,37 @@ async function stopDesktopRecording(active: { recorder: BrowserWindow; timer: Re
 
 async function captureEmbeddedPage(task: any) {
   const browser = embeddedBrowserWindow;
-  if (!browser || browser.isDestroyed()) throw new Error("桌面内嵌浏览器未打开。");
+  if (!browser || browser.isDestroyed())
+    throw new Error("桌面内嵌浏览器未打开。");
   desktopTaskTabs.set(String(task.taskId), browser);
-  const recording = task.recordVideo ? await startDesktopRecording(browser) : null;
+  const recording = task.recordVideo
+    ? await startDesktopRecording(browser)
+    : null;
   let recordingBase64: string | null = null;
   const startUrl = new URL(String(task.startUrl));
   const queue = [startUrl.toString()];
   const visited = new Set<string>();
   let recordingStopped = false;
   try {
-    while (queue.length && visited.size < Number(task.pageLimit) && !browser.isDestroyed()) {
-    const next = queue.shift();
-    if (!next || visited.has(next)) continue;
-    visited.add(next);
-    if (browser.webContents.getURL() !== next) await browser.loadURL(next);
-    const loadedUrl = new URL(browser.webContents.getURL() || next);
-    if (!isAllowedDesktopDestination(loadedUrl, startUrl, Boolean(task.followExternal))) throw new Error("自动跟链或重定向扩展到了未授权的本地地址。");
-    const page = await browser.webContents.executeJavaScript(`(() => {
+    while (
+      queue.length &&
+      visited.size < Number(task.pageLimit) &&
+      !browser.isDestroyed()
+    ) {
+      const next = queue.shift();
+      if (!next || visited.has(next)) continue;
+      visited.add(next);
+      if (browser.webContents.getURL() !== next) await browser.loadURL(next);
+      const loadedUrl = new URL(browser.webContents.getURL() || next);
+      if (
+        !isAllowedDesktopDestination(
+          loadedUrl,
+          startUrl,
+          Boolean(task.followExternal),
+        )
+      )
+        throw new Error("自动跟链或重定向扩展到了未授权的本地地址。");
+      const page = await browser.webContents.executeJavaScript(`(() => {
     const clean = (value) => String(value ?? '').replace(/\\s+/g, ' ').trim().slice(0, 500);
     return {
       url: location.href,
@@ -289,23 +1044,59 @@ async function captureEmbeddedPage(task: any) {
       links: [...new Set([...document.querySelectorAll('a[href]')].map((anchor) => anchor.href).filter((href) => /^https?:\\/\\//i.test(href)))].slice(0, 80),
     };
   })()`);
-    const screenshotBase64 = `data:image/jpeg;base64,${(await browser.webContents.capturePage()).toJPEG(76).toString("base64")}`;
-    sendAssistant({ type: "website_capture.page", taskId: task.taskId, page, screenshotBase64 });
-    sendAssistant({ type: "website_capture.progress", taskId: task.taskId, progress: 10 + Math.round((visited.size / Number(task.pageLimit)) * 70), stage: "page_loading", detail: `已读取 ${visited.size}/${task.pageLimit} 个页面` });
-    for (const link of Array.isArray(page.links) ? page.links : []) {
-      try {
-        const linkUrl = new URL(String(link));
-        if ((Boolean(task.followExternal) || linkUrl.hostname.toLowerCase() === startUrl.hostname.toLowerCase()) && isAllowedDesktopDestination(linkUrl, startUrl, Boolean(task.followExternal)) && !visited.has(linkUrl.toString()) && !queue.includes(linkUrl.toString())) queue.push(linkUrl.toString());
-      } catch { /* malformed links are ignored */ }
-      if (queue.length >= Number(task.pageLimit) * 3) break;
-    }
+      const screenshotBase64 = `data:image/jpeg;base64,${(await browser.webContents.capturePage()).toJPEG(76).toString("base64")}`;
+      sendAssistant({
+        type: "website_capture.page",
+        taskId: task.taskId,
+        page,
+        screenshotBase64,
+      });
+      sendAssistant({
+        type: "website_capture.progress",
+        taskId: task.taskId,
+        progress: 10 + Math.round((visited.size / Number(task.pageLimit)) * 70),
+        stage: "page_loading",
+        detail: `已读取 ${visited.size}/${task.pageLimit} 个页面`,
+      });
+      for (const link of Array.isArray(page.links) ? page.links : []) {
+        try {
+          const linkUrl = new URL(String(link));
+          if (
+            (Boolean(task.followExternal) ||
+              linkUrl.hostname.toLowerCase() ===
+                startUrl.hostname.toLowerCase()) &&
+            isAllowedDesktopDestination(
+              linkUrl,
+              startUrl,
+              Boolean(task.followExternal),
+            ) &&
+            !visited.has(linkUrl.toString()) &&
+            !queue.includes(linkUrl.toString())
+          )
+            queue.push(linkUrl.toString());
+        } catch {
+          /* malformed links are ignored */
+        }
+        if (queue.length >= Number(task.pageLimit) * 3) break;
+      }
     }
     if (recording) {
       recordingBase64 = await stopDesktopRecording(recording);
       recordingStopped = true;
     }
-    if (task.recordVideo && !recordingBase64) sendAssistant({ type: "website_capture.recording_failed", taskId: task.taskId, message: "桌面内嵌浏览器录屏编码失败，已保存页面截图。" });
-    sendAssistant({ type: "website_capture.complete", taskId: task.taskId, ...(recordingBase64 ? { recordingBase64: `data:video/webm;base64,${recordingBase64}` } : {}) });
+    if (task.recordVideo && !recordingBase64)
+      sendAssistant({
+        type: "website_capture.recording_failed",
+        taskId: task.taskId,
+        message: "桌面内嵌浏览器录屏编码失败，已保存页面截图。",
+      });
+    sendAssistant({
+      type: "website_capture.complete",
+      taskId: task.taskId,
+      ...(recordingBase64
+        ? { recordingBase64: `data:video/webm;base64,${recordingBase64}` }
+        : {}),
+    });
   } finally {
     if (recording && !recordingStopped) await stopDesktopRecording(recording);
     desktopTaskTabs.delete(String(task.taskId));
@@ -315,8 +1106,11 @@ async function captureEmbeddedPage(task: any) {
 async function readEmbeddedPage(browser: BrowserWindow) {
   return browser.webContents.executeJavaScript(`(() => {
     const clean = (value) => String(value ?? '').replace(/\\s+/g, ' ').trim().slice(0, 500);
+    const safeUrl = new URL(location.href);
+    safeUrl.search = '';
+    safeUrl.hash = '';
     return {
-      url: location.href,
+      url: safeUrl.toString(),
       title: clean(document.title) || location.hostname,
       description: clean(document.querySelector('meta[name="description"]')?.content ?? document.querySelector('meta[property="og:description"]')?.content),
       headings: [...document.querySelectorAll('h1,h2,h3')].map((node) => clean(node.textContent)).filter(Boolean).slice(0, 16),
@@ -336,41 +1130,203 @@ function desktopCapabilityForAction(action: DesktopAgentAction) {
     stop_recording: "browser.record",
     click: "browser.click",
     type: "browser.type",
+    native_click: "window.click",
+    native_type: "window.type",
   };
   return capabilities[action.kind];
+}
+
+function isNativeDesktopTask(task: DesktopAgentTask) {
+  return task.executionMode === "windows_ui" || task.executionMode === "visual_ocr";
+}
+
+function finishDesktopAgentTask(taskId: string) {
+  desktopAgentPlans.delete(taskId);
+  desktopAgentTasks.delete(taskId);
+  desktopTaskTabs.delete(taskId);
+}
+
+async function completeDesktopAgentTask(taskId: string) {
+  const task = desktopAgentTasks.get(taskId);
+  if (!task) return;
+  try {
+    if (isNativeDesktopTask(task)) {
+      const evidence = await inspectNativeDesktop({
+        platform: process.platform,
+        userDataPath: app.getPath("userData"),
+        sessionType: process.env.XDG_SESSION_TYPE,
+        preferVision: task.executionMode === "visual_ocr",
+      });
+      const summary = [`Active window: ${evidence.windowTitle}`, evidence.ocrText].filter(Boolean).join("\n\n").slice(0, 8_000);
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId,
+        eventType: "completed",
+        progress: 100,
+        detail: "Native window task completed.",
+        result: {
+          summary,
+          evidence: [{ kind: "window", title: evidence.windowTitle, excerpt: evidence.controls.map((control) => control.title).join("; ").slice(0, 8_000) }, ...(evidence.ocrText ? [{ kind: "ocr", title: evidence.windowTitle, excerpt: evidence.ocrText }] : [])],
+          screenshotBase64: evidence.screenshotBase64,
+          screenshotMimeType: evidence.screenshotMimeType,
+        },
+      });
+    } else {
+      const browser = desktopTaskTabs.get(taskId);
+      if (!browser || browser.isDestroyed()) throw new Error("The task browser was closed before the plan finished.");
+      const page = task.capabilities.includes("browser.read") ? await readEmbeddedPage(browser) : undefined;
+      const screenshotBase64 = task.capabilities.includes("browser.capture") ? (await browser.webContents.capturePage()).toJPEG(76).toString("base64") : undefined;
+      const summary = [page?.title, page?.description, ...(page?.headings ?? []).slice(0, 5)].filter(Boolean).join("\n").slice(0, 8_000);
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId,
+        eventType: "completed",
+        progress: 100,
+        detail: "Desktop browser task completed.",
+        result: {
+          summary,
+          ...(page ? { page, evidence: [{ kind: "page", sourceUrl: page.url, title: page.title, excerpt: summary }] } : {}),
+          ...(screenshotBase64 ? { screenshotBase64 } : {}),
+        },
+      });
+    }
+  } catch (error) {
+    sendAssistant({ type: "desktop_agent.event", taskId, eventType: "failed", detail: error instanceof Error ? error.message : "Could not collect final task evidence." });
+  } finally {
+    finishDesktopAgentTask(taskId);
+  }
+}
+
+async function continueDesktopAgentPlan(taskId: string) {
+  const task = desktopAgentTasks.get(taskId);
+  if (!task) return;
+  const plan = desktopAgentPlans.get(taskId) ?? [];
+  const action = plan[0];
+  if (!action) {
+    await completeDesktopAgentTask(taskId);
+    return;
+  }
+  if (classifyDesktopAction(action) === "deny") {
+    sendAssistant({
+      type: "desktop_agent.event",
+      taskId,
+      eventType: "approval_required",
+      action,
+      detail: `Approval required before ${action.kind}.`,
+    });
+    return;
+  }
+  await executeDesktopAgentAction(action);
 }
 
 async function runDesktopAgentTask(rawTask: unknown) {
   const parsed = desktopAgentTaskSchema.safeParse(rawTask);
   if (!parsed.success) {
-    sendAssistant({ type: "assistant.error", message: "桌面协作任务格式无效。" });
+    sendAssistant({
+      type: "assistant.error",
+      message: "桌面协作任务格式无效。",
+    });
     return;
   }
   const task = parsed.data;
   try {
+    if (task.executionMode === "windows_ui" || task.executionMode === "visual_ocr") {
+      const evidence = await inspectNativeDesktop({
+        platform: process.platform,
+        userDataPath: app.getPath("userData"),
+        sessionType: process.env.XDG_SESSION_TYPE,
+        preferVision: task.executionMode === "visual_ocr",
+      });
+      const controls = evidence.controls.map((control) => `${control.role ?? "control"}: ${control.title}`).join("\n");
+      const summary = [
+        `Active window: ${evidence.windowTitle}`,
+        ...(controls ? [`Accessible controls:\n${controls}`] : []),
+        ...(evidence.ocrText ? [`Visible text (untrusted):\n${evidence.ocrText}`] : []),
+        ...(evidence.fallbackReason ? [`Fallback: ${evidence.fallbackReason}`] : []),
+      ].join("\n\n").slice(0, 8_000);
+      desktopAgentTasks.set(task.taskId, task);
+      desktopTaskTabs.set(task.taskId, null);
+      sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "plan", progress: 5, detail: "Inspect the active native window and collect local evidence." });
+      sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "step", stepId: "inspect-native-window", progress: 35, detail: evidence.fallbackReason ?? "Read the active window's accessible controls." });
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId: task.taskId,
+        eventType: "evidence",
+        stepId: "inspect-native-window",
+        progress: 80,
+        detail: summary.slice(0, 2_000),
+      });
+      desktopAgentPlans.set(task.taskId, [...task.plannedActions]);
+      if (task.plannedActions.length > 0) await continueDesktopAgentPlan(task.taskId);
+      else await completeDesktopAgentTask(task.taskId);
+      return;
+    }
+    if (task.executionMode === "connected_browser_tab") {
+      throw new Error("Use the connected-browser website capture workflow for authorized Edge/Chrome tabs; this native task channel cannot target extension tabs yet.");
+    }
     const browser = embeddedBrowserWindow;
-    if (!browser || browser.isDestroyed()) throw new Error("请先打开桌面内嵌浏览器。");
-    if (task.targetUrl) await openEmbeddedBrowser(task.targetUrl);
+    if (!browser || browser.isDestroyed())
+      throw new Error("请先打开桌面内嵌浏览器。");
+    if (task.targetUrl) {
+      const target = new URL(task.targetUrl);
+      if (!["http:", "https:"].includes(target.protocol) || target.username || target.password) {
+        throw new Error("Desktop Agent accepts only credential-free HTTP(S) URLs.");
+      }
+      await openEmbeddedBrowser(target.toString());
+    }
     desktopAgentTasks.set(task.taskId, task);
-    desktopTaskTabs.set(task.taskId, browser);
-    sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "started", progress: 2, detail: `${task.role} Agent 已开始执行` });
-    const page = task.capabilities.includes("browser.read") ? await readEmbeddedPage(browser) : undefined;
-    const screenshotBase64 = task.capabilities.includes("browser.capture")
-      ? (await browser.webContents.capturePage()).toJPEG(76).toString("base64")
-      : undefined;
+  desktopTaskTabs.set(task.taskId, browser);
     sendAssistant({
       type: "desktop_agent.event",
       taskId: task.taskId,
-      eventType: "completed",
-      progress: 100,
-      detail: "桌面协作任务已完成",
-      result: { ...(page ? { page } : {}), ...(screenshotBase64 ? { screenshotBase64 } : {}) },
+      eventType: "plan",
+      progress: 2,
+      detail: "读取当前页面并收集可复核证据",
     });
+    sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "step", stepId: "inspect-page", progress: 25, detail: "读取页面标题、说明和导航结构" });
+    const page = task.capabilities.includes("browser.read")
+      ? await readEmbeddedPage(browser)
+      : undefined;
+    const screenshotBase64 = task.capabilities.includes("browser.capture")
+      ? (await browser.webContents.capturePage()).toJPEG(76).toString("base64")
+      : undefined;
+    if (task.capabilities.includes("browser.record")) {
+      throw new Error("当前桌面控制通道不支持录屏；请使用网站录屏任务生成视频草稿。");
+    }
+    if (!page && !screenshotBase64) throw new Error("该任务没有请求当前浏览器可执行的能力。");
+    const summary = page
+      ? [page.title, page.description, ...(page.headings ?? []).slice(0, 5)].filter(Boolean).join("\n")
+      : "已捕获当前桌面浏览器画面。";
+    sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "evidence", stepId: "inspect-page", progress: 80, detail: "页面证据已收集" });
+    sendAssistant({
+      type: "desktop_agent.event",
+      taskId: task.taskId,
+      eventType: "evidence",
+      stepId: "inspect-page",
+      progress: 80,
+      detail: "桌面协作任务已完成",
+      result: {
+        summary,
+        ...(page ? { evidence: [{ kind: "page", sourceUrl: page.url, title: page.title, excerpt: summary.slice(0, 8_000) }] } : {}),
+        ...(page ? { page } : {}),
+        ...(screenshotBase64 ? { screenshotBase64 } : {}),
+      },
+    });
+    desktopAgentPlans.set(task.taskId, [...task.plannedActions]);
+    if (task.plannedActions.length > 0) {
+      await continueDesktopAgentPlan(task.taskId);
+      return;
+    }
+    await completeDesktopAgentTask(task.taskId);
   } catch (error) {
-    sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "failed", detail: error instanceof Error ? error.message : "桌面协作任务失败" });
+    sendAssistant({
+      type: "desktop_agent.event",
+      taskId: task.taskId,
+      eventType: "failed",
+      detail: error instanceof Error ? error.message : "桌面协作任务失败",
+    });
   } finally {
-    desktopAgentTasks.delete(task.taskId);
-    desktopTaskTabs.delete(task.taskId);
+    if (!desktopAgentPlans.has(task.taskId)) finishDesktopAgentTask(task.taskId);
   }
 }
 
@@ -381,66 +1337,202 @@ async function executeDesktopAgentAction(rawAction: unknown) {
   const task = desktopAgentTasks.get(action.taskId);
   const browser = desktopTaskTabs.get(action.taskId);
   const capability = desktopCapabilityForAction(action);
-  if (!task || !browser || browser.isDestroyed() || !capability || !task.capabilities.includes(capability as DesktopAgentTask["capabilities"][number])) {
-    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "failed", detail: "Agent 没有该桌面能力或任务已结束" });
+  if (
+    !task ||
+    browser === undefined ||
+    (browser === null && !isNativeDesktopTask(task)) ||
+    (browser !== null && browser.isDestroyed()) ||
+    !capability ||
+    !task.capabilities.includes(
+      capability as DesktopAgentTask["capabilities"][number],
+    )
+  ) {
+    sendAssistant({
+      type: "desktop_agent.event",
+      taskId: action.taskId,
+      eventType: "failed",
+      detail: "Agent 没有该桌面能力或任务已结束",
+    });
     return;
   }
   if (classifyDesktopAction(action) === "deny") {
-    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "approval_required", action, detail: "该动作需要用户批准，或涉及禁止的凭据字段" });
+    sendAssistant({
+      type: "desktop_agent.event",
+      taskId: action.taskId,
+      eventType: "approval_required",
+      action,
+      detail: "该动作需要用户批准，或涉及禁止的凭据字段",
+    });
     return;
   }
   try {
+    if (isNativeDesktopTask(task)) {
+      if (action.kind === "native_click") {
+        await clickNativeText(String(action.target ?? ""), app.getPath("userData"));
+      } else if (action.kind === "native_type") {
+        await typeIntoNativeControl(String(action.target ?? ""), String(action.value ?? ""), app.getPath("userData"));
+      } else if (action.kind === "focus_window") {
+        const { getActiveWindow } = await import("@nut-tree/nut-js");
+        const active = await getActiveWindow();
+        const currentTitle = await active.title;
+        if (action.target && currentTitle !== action.target) throw new Error("The requested native window is not the active window.");
+        await active.focus();
+      } else if (action.kind === "capture_screen" || action.kind === "read_page") {
+        const evidence = await inspectNativeDesktop({
+          platform: process.platform,
+          userDataPath: app.getPath("userData"),
+          sessionType: process.env.XDG_SESSION_TYPE,
+          preferVision: task.executionMode === "visual_ocr",
+        });
+        sendAssistant({
+          type: "desktop_agent.event",
+          taskId: action.taskId,
+          eventType: "evidence",
+          detail: evidence.ocrText,
+          result: {
+            summary: evidence.ocrText,
+            evidence: [{ kind: "window", title: evidence.windowTitle, excerpt: evidence.controls.map((control) => control.title).join("; ") }],
+            screenshotBase64: evidence.screenshotBase64,
+            screenshotMimeType: evidence.screenshotMimeType,
+          },
+        });
+      } else {
+        throw new Error("This native action is unavailable in the selected execution mode.");
+      }
+    } else {
+      if (!browser) throw new Error("The task browser is unavailable.");
     if (action.kind === "navigate") {
       const targetUrl = String(action.targetUrl ?? "");
-      if (!/^https?:$/i.test(new URL(targetUrl).protocol)) throw new Error("只允许导航到 HTTP(S) 地址。");
-      await browser.loadURL(targetUrl);
+      if (!/^https?:$/i.test(new URL(targetUrl).protocol))
+        throw new Error("只允许导航到 HTTP(S) 地址。");
+      const target = new URL(targetUrl);
+      if (target.username || target.password) {
+        throw new Error("Credential-bearing URLs are not allowed.");
+      }
+      await browser.loadURL(target.toString());
     } else if (action.kind === "scroll") {
-      await browser.webContents.executeJavaScript(`window.scrollTo({ top: ${Number(action.top) || 0}, behavior: 'instant' })`);
+      await browser.webContents.executeJavaScript(
+        `window.scrollTo({ top: ${Number(action.top) || 0}, behavior: 'instant' })`,
+      );
     } else if (action.kind === "read_page") {
       const page = await readEmbeddedPage(browser);
-      sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "page", detail: "已读取页面", result: { page } });
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId: action.taskId,
+        eventType: "page",
+        detail: "已读取页面",
+        result: { page },
+      });
     } else if (action.kind === "capture_screen") {
-      const screenshotBase64 = (await browser.webContents.capturePage()).toJPEG(76).toString("base64");
-      sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "page", detail: "已捕获屏幕", result: { screenshotBase64 } });
+      const screenshotBase64 = (await browser.webContents.capturePage())
+        .toJPEG(76)
+        .toString("base64");
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId: action.taskId,
+        eventType: "page",
+        detail: "已捕获屏幕",
+        result: { screenshotBase64 },
+      });
     } else if (action.kind === "click") {
       const selector = JSON.stringify(String(action.target ?? ""));
-      await browser.webContents.executeJavaScript(`(() => { const element = document.querySelector(${selector}); if (!(element instanceof HTMLElement)) throw new Error('点击目标不存在。'); element.click(); })()`);
+      await browser.webContents.executeJavaScript(
+        `(() => { const element = document.querySelector(${selector}); if (!(element instanceof HTMLElement)) throw new Error('点击目标不存在。'); element.click(); })()`,
+      );
     } else if (action.kind === "type") {
       const selector = JSON.stringify(String(action.target ?? ""));
       const value = JSON.stringify(action.value ?? "");
-      await browser.webContents.executeJavaScript(`(() => { const element = document.querySelector(${selector}); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) throw new Error('填写目标不存在。'); element.value = ${value}; element.dispatchEvent(new Event('input', { bubbles: true })); element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+      await browser.webContents.executeJavaScript(
+        `(() => { const element = document.querySelector(${selector}); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) throw new Error('Fill target not found.'); const hints = [element instanceof HTMLInputElement ? element.type : '', element.name, element.id, element.getAttribute('autocomplete'), element.getAttribute('aria-label'), element.getAttribute('placeholder')].filter(Boolean).join(' ').toLowerCase().replace(/[\\s_]+/g, '-'); if ((element instanceof HTMLInputElement && element.type.toLowerCase() === 'password') || /password|passcode|one-time-code|otp|verification-code|auth-code|mfa/.test(hints)) throw new Error('Credentials and verification fields cannot be filled by the desktop Agent.'); element.value = ${value}; element.dispatchEvent(new Event('input', { bubbles: true })); element.dispatchEvent(new Event('change', { bubbles: true })); })()`,
+      );
     } else {
       throw new Error("该桌面动作暂未实现。");
     }
-    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "progress", progress: 80, detail: `已完成 ${action.kind}`, ...(action.approvalId ? { approvalId: action.approvalId } : {}), action: { ...action, approvalToken: action.approvalToken } });
+    }
+    sendAssistant({
+      type: "desktop_agent.event",
+      taskId: action.taskId,
+      eventType: "progress",
+      progress: 80,
+      detail: `已完成 ${action.kind}`,
+      ...(action.approvalId ? { approvalId: action.approvalId } : {}),
+      action: { ...action, approvalToken: action.approvalToken },
+    });
+    const pending = desktopAgentPlans.get(action.taskId);
+    if (pending?.[0]?.requestId === action.requestId) pending.shift();
+    await continueDesktopAgentPlan(action.taskId);
   } catch (error) {
-    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "failed", detail: error instanceof Error ? error.message : "桌面动作失败", ...(action.approvalId ? { approvalId: action.approvalId } : {}), action: { ...action, approvalToken: action.approvalToken } });
+    sendAssistant({
+      type: "desktop_agent.event",
+      taskId: action.taskId,
+      eventType: "failed",
+      detail: error instanceof Error ? error.message : "桌面动作失败",
+      ...(action.approvalId ? { approvalId: action.approvalId } : {}),
+      action: { ...action, approvalToken: action.approvalToken },
+    });
+    finishDesktopAgentTask(action.taskId);
   }
 }
 
 function isPrivateDesktopHost(value: string) {
   const hostname = value.toLowerCase().replace(/^\[|\]$/g, "");
-  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) return true;
-  if (hostname === "::1" || hostname.startsWith("127.") || /^10\./.test(hostname) || /^192\.168\./.test(hostname) || /^169\.254\./.test(hostname)) return true;
+  if (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") ||
+    hostname.endsWith(".internal")
+  )
+    return true;
+  if (
+    hostname === "::1" ||
+    hostname.startsWith("127.") ||
+    /^10\./.test(hostname) ||
+    /^192\.168\./.test(hostname) ||
+    /^169\.254\./.test(hostname)
+  )
+    return true;
   const private172 = hostname.match(/^172\.(\d{1,3})\./);
-  return Boolean((private172 && Number(private172[1]) >= 16 && Number(private172[1]) <= 31) || /^(fc|fd|fe80):/i.test(hostname));
+  return Boolean(
+    (private172 &&
+      Number(private172[1]) >= 16 &&
+      Number(private172[1]) <= 31) ||
+      /^(fc|fd|fe80):/i.test(hostname),
+  );
 }
 
-function isAllowedDesktopDestination(url: URL, start: URL, followExternal: boolean) {
+function isAllowedDesktopDestination(
+  url: URL,
+  start: URL,
+  followExternal: boolean,
+) {
   const sameHost = url.hostname.toLowerCase() === start.hostname.toLowerCase();
   return sameHost || (followExternal && !isPrivateDesktopHost(url.hostname));
 }
 
 function isCredentialField(action: any) {
-  const fieldType = String(action?.fieldType ?? "").toLowerCase().replace(/[\s_]+/g, "-");
-  return /password|passcode|one-time-code|otp|verification-code|auth-code|\bmfa\b/.test(fieldType);
+  const fieldType = String(action?.fieldType ?? "")
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-");
+  return /password|passcode|one-time-code|otp|verification-code|auth-code|\bmfa\b/.test(
+    fieldType,
+  );
 }
 
 function desktopActionNeedsApproval(action: any) {
-  return ["upload", "download", "publish", "purchase", "payment", "authorize", "submit"].includes(action?.kind)
-    || action?.kind === "fill"
-    || action?.sideEffect === true
-    || action?.kind === "click";
+  return (
+    [
+      "upload",
+      "download",
+      "publish",
+      "purchase",
+      "payment",
+      "authorize",
+      "submit",
+    ].includes(action?.kind) ||
+    action?.kind === "fill" ||
+    action?.sideEffect === true ||
+    action?.kind === "click"
+  );
 }
 
 function websiteActionReceipt(action: any) {
@@ -452,27 +1544,56 @@ function websiteActionReceipt(action: any) {
 async function executeDesktopAction(message: any) {
   const browser = desktopTaskTabs.get(String(message.taskId ?? ""));
   const action = message.action;
-  if (!browser || browser.isDestroyed() || !action || isCredentialField(action) || (desktopActionNeedsApproval(action) && !message.approvalToken)) {
-    if (message.actionId) sendAssistant({ type: "website_capture.action_result", actionId: message.actionId, taskId: message.taskId, approvalToken: message.approvalToken, action: websiteActionReceipt(action), ok: false, message: "桌面端禁止执行凭据字段动作。" });
+  if (
+    !browser ||
+    browser.isDestroyed() ||
+    !action ||
+    isCredentialField(action) ||
+    (desktopActionNeedsApproval(action) && !message.approvalToken)
+  ) {
+    if (message.actionId)
+      sendAssistant({
+        type: "website_capture.action_result",
+        actionId: message.actionId,
+        taskId: message.taskId,
+        approvalToken: message.approvalToken,
+        action: websiteActionReceipt(action),
+        ok: false,
+        message: "桌面端禁止执行凭据字段动作。",
+      });
     return;
   }
   let ok = false;
   let resultMessage = "动作未执行";
   try {
-    if (action.kind === "navigate" && /^https?:$/i.test(new URL(String(action.targetUrl)).protocol)) {
+    if (
+      action.kind === "navigate" &&
+      /^https?:$/i.test(new URL(String(action.targetUrl)).protocol)
+    ) {
       await browser.loadURL(String(action.targetUrl));
       ok = true;
       resultMessage = "已导航";
     } else if (action.kind === "scroll") {
-      await browser.webContents.executeJavaScript(`window.scrollTo({ top: ${Number(action.top) || 0}, behavior: 'instant' })`);
+      await browser.webContents.executeJavaScript(
+        `window.scrollTo({ top: ${Number(action.top) || 0}, behavior: 'instant' })`,
+      );
       ok = true;
       resultMessage = "已滚动";
-    } else if (action.kind === "click" && String(action.target ?? "").length <= 500) {
+    } else if (
+      action.kind === "click" &&
+      String(action.target ?? "").length <= 500
+    ) {
       const selector = JSON.stringify(String(action.target));
-      await browser.webContents.executeJavaScript(`(() => { const element = document.querySelector(${selector}); if (!(element instanceof HTMLElement)) throw new Error('点击目标不存在。'); element.click(); })()`);
+      await browser.webContents.executeJavaScript(
+        `(() => { const element = document.querySelector(${selector}); if (!(element instanceof HTMLElement)) throw new Error('点击目标不存在。'); element.click(); })()`,
+      );
       ok = true;
       resultMessage = "已点击";
-    } else if (action.kind === "fill" && String(action.target ?? "").length <= 500 && typeof action.value === "string") {
+    } else if (
+      action.kind === "fill" &&
+      String(action.target ?? "").length <= 500 &&
+      typeof action.value === "string"
+    ) {
       const selector = JSON.stringify(String(action.target));
       const value = JSON.stringify(action.value);
       await browser.webContents.executeJavaScript(`(() => {
@@ -493,51 +1614,129 @@ async function executeDesktopAction(message: any) {
   } catch (error) {
     resultMessage = error instanceof Error ? error.message : "动作执行失败";
   }
-  if (message.actionId) sendAssistant({ type: "website_capture.action_result", actionId: message.actionId, taskId: message.taskId, approvalToken: message.approvalToken, action: websiteActionReceipt(action), ok, message: resultMessage });
+  if (message.actionId)
+    sendAssistant({
+      type: "website_capture.action_result",
+      actionId: message.actionId,
+      taskId: message.taskId,
+      approvalToken: message.approvalToken,
+      action: websiteActionReceipt(action),
+      ok,
+      message: resultMessage,
+    });
 }
 
 function connectEmbeddedAssistant(wssUrl: string, code: string) {
-  if (assistantSocket?.readyState === 1) return { ok: true, message: "已经连接" };
+  if (assistantSocket?.readyState === 1)
+    return { ok: true, message: "已经连接" };
   const endpoint = new URL(wssUrl);
-  const localDevelopment = endpoint.protocol === "ws:" && ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname);
-  if ((endpoint.protocol !== "wss:" && !localDevelopment) || endpoint.pathname !== "/api/website-capture/assistant/ws" || endpoint.username || endpoint.password) throw new Error("只允许连接 Helstera 的 WSS 助手地址。");
+  const localDevelopment =
+    endpoint.protocol === "ws:" &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname);
+  if (
+    (endpoint.protocol !== "wss:" && !localDevelopment) ||
+    endpoint.pathname !== "/api/website-capture/assistant/ws" ||
+    endpoint.username ||
+    endpoint.password
+  )
+    throw new Error("只允许连接 Helstera 的 WSS 助手地址。");
   endpoint.search = "";
   endpoint.hash = "";
-  const Socket = (globalThis as typeof globalThis & { WebSocket?: any }).WebSocket;
+  const Socket = (globalThis as typeof globalThis & { WebSocket?: any })
+    .WebSocket;
   if (!Socket) throw new Error("当前 Electron 运行时不支持 WebSocket。");
-  const credential = assistantSessionToken ? `session_token=${encodeURIComponent(assistantSessionToken)}` : `code=${encodeURIComponent(code)}`;
+  const credential = assistantSessionToken
+    ? `session_token=${encodeURIComponent(assistantSessionToken)}`
+    : `code=${encodeURIComponent(code)}`;
   const separator = endpoint.toString().includes("?") ? "&" : "?";
-  assistantSocket = new Socket(`${endpoint.toString()}${separator}${credential}`);
-  assistantSocket.onopen = () => sendAssistant({ type: "assistant.ready", browser: "Electron Chrome", platform: process.platform });
+  assistantSocket = new Socket(
+    `${endpoint.toString()}${separator}${credential}`,
+  );
+  assistantSocket.onopen = () =>
+    sendAssistant({
+      type: "assistant.ready",
+      browser: "Electron Chrome",
+      platform: process.platform,
+      clientKind: "desktop-app",
+    });
   assistantSocket.onmessage = (event: any) => {
     let message: any;
-    try { message = JSON.parse(String(event.data)); } catch { return; }
-    if (message.type === "assistant.connected") {
-      if (message.sessionToken) assistantSessionToken = String(message.sessionToken);
+    try {
+      message = JSON.parse(String(event.data));
+    } catch {
       return;
     }
-    if (message.type === "website_capture.start") void captureEmbeddedPage(message).catch((error) => sendAssistant({ type: "website_capture.failed", taskId: message.taskId, message: error instanceof Error ? error.message : "桌面浏览失败" }));
-    if (message.type === "website_capture.action_execute") void executeDesktopAction(message);
-    if (message.type === "desktop_agent.task") void runDesktopAgentTask(message.task);
-    if (message.type === "desktop_agent.action") void executeDesktopAgentAction(message.action);
+    if (message.type === "assistant.connected") {
+      if (message.sessionToken)
+        assistantSessionToken = String(message.sessionToken);
+      assistantConnectionId = String(message.connectionId ?? "");
+      publishDesktopMcpTools();
+      return;
+    }
+    if (message.type === "desktop.mcp.call") void runDesktopMcpCall(message);
+    if (
+      message.type === "desktop.mcp.cancel" &&
+      typeof message.requestId === "string"
+    )
+      desktopMcpCalls.get(message.requestId)?.abort();
+    if (message.type === "website_capture.start")
+      void captureEmbeddedPage(message).catch((error) =>
+        sendAssistant({
+          type: "website_capture.failed",
+          taskId: message.taskId,
+          message: error instanceof Error ? error.message : "桌面浏览失败",
+        }),
+      );
+    if (message.type === "website_capture.action_execute")
+      void executeDesktopAction(message);
+    if (message.type === "desktop_agent.task")
+      void runDesktopAgentTask(message.task);
+    if (message.type === "desktop_agent.action")
+      void executeDesktopAgentAction(message.action);
     if (message.type === "desktop_agent.stop") {
       desktopAgentTasks.delete(String(message.taskId ?? ""));
       desktopTaskTabs.delete(String(message.taskId ?? ""));
-      sendAssistant({ type: "desktop_agent.event", taskId: message.taskId, eventType: "failed", detail: String(message.reason ?? "桌面协作任务已停止") });
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId: message.taskId,
+        eventType: "failed",
+        detail: String(message.reason ?? "桌面协作任务已停止"),
+      });
     }
-    if (message.type === "website_capture.stop") sendAssistant({ type: "website_capture.failed", taskId: message.taskId, message: "用户停止了桌面浏览任务" });
+    if (message.type === "website_capture.stop")
+      sendAssistant({
+        type: "website_capture.failed",
+        taskId: message.taskId,
+        message: "用户停止了桌面浏览任务",
+      });
   };
-  assistantSocket.onclose = () => { assistantSocket = null; assistantSessionToken = ""; desktopTaskTabs.clear(); };
+  assistantSocket.onclose = () => {
+    for (const controller of desktopMcpCalls.values()) controller.abort();
+    desktopMcpCalls.clear();
+    assistantSocket = null;
+    assistantSessionToken = "";
+    assistantConnectionId = "";
+    desktopTaskTabs.clear();
+  };
   return { ok: true, message: "正在连接" };
 }
 
-ipcMain.handle("assistant.open-embedded", (_event, url: string) => openEmbeddedBrowser(url));
-ipcMain.handle("assistant.connect-embedded", (_event, input: { wssUrl: string; code: string }) => connectEmbeddedAssistant(input.wssUrl, input.code));
+ipcMain.handle("assistant.open-embedded", (_event, url: string) =>
+  openEmbeddedBrowser(url),
+);
+ipcMain.handle(
+  "assistant.connect-embedded",
+  (_event, input: { wssUrl: string; code: string }) =>
+    connectEmbeddedAssistant(input.wssUrl, input.code),
+);
 ipcMain.handle("assistant.disconnect-embedded", () => {
   sendAssistant({ type: "assistant.disconnect" });
   assistantSocket?.close();
   assistantSocket = null;
   assistantSessionToken = "";
+  assistantConnectionId = "";
+  for (const controller of desktopMcpCalls.values()) controller.abort();
+  desktopMcpCalls.clear();
   desktopTaskTabs.clear();
   return { ok: true };
 });
@@ -554,11 +1753,12 @@ if (!gotTheLock) {
 }
 
 function createWindow() {
+  mainWindowReady = false;
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    minWidth: 900,
-    minHeight: 600,
+    minWidth: 720,
+    minHeight: 480,
     show: false,
     frame: false,
     autoHideMenuBar: true,
@@ -571,7 +1771,24 @@ function createWindow() {
     },
     icon: join(__dirname, "../resources/icon.png"),
   });
+  const window = mainWindow;
   mainWindow.setMenuBarVisibility(false);
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch {
+      return { action: "deny" };
+    }
+    const origin = new URL(desktopWebsiteUrl()).origin;
+    if (target.origin === origin) {
+      if (!window.isDestroyed()) void window.loadURL(target.toString());
+      return { action: "deny" };
+    }
+    if (target.protocol === "https:" || target.protocol === "http:")
+      void shell.openExternal(target.toString());
+    return { action: "deny" };
+  });
 
   // Build application menu
   const menu = Menu.buildFromTemplate([
@@ -584,8 +1801,7 @@ function createWindow() {
         {
           label: "偏好设置…",
           accelerator: "CmdOrCtrl+,",
-          click: () =>
-            mainWindow?.webContents.send("navigate", "/settings"),
+          click: () => mainWindow?.webContents.send("navigate", "/settings"),
         },
         { type: "separator" },
         { label: "退出", accelerator: "CmdOrCtrl+Q", role: "quit" },
@@ -658,24 +1874,25 @@ function createWindow() {
   ]);
   Menu.setApplicationMenu(menu);
 
-  mainWindow.once("ready-to-show", () => {
-    mainWindow?.show();
+  window.once("ready-to-show", () => {
+    if (!window.isDestroyed()) {
+      mainWindowReady = true;
+      window.show();
+    }
+    void deliverPendingDesktopLoginCallbacks();
   });
 
-  mainWindow.on("close", (e) => {
-    if (process.platform === "darwin") {
-      e.preventDefault();
-      mainWindow?.hide();
+  observeMainWindowLifecycle(window, process.platform, () => {
+    if (mainWindow === window) {
+      mainWindow = null;
+      mainWindowReady = false;
     }
   });
 
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
-
-  const desktopHome = new URL("/desktop/", desktopWebsiteUrl());
-  void mainWindow.loadURL(desktopHome.toString());
-  if (!app.isPackaged && process.env.HELSTERA_DESKTOP_URL) mainWindow.webContents.openDevTools();
+  const desktopHome = new URL("/desktop-app/", desktopWebsiteUrl());
+  void window.loadURL(desktopHome.toString());
+  if (!app.isPackaged && process.env.HELSTERA_DESKTOP_URL)
+    window.webContents.openDevTools();
 }
 
 function createTray() {
@@ -687,10 +1904,13 @@ function createTray() {
   const contextMenu = Menu.buildFromTemplate([
     { label: "显示 Helstera", click: () => mainWindow?.show() },
     { type: "separator" },
-    { label: "新建项目", click: () => {
-      mainWindow?.show();
-      mainWindow?.webContents.send("new-project");
-    }},
+    {
+      label: "新建项目",
+      click: () => {
+        mainWindow?.show();
+        mainWindow?.webContents.send("new-project");
+      },
+    },
     { type: "separator" },
     { label: "退出", click: () => app.quit() },
   ]);
@@ -701,27 +1921,19 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  mcpRegistry = new McpRegistry(
+    join(app.getPath("userData"), "mcp-registry.json"),
+    safeStorage,
+  );
   app.setAsDefaultProtocolClient("helstera");
   configureAutoUpdates();
   createWindow();
-  const startupAuthUrl = process.argv.find((argument) => argument.startsWith(`${DESKTOP_AUTH_SCHEME}//`));
+  const startupAuthUrl = process.argv.find((argument) =>
+    argument.startsWith(`${DESKTOP_AUTH_SCHEME}//`),
+  );
   if (startupAuthUrl) receiveDesktopLoginUrl(startupAuthUrl);
   if (process.platform !== "linux") {
     createTray();
-  }
-});
-
-app.on("open-url", (event, url) => {
-  event.preventDefault();
-  receiveDesktopLoginUrl(url);
-});
-
-app.on("second-instance", (_event, commandLine) => {
-  const authUrl = commandLine.find((argument) => argument.startsWith(`${DESKTOP_AUTH_SCHEME}//`));
-  if (authUrl) receiveDesktopLoginUrl(authUrl);
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
   }
 });
 
@@ -740,6 +1952,7 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
+  void mcpRegistry?.closeAll();
   if (updateTimer) clearInterval(updateTimer);
   for (const timer of desktopLoginTimers.values()) clearTimeout(timer);
   desktopLoginTimers.clear();
@@ -748,4 +1961,7 @@ app.on("before-quit", () => {
   assistantSocket?.close();
   recorderWindow?.destroy();
   embeddedBrowserWindow?.destroy();
+  desktopCallbackServer?.close();
+  desktopCallbackServer = null;
+  desktopCallbackUrl = "";
 });

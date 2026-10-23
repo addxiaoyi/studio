@@ -207,7 +207,7 @@ describe("Login page", () => {
     await waitFor(() => expect(mockCancelBrowserLogin).toHaveBeenCalledOnce());
   });
 
-  it("renders the dedicated desktop login from the explicit desktop URL mode", async () => {
+  it("keeps normal login in the system browser for a desktop confirmation redirect", async () => {
     mockSearchParams.mockReturnValue(new URLSearchParams("desktop=1"));
     render(
       <AuthProvider>
@@ -216,9 +216,42 @@ describe("Login page", () => {
     );
 
     expect(
-      await screen.findByRole("button", { name: /^登录$/ }),
+      await screen.findByRole("button", { name: /send code|发送验证码/i }),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/email|邮箱/i)).toBeInTheDocument();
+    expect(screen.queryByText(/桌面登录组件未启动/)).not.toBeInTheDocument();
+  });
+
+  it("preserves the desktop confirmation redirect after browser sign-in", async () => {
+    mockSearchParams.mockReturnValue(
+      new URLSearchParams(
+        "desktop=1&redirect=%2Fauth%2Fdesktop-confirm%2F%3Fstate%3Dstate-1",
+      ),
+    );
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+    await screen.findByRole("button", { name: /send code|发送验证码/i });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /use password instead|使用密码登录/i,
+      }),
+    );
+    fireEvent.change(screen.getByLabelText(/email|邮箱/i), {
+      target: { value: "user@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/password|密码/i), {
+      target: { value: "MOCK_PASSWORD" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^(sign in|登录)$/i }));
+
+    await waitFor(() => {
+      expect(mockSignInLocalWithPassword).toHaveBeenCalledOnce();
+      expect(mockReplace).toHaveBeenCalledWith(
+        "/auth/desktop-confirm/?state=state-1",
+      );
+    });
   });
 });

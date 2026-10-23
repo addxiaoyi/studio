@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Publish desktop installers and update manifests to studio.0st.top"
+        description: Publish verified packages and manifests to studio.0st.top
         required: true
         default: true
         type: boolean
@@ -16,6 +16,43 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    name: Verify workspace and desktop login
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Loomic
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: Loomic/pnpm-lock.yaml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build shared contracts and typecheck
+        run: |
+          pnpm --filter @helstera/shared build
+          pnpm typecheck
+      - name: Test workspace
+        run: |
+          pnpm test
+          node --test apps/browser-assistant/test/*.test.mjs
+      - name: Build the static Web routes
+        run: pnpm --filter @helstera/web build
+      - name: Test release packaging and pinned hosts
+        run: |
+          python -m pip install -r scripts/requirements-desktop-release.txt
+          python scripts/test_release_desktop.py
+          test -s scripts/production-known-hosts
+
   build:
     name: Build ${{ matrix.name }}
     strategy:
@@ -24,21 +61,21 @@ jobs:
         include:
           - name: Windows x64
             os: windows-latest
-            args: "--win nsis"
+            args: --win nsis zip --x64
             artifact: windows-x64
           - name: macOS Intel
             os: macos-14
-            args: "--mac dmg zip --x64"
+            args: --mac dmg zip --x64
             artifact: macos-x64
           - name: macOS Apple Silicon
             os: macos-14
-            args: "--mac dmg zip --arm64"
+            args: --mac dmg zip --arm64
             artifact: macos-arm64
           - name: Linux x64
             os: ubuntu-latest
-            args: "--linux AppImage"
+            args: --linux AppImage --x64
             artifact: linux-x64
-
+    needs: verify
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -51,110 +88,98 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Resolve release version
-        shell: bash
-        env:
-          DESKTOP_TAG: ${{ github.ref_name }}
-        run: |
-          VERSION="${DESKTOP_TAG#desktop-v}"
-          if [[ "$VERSION" == "$DESKTOP_TAG" ]]; then VERSION="$(node -p "require('./apps/desktop/package.json').version")"; fi
-          echo "DESKTOP_VERSION=$VERSION" >> "$GITHUB_ENV"
-          node -e 'const fs=require("node:fs"); const p="apps/desktop/package.json"; const pkg=JSON.parse(fs.readFileSync(p,"utf8")); pkg.version=process.env.DESKTOP_VERSION; fs.writeFileSync(p, JSON.stringify(pkg,null,2)+"\n")'
-      - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
-      - name: Build shared package
+          cache: pnpm
+          cache-dependency-path: Loomic/pnpm-lock.yaml
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build shared contracts
         run: pnpm --filter @helstera/shared build
+      - name: Verify desktop and browser extension
+        run: |
+          pnpm --filter @helstera/desktop typecheck
+          pnpm --filter @helstera/desktop test
+          pnpm --filter @helstera/browser-assistant test
+          pnpm --filter @helstera/web exec vitest run test/desktop-login.test.tsx test/auth-callback.test.tsx test/desktop-callback-url.test.ts
       - name: Disable macOS signing auto-discovery
         if: runner.os == 'macOS'
         run: echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
-      - name: Build desktop package and updater metadata
-        run: pnpm --filter @helstera/desktop build -- ${{ matrix.args }} --publish never
-      - name: Prepare public downloads and updater feed
-        shell: bash
-        env:
-          DESKTOP_CHANNEL: ${{ matrix.artifact }}
-          DESKTOP_TAG: ${{ github.ref_name }}
-        run: |
-          VERSION="${DESKTOP_TAG#desktop-v}"
-          if [[ "$VERSION" == "$DESKTOP_TAG" ]]; then VERSION="$(node -p "require('./apps/desktop/package.json').version")"; fi
-          mkdir -p "desktop-release/downloads" "desktop-release/updates/${DESKTOP_CHANNEL}"
-
-          case "$DESKTOP_CHANNEL" in
-            windows-x64)
-              cp apps/desktop/release/*.exe "desktop-release/downloads/Helstera-${VERSION}-Windows-x64.exe"
-              cp apps/desktop/release/latest.yml "desktop-release/updates/${DESKTOP_CHANNEL}/latest.yml"
-              cp apps/desktop/release/*.exe apps/desktop/release/*.blockmap "desktop-release/updates/${DESKTOP_CHANNEL}/"
-              ;;
-            macos-x64)
-              cp "apps/desktop/release/Helstera-${VERSION}.dmg" "desktop-release/downloads/Helstera-${VERSION}-macOS-x64.dmg"
-              cp apps/desktop/release/latest-mac.yml "desktop-release/updates/${DESKTOP_CHANNEL}/latest-mac.yml"
-              cp apps/desktop/release/*.dmg apps/desktop/release/*.zip apps/desktop/release/*.blockmap "desktop-release/updates/${DESKTOP_CHANNEL}/"
-              ;;
-            macos-arm64)
-              cp "apps/desktop/release/Helstera-${VERSION}-arm64.dmg" "desktop-release/downloads/Helstera-${VERSION}-macOS-arm64.dmg"
-              cp apps/desktop/release/latest-mac.yml "desktop-release/updates/${DESKTOP_CHANNEL}/latest-mac.yml"
-              cp apps/desktop/release/*.dmg apps/desktop/release/*.zip apps/desktop/release/*.blockmap "desktop-release/updates/${DESKTOP_CHANNEL}/"
-              ;;
-            linux-x64)
-              cp apps/desktop/release/*.AppImage "desktop-release/downloads/Helstera-${VERSION}.AppImage"
-              cp apps/desktop/release/latest-linux.yml "desktop-release/updates/${DESKTOP_CHANNEL}/latest-linux.yml"
-              cp apps/desktop/release/*.AppImage apps/desktop/release/*.blockmap "desktop-release/updates/${DESKTOP_CHANNEL}/"
-              ;;
-          esac
-
-          test -n "$(find "desktop-release/updates/${DESKTOP_CHANNEL}" -maxdepth 1 -type f -print -quit)"
-          if [[ "$RUNNER_OS" == "macOS" ]]; then shasum -a 256 desktop-release/downloads/* > "desktop-release/downloads/SHA256SUMS-${DESKTOP_CHANNEL}.txt"; else sha256sum desktop-release/downloads/* > "desktop-release/downloads/SHA256SUMS-${DESKTOP_CHANNEL}.txt"; fi
+      - name: Build native package and updater metadata
+        run: pnpm --filter @helstera/desktop exec electron-builder ${{ matrix.args }} --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.artifact }}
           path: |
-            Loomic/desktop-release/downloads/*
-            Loomic/desktop-release/updates/${{ matrix.artifact }}/*
+            Loomic/apps/desktop/release/*.exe
+            Loomic/apps/desktop/release/*.zip
+            Loomic/apps/desktop/release/*.dmg
+            Loomic/apps/desktop/release/*.AppImage
+            Loomic/apps/desktop/release/*.blockmap
+            Loomic/apps/desktop/release/latest*.yml
           if-no-files-found: error
+          retention-days: 14
 
-  publish-server:
-    name: Publish installers and updater feeds
+  publish:
+    name: Publish packages and verify production routes
     needs: build
     if: ${{ github.event_name == 'push' || github.event.inputs.publish == 'true' }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/download-artifact@v4
         with:
           pattern: desktop-*
-          path: desktop-release
+          path: desktop-artifacts
           merge-multiple: false
-      - name: Upload versioned downloads and platform feeds
+      - name: Install release publisher dependencies
+        run: python -m pip install -r Loomic/scripts/requirements-desktop-release.txt
+      - name: Publish each platform through the pinned SSH publisher
         env:
           HELT_DEPLOY_HOST: ${{ secrets.HELT_DEPLOY_HOST }}
           HELT_DEPLOY_USER: ${{ secrets.HELT_DEPLOY_USER }}
-          SSHPASS: ${{ secrets.HELT_DEPLOY_PASSWORD }}
+          HELT_DEPLOY_PASSWORD: ${{ secrets.HELT_DEPLOY_PASSWORD }}
+          HELT_DEPLOY_KNOWN_HOSTS: ${{ github.workspace }}/Loomic/scripts/production-known-hosts
         run: |
-          test -n "$HELT_DEPLOY_HOST"
-          test -n "$HELT_DEPLOY_USER"
-          test -n "$SSHPASS"
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq sshpass
-          sshpass -e ssh -o StrictHostKeyChecking=no "$HELT_DEPLOY_USER@$HELT_DEPLOY_HOST" 'mkdir -p /www/helstera/apps/web/out/downloads/updates/windows-x64 /www/helstera/apps/web/out/downloads/updates/macos-x64 /www/helstera/apps/web/out/downloads/updates/macos-arm64 /www/helstera/apps/web/out/downloads/updates/linux-x64'
-          for artifact in desktop-release/*; do
-            downloads="$artifact/downloads"
-            [[ ! -d "$downloads" ]] || sshpass -e scp -o StrictHostKeyChecking=no "$downloads"/* "$HELT_DEPLOY_USER@$HELT_DEPLOY_HOST:/www/helstera/apps/web/out/downloads/"
-            updates="$artifact/updates"
-            [[ ! -d "$updates" ]] || find "$updates" -mindepth 2 -maxdepth 2 -type f -print0 | while IFS= read -r -d '' file; do
-              relative="${file#*/updates/}"
-              target_dir="/www/helstera/apps/web/out/downloads/updates/$(dirname "$relative")"
-              sshpass -e ssh -o StrictHostKeyChecking=no "$HELT_DEPLOY_USER@$HELT_DEPLOY_HOST" "mkdir -p '$target_dir'"
-              sshpass -e scp -o StrictHostKeyChecking=no "$file" "$HELT_DEPLOY_USER@$HELT_DEPLOY_HOST:$target_dir/"
-            done
+          set -euo pipefail
+          for platform in windows-x64 macos-x64 macos-arm64 linux-x64; do
+            python Loomic/scripts/release-desktop.py \
+              --platform "$platform" \
+              --skip-build \
+              --output-dir "$GITHUB_WORKSPACE/desktop-artifacts/desktop-$platform"
           done
-      - name: Verify updater manifests and installers
-        env:
-          DESKTOP_TAG: ${{ github.ref_name }}
+      - name: Verify desktop routes, callback routes, manifests, and download hashes
         run: |
-          DESKTOP_VERSION="${DESKTOP_TAG#desktop-v}"
-          if [[ "$DESKTOP_VERSION" == "$DESKTOP_TAG" ]]; then DESKTOP_VERSION="0.2.0"; fi
-          for feed in windows-x64/latest.yml macos-x64/latest-mac.yml macos-arm64/latest-mac.yml linux-x64/latest-linux.yml; do
-            curl --fail --location --silent --show-error --head "https://studio.0st.top/downloads/updates/$feed" | grep -i '^content-length:'
-          done
-          for asset in "Helstera-${DESKTOP_VERSION}.AppImage" "Helstera-${DESKTOP_VERSION}-Windows-x64.exe" "Helstera-${DESKTOP_VERSION}-macOS-x64.dmg" "Helstera-${DESKTOP_VERSION}-macOS-arm64.dmg"; do
-            curl --fail --location --silent --show-error --head "https://studio.0st.top/downloads/$asset" | grep -i '^content-length:'
-          done
+          set -euo pipefail
+          curl --fail --silent --show-error --output /dev/null https://studio.0st.top/desktop-app/
+          curl --fail --silent --show-error --output /dev/null 'https://studio.0st.top/auth/desktop-confirm/?state=release-check'
+          curl --fail --silent --show-error --output /dev/null 'https://studio.0st.top/auth/callback/?state=release-check'
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import urllib.request
+
+          version = json.load(open("Loomic/apps/desktop/package.json", encoding="utf-8"))["version"]
+          ref_name = os.environ.get("GITHUB_REF_NAME", "")
+          if ref_name.startswith("desktop-v") and ref_name.removeprefix("desktop-v") != version:
+              raise SystemExit(f"Tag {ref_name} does not match package version {version}")
+
+          for platform in ("windows-x64", "macos-x64", "macos-arm64", "linux-x64"):
+              manifest_url = f"https://studio.0st.top/downloads/desktop-release-{platform}.json"
+              with urllib.request.urlopen(manifest_url) as response:
+                  manifest = json.load(response)
+              if manifest["version"] != version:
+                  raise SystemExit(f"{platform} manifest has version {manifest['version']}, expected {version}")
+              for key in ("fileName", "portableFileName"):
+                  name = manifest.get(key)
+                  checksum = manifest.get("sha256" if key == "fileName" else "portableSha256")
+                  if not name:
+                      continue
+                  with urllib.request.urlopen(f"https://studio.0st.top/downloads/{name}") as response:
+                      digest = hashlib.sha256(response.read()).hexdigest()
+                  if digest.lower() != checksum.lower():
+                      raise SystemExit(f"SHA-256 mismatch for {name}")
+              print(f"verified {platform} {version}")
+          PY

@@ -1,20 +1,44 @@
 import { fillPageField, isCredentialAction, websiteActionReceipt } from "./action-safety.js";
+import { getReconnectDelay } from "./reconnect-policy.js";
 
 let socket = null;
+let connectionAccepted = false;
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+let userRequestedDisconnect = false;
+let lastActiveTabId = null;
+let lastActiveWindowId = null;
+let pairingTabId = null;
+let returnTabId = null;
+let returnWindowId = null;
+const CONNECT_TIMEOUT_MS = 15_000;
+const PAIRING_PAGE_PATH = "/desktop-browser-pair.html";
 let currentState = { connected: false, message: "未连接" };
 let pendingRecording = null;
 let recordingWaitResolve = null;
 const taskTabs = new Map();
 const consumedApprovalIds = new Set();
+const desktopAgentTasks = new Map();
 
 function setState(next) {
-  currentState = { ...currentState, ...next };
+  const state = next.connected === true && !connectionAccepted
+    ? { ...next, connected: false }
+    : next;
+  currentState = { ...currentState, ...state };
   chrome.runtime.sendMessage({ type: "assistant.state", state: currentState }).catch(() => undefined);
+  if (state.connected === false && (!socket || socket.readyState === WebSocket.CLOSED)) {
+    void scheduleReconnect();
+  }
 }
 
 async function connect(wssUrl, code, sessionToken) {
   if (socket && socket.readyState === WebSocket.OPEN) return { ...currentState, message: "已经连接" };
   const safeUrl = safeWssUrl(wssUrl);
+  connectionAccepted = false;
+  if (code) {
+    userRequestedDisconnect = false;
+    reconnectAttempt = 0;
+  }
   if (!safeUrl) return { connected: false, message: "只允许连接 Helstera 的 WSS 助手地址" };
   const separator = wssUrl.includes("?") ? "&" : "?";
   const credential = sessionToken
@@ -23,16 +47,112 @@ async function connect(wssUrl, code, sessionToken) {
   socket = new WebSocket(`${safeUrl}${separator}${credential}`);
   socket.onopen = async () => {
     setState({ connected: true, message: "已连接，等待浏览任务" });
-    socket.send(JSON.stringify({ type: "assistant.ready", browser: navigator.userAgent, platform: navigator.platform }));
+    socket.send(JSON.stringify({ type: "assistant.ready", browser: navigator.userAgent, platform: navigator.platform, clientKind: "browser-extension" }));
     await chrome.storage.local.set({ wssUrl });
   };
   socket.onmessage = (event) => {
     try { void handleServerMessage(JSON.parse(event.data)); } catch { setState({ message: "收到无法识别的服务器消息" }); }
   };
   socket.onerror = () => setState({ connected: false, message: "WSS 连接失败" });
-  socket.onclose = () => { socket = null; setState({ connected: false, message: "连接已断开" }); };
+  socket.onclose = (event) => {
+    socket = null;
+    if ([4001, 4004].includes(event.code)) {
+      userRequestedDisconnect = true;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      reconnectAttempt = 0;
+      connectionAccepted = false;
+      void chrome.storage.local.remove(["sessionToken"]);
+      setState({ connected: false, message: event.code === 4004 ? "连接已撤销，需要重新配对。" : "配对码已失效，请从桌面端重新发起。" });
+      return;
+    }
+    setState({ connected: false, message: "连接已断开，正在尝试恢复…" });
+  };
   return { connected: true, message: "正在连接" };
 }
+
+async function connectAndConfirm(wssUrl, code, sessionToken) {
+  const wasAccepted = connectionAccepted;
+  const startedAt = Date.now();
+  const response = await connect(wssUrl, code, sessionToken);
+  if (!response.connected) return response;
+  if (wasAccepted && connectionAccepted) return currentState;
+
+  while (Date.now() - startedAt < CONNECT_TIMEOUT_MS) {
+    if (connectionAccepted) return currentState;
+    if (!socket || socket.readyState === WebSocket.CLOSED) return currentState;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  socket?.close(4000, "Pairing timed out");
+  return { connected: false, message: "服务器未确认配对，请回到桌面重新发起。" };
+}
+
+async function scheduleReconnect() {
+  if (userRequestedDisconnect || reconnectTimer) return;
+  const stored = await chrome.storage.local.get(["wssUrl", "sessionToken"]);
+  if (!stored.wssUrl || !stored.sessionToken) return;
+
+  const delay = getReconnectDelay(reconnectAttempt);
+  if (delay === null) {
+    setState({ connected: false, message: "自动重连次数已用完，请从桌面端重新连接。" });
+    return;
+  }
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    reconnectAttempt += 1;
+    void connectAndConfirm(stored.wssUrl, "", stored.sessionToken);
+  }, delay);
+}
+
+function isPairingPage(value) {
+  try {
+    const url = new URL(String(value ?? ""));
+    const isSupportedOrigin = url.origin === "https://studio.0st.top"
+      || (url.protocol === "http:" && ["localhost:3000", "localhost:3103"].includes(url.host));
+    return isSupportedOrigin && url.pathname === PAIRING_PAGE_PATH;
+  } catch {
+    return false;
+  }
+}
+
+async function restorePreviousTab() {
+  const pairingId = pairingTabId;
+  const targetTab = returnTabId;
+  const targetWindow = returnWindowId;
+  pairingTabId = null;
+  returnTabId = null;
+  returnWindowId = null;
+  if (pairingId == null) return;
+
+  await chrome.tabs.remove(pairingId).catch(() => undefined);
+  if (targetTab != null && targetWindow != null) {
+    await chrome.tabs.update(targetTab, { active: true }).catch(() => undefined);
+    await chrome.windows.update(targetWindow, { focused: true }).catch(() => undefined);
+  }
+}
+
+chrome.tabs.onUpdated.addListener((tabId, _changeInfo, tab) => {
+  if (isPairingPage(tab.url)) pairingTabId = tabId;
+});
+
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  void chrome.tabs.get(tabId).then((tab) => {
+    if (!isPairingPage(tab.url)) {
+      lastActiveTabId = tabId;
+      lastActiveWindowId = tab.windowId;
+    }
+  }).catch(() => undefined);
+});
+
+void chrome.tabs.query({ active: true, lastFocusedWindow: true }).then((tabs) => {
+  const tab = tabs[0];
+  if (tab?.id != null && !isPairingPage(tab.url)) {
+    lastActiveTabId = tab.id;
+    lastActiveWindowId = tab.windowId;
+  }
+}).catch(() => undefined);
 
 function safeWssUrl(value) {
   try {
@@ -179,10 +299,147 @@ function needsApproval(action) {
 function safeHttpUrl(value) {
   try {
     const url = new URL(String(value ?? ""));
-    return ["http:", "https:"].includes(url.protocol) ? url.toString() : null;
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.toString() : null;
   } catch {
     return null;
   }
+}
+
+function safeEvidenceUrl(value) {
+  const safe = safeHttpUrl(value);
+  if (!safe) return null;
+  const url = new URL(safe);
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+async function hasCredentialControls(tabId) {
+  const [result] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => [...document.querySelectorAll("input")].some((input) => {
+      const hints = [input.type, input.name, input.id, input.autocomplete, input.getAttribute("aria-label"), input.placeholder]
+        .filter(Boolean).join(" ").toLowerCase().replace(/[\s_]+/g, "-");
+      return input.type === "password" || /password|passcode|one-time-code|otp|verification-code|auth-code|mfa/.test(hints);
+    }),
+  });
+  return result?.result === true;
+}
+
+function emitDesktopAgentEvent(taskId, eventType, fields = {}) {
+  send({ type: "desktop_agent.event", taskId, eventType, ...fields });
+}
+
+function desktopActionNeedsApproval(action) {
+  return ["click", "type", "native_click", "native_type", "start_recording", "stop_recording"].includes(action?.kind);
+}
+
+async function captureDesktopAgentEvidence(task, tabId) {
+  const [pageResult] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
+      const url = new URL(location.href);
+      url.search = "";
+      url.hash = "";
+      return {
+        url: url.toString(),
+        title: clean(document.title) || location.hostname,
+        description: clean(document.querySelector('meta[name="description"]')?.content ?? document.querySelector('meta[property="og:description"]')?.content),
+        headings: [...document.querySelectorAll("h1,h2,h3")].map((node) => clean(node.textContent)).filter(Boolean).slice(0, 16),
+        navigation: [...document.querySelectorAll("header a,nav a")].map((node) => clean(node.textContent)).filter(Boolean).slice(0, 24),
+      };
+    },
+  });
+  const page = pageResult?.result;
+  if (!page || !safeEvidenceUrl(page.url)) throw new Error("The active tab did not expose a safe HTTP(S) page snapshot.");
+  const credentialControls = await hasCredentialControls(tabId);
+  const screenshotBase64 = credentialControls ? undefined : (await screenshot(await chrome.tabs.get(tabId))).replace(/^data:image\/jpeg;base64,/i, "");
+  const summary = [page.title, page.description, ...(page.headings ?? []).slice(0, 5)].filter(Boolean).join("\n").slice(0, 8_000);
+  return {
+    summary: `${summary}${credentialControls ? "\nScreenshot omitted because the page contains a credential or verification control." : ""}`,
+    page: { ...page, url: safeEvidenceUrl(page.url) },
+    evidence: [{ kind: "page", sourceUrl: safeEvidenceUrl(page.url), title: page.title, excerpt: summary }],
+    ...(screenshotBase64 ? { screenshotBase64 } : {}),
+  };
+}
+
+async function startDesktopAgentTask(task) {
+  if (!task || task.executionMode !== "connected_browser_tab" || !Array.isArray(task.plannedActions)) {
+    throw new Error("The browser extension only accepts connected-tab Agent tasks.");
+  }
+  const tab = await activeTab();
+  if (!tab?.id || !safeHttpUrl(tab.url)) throw new Error("Select an HTTP(S) Edge/Chrome tab before starting the task.");
+  if (task.targetUrl) {
+    const target = safeHttpUrl(task.targetUrl);
+    if (!target) throw new Error("The requested target must be a credential-free HTTP(S) URL.");
+    if (new URL(target).origin !== new URL(tab.url).origin || new URL(target).pathname !== new URL(tab.url).pathname) {
+      await chrome.tabs.update(tab.id, { url: target });
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+  }
+  desktopAgentTasks.set(task.taskId, { task, tabId: tab.id, actions: [...task.plannedActions] });
+  emitDesktopAgentEvent(task.taskId, "plan", { progress: 5, detail: "Inspect the user-authorized browser tab and follow the approved task plan." });
+  emitDesktopAgentEvent(task.taskId, "step", { stepId: "inspect-page", progress: 30, detail: "Read the current page and check for credential controls." });
+  const result = await captureDesktopAgentEvidence(task, tab.id);
+  emitDesktopAgentEvent(task.taskId, "evidence", { stepId: "inspect-page", progress: 55, detail: "Page evidence captured from the authorized tab.", result });
+  await continueDesktopAgentTask(task.taskId);
+}
+
+async function continueDesktopAgentTask(taskId) {
+  const state = desktopAgentTasks.get(taskId);
+  if (!state) return;
+  const action = state.actions[0];
+  if (!action) {
+    const result = await captureDesktopAgentEvidence(state.task, state.tabId);
+    emitDesktopAgentEvent(taskId, "completed", { progress: 100, detail: "Browser task completed with evidence.", result });
+    desktopAgentTasks.delete(taskId);
+    return;
+  }
+  if (desktopActionNeedsApproval(action) && !action.approvalToken) {
+    emitDesktopAgentEvent(taskId, "approval_required", { action, detail: `Approval required before ${action.kind}.` });
+    return;
+  }
+  await executeDesktopAgentAction({ taskId, action });
+}
+
+async function executeDesktopAgentAction(message) {
+  const state = desktopAgentTasks.get(String(message.taskId ?? ""));
+  const action = message.action;
+  if (!state || !action || action.taskId !== state.task.taskId) throw new Error("The desktop task or action is no longer active.");
+  if (isCredentialAction(action)) throw new Error("Credential and verification fields are blocked.");
+  if (desktopActionNeedsApproval(action) && !action.approvalToken) throw new Error("This action requires an approval token.");
+  const tabId = state.tabId;
+  if (action.kind === "navigate") {
+    const target = safeHttpUrl(action.targetUrl);
+    if (!target) throw new Error("Only credential-free HTTP(S) navigation is allowed.");
+    await chrome.tabs.update(tabId, { url: target });
+  } else if (action.kind === "scroll") {
+    await chrome.scripting.executeScript({ target: { tabId }, func: (top) => window.scrollTo({ top, behavior: "instant" }), args: [Number(action.top) || 0] });
+  } else if (action.kind === "click") {
+    const selector = String(action.target ?? "");
+    if (!selector || selector.length > 500) throw new Error("The click selector is missing or too long.");
+    await chrome.scripting.executeScript({ target: { tabId }, func: (value) => {
+      const element = document.querySelector(value);
+      if (!(element instanceof HTMLElement)) throw new Error("The requested click target was not found.");
+      element.click();
+    }, args: [selector] });
+  } else if (action.kind === "type") {
+    const [execution] = await chrome.scripting.executeScript({ target: { tabId }, func: fillPageField, args: [{ selector: String(action.target ?? ""), value: String(action.value ?? "") }] });
+    if (!execution?.result?.ok) throw new Error(execution?.result?.message ?? "The requested field could not be filled.");
+  } else if (action.kind === "read_page" || action.kind === "capture_screen") {
+    // Evidence is collected again when the task finishes.
+  } else {
+    throw new Error(`Action ${String(action.kind)} is not supported by the browser extension.`);
+  }
+  if (state.actions[0]?.requestId === action.requestId) state.actions.shift();
+  emitDesktopAgentEvent(action.taskId, "progress", {
+    progress: 75,
+    detail: `Completed ${action.kind}.`,
+    ...(action.approvalId ? { approvalId: action.approvalId } : {}),
+    action,
+  });
+  await continueDesktopAgentTask(action.taskId);
 }
 
 async function executeApprovedAction(message) {
@@ -240,10 +497,47 @@ async function executeApprovedAction(message) {
 
 async function handleServerMessage(message) {
   if (message.type === "assistant.connected") {
+    connectionAccepted = true;
+    reconnectAttempt = 0;
     if (message.sessionToken) await chrome.storage.local.set({ sessionToken: message.sessionToken });
+    await restorePreviousTab();
     setState({ connected: true, message: "已连接，等待浏览任务" });
   }
   if (message.type === "website_capture.start") await captureTask(message);
+  if (message.type === "desktop_agent.task") {
+    try {
+      await startDesktopAgentTask(message.task);
+    } catch (error) {
+      const taskId = String(message.task?.taskId ?? "");
+      if (taskId) {
+        desktopAgentTasks.delete(taskId);
+        emitDesktopAgentEvent(taskId, "failed", { detail: error instanceof Error ? error.message : "Browser Agent task failed." });
+      }
+    }
+  }
+  if (message.type === "desktop_agent.action") {
+    try {
+      await executeDesktopAgentAction(message);
+    } catch (error) {
+      const taskId = String(message.action?.taskId ?? "");
+      desktopAgentTasks.delete(taskId);
+      emitDesktopAgentEvent(taskId, "failed", {
+        detail: error instanceof Error ? error.message : "Approved browser action failed.",
+        ...(message.action?.approvalId ? { approvalId: message.action.approvalId } : {}),
+        action: message.action,
+      });
+    }
+  }
+  if (message.type === "desktop_agent.action_denied") {
+    const taskId = String(message.taskId ?? "");
+    desktopAgentTasks.delete(taskId);
+    emitDesktopAgentEvent(taskId, "failed", { detail: String(message.reason ?? "The action was not approved.") });
+  }
+  if (message.type === "desktop_agent.stop") {
+    const taskId = String(message.taskId ?? "");
+    desktopAgentTasks.delete(taskId);
+    emitDesktopAgentEvent(taskId, "failed", { detail: String(message.reason ?? "The task was canceled.") });
+  }
   if (message.type === "assistant.pause") setState({ message: "已暂停，等待恢复" });
   if (message.type === "assistant.resume") setState({ message: "已连接，等待浏览任务" });
   if (message.type === "website_capture.stop") {
@@ -260,12 +554,22 @@ async function handleServerMessage(message) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "assistant.connect") {
-    void connect(message.wssUrl, message.code).then(sendResponse);
+    if (isPairingPage(sender.url) && sender.tab?.id != null) {
+      pairingTabId = sender.tab.id;
+      returnTabId = lastActiveTabId === pairingTabId ? null : lastActiveTabId;
+      returnWindowId = returnTabId == null ? null : lastActiveWindowId;
+    }
+    void connectAndConfirm(message.wssUrl, message.code).then(sendResponse);
     return true;
   }
   if (message.type === "assistant.disconnect") {
+    userRequestedDisconnect = true;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    reconnectAttempt = 0;
+    connectionAccepted = false;
     send({ type: "assistant.disconnect" });
     socket?.close(1000, "User disconnected");
     void chrome.storage.local.remove(["sessionToken"]);
@@ -283,5 +587,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 chrome.runtime.onStartup.addListener(async () => {
   const stored = await chrome.storage.local.get(["wssUrl", "sessionToken"]);
-  if (stored.wssUrl && stored.sessionToken) void connect(stored.wssUrl, "", stored.sessionToken);
+  if (stored.wssUrl && stored.sessionToken) void connectAndConfirm(stored.wssUrl, "", stored.sessionToken);
 });

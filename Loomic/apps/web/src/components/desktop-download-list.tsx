@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Download, MonitorDown, RefreshCw } from "lucide-react";
 
 const PLATFORMS = [
-  { id: "windows-x64", label: "Windows 免安装版", architecture: "x64", icon: Download },
+  { id: "windows-x64", label: "Windows 便携包", architecture: "x64", icon: Download },
   { id: "linux-x64", label: "Linux AppImage", architecture: "x64", icon: MonitorDown },
   { id: "macos-arm64", label: "macOS 安装包", architecture: "Apple Silicon", icon: Download },
   { id: "macos-x64", label: "macOS 安装包", architecture: "Intel", icon: Download },

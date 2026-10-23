@@ -8,11 +8,13 @@ const {
   mockExchangeLocalToken,
   mockExchangeDesktopLoginToken,
   mockFinishBrowserLogin,
+  mockAcceptSession,
 } = vi.hoisted(() => ({
   mockReplace: vi.fn(),
   mockExchangeLocalToken: vi.fn(),
   mockExchangeDesktopLoginToken: vi.fn(),
   mockFinishBrowserLogin: vi.fn().mockResolvedValue({ ok: true }),
+  mockAcceptSession: vi.fn(),
 }));
 let currentSearchParams = new URLSearchParams();
 
@@ -26,6 +28,10 @@ vi.mock("next/navigation", () => ({
 vi.mock("../src/lib/local-auth", () => ({
   exchangeLocalToken: mockExchangeLocalToken,
   exchangeDesktopLoginToken: mockExchangeDesktopLoginToken,
+}));
+
+vi.mock("../src/lib/auth-context", () => ({
+  useAuth: () => ({ acceptSession: mockAcceptSession }),
 }));
 
 import CallbackPage from "../src/app/auth/callback/page";
@@ -76,8 +82,9 @@ describe("Auth callback page", () => {
 
     await waitFor(() => {
       expect(mockExchangeDesktopLoginToken).toHaveBeenCalledWith("one-time");
+      expect(mockAcceptSession).toHaveBeenCalledWith({ access_token: "session-token" });
       expect(mockFinishBrowserLogin).toHaveBeenCalledWith(true);
-      expect(mockReplace).toHaveBeenCalledWith("/home");
+      expect(mockReplace).toHaveBeenCalledWith("/desktop-app/");
     });
   });
 

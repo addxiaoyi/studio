@@ -31,7 +31,6 @@ const fadeIn = {
 interface LoginFormProps {
   initialErrorMessage?: string | null;
   redirectTo?: string;
-  desktopMode?: boolean;
 }
 
 type DesktopLoginBridge = {
@@ -55,7 +54,6 @@ type DesktopLoginStatus =
 export function LoginForm({
   initialErrorMessage = null,
   redirectTo = "/home",
-  desktopMode = false,
 }: LoginFormProps) {
   const copy = t(useLocale()).authForm;
   const router = useRouter();
@@ -66,7 +64,7 @@ export function LoginForm({
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(initialErrorMessage);
-  const [isDesktopShell, setIsDesktopShell] = useState(desktopMode);
+  const [isDesktopShell, setIsDesktopShell] = useState(false);
   const [desktopLoginStatus, setDesktopLoginStatus] =
     useState<DesktopLoginStatus>("idle");
   const [desktopLoginError, setDesktopLoginError] = useState<string | null>(
@@ -75,9 +73,9 @@ export function LoginForm({
   const destination = getSafeRedirect(redirectTo);
 
   useEffect(() => {
+    // desktop=1 preserves the browser-to-desktop redirect; only Electron preload proves this is the desktop shell.
     setIsDesktopShell(
-      desktopMode ||
-        document.documentElement.dataset.helsteraDesktop === "true",
+      document.documentElement.dataset.helsteraDesktop === "true",
     );
     const bridge = (window as Window & { electronAPI?: DesktopLoginBridge })
       .electronAPI;
@@ -85,7 +83,7 @@ export function LoginForm({
     return bridge.onBrowserLoginState(({ status }) =>
       setDesktopLoginStatus(status),
     );
-  }, [desktopMode]);
+  }, []);
 
   useEffect(() => {
     if (mode === "code" && error?.includes("请刷新页面后使用邮箱验证码登录")) {

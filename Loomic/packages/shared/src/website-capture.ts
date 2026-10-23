@@ -63,7 +63,7 @@ export const createWebsiteCaptureRequestSchema = z.object({
   mode: websiteCaptureModeSchema,
   sessionId: z.string().uuid().optional(),
   pageLimit: z.number().int().min(1).max(5).default(3),
-  recordVideo: z.boolean().default(true),
+  recordVideo: z.boolean().default(false),
   followExternal: z.boolean().default(false),
   promo: websiteCapturePromoSchema.optional(),
   idempotencyKey: z.string().trim().min(1).max(160),

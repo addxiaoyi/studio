@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'">
+    <title>连接 Helstera 浏览器</title>
+    <style>
+      :root { color-scheme: light dark; font: 14px/1.6 system-ui, sans-serif; }
+      body { display: grid; min-height: 100vh; place-items: center; margin: 0; background: Canvas; color: CanvasText; }
+      main { width: min(440px, calc(100% - 40px)); padding: 26px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); border-radius: 10px; }
+      h1 { margin: 0 0 8px; font-size: 20px; }
+      p { margin: 0; color: color-mix(in srgb, CanvasText 68%, transparent); }
+      #pair-status { margin-top: 18px; }
+      [data-state="connected"] { color: #16835d; }
+      [data-state="failed"] { color: #bd3030; }
+    </style>
+    <script src="/desktop-browser-pair-cleanup.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <h1>连接 Helstera Desktop</h1>
+      <p>一次性配对码只用于建立浏览器助手连接，不会读取或发送 Cookie、密码、OTP 或浏览器存储。</p>
+      <p id="pair-status" role="status" aria-live="polite">正在检查 Helstera 浏览器助手…</p>
+    </main>
+  </body>
+</html>

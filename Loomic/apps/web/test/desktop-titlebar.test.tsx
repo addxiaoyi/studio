@@ -7,8 +7,9 @@ import { DesktopTitlebar } from "@/components/desktop-titlebar";
 const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/home",
-  useRouter: () => ({ push: mockPush }),
+  usePathname: () => "/desktop-app",
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: mockPush, replace: mockPush }),
 }));
 
 type NavigationState = { canGoBack: boolean; canGoForward: boolean };
@@ -67,11 +68,11 @@ describe("DesktopTitlebar", () => {
 
     expect(
       (
-        await screen.findByRole("link", { name: "Helstera 工作台" })
+        await screen.findByRole("link", { name: "Helstera Desktop Agent" })
       ).getAttribute("href"),
-    ).toBe("/home");
+    ).toBe("/desktop-app");
     expect(
-      screen.getByRole("link", { name: "工作台" }).getAttribute("aria-current"),
+      screen.getByRole("link", { name: "Agent" }).getAttribute("aria-current"),
     ).toBe("page");
     expect(
       (screen.getByRole("button", { name: "后退" }) as HTMLButtonElement)

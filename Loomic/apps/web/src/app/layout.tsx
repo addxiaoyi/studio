@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import Script from "next/script";
-import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
 import { getServerPreconnectUrl } from "@/lib/env";
 
@@ -10,8 +9,6 @@ import { PWAInstallPrompt } from "../components/pwa-install-prompt";
 import { DesktopTitlebar } from "../components/desktop-titlebar";
 
 import "./globals.css";
-
-const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -123,7 +120,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   const apiPreconnect = getServerPreconnectUrl();
   return (
-    <html lang="zh-CN" className={cn(geist.variable, "scroll-smooth")} suppressHydrationWarning>
+    <html lang="zh-CN" className={cn("scroll-smooth")} suppressHydrationWarning>
       <head>
         {apiPreconnect ? <link rel="preconnect" href={apiPreconnect} /> : null}
         <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />

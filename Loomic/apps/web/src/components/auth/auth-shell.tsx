@@ -24,6 +24,7 @@ interface AuthShellProps {
   description: string;
   features: readonly string[];
   children: ReactNode;
+  variant?: "default" | "desktop";
 }
 
 export function AuthShell({
@@ -31,14 +32,15 @@ export function AuthShell({
   description,
   features,
   children,
+  variant = "default",
 }: AuthShellProps) {
   const copy = t("zh-CN").authShell;
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className={`auth-shell ${variant === "desktop" ? "auth-shell--desktop" : ""}`}>
       {/* Brand panel — dark glass */}
       <aside
         aria-label={copy.brand}
-        className="relative hidden overflow-hidden bg-foreground px-16 text-background lg:flex lg:w-1/2 lg:flex-col lg:justify-center"
+        className="auth-shell__brand relative hidden overflow-hidden bg-foreground px-16 text-background lg:flex lg:w-1/2 lg:flex-col lg:justify-center"
       >
         <div
           className="pointer-events-none absolute -left-1/4 -top-1/4 h-[80%] w-[80%] rounded-full blur-[100px]"
@@ -99,7 +101,7 @@ export function AuthShell({
       </aside>
 
       {/* Form panel — wrapped in <main> for landmark structure */}
-      <main className="flex w-full items-center justify-center px-6 py-12 lg:w-1/2">
+      <main className="auth-shell__main flex w-full items-center justify-center px-6 py-12 lg:w-1/2">
         <div className="w-full max-w-sm">{children}</div>
       </main>
     </div>

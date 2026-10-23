@@ -73,6 +73,11 @@ export const videoGenerationPreferenceSchema = z.object({
   duration: z.number().int().min(1).optional(),
 });
 
+export const desktopExecutionContextSchema = z.object({
+  browserMode: z.enum(["isolated_browser", "connected_browser_tab"]),
+  executionMode: z.literal("automatic"),
+}).strict();
+
 export const runCreateRequestSchema = z.object({
   sessionId: sessionIdSchema,
   requestId: z.string().min(1).max(128).optional(),
@@ -85,6 +90,7 @@ export const runCreateRequestSchema = z.object({
   mentions: z.array(messageMentionSchema).optional(),
   accessToken: z.string().optional(),
   model: z.string().optional(),
+  desktopExecutionContext: desktopExecutionContextSchema.optional(),
 });
 
 export const runCreateResponseSchema = z.object({
@@ -294,6 +300,7 @@ export type ImageGenerationPreference = z.infer<
 export type VideoGenerationPreference = z.infer<
   typeof videoGenerationPreferenceSchema
 >;
+export type DesktopExecutionContext = z.infer<typeof desktopExecutionContextSchema>;
 export type ContentBlock = z.infer<typeof contentBlockSchema>;
 export type ChatSessionSummary = z.infer<typeof chatSessionSummarySchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;

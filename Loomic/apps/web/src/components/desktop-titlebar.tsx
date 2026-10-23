@@ -4,6 +4,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Clapperboard,
+  Blocks,
+  Code2,
   Copy,
   FilePlus2,
   Film,
@@ -12,12 +14,14 @@ import {
   Images,
   type LucideIcon,
   Minus,
+  PanelsTopLeft,
   Search,
   Settings,
   Square,
   X,
 } from "lucide-react";
 import Link from "next/link";
+import type { MouseEvent } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -44,37 +48,42 @@ type DesktopRoute = {
 };
 
 const routes: DesktopRoute[] = [
-  { href: "/home/", label: "工作台", group: "工作", icon: Home },
-  { href: "/create/", label: "文案创作", group: "创作", icon: FilePlus2 },
-  {
-    href: "/storyboard/",
-    label: "分镜工作台",
-    group: "创作",
-    icon: Clapperboard,
-  },
-  { href: "/feed/", label: "内容增长 Feed", group: "创作", icon: Film },
-  { href: "/projects/", label: "项目", group: "资源", icon: FolderKanban },
-  { href: "/assets/", label: "素材库", group: "资源", icon: Images },
+  { href: "/desktop-app/", label: "Agent", group: "任务", icon: Home },
+  { href: "/desktop-app/canvas/", label: "画布", group: "任务", icon: PanelsTopLeft },
+  { href: "/desktop-app/projects/", label: "项目", group: "资源", icon: FolderKanban },
+  { href: "/desktop-app/assets/", label: "素材库", group: "资源", icon: Images },
+  { href: "/desktop-app/mcp/", label: "高级能力", group: "设置", icon: Blocks },
   { href: "/gallery/", label: "作品集", group: "资源", icon: Images },
   { href: "/brand-kit/", label: "品牌资产", group: "资源", icon: Settings },
   { href: "/settings/", label: "设置", group: "管理", icon: Settings },
+  { href: "/storyboard/", label: "分镜工作台", group: "创作", icon: Clapperboard },
+  { href: "/feed/", label: "内容增长 Feed", group: "创作", icon: Film },
+  {
+    href: "/desktop-app/development/",
+    label: "本地开发与 MCP",
+    group: "辅助",
+    icon: Code2,
+  },
 ];
 
 function getDesktopApi() {
   return (window as Window & { electronAPI?: DesktopWindowApi }).electronAPI;
 }
 
-function matchesRoute(route: DesktopRoute, pathname: string | null) {
-  return Boolean(
-    pathname &&
-      (pathname === route.href.replace(/\/$/, "") ||
-        pathname.startsWith(route.href)),
-  );
+function matchesRoute(route: DesktopRoute, pathname: string | null, search: string) {
+  if (!pathname) return false;
+  const [routePath = "", routeSearch = ""] = route.href.split("?");
+  const normalizedPath = routePath.replace(/\/$/, "");
+  const matchesPath = normalizedPath === "/desktop-app"
+    ? pathname === normalizedPath
+    : pathname === normalizedPath || pathname.startsWith(`${normalizedPath}/`);
+  return matchesPath && (!routeSearch || routeSearch === search);
 }
 
 export function DesktopTitlebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [routeSearch, setRouteSearch] = useState("");
   const [api, setApi] = useState<DesktopWindowApi | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [history, setHistory] = useState<NavigationState>({
@@ -90,6 +99,10 @@ export function DesktopTitlebar() {
   useEffect(() => {
     const bridge = getDesktopApi();
     if (!bridge) return;
+    setRouteSearch(window.location.search.slice(1));
+    const syncRouteSearch = () => setRouteSearch(window.location.search.slice(1));
+    window.addEventListener("popstate", syncRouteSearch);
+    window.addEventListener("desktop:route-changed", syncRouteSearch);
     setApi(bridge);
     void bridge
       .getWindowState()
@@ -104,6 +117,8 @@ export function DesktopTitlebar() {
     );
     const stopHistoryUpdates = bridge.onNavigationState(setHistory);
     return () => {
+      window.removeEventListener("popstate", syncRouteSearch);
+      window.removeEventListener("desktop:route-changed", syncRouteSearch);
       stopWindowUpdates();
       stopHistoryUpdates();
     };
@@ -143,11 +158,22 @@ export function DesktopTitlebar() {
     );
   }, [query]);
 
-  if (!api) return null;
+  if (!api || pathname?.startsWith("/auth/")) return null;
 
   function navigateTo(href: string) {
-    router.push(href);
+    router.replace(href);
+    setRouteSearch(href.split("?")[1] ?? "");
+    window.dispatchEvent(new Event("desktop:route-changed"));
     setQuickOpen(false);
+  }
+
+  function navigateInWindow(
+    event: MouseEvent<HTMLAnchorElement>,
+    href: string,
+  ) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigateTo(href);
   }
 
   function closeQuickSwitcher() {
@@ -189,9 +215,9 @@ export function DesktopTitlebar() {
       >
         <div className="helstera-desktop-titlebar__start">
           <Link
-            href="/home/"
+            href="/desktop-app/"
             className="helstera-desktop-titlebar__brand"
-            aria-label="Helstera 工作台"
+            aria-label="Helstera Desktop Agent"
           >
             <HelsteraBrandMark size="sm" />
           </Link>
@@ -228,8 +254,9 @@ export function DesktopTitlebar() {
                 <Link
                   key={route.href}
                   href={route.href}
+                  onClick={(event) => navigateInWindow(event, route.href)}
                   aria-current={
-                    matchesRoute(route, pathname) ? "page" : undefined
+                    matchesRoute(route, pathname, routeSearch) ? "page" : undefined
                   }
                   title={route.label}
                 >
@@ -322,7 +349,7 @@ export function DesktopTitlebar() {
                   <button
                     type="button"
                     aria-current={
-                      matchesRoute(route, pathname) ? "page" : undefined
+                      matchesRoute(route, pathname, routeSearch) ? "page" : undefined
                     }
                     onClick={() => navigateTo(route.href)}
                   >

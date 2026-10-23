@@ -92,7 +92,7 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
     if (!desktopGoal.trim() || desktopCapabilities.length === 0 || taskBusy) return;
     setTaskBusy(true); setError(null);
     try {
-      await createDesktopAgentTask(accessToken, { goal: desktopGoal.trim(), role: desktopRole, capabilities: desktopCapabilities, ...(embeddedUrl.trim() ? { targetUrl: embeddedUrl.trim() } : {}), maxDurationSeconds: 300, pageLimit: 3 });
+      await createDesktopAgentTask(accessToken, { goal: desktopGoal.trim(), role: desktopRole, capabilities: desktopCapabilities, executionMode: "automatic", plannedActions: [], ...(embeddedUrl.trim() ? { targetUrl: embeddedUrl.trim() } : {}), maxDurationSeconds: 300, pageLimit: 3 });
       setDesktopGoal("");
       await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "桌面协作任务提交失败"); } finally { setTaskBusy(false); }

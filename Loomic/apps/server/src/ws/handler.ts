@@ -194,6 +194,9 @@ async function authenticateAndBind(
               : {}),
             ...(p.mentions !== undefined ? { mentions: p.mentions } : {}),
             ...(p.model !== undefined ? { model: p.model } : {}),
+            ...(p.desktopExecutionContext !== undefined
+              ? { desktopExecutionContext: p.desktopExecutionContext }
+              : {}),
           },
           agentRuns,
           connectionManager,

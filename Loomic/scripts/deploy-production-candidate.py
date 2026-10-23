@@ -47,6 +47,18 @@ def remote_run(client: paramiko.SSHClient, command: str, timeout: int = 180) -> 
     return output.strip()
 
 
+def configure_ssh(client: paramiko.SSHClient) -> None:
+    client.load_system_host_keys()
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+
+
+def validate_remote_temp(path: str, root: str, prefix: str) -> str:
+    candidate = pathlib.PurePosixPath(path)
+    if candidate.parent != pathlib.PurePosixPath(root) or not candidate.name.startswith(prefix):
+        raise RuntimeError("Remote temporary path is outside the deployment root.")
+    return str(candidate)
+
+
 def active_jobs(client: paramiko.SSHClient, root: str) -> list[dict[str, object]]:
     script = """import pg from 'pg';
 const db = new pg.Client({connectionString: process.env.DATABASE_URL});
@@ -64,6 +76,42 @@ def restore_backup(client: paramiko.SSHClient, root: str, backup: str) -> None:
     remote_run(client, command, timeout=300)
 
 
+def prepare_candidate_command(root: str, staging: str) -> str:
+    root_q = shlex.quote(root)
+    stage_q = shlex.quote(staging)
+    return (
+        f"set -eu; cd {root_q}; next={stage_q}/next; "
+        f"mkdir -p $next/apps/server $next/apps/desktop $next/apps/web $next/packages/shared; "
+        f"cp -a {stage_q}/candidate/apps/server/src $next/apps/server/src; "
+        f"cp -a {stage_q}/candidate/apps/server/package.json $next/apps/server/package.json; "
+        f"cp -a {stage_q}/candidate/apps/server/tsconfig.json $next/apps/server/tsconfig.json; "
+        f"cp -a {stage_q}/candidate/apps/desktop/package.json $next/apps/desktop/package.json; "
+        f"cp -a {stage_q}/candidate/apps/web/out $next/apps/web/out; "
+        f"cp -a {stage_q}/candidate/packages/shared/dist $next/packages/shared/dist; "
+        f"cp -a {stage_q}/candidate/package.json $next/package.json; "
+        f"cp -a {stage_q}/candidate/pnpm-lock.yaml $next/pnpm-lock.yaml; "
+        f"cp -a {stage_q}/candidate/pnpm-workspace.yaml $next/pnpm-workspace.yaml"
+    )
+
+
+def replace_live_command(root: str, staging: str) -> str:
+    root_q = shlex.quote(root)
+    stage_q = shlex.quote(staging)
+    return (
+        f"set -eu; cd {root_q}; "
+        f"rm -rf apps/server/src apps/web/out packages/shared/dist; "
+        f"mv {stage_q}/next/apps/server/src apps/server/src; "
+        f"mv {stage_q}/next/apps/web/out apps/web/out; "
+        f"mv {stage_q}/next/packages/shared/dist packages/shared/dist; "
+        f"cp {stage_q}/next/apps/server/package.json apps/server/package.json; "
+        f"cp {stage_q}/next/apps/server/tsconfig.json apps/server/tsconfig.json; "
+        f"cp {stage_q}/next/apps/desktop/package.json apps/desktop/package.json; "
+        f"cp {stage_q}/next/package.json package.json; "
+        f"cp {stage_q}/next/pnpm-lock.yaml pnpm-lock.yaml; "
+        f"cp {stage_q}/next/pnpm-workspace.yaml pnpm-workspace.yaml"
+    )
+
+
 def deploy(args: argparse.Namespace) -> None:
     archive = args.archive.resolve()
     if not archive.is_file():
@@ -76,11 +124,12 @@ def deploy(args: argparse.Namespace) -> None:
     jump = None
     if not args.direct:
         jump = paramiko.SSHClient()
-        jump.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_ssh(jump)
     target = paramiko.SSHClient()
-    target.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_ssh(target)
     backup = None
     staging = None
+    replacement_started = False
     try:
         if args.direct:
             target.connect(args.target_host, username=args.target_user, password=password, timeout=20)
@@ -102,8 +151,16 @@ def deploy(args: argparse.Namespace) -> None:
             raise RuntimeError("Active queued/running jobs detected; deployment stopped before upload")
 
         root_path = shlex.quote(args.root)
-        staging = remote_run(target, f"mktemp -d {root_path}/.helstera-candidate.XXXXXX")
-        backup = remote_run(target, f"mktemp -d {root_path}/.helstera-backup.XXXXXX")
+        staging = validate_remote_temp(
+            remote_run(target, f"mktemp -d {root_path}/.helstera-candidate.XXXXXX"),
+            args.root,
+            ".helstera-candidate.",
+        )
+        backup = validate_remote_temp(
+            remote_run(target, f"mktemp -d {root_path}/.helstera-backup.XXXXXX"),
+            args.root,
+            ".helstera-backup.",
+        )
         print("BACKUP", backup, flush=True)
         print("LOCAL_SHA256", local_hash, flush=True)
 
@@ -120,38 +177,45 @@ def deploy(args: argparse.Namespace) -> None:
             f"if test -d {root}/apps/web/out/downloads; then "
             f"cp -an {root}/apps/web/out/downloads/. {stage}/candidate/apps/web/out/downloads/; fi",
         )
-        remote_run(target, f"test -f {stage}/candidate/apps/web/out/index.html && test -f {stage}/candidate/apps/web/out/download/index.html && test -f {stage}/candidate/apps/web/out/downloads/Helstera-0.1.0.AppImage && test -f {stage}/candidate/apps/desktop/package.json && test -d {stage}/candidate/apps/web/out/_next/static && test -f {stage}/candidate/RELEASE-MANIFEST.json")
+        required_candidate_files = (
+            "apps/web/out/index.html",
+            "apps/web/out/desktop-app/index.html",
+            "apps/desktop/package.json",
+            "apps/server/src/local-db/migrate.ts",
+            "apps/server/src/local-db/migrations/20261023000001_desktop_mcp_tool_calls.sql",
+            "apps/server/src/local-db/migrations/20261023000002_desktop_agent_canvas_link.sql",
+            "RELEASE-MANIFEST.json",
+        )
+        candidate_checks = " && ".join(
+            f"test -f {shlex.quote(staging + '/candidate/' + path)}"
+            for path in required_candidate_files
+        )
+        remote_run(
+            target,
+            f"test -d {stage}/candidate/apps/web/out/_next/static && {candidate_checks}",
+        )
         remote_run(
             target,
             f"cd {root} && tar -czf {backup_q}/current.tgz apps/server/src apps/server/package.json apps/server/tsconfig.json apps/desktop/package.json apps/web/out packages/shared/dist package.json pnpm-lock.yaml pnpm-workspace.yaml",
             timeout=300,
         )
-
+        database_dump = backup + "/database.dump"
+        database_dump_q = shlex.quote(database_dump)
         remote_run(
             target,
-            f"set -eu; cd {root}; "
-            f"rm -rf .codex-next; mkdir -p .codex-next/apps/server .codex-next/apps/desktop .codex-next/apps/web .codex-next/packages/shared; "
-            f"cp -a {stage}/candidate/apps/server/src .codex-next/apps/server/src; "
-            f"cp -a {stage}/candidate/apps/server/package.json .codex-next/apps/server/package.json; "
-            f"cp -a {stage}/candidate/apps/server/tsconfig.json .codex-next/apps/server/tsconfig.json; "
-            f"cp -a {stage}/candidate/apps/desktop/package.json .codex-next/apps/desktop/package.json; "
-            f"cp -a {stage}/candidate/apps/web/out .codex-next/apps/web/out; "
-            f"cp -a {stage}/candidate/packages/shared/dist .codex-next/packages/shared/dist; "
-            f"cp -a {stage}/candidate/package.json .codex-next/package.json; "
-            f"cp -a {stage}/candidate/pnpm-lock.yaml .codex-next/pnpm-lock.yaml; "
-            f"cp -a {stage}/candidate/pnpm-workspace.yaml .codex-next/pnpm-workspace.yaml; "
-            f"rm -rf apps/server/src apps/web/out packages/shared/dist; "
-            f"mv .codex-next/apps/server/src apps/server/src; "
-            f"mv .codex-next/apps/web/out apps/web/out; "
-            f"mv .codex-next/packages/shared/dist packages/shared/dist; "
-            f"cp .codex-next/apps/server/package.json apps/server/package.json; "
-            f"cp .codex-next/apps/server/tsconfig.json apps/server/tsconfig.json; "
-            f"cp .codex-next/apps/desktop/package.json apps/desktop/package.json; "
-            f"cp .codex-next/package.json package.json; cp .codex-next/pnpm-lock.yaml pnpm-lock.yaml; cp .codex-next/pnpm-workspace.yaml pnpm-workspace.yaml; "
-            f"rm -rf .codex-next",
-            timeout=300,
+            f"set -eu; cd {root}; set -a; . ./.env.local; set +a; "
+            f"test -n \"${{DATABASE_URL:-}}\"; "
+            f"pg_dump --format=custom --no-owner --no-acl --file={database_dump_q} \"$DATABASE_URL\"; "
+            f"pg_restore --list {database_dump_q} >/dev/null; "
+            f"sha256sum {database_dump_q} > {shlex.quote(database_dump + '.sha256')}; "
+            f"cat {shlex.quote(database_dump + '.sha256')}",
+            timeout=900,
         )
-        remote_run(target, f"cd {root} && pnpm install --no-frozen-lockfile", timeout=600)
+
+        remote_run(target, prepare_candidate_command(args.root, staging), timeout=300)
+        replacement_started = True
+        remote_run(target, replace_live_command(args.root, staging), timeout=300)
+        remote_run(target, f"cd {root} && pnpm install --frozen-lockfile", timeout=600)
         remote_run(target, f"cd {root}/apps/server && node --env-file=../../.env.local --import tsx ./src/local-db/migrate.ts", timeout=300)
         remote_run(target, f"pm2 restart helstera-worker --kill-timeout 1200000 && pm2 restart helstera-server --kill-timeout 30000 && pm2 save", timeout=300)
         remote_run(target, "nginx -t && systemctl reload nginx", timeout=60)
@@ -161,9 +225,9 @@ def deploy(args: argparse.Namespace) -> None:
         print("HEALTH", health, flush=True)
         print("PUBLIC_HEALTH", public_health, flush=True)
         print("PUBLIC_CANVAS_HTML_SHA256", public_html_hash, flush=True)
-        print("DEPLOYED", json.dumps({"target": args.target_host, "root": args.root, "backup": backup, "sha256": local_hash}), flush=True)
+        print("DEPLOYED", json.dumps({"target": args.target_host, "root": args.root, "backup": backup, "databaseBackup": database_dump, "sha256": local_hash}), flush=True)
     except Exception:
-        if backup:
+        if backup and replacement_started:
             try:
                 print("ROLLBACK", restore_backup(target, args.root, backup), flush=True)
                 remote_run(target, "pm2 restart helstera-worker --kill-timeout 1200000 && pm2 restart helstera-server --kill-timeout 30000", timeout=300)
@@ -172,12 +236,11 @@ def deploy(args: argparse.Namespace) -> None:
         raise
     finally:
         if target.get_transport() and target.get_transport().is_active():
-            for temporary_path in (staging, backup):
-                if temporary_path:
-                    try:
-                        remote_run(target, f"rm -rf {shlex.quote(temporary_path)}", timeout=120)
-                    except Exception as cleanup_error:
-                        print("CLEANUP_FAILED", str(cleanup_error), file=sys.stderr, flush=True)
+            if staging:
+                try:
+                    remote_run(target, f"rm -rf {shlex.quote(staging)}", timeout=120)
+                except Exception as cleanup_error:
+                    print("STAGING_CLEANUP_FAILED", str(cleanup_error), file=sys.stderr, flush=True)
             target.close()
         if jump is not None and jump.get_transport() and jump.get_transport().is_active():
             jump.close()

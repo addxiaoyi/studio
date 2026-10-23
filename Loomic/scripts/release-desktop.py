@@ -74,6 +74,16 @@ def desktop_version(root: pathlib.Path) -> str:
     return version
 
 
+def installer_pattern(target: str, version: str) -> str:
+    patterns = {
+        "windows-x64": f"Helstera-Setup-{version}-Windows-x64.exe",
+        "macos-x64": f"Helstera-{version}-mac-x64.dmg",
+        "macos-arm64": f"Helstera-{version}-mac-arm64.dmg",
+        "linux-x64": "*.AppImage",
+    }
+    return patterns[target]
+
+
 def ensure_native_host(target: str) -> None:
     expected = {
         "windows-x64": ("Windows", "x86_64"),
@@ -156,12 +166,6 @@ def files_for_release(root: pathlib.Path, target: str, version: str, stage: path
         "macos-arm64": f"Helstera-{version}-macOS-arm64.dmg",
         "linux-x64": f"Helstera-{version}.AppImage",
     }
-    installer_patterns = {
-        "windows-x64": f"Helstera-Setup-{version}-Windows-x64.exe",
-        "macos-x64": f"Helstera-{version}.dmg",
-        "macos-arm64": f"Helstera-{version}-arm64.dmg",
-        "linux-x64": "*.AppImage",
-    }
     manifest_names = {
         "windows-x64": "latest.yml",
         "macos-x64": "latest-mac.yml",
@@ -169,9 +173,10 @@ def files_for_release(root: pathlib.Path, target: str, version: str, stage: path
         "linux-x64": "latest-linux.yml",
     }
 
-    installer_matches = sorted(path for path in release.glob(installer_patterns[target]) if not path.name.endswith(".blockmap"))
+    expected_installer = installer_pattern(target, version)
+    installer_matches = sorted(path for path in release.glob(expected_installer) if not path.name.endswith(".blockmap"))
     if len(installer_matches) != 1:
-        raise RuntimeError(f"Expected one installer matching {installer_patterns[target]} in {release}")
+        raise RuntimeError(f"Expected one installer matching {expected_installer} in {release}")
     public_installer = downloads / installer_names[target]
     shutil.copy2(installer_matches[0], public_installer)
     portable_installer: pathlib.Path | None = None

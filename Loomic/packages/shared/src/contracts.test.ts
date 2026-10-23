@@ -118,6 +118,40 @@ describe("@helstera/shared contracts", () => {
     });
   });
 
+  it("preserves a validated desktop execution context", () => {
+    const request = runCreateRequestSchema.parse({
+      sessionId: "session_123",
+      conversationId: "conversation_123",
+      prompt: "Summarize this page",
+      desktopExecutionContext: {
+        browserMode: "connected_browser_tab",
+        executionMode: "automatic",
+      },
+    });
+
+    expect(request.desktopExecutionContext).toEqual({
+      browserMode: "connected_browser_tab",
+      executionMode: "automatic",
+    });
+    expect(() => runCreateRequestSchema.parse({
+      sessionId: "session_123",
+      conversationId: "conversation_123",
+      prompt: "Summarize this page",
+      desktopExecutionContext: { browserMode: "connected_browser_tab", executionMode: "manual" },
+    })).toThrow();
+  });
+
+  it("does not start website recording unless it was requested", () => {
+    const websiteRequestSchema = getExportedSchema("createWebsiteCaptureRequestSchema");
+    const parsed = websiteRequestSchema.parse({
+      url: "https://example.com",
+      mode: "isolated",
+      idempotencyKey: "desktop-task-1",
+    });
+
+    expect(parsed.recordVideo).toBe(false);
+  });
+
   it("accepts sessionId and conversationId for run creation", () => {
     const request = runCreateRequestSchema.parse({
       sessionId: "session_123",

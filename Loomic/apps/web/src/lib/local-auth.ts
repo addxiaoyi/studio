@@ -56,12 +56,41 @@ export async function exchangeLocalToken(token: string) {
   return (await response.json()) as { access_token: string; user: { id: string; email: string } };
 }
 
-export async function confirmDesktopLogin(state: string): Promise<string> {
+export function isDesktopCallbackUrl(value: string, state: string): boolean {
+  try {
+    const callback = new URL(value);
+    const isProtocolHandler =
+      callback.protocol === "helstera:" &&
+      callback.hostname === "auth" &&
+      callback.pathname === "/callback" &&
+      !callback.port;
+    const isLoopbackHandler =
+      callback.protocol === "http:" &&
+      callback.hostname === "127.0.0.1" &&
+      callback.pathname === "/callback" &&
+      callback.port !== "";
+    const hasNoCredentials = !callback.username && !callback.password;
+    const hasValidToken = /^[A-Za-z0-9_-]{43}$/.test(
+      callback.searchParams.get("desktop_token") ?? "",
+    );
+    return (
+      (isProtocolHandler || isLoopbackHandler) &&
+      hasNoCredentials &&
+      callback.hash === "" &&
+      callback.searchParams.get("state") === state &&
+      hasValidToken
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function confirmDesktopLogin(state: string, callbackUrl?: string): Promise<string> {
   const response = await localAuthFetch("/api/local-auth/desktop-confirm", {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ state }),
+    body: JSON.stringify({ state, callbackUrl }),
   });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
@@ -70,11 +99,10 @@ export async function confirmDesktopLogin(state: string): Promise<string> {
 
   const body = await response.json() as { callbackUrl?: unknown };
   if (typeof body.callbackUrl !== "string") throw new Error("桌面登录回调无效，请重新发起。");
-  const callback = new URL(body.callbackUrl);
-  if (callback.protocol !== "helstera:" || callback.hostname !== "auth" || callback.pathname !== "/callback" || callback.searchParams.get("state") !== state || !callback.searchParams.has("desktop_token")) {
+  if (!isDesktopCallbackUrl(body.callbackUrl, state)) {
     throw new Error("桌面登录回调地址校验失败。");
   }
-  return callback.toString();
+  return new URL(body.callbackUrl).toString();
 }
 
 export async function exchangeDesktopLoginToken(token: string) {

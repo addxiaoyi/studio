@@ -31,6 +31,7 @@ export function PWAInstallPrompt() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if ("electronAPI" in window) return;
     // Already dismissed recently?
     const storage = getStorage();
     const lastDismissed = Number(storage?.getItem(STORAGE_KEY));

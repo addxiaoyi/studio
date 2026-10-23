@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef } from "react";
 
 import { LoadingScreen } from "../../../components/loading-screen";
+import { useAuth } from "../../../lib/auth-context";
 import {
   exchangeDesktopLoginToken,
   exchangeLocalToken,
@@ -16,6 +17,7 @@ function loginErrorUrl(error: string): string {
 function AuthCallbackPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { acceptSession } = useAuth();
   const started = useRef(false);
 
   useEffect(() => {
@@ -39,15 +41,16 @@ function AuthCallbackPageContent() {
       /^[A-Za-z0-9_-]{43}$/.test(desktopState)
     ) {
       void exchangeDesktopLoginToken(desktopToken)
-        .then(() => {
-          void (
+        .then(async (session) => {
+          acceptSession(session);
+          await (
             window as Window & {
               electronAPI?: {
                 finishBrowserLogin: (success: boolean) => Promise<unknown>;
               };
             }
           ).electronAPI?.finishBrowserLogin(true);
-          router.replace("/home");
+          router.replace(desktopState ? "/desktop-app/" : "/home/");
         })
         .catch(() => {
           void (
@@ -69,7 +72,7 @@ function AuthCallbackPageContent() {
       return;
     }
     router.replace(loginErrorUrl("local_auth_callback_required"));
-  }, [router, searchParams]);
+  }, [acceptSession, router, searchParams]);
 
   return <LoadingScreen />;
 }
