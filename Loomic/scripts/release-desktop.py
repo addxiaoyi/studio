@@ -319,20 +319,45 @@ def version_compare(left: str, right: str) -> int:
     return (left_parts > right_parts) - (left_parts < right_parts)
 
 
-def verify_version_is_newer(target: str, version: str) -> None:
-    url = f"https://studio.0st.top/downloads/desktop-release-{target}.json"
+def public_release_version(url: str, manifest_format: str) -> str | None:
     request = urllib.request.Request(url, headers={"Cache-Control": "no-cache"})
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
-            current = json.load(response)
+            content_type = response.headers.get_content_type()
+            body = response.read()
     except urllib.error.HTTPError as error:
         if error.code == 404:
-            return
-        raise RuntimeError(f"Cannot check current public desktop version: HTTP {error.code}") from error
+            return None
+        raise RuntimeError(f"Cannot check current public desktop version: HTTP {error.code} at {url}") from error
     except urllib.error.URLError as error:
-        raise RuntimeError(f"Cannot check current public desktop version: {error}") from error
-    current_version = current.get("version") if isinstance(current, dict) else None
-    if isinstance(current_version, str) and version_compare(version, current_version) <= 0:
+        raise RuntimeError(f"Cannot check current public desktop version at {url}: {error}") from error
+
+    if content_type == "text/html":
+        return None
+
+    try:
+        current = json.loads(body) if manifest_format == "json" else yaml.safe_load(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, yaml.YAMLError) as error:
+        raise RuntimeError(f"The public desktop version manifest is malformed: {url}") from error
+
+    if not isinstance(current, dict) or not isinstance(current.get("version"), str):
+        raise RuntimeError(f"The public desktop version manifest has no valid version: {url}")
+    return current["version"]
+
+
+def verify_version_is_newer(target: str, version: str) -> None:
+    updater_manifests = {
+        "windows-x64": "latest.yml",
+        "macos-x64": "latest-mac.yml",
+        "macos-arm64": "latest-mac.yml",
+        "linux-x64": "latest-linux.yml",
+    }
+    manifest_url = f"https://studio.0st.top/downloads/desktop-release-{target}.json"
+    current_version = public_release_version(manifest_url, "json")
+    if current_version is None:
+        updater_url = f"https://studio.0st.top/downloads/updates/{target}/{updater_manifests[target]}"
+        current_version = public_release_version(updater_url, "yaml")
+    if current_version and version_compare(version, current_version) <= 0:
         raise RuntimeError(f"Version {version} is not newer than the published {target} version {current_version}; bump apps/desktop/package.json first")
 
 

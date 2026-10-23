@@ -1,6 +1,8 @@
 import importlib.util
 import pathlib
 import unittest
+from email.message import Message
+from unittest.mock import patch
 
 import yaml
 
@@ -10,6 +12,22 @@ SPEC = importlib.util.spec_from_file_location("release_desktop", SCRIPT)
 release_desktop = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(release_desktop)
+
+
+class FakeResponse:
+    def __init__(self, content_type: str, body: bytes) -> None:
+        self.headers = Message()
+        self.headers["Content-Type"] = content_type
+        self.body = body
+
+    def read(self) -> bytes:
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
 
 
 class ReleasePathTests(unittest.TestCase):
@@ -52,6 +70,43 @@ class ReleasePathTests(unittest.TestCase):
         self.assertFalse(allowed["@google/genai"])
         self.assertFalse(allowed["protobufjs"])
         self.assertTrue(all(type(value) is bool for value in allowed.values()))
+
+
+class PublicVersionTests(unittest.TestCase):
+    def response(self, content_type: str, body: bytes) -> FakeResponse:
+        return FakeResponse(content_type, body)
+
+    def test_missing_json_and_updater_html_allow_initial_platform_release(self) -> None:
+        with patch.object(
+            release_desktop.urllib.request,
+            "urlopen",
+            side_effect=[
+                self.response("text/html", b"<!doctype html><html></html>"),
+                self.response("text/html", b"<!doctype html><html></html>"),
+            ],
+        ):
+            release_desktop.verify_version_is_newer("macos-x64", "0.2.14")
+
+    def test_existing_updater_manifest_blocks_a_downgrade_when_json_is_missing(self) -> None:
+        with patch.object(
+            release_desktop.urllib.request,
+            "urlopen",
+            side_effect=[
+                self.response("text/html", b"<!doctype html><html></html>"),
+                self.response("application/octet-stream", b"version: 0.2.15\n"),
+            ],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "not newer"):
+                release_desktop.verify_version_is_newer("macos-x64", "0.2.14")
+
+    def test_malformed_json_manifest_fails_closed(self) -> None:
+        with patch.object(
+            release_desktop.urllib.request,
+            "urlopen",
+            return_value=self.response("application/json", b"not json"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "malformed"):
+                release_desktop.verify_version_is_newer("windows-x64", "0.2.14")
 
 
 if __name__ == "__main__":

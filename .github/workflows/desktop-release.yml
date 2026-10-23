@@ -8,6 +8,11 @@ on:
         required: true
         default: true
         type: boolean
+      platforms:
+        description: Comma-separated platform identifiers to build and publish
+        required: true
+        default: windows-x64,macos-x64,macos-arm64,linux-x64
+        type: string
   push:
     tags:
       - "desktop-v*"
@@ -53,6 +58,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.name }}
+    if: ${{ github.event_name != 'workflow_dispatch' || contains(github.event.inputs.platforms, matrix.artifact) }}
     strategy:
       fail-fast: false
       matrix:
@@ -140,9 +146,11 @@ jobs:
           HELT_DEPLOY_USER: ${{ secrets.HELT_DEPLOY_USER }}
           HELT_DEPLOY_PASSWORD: ${{ secrets.HELT_DEPLOY_PASSWORD }}
           HELT_DEPLOY_KNOWN_HOSTS: ${{ github.workspace }}/Loomic/scripts/production-known-hosts
+          RELEASE_PLATFORMS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.platforms || 'windows-x64,macos-x64,macos-arm64,linux-x64' }}
         run: |
           set -euo pipefail
-          for platform in windows-x64 macos-x64 macos-arm64 linux-x64; do
+          IFS=',' read -r -a platforms <<< "$RELEASE_PLATFORMS"
+          for platform in "${platforms[@]}"; do
             python Loomic/scripts/release-desktop.py \
               --platform "$platform" \
               --skip-build \
