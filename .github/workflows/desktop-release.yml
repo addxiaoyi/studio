@@ -146,6 +146,7 @@ jobs:
             python Loomic/scripts/release-desktop.py \
               --platform "$platform" \
               --skip-build \
+              --direct \
               --output-dir "$GITHUB_WORKSPACE/desktop-artifacts/desktop-$platform"
           done
       - name: Verify desktop routes, callback routes, manifests, and download hashes

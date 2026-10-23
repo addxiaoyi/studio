@@ -356,17 +356,21 @@ def release(args: argparse.Namespace) -> None:
             print(f"Would publish {version}, updater feed and download manifest for {args.platform}")
             return
 
+        print(f"Checking published version for {args.platform}...", flush=True)
         verify_version_is_newer(args.platform, version)
 
         password = os.environ.get("HELT_DEPLOY_PASSWORD")
         if not password:
             raise RuntimeError("Set HELT_DEPLOY_PASSWORD in the environment before publishing.")
+        print(f"Connecting to the pinned production host for {args.platform}...", flush=True)
         target, jump = connect_target(password, args.direct)
         remote_stage = f"{DOWNLOAD_ROOT}/.release-{uuid.uuid4().hex}"
         sftp = target.open_sftp()
         try:
             ensure_remote_dir(sftp, remote_stage)
+            print(f"Uploading {len(files)} release files for {args.platform}...", flush=True)
             publish_files(sftp, stage, remote_stage, args.platform, files, updater_manifest, release_manifest)
+            print(f"Verifying public downloads for {args.platform}...", flush=True)
             verify_public_installer(files, stage)
         finally:
             clean_remote_stage(sftp, stage, remote_stage, args.platform, files)
