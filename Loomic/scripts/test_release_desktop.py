@@ -27,8 +27,8 @@ class ReleasePathTests(unittest.TestCase):
         self.assertEqual(result, (self.root / "apps/desktop/release-candidates/0.2.2").resolve())
 
     def test_absolute_paths_remain_absolute(self) -> None:
-        stage = pathlib.Path("C:/tmp/stage")
-        output = pathlib.Path("C:/tmp/build")
+        stage = pathlib.Path.cwd() / "tmp" / "stage"
+        output = pathlib.Path.cwd() / "tmp" / "build"
 
         self.assertEqual(release_desktop.resolve_stage_path(self.root, stage), stage.resolve())
         self.assertEqual(release_desktop.resolve_build_output(self.root, output), output.resolve())
