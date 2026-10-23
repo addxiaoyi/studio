@@ -19,19 +19,12 @@ overrides:
   picomatch@>=2 <2.3.2: 2.3.2
   postcss@>=8 <8.5.18: 8.5.18
 
-ignoredBuiltDependencies:
-  - '@biomejs/biome'
-  - msw
-
-onlyBuiltDependencies:
-  - esbuild
-  - sharp
-
 allowBuilds:
-  '@biomejs/biome': set this to true or false
-  '@google/genai': set this to true or false
-  electron: set this to true or false
-  esbuild: set this to true or false
-  msw: set this to true or false
-  protobufjs: set this to true or false
+  '@biomejs/biome': false
+  '@google/genai': false
+  electron: true
+  esbuild: true
+  msw: false
+  protobufjs: false
+  sharp: true
   tesseract.js: true

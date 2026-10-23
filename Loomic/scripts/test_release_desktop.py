@@ -2,6 +2,8 @@ import importlib.util
 import pathlib
 import unittest
 
+import yaml
+
 
 SCRIPT = pathlib.Path(__file__).with_name("release-desktop.py")
 SPEC = importlib.util.spec_from_file_location("release_desktop", SCRIPT)
@@ -37,6 +39,19 @@ class ReleasePathTests(unittest.TestCase):
         self.assertEqual(release_desktop.installer_pattern("macos-x64", version), "Helstera-0.2.14-mac-x64.dmg")
         self.assertEqual(release_desktop.installer_pattern("macos-arm64", version), "Helstera-0.2.14-mac-arm64.dmg")
         self.assertEqual(release_desktop.installer_pattern("linux-x64", version), "*.AppImage")
+
+    def test_workspace_build_scripts_use_explicit_boolean_approval(self) -> None:
+        workspace_path = pathlib.Path(__file__).resolve().parents[1] / "pnpm-workspace.yaml"
+        workspace = yaml.safe_load(workspace_path.read_text(encoding="utf-8"))
+        allowed = workspace["allowBuilds"]
+
+        self.assertIs(allowed["electron"], True)
+        self.assertIs(allowed["esbuild"], True)
+        self.assertIs(allowed["sharp"], True)
+        self.assertIs(allowed["tesseract.js"], True)
+        self.assertFalse(allowed["@google/genai"])
+        self.assertFalse(allowed["protobufjs"])
+        self.assertTrue(all(type(value) is bool for value in allowed.values()))
 
 
 if __name__ == "__main__":
