@@ -20,7 +20,7 @@ describe("generated asset retention", () => {
 
     const result = await cleanExpiredGeneratedAssets({ db: { query, connect } as unknown as Pool, storage: storage as never, log: { error: vi.fn(), info: vi.fn() } });
 
-    expect(result).toEqual({ softDeleted: 0, purged: 1, failed: 0 });
+    expect(result).toEqual({ purged: 1, failed: 0 });
     expect(storage.remove).toHaveBeenCalledWith("project-assets", ["workspace-1/generated/image.png"]);
     expect(clientQuery.mock.calls.some(([sql, params]) => String(sql).includes("asset_purged") && Array.isArray(params) && params.includes("Cloud asset removed"))).toBe(true);
     expect(clientQuery.mock.calls.some(([sql]) => String(sql).includes("retention_state = 'purged'"))).toBe(true);
@@ -36,7 +36,7 @@ describe("generated asset retention", () => {
 
     const result = await cleanExpiredGeneratedAssets({ db: { query, connect } as unknown as Pool, storage: storage as never, log: { error: vi.fn(), info: vi.fn() } });
 
-    expect(result).toEqual({ softDeleted: 0, purged: 1, failed: 0 });
+    expect(result).toEqual({ purged: 1, failed: 0 });
     expect(clientQuery.mock.calls.map(([sql]) => String(sql))).toContainEqual(expect.stringContaining("retention_state = 'purged'"));
     const purgedIndex = clientQuery.mock.calls.findIndex(([sql]) => String(sql).includes("retention_state = 'purged'"));
     const commitIndex = clientQuery.mock.calls.findIndex(([sql]) => String(sql) === "commit");
@@ -52,7 +52,7 @@ describe("generated asset retention", () => {
 
     const result = await cleanExpiredGeneratedAssets({ db: { query, connect } as unknown as Pool, storage: storage as never, log: { error: vi.fn(), info: vi.fn() } });
 
-    expect(result).toEqual({ softDeleted: 0, purged: 0, failed: 1 });
+    expect(result).toEqual({ purged: 0, failed: 1 });
     expect(connect).not.toHaveBeenCalled();
   });
 });

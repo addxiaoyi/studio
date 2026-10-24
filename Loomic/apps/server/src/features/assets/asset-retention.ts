@@ -23,7 +23,6 @@ type AssetRetentionOptions = {
 };
 
 export type AssetRetentionResult = {
-  softDeleted: number;
   purged: number;
   failed: number;
 };
@@ -50,7 +49,6 @@ export async function cleanExpiredGeneratedAssets({
     [ASSET_RETENTION_DAYS, Math.max(1, Math.min(batchSize, ASSET_RETENTION_BATCH_SIZE))],
   );
 
-  let softDeleted = 0;
   let purged = 0;
   let failed = 0;
 
@@ -100,8 +98,8 @@ export async function cleanExpiredGeneratedAssets({
     }
   }
 
-  if (softDeleted || purged || failed) {
-    log.info(`[asset-retention] softDeleted=${softDeleted} purged=${purged} failed=${failed}`);
+  if (purged || failed) {
+    log.info(`[asset-retention] purged=${purged} failed=${failed}`);
   }
-  return { softDeleted, purged, failed };
+  return { purged, failed };
 }
