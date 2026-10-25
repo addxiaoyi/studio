@@ -46,6 +46,21 @@ type HubOptions = {
   storage: StorageProvider;
   webOrigin: string;
   storageRoot: string;
+  onDesktopAgentPlanNext?: (input: {
+    taskId: string;
+    goal: string;
+    capabilities: DesktopCapability[];
+    round: number;
+    windowTitle: string;
+    observation: string;
+  }) => Promise<Array<Record<string, unknown>>>;
+  analyzeDesktopScreenshot?: (input: {
+    screenshotBase64: string;
+    screenshotMimeType: string;
+    screenshotWidth: number;
+    screenshotHeight: number;
+    description: string;
+  }) => Promise<{ found: boolean; x: number; y: number; confidence: number }>;
 };
 
 type LocalTask = CaptureTask & {
@@ -130,6 +145,17 @@ async function persistDesktopAgentAsset(input: {
   }
 }
 
+export function assembleRecordingChunks(chunks: Map<number, string>, totalChunks: number): string | null {
+  if (totalChunks < 1) return null;
+  const parts: string[] = [];
+  for (let index = 0; index < totalChunks; index += 1) {
+    const part = chunks.get(index);
+    if (part === undefined) return null;
+    parts.push(part);
+  }
+  return parts.join("");
+}
+
 function decodeDesktopRecording(value: string): Buffer {
   const match = value.match(/^data:video\/webm;base64,([\s\S]*)$/i);
   const encoded = match?.[1] ?? value;
@@ -171,6 +197,28 @@ export class WebsiteAssistantHub {
   >();
   private readonly pendingMcpCalls = new Map<string, PendingMcpCall>();
   private readonly lastProgressEventAt = new Map<string, number>();
+  private readonly pendingRecordingUploads = new Map<
+    string,
+    {
+      taskId: string;
+      connectionId: string;
+      chunks: Map<number, string>;
+      totalChunks: number;
+      createdAt: number;
+    }
+  >();
+  private readonly pendingVisionRequests = new Map<
+    string,
+    {
+      connectionId: string;
+      resolve: (value: { found: boolean; x: number; y: number; confidence: number }) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+      description: string;
+    }
+  >();
+  private planNextHandler?: HubOptions["onDesktopAgentPlanNext"];
+  private visionAnalyzer?: HubOptions["analyzeDesktopScreenshot"];
 
   constructor(private readonly options: HubOptions) {
     void this.options.db
@@ -178,6 +226,24 @@ export class WebsiteAssistantHub {
         "update website_capture_connections set disconnected_at=coalesce(disconnected_at, now()) where revoked_at is null and disconnected_at is null",
       )
       .catch(() => undefined);
+    setInterval(() => {
+      const cutoff = Date.now() - 5 * 60 * 1000;
+      for (const [uploadId, upload] of this.pendingRecordingUploads) {
+        if (upload.createdAt < cutoff) this.pendingRecordingUploads.delete(uploadId);
+      }
+    }, 60 * 1000).unref();
+  }
+
+  setDesktopAgentPlanNextHandler(
+    handler: NonNullable<HubOptions["onDesktopAgentPlanNext"]>,
+  ) {
+    this.planNextHandler = handler;
+  }
+
+  setDesktopVisionAnalyzer(
+    handler: NonNullable<HubOptions["analyzeDesktopScreenshot"]>,
+  ) {
+    this.visionAnalyzer = handler;
   }
 
   async createPairing(
@@ -256,6 +322,102 @@ export class WebsiteAssistantHub {
           connection.ws.readyState === 1,
       );
     return live?.mcpTools ?? [];
+  }
+
+  async analyzeDesktopScreenshotViaDesktop(input: {
+    userId: string;
+    workspaceId: string;
+    description: string;
+    timeoutMs?: number;
+  }): Promise<{ found: boolean; x: number; y: number; confidence: number }> {
+    const handler = this.visionAnalyzer ?? this.options.analyzeDesktopScreenshot;
+    const live = [...this.connections.values()]
+      .reverse()
+      .find(
+        (connection) =>
+          connection.userId === input.userId &&
+          connection.workspaceId === input.workspaceId &&
+          !connection.paused &&
+          connection.ws.readyState === 1,
+      );
+    if (!live)
+      throw new Error("The authorized desktop MCP connection is unavailable or paused.");
+    if (!handler)
+      throw new Error("Visual grounding is not configured on the server.");
+    const requestId = randomUUID();
+    const timeoutMs = Math.min(30_000, Math.max(3_000, input.timeoutMs ?? 15_000));
+    try {
+      const result = await new Promise<{ found: boolean; x: number; y: number; confidence: number }>(
+        (resolve, reject) => {
+          const timer = setTimeout(() => {
+            this.pendingVisionRequests.delete(requestId);
+            reject(new Error("Visual grounding timed out."));
+          }, timeoutMs);
+          this.pendingVisionRequests.set(requestId, {
+            connectionId: live.id,
+            resolve,
+            reject,
+            timer,
+            description: input.description.slice(0, 500),
+          });
+          this.send(live, {
+            type: "desktop_agent.vision_request",
+            requestId,
+            description: input.description.slice(0, 500),
+          });
+        },
+      );
+      return result;
+    } catch (error) {
+      throw error instanceof Error ? error : new Error("Visual grounding failed.");
+    } finally {
+      const pending = this.pendingVisionRequests.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timer);
+        this.pendingVisionRequests.delete(requestId);
+      }
+    }
+  }
+
+  private consumeDesktopVisionResult(live: LiveConnection, raw: unknown) {
+    const message = raw as {
+      type?: string;
+      requestId?: string;
+      screenshotBase64?: string;
+      screenshotMimeType?: string;
+      screenshotWidth?: number;
+      screenshotHeight?: number;
+      error?: string;
+    };
+    if (message?.type !== "desktop_agent.vision_result" || typeof message.requestId !== "string") return;
+    const pending = this.pendingVisionRequests.get(message.requestId);
+    if (!pending || pending.connectionId !== live.id) return;
+    clearTimeout(pending.timer);
+    this.pendingVisionRequests.delete(message.requestId);
+    const handler = this.visionAnalyzer ?? this.options.analyzeDesktopScreenshot;
+    if (!handler) {
+      pending.reject(new Error("Visual grounding is not configured on the server."));
+      return;
+    }
+    if (message.error || !message.screenshotBase64) {
+      pending.reject(new Error(message.error ?? "The desktop could not capture a screenshot."));
+      return;
+    }
+    void handler({
+      screenshotBase64: message.screenshotBase64,
+      screenshotMimeType: message.screenshotMimeType ?? "image/png",
+      screenshotWidth: Number(message.screenshotWidth ?? 0),
+      screenshotHeight: Number(message.screenshotHeight ?? 0),
+      description: pending.description,
+    })
+      .then((result) => {
+        this.send(live, { type: "desktop_agent.vision_coordinate", requestId: message.requestId, ...result });
+        pending.resolve(result);
+      })
+      .catch((error: unknown) => {
+        this.send(live, { type: "desktop_agent.vision_coordinate", requestId: message.requestId, found: false, x: -1, y: -1, confidence: 0, error: error instanceof Error ? error.message.slice(0, 300) : "grounding failed" });
+        pending.reject(error instanceof Error ? error : new Error("Visual grounding failed."));
+      });
   }
 
   async callDesktopMcpTool(input: {
@@ -1156,6 +1318,12 @@ export class WebsiteAssistantHub {
     }
     if (message?.type === "desktop.mcp.result")
       return this.consumeDesktopMcpResult(live, message);
+    if (message?.type === "desktop_agent.observe")
+      return this.handleDesktopAgentObserve(live, message);
+    if (message?.type === "desktop_agent.recording_chunk")
+      return this.consumeDesktopRecordingChunk(live, message);
+    if (message?.type === "desktop_agent.vision_result")
+      return this.consumeDesktopVisionResult(live, message);
     if (message?.type === "website_capture.progress")
       return this.updateProgress(live, message);
     if (message?.type === "website_capture.page")
@@ -1266,7 +1434,7 @@ export class WebsiteAssistantHub {
       const action = event.action;
       if (
         !action ||
-        !["click", "type", "native_click", "native_type"].includes(action.kind) ||
+        !["click", "type", "native_click", "native_type", "native_key", "native_drag"].includes(action.kind) ||
         !isDesktopActionAuthorized(action, task.capabilities) ||
         isDesktopCredentialField(action.fieldType) ||
         action.approvalToken
@@ -1373,6 +1541,8 @@ export class WebsiteAssistantHub {
       ...(item.title ? { title: item.title } : {}),
       ...(item.excerpt ? { excerpt: item.excerpt } : {}),
       ...(item.assetId ? { assetId: item.assetId } : {}),
+      ...(item.kind === "screenshot" && screenshotAsset ? { assetId: screenshotAsset.assetId } : {}),
+      ...(item.kind === "recording" && recordingAsset ? { assetId: recordingAsset.assetId } : {}),
     }));
     const safeResult = {
       ...(event.result?.summary ? { summary: event.result.summary } : {}),
@@ -1436,6 +1606,103 @@ export class WebsiteAssistantHub {
         "update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'",
         [event.taskId],
       );
+    }
+  }
+
+  private async consumeDesktopRecordingChunk(
+    live: LiveConnection,
+    message: Record<string, unknown>,
+  ) {
+    const taskId = String(message.taskId ?? "");
+    const uploadId = String(message.uploadId ?? "");
+    const chunkIndex = Number(message.chunkIndex ?? -1);
+    const totalChunks = Number(message.totalChunks ?? 0);
+    const data = String(message.data ?? "");
+    if (!taskId || !uploadId || chunkIndex < 0 || totalChunks < 1 || !data) return;
+    const upload = this.pendingRecordingUploads.get(uploadId) ?? {
+      taskId,
+      connectionId: live.id,
+      chunks: new Map<number, string>(),
+      totalChunks,
+      createdAt: Date.now(),
+    };
+    if (upload.taskId !== taskId || upload.connectionId !== live.id || upload.totalChunks !== totalChunks) return;
+    upload.chunks.set(chunkIndex, data);
+    this.pendingRecordingUploads.set(uploadId, upload);
+    if (upload.chunks.size < totalChunks) return;
+    this.pendingRecordingUploads.delete(uploadId);
+    const encoded = assembleRecordingChunks(upload.chunks, totalChunks);
+    if (!encoded) return;
+    await this.handleDesktopAgentEvent(live, {
+      type: "desktop_agent.event",
+      taskId,
+      eventType: "evidence",
+      stepId: "native-recording",
+      detail: "Native screen recording captured (chunked upload).",
+      result: {
+        summary: "Native screen recording captured.",
+        evidence: [{ kind: "recording", title: "Native screen recording" }],
+        recordingBase64: `data:video/webm;base64,${encoded}`,
+      },
+    });
+  }
+
+  private async handleDesktopAgentObserve(    live: LiveConnection,
+    message: Record<string, unknown>,
+  ) {
+    const taskId = String(message.taskId ?? "");
+    const round = Number(message.round ?? 0);
+    const observation = String(message.observation ?? "").slice(0, 4_000);
+    const windowTitle = String(message.windowTitle ?? "").slice(0, 500);
+    if (!taskId) return;
+    const taskResult = await this.options.db.query<{
+      id: string;
+      status: string;
+      goal: string;
+      capabilities: DesktopCapability[];
+    }>(
+      "select id,status,goal,capabilities from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3",
+      [taskId, live.userId, live.id],
+    );
+    const task = taskResult.rows[0];
+    if (!task || task.status !== "running") return;
+    await this.options.db.query(
+      "insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,'reobserve',$2,$3::jsonb)",
+      [
+        taskId,
+        `Round ${round}: planner re-observed the active window.`,
+        JSON.stringify({ round, windowTitle, observation }),
+      ],
+    );
+    const planNext = this.planNextHandler ?? this.options.onDesktopAgentPlanNext;
+    if (!planNext) {
+      this.send(live, { type: "desktop_agent.plan_next", taskId, round, actions: [] });
+      return;
+    }
+    try {
+      const rawActions = await planNext({
+        taskId,
+        goal: task.goal,
+        capabilities: task.capabilities,
+        round,
+        windowTitle,
+        observation,
+      });
+      const { filterActionsByCapabilities } = await import(
+        "../../agent/tools/desktop-agent-planning.js"
+      );
+      const filtered = filterActionsByCapabilities(
+        rawActions as Array<{ kind: string }>,
+        task.capabilities,
+      );
+      const actions = filtered.map((action, index) => ({
+        ...action,
+        taskId,
+        requestId: `${taskId}:r${round}:${index + 1}`,
+      }));
+      this.send(live, { type: "desktop_agent.plan_next", taskId, round, actions });
+    } catch {
+      this.send(live, { type: "desktop_agent.plan_next", taskId, round, actions: [] });
     }
   }
 
@@ -1745,6 +2012,12 @@ export class WebsiteAssistantHub {
       if (pending.connectionId !== connectionId) continue;
       clearTimeout(pending.timer);
       this.pendingMcpCalls.delete(requestId);
+      pending.reject(new Error(reason));
+    }
+    for (const [requestId, pending] of this.pendingVisionRequests) {
+      if (pending.connectionId !== connectionId) continue;
+      clearTimeout(pending.timer);
+      this.pendingVisionRequests.delete(requestId);
       pending.reject(new Error(reason));
     }
   }

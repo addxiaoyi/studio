@@ -71,11 +71,12 @@ export const videoGenerationPreferenceSchema = z.object({
   mode: z.enum(["auto", "manual"]),
   models: z.array(z.string().min(1)),
   duration: z.number().int().min(1).optional(),
+  resolution: z.enum(["480p", "720p", "768p", "1080p", "1088p", "1440p", "2160p", "4k"]).optional(),
 });
 
 export const desktopExecutionContextSchema = z.object({
-  browserMode: z.enum(["isolated_browser", "connected_browser_tab"]),
-  executionMode: z.literal("automatic"),
+  browserMode: z.enum(["isolated_browser", "connected_browser_tab", "windows_ui", "visual_ocr"]),
+  executionMode: z.enum(["automatic", "windows_ui", "visual_ocr"]),
 }).strict();
 
 export const runCreateRequestSchema = z.object({

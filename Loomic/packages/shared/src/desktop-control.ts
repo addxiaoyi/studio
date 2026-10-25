@@ -25,6 +25,9 @@ export const desktopCapabilitySchema = z.enum([
   "browser.type",
   "window.click",
   "window.type",
+  "window.key",
+  "window.drag",
+  "window.scroll",
 ]);
 export const desktopActionKindSchema = z.enum([
   "focus_window",
@@ -38,6 +41,13 @@ export const desktopActionKindSchema = z.enum([
   "type",
   "native_click",
   "native_type",
+  "native_key",
+  "native_scroll",
+  "native_drag",
+  "native_double_click",
+  "native_right_click",
+  "wait",
+  "native_wait_for_text",
 ]);
 
 export const desktopAgentPlannedActionSchema = z.object({
@@ -47,6 +57,15 @@ export const desktopAgentPlannedActionSchema = z.object({
   value: z.string().max(10_000).optional(),
   top: z.number().finite().optional(),
   fieldType: z.string().max(80).optional(),
+  key: z.string().min(1).max(80).optional(),
+  modifiers: z.array(z.enum(["ctrl", "alt", "shift", "meta", "cmd"])).max(4).optional(),
+  x: z.number().finite().int().min(0).optional(),
+  y: z.number().finite().int().min(0).optional(),
+  toX: z.number().finite().int().min(0).optional(),
+  toY: z.number().finite().int().min(0).optional(),
+  dx: z.number().finite().optional(),
+  dy: z.number().finite().optional(),
+  durationMs: z.number().finite().int().min(0).max(60_000).optional(),
 });
 
 export const desktopAgentTaskRequestSchema = z.object({
@@ -71,6 +90,15 @@ export const desktopAgentActionSchema = z.object({
   value: z.string().max(10_000).optional(),
   top: z.number().finite().optional(),
   fieldType: z.string().max(80).optional(),
+  key: z.string().min(1).max(80).optional(),
+  modifiers: z.array(z.enum(["ctrl", "alt", "shift", "meta", "cmd"])).max(4).optional(),
+  x: z.number().finite().int().min(0).optional(),
+  y: z.number().finite().int().min(0).optional(),
+  toX: z.number().finite().int().min(0).optional(),
+  toY: z.number().finite().int().min(0).optional(),
+  dx: z.number().finite().optional(),
+  dy: z.number().finite().optional(),
+  durationMs: z.number().finite().int().min(0).max(60_000).optional(),
   approvalToken: z.string().min(16).max(256).optional(),
 });
 
@@ -136,6 +164,13 @@ const actionCapabilities: Record<DesktopActionKind, DesktopCapability | null> = 
   type: "browser.type",
   native_click: "window.click",
   native_type: "window.type",
+  native_key: "window.key",
+  native_scroll: "window.scroll",
+  native_drag: "window.drag",
+  native_double_click: "window.click",
+  native_right_click: "window.click",
+  wait: null,
+  native_wait_for_text: "screen.read",
 };
 
 export function isDesktopActionAuthorized(action: DesktopAgentAction, capabilities: readonly DesktopCapability[]) {
@@ -144,12 +179,25 @@ export function isDesktopActionAuthorized(action: DesktopAgentAction, capabiliti
 }
 
 const alwaysDeniedFieldTypes = new Set(["password", "otp", "one-time-code", "verification-code"]);
-const approvalActions = new Set<DesktopActionKind>(["click", "type", "native_click", "native_type", "start_recording", "stop_recording"]);
+const approvalActions = new Set<DesktopActionKind>(["click", "type", "native_click", "native_type", "native_key", "native_drag", "start_recording", "stop_recording"]);
+
+const allowedNativeKeys = new Set([
+  "enter", "tab", "escape", "space", "backspace", "delete",
+  "up", "down", "left", "right", "home", "end", "pageup", "pagedown",
+  "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+]);
+
+function isNativeKeyAllowed(key: string | undefined): boolean {
+  if (!key) return false;
+  return allowedNativeKeys.has(key.trim().toLowerCase());
+}
 
 export function classifyDesktopAction(action: DesktopAgentAction | null | undefined): "allow" | "confirm" | "deny" {
   if (!action) return "deny";
   if (alwaysDeniedFieldTypes.has((action.fieldType ?? "").toLowerCase())) return "deny";
   if ((action.kind === "type" || action.kind === "native_type") && !action.value) return "deny";
+  if (action.kind === "native_key" && !isNativeKeyAllowed(action.key)) return "deny";
+  if (action.kind === "native_drag" && (action.x === undefined || action.y === undefined || action.toX === undefined || action.toY === undefined)) return "deny";
   if (approvalActions.has(action.kind)) return action.approvalToken ? "confirm" : "deny";
   return "allow";
 }

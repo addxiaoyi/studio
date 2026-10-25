@@ -123,6 +123,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("workspace:script-finished", listener);
     return () => ipcRenderer.removeListener("workspace:script-finished", listener);
   },
+  onAgentEvent: (callback: (event: Record<string, unknown>) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: Record<string, unknown>) => callback(value);
+    ipcRenderer.on("desktop:agent-event", listener);
+    return () => ipcRenderer.removeListener("desktop:agent-event", listener);
+  },
 });
 
 type DesktopUpdateState = {
@@ -226,6 +231,7 @@ declare global {
       callMcpTool: (input: { id: string; name: string; arguments: string }) => Promise<string>;
       onWorkspaceScriptOutput: (callback: (event: { runId: string; chunk: string }) => void) => () => void;
       onWorkspaceScriptFinished: (callback: (event: { runId: string; ok: boolean; exitCode?: number; message?: string }) => void) => () => void;
+      onAgentEvent: (callback: (event: Record<string, unknown>) => void) => () => void;
     };
   }
 }

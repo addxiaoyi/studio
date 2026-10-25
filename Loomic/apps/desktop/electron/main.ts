@@ -13,6 +13,20 @@ import {
 import { buildBrowserPairingUrl } from "./browser-pairing.js";
 import {
   clickNativeText,
+  clickNativeCoordinates,
+  clickGroundedTarget,
+  groundNativeTarget,
+  pressNativeKey,
+  scrollNativeWindow,
+  dragNativeMouse,
+  waitForNativeText,
+  listNativeWindows,
+  focusNativeWindowByTitle,
+  readNativeClipboard,
+  writeNativeClipboard,
+  pasteNativeClipboard,
+  launchApplication,
+  closeApplicationByPid,
   inspectNativeDesktop,
   typeIntoNativeControl,
 } from "./native-automation.js";
@@ -50,6 +64,16 @@ let assistantConnectionId = "";
 const desktopTaskTabs = new Map<string, BrowserWindow | null>();
 const desktopAgentTasks = new Map<string, DesktopAgentTask>();
 const desktopAgentPlans = new Map<string, DesktopAgentAction[]>();
+const desktopAgentRounds = new Map<string, number>();
+const MAX_NATIVE_AGENT_ROUNDS = 5;
+const nativeTaskRecordings = new Map<string, NativeScreenRecording>();
+const pendingVisionCoordinates = new Map<
+  string,
+  {
+    resolve: (value: { found: boolean; x: number; y: number; confidence: number }) => void;
+    reject: (error: Error) => void;
+  }
+>();
 type UpdateState = {
   status:
     | "idle"
@@ -544,7 +568,13 @@ function publishDesktopMcpTools() {
   void mcpRegistry
     .list()
     .then((servers) => {
-      const tools = servers
+      const tools: Array<{
+        serverId: string;
+        serverName: string;
+        name: string;
+        description?: string;
+        inputSchema: Record<string, unknown>;
+      }> = servers
         .filter((server) => server.connected)
         .flatMap((server) =>
           server.tools.map((tool) => ({
@@ -558,6 +588,7 @@ function publishDesktopMcpTools() {
       if (localWorkspace && localWorkspaceSessionId) {
         tools.push(...createLocalProjectToolCatalog(localWorkspaceSessionId));
       }
+      tools.push(...createNativeScreenToolCatalog());
       const catalog = desktopMcpToolCatalogSchema.parse({
         type: "desktop.mcp.tools",
         connectionId: assistantConnectionId,
@@ -595,6 +626,8 @@ function createLocalProjectToolCatalog(serverId: string) {
     minimum: number,
     maximum: number,
   ) => ({ type: "integer", minimum, maximum, description });
+
+
   return [
     {
       name: "list_files",
@@ -656,8 +689,340 @@ function createLocalProjectToolCatalog(serverId: string) {
   ].map((tool) => ({ serverId, serverName: "Local Project", ...tool }));
 }
 
-function clippedUtf8(value: string, maxBytes = 100_000) {
-  const bytes = Buffer.from(value, "utf8");
+const NATIVE_SCREEN_SERVER_ID = "0e5c1a30-9f4a-4d0e-8a51-1b2c3d4e5f60";
+const NATIVE_SCREEN_SERVER_NAME = "Native Screen";
+
+function createNativeScreenToolCatalog(): Array<{
+  serverId: string;
+  serverName: string;
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}> {
+  const objectSchema = (
+    properties: Record<string, object>,
+    required: string[] = [],
+  ) => ({
+    type: "object" as const,
+    properties,
+    ...(required.length ? { required } : {}),
+    additionalProperties: false,
+  });
+  const stringField = (description: string) => ({ type: "string", description });
+  const intField = (description: string, minimum: number, maximum: number) => ({
+    type: "integer" as const,
+    minimum,
+    maximum,
+    description,
+  });
+  return [
+    {
+      name: "screen_observe",
+      description:
+        "Inspect the active native window: accessible controls, OCR text (untrusted), and a screenshot. Read-only. Blocked automatically when password/OTP fields are visible.",
+      inputSchema: objectSchema({
+        preferVision: { type: "boolean", description: "Skip the accessibility tree and rely on visual/OCR evidence." },
+      }),
+    },
+    {
+      name: "screen_click",
+      description:
+        "Click the active native window at visible text, window-relative coordinates, or screenshot pixel coordinates (from a vision model reading the latest screen_observe screenshot). Prefer text for reliability.",
+      inputSchema: objectSchema({
+        text: stringField("Visible text to click, e.g. 'Save file'. Up to 160 characters."),
+        x: intField("Window-relative x, used when text is absent.", 0, 100_000),
+        y: intField("Window-relative y, used when text is absent.", 0, 100_000),
+        screenshotX: intField("Screenshot pixel x from the latest screen_observe evidence, used for icons without text.", 0, 100_000),
+        screenshotY: intField("Screenshot pixel y from the latest screen_observe evidence.", 0, 100_000),
+        button: { type: "string", enum: ["left", "right"], description: "Mouse button, default left." },
+        doubleClick: { type: "boolean", description: "Double-click instead of single click." },
+      }),
+    },
+    {
+      name: "screen_type",
+      description:
+        "Type text into an accessible native text field identified by its label. Credential fields are blocked.",
+      inputSchema: objectSchema(
+        {
+          target: stringField("Accessible label of the target text field."),
+          value: stringField("Text to type. Up to 10,000 characters."),
+        },
+        ["target", "value"],
+      ),
+    },
+    {
+      name: "screen_key",
+      description:
+        "Press a key (Enter/Tab/Escape/arrows/Home/End/PageUp/PageDown/F1-F12) with optional ctrl/alt/shift modifiers.",
+      inputSchema: objectSchema(
+        {
+          key: stringField("Key name, e.g. 'Enter'."),
+          modifiers: { type: "array", items: { type: "string", enum: ["ctrl", "alt", "shift", "meta", "cmd"] }, description: "Held modifiers." },
+        },
+        ["key"],
+      ),
+    },
+    {
+      name: "screen_scroll",
+      description: "Scroll the window under the cursor horizontally and vertically.",
+      inputSchema: objectSchema({
+        dx: intField("Horizontal steps, negative scrolls left.", -100, 100),
+        dy: intField("Vertical steps, negative scrolls up.", -100, 100),
+      }),
+    },
+    {
+      name: "screen_drag",
+      description: "Drag from one window-relative point to another with the left button held.",
+      inputSchema: objectSchema(
+        {
+          fromX: intField("Start x.", 0, 100_000),
+          fromY: intField("Start y.", 0, 100_000),
+          toX: intField("End x.", 0, 100_000),
+          toY: intField("End y.", 0, 100_000),
+        },
+        ["fromX", "fromY", "toX", "toY"],
+      ),
+    },
+    {
+      name: "screen_wait_for_text",
+      description:
+        "Poll the active window's OCR text until the target text appears. Returns found=true/false. Use after clicks that trigger loading states.",
+      inputSchema: objectSchema(
+        {
+          text: stringField("Text to wait for, e.g. 'Download complete'."),
+          timeoutMs: intField("Timeout in milliseconds, default 10000, max 60000.", 1_000, 60_000),
+        },
+        ["text"],
+      ),
+    },
+    {
+      name: "screen_list_windows",
+      description: "List visible top-level windows with titles and regions. Read-only. Use before switching windows.",
+      inputSchema: objectSchema({
+        limit: intField("Maximum windows returned, default 24.", 1, 64),
+      }),
+    },
+    {
+      name: "screen_focus_window",
+      description:
+        "Bring a window to the foreground by exact or partial title match. Subsequent screen tools will operate on it.",
+      inputSchema: objectSchema(
+        { title: stringField("Window title, exact or unique partial match.") },
+        ["title"],
+      ),
+    },
+    {
+      name: "screen_clipboard_read",
+      description: "Read up to 20,000 characters from the system clipboard. Read-only.",
+      inputSchema: objectSchema({}),
+    },
+    {
+      name: "screen_clipboard_write",
+      description:
+        "Write text to the system clipboard (up to 100,000 characters). Optionally paste it into the focused field with ctrl+V.",
+      inputSchema: objectSchema({
+        value: stringField("Text to place on the clipboard."),
+        paste: { type: "boolean", description: "Send ctrl+V after writing. The target field must be focused." },
+      }),
+    },
+    {
+      name: "screen_launch_app",
+      description:
+        "Launch a desktop application by executable name or path (no shell metacharacters). Returns the new process id. Use screen_observe afterwards to see the new window.",
+      inputSchema: objectSchema(
+        { command: stringField("Executable name or absolute path, e.g. 'notepad' or 'C:\\\\Program Files\\\\app.exe'.") },
+        ["command"],
+      ),
+    },
+    {
+      name: "screen_close_app",
+      description:
+        "Gracefully close an application by process id (sends WM_CLOSE/SIGTERM, does not force kill). Refuses to close Helstera Desktop itself.",
+      inputSchema: objectSchema(
+        { pid: { type: "integer", minimum: 1, description: "Process id from screen_launch_app." }, confirm: { type: "boolean", description: "Must be true to close." } },
+        ["pid", "confirm"],
+      ),
+    },
+    {
+      name: "screen_find",
+      description:
+        "Locate an element in the active window screenshot by natural-language description using server-side visual grounding. Returns pixel coordinates for screen_click. Requires the server's visual analyzer.",
+      inputSchema: objectSchema(
+        { description: stringField("What to find, e.g. 'the red close button in the toolbar'.") },
+        ["description"],
+      ),
+    },
+  ].map((tool) => ({
+    serverId: NATIVE_SCREEN_SERVER_ID,
+    serverName: NATIVE_SCREEN_SERVER_NAME,
+    ...tool,
+  }));
+}
+
+async function runNativeScreenTool(
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const userDataPath = app.getPath("userData");
+  const platform = process.platform;
+  const sessionType = process.env.XDG_SESSION_TYPE;
+  switch (toolName) {
+    case "screen_observe": {
+      const evidence = await inspectNativeDesktop({
+        platform,
+        userDataPath,
+        sessionType,
+        preferVision: args.preferVision === true,
+      });
+      const includeScreenshot = args.includeScreenshot !== false;
+      return JSON.stringify({
+        windowTitle: evidence.windowTitle,
+        windowRegion: evidence.windowRegion,
+        controls: evidence.controls.slice(0, 80),
+        ocrWords: evidence.ocrWords.slice(0, 500),
+        ocrText: evidence.ocrText.slice(0, 6_000),
+        pixelScale: evidence.pixelScale,
+        screenshotWidth: evidence.screenshotWidth,
+        screenshotHeight: evidence.screenshotHeight,
+        ...(includeScreenshot
+          ? {
+              screenshotBase64: evidence.screenshotBase64.slice(0, 300_000),
+              screenshotMimeType: evidence.screenshotMimeType,
+              screenshotTruncated: evidence.screenshotBase64.length > 300_000,
+            }
+          : {}),
+        ...(evidence.fallbackReason ? { fallbackReason: evidence.fallbackReason } : {}),
+      });
+    }
+    case "screen_click": {
+      const button = args.button === "right" ? "right" : "left";
+      const double = args.doubleClick === true;
+      if (typeof args.text === "string" && args.text.trim()) {
+        const grounded = await clickGroundedTarget(
+          { text: String(args.text) },
+          userDataPath,
+          button,
+          double,
+        );
+        return JSON.stringify({ ok: true, x: Math.round(grounded.x), y: Math.round(grounded.y), source: grounded.source });
+      }
+      if (typeof args.screenshotX === "number" && typeof args.screenshotY === "number") {
+        const evidence = await inspectNativeDesktop({ platform, userDataPath, sessionType, preferVision: true });
+        const grounded = groundNativeTarget(
+          { screenshotX: Number(args.screenshotX), screenshotY: Number(args.screenshotY) },
+          evidence,
+        );
+        await clickNativeCoordinates(grounded.x, grounded.y, button, double);
+        return JSON.stringify({ ok: true, x: Math.round(grounded.x), y: Math.round(grounded.y), source: "screenshot_pixel" });
+      }
+      if (typeof args.x === "number" && typeof args.y === "number") {
+        const grounded = await clickGroundedTarget(
+          { x: Number(args.x), y: Number(args.y) },
+          userDataPath,
+          button,
+          double,
+        );
+        return JSON.stringify({ ok: true, x: Math.round(grounded.x), y: Math.round(grounded.y), source: grounded.source });
+      }
+      throw new Error("screen_click requires text, screenshotX/Y, or x/y coordinates.");
+    }
+    case "screen_type": {
+      const target = typeof args.target === "string" ? args.target : "";
+      const value = typeof args.value === "string" ? args.value : "";
+      await typeIntoNativeControl(target, value, userDataPath);
+      return JSON.stringify({ ok: true });
+    }
+    case "screen_key": {
+      const key = typeof args.key === "string" ? args.key : "";
+      const modifiers = Array.isArray(args.modifiers)
+        ? args.modifiers.filter((m): m is string => typeof m === "string")
+        : [];
+      await pressNativeKey(key, modifiers);
+      return JSON.stringify({ ok: true });
+    }
+    case "screen_scroll": {
+      const dx = typeof args.dx === "number" ? args.dx : 0;
+      const dy = typeof args.dy === "number" ? args.dy : 0;
+      await scrollNativeWindow(dx, dy);
+      return JSON.stringify({ ok: true });
+    }
+    case "screen_drag": {
+      const evidence = await inspectNativeDesktop({ platform, userDataPath, sessionType, preferVision: false });
+      await dragNativeMouse(
+        Number(args.fromX),
+        Number(args.fromY),
+        Number(args.toX),
+        Number(args.toY),
+        evidence.windowRegion,
+      );
+      return JSON.stringify({ ok: true });
+    }
+    case "screen_wait_for_text": {
+      const result = await waitForNativeText(
+        typeof args.text === "string" ? args.text : "",
+        userDataPath,
+        { timeoutMs: typeof args.timeoutMs === "number" ? args.timeoutMs : undefined },
+      );
+      return JSON.stringify(result);
+    }
+    case "screen_list_windows": {
+      const windows = await listNativeWindows(
+        typeof args.limit === "number" ? Number(args.limit) : 24,
+      );
+      return JSON.stringify({ windows });
+    }
+    case "screen_focus_window": {
+      const result = await focusNativeWindowByTitle(
+        typeof args.title === "string" ? args.title : "",
+      );
+      return JSON.stringify(result);
+    }
+    case "screen_clipboard_read": {
+      const text = await readNativeClipboard();
+      return JSON.stringify({ text });
+    }
+    case "screen_clipboard_write": {
+      await writeNativeClipboard(typeof args.value === "string" ? args.value : "");
+      if (args.paste === true) await pasteNativeClipboard(userDataPath);
+      return JSON.stringify({ ok: true, pasted: args.paste === true });
+    }
+    case "screen_launch_app": {
+      const launched = await launchApplication(typeof args.command === "string" ? args.command : "");
+      return JSON.stringify(launched);
+    }
+    case "screen_close_app": {
+      if (args.confirm !== true) throw new Error("screen_close_app requires confirm=true.");
+      const result = await closeApplicationByPid(Number(args.pid));
+      return JSON.stringify(result);
+    }
+    case "screen_find": {
+      const description = typeof args.description === "string" ? args.description : "";
+      const requestId = randomUUID();
+      const coordinate = await new Promise<{ found: boolean; x: number; y: number; confidence: number }>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pendingVisionCoordinates.delete(requestId);
+          reject(new Error("Visual grounding timed out."));
+        }, 25_000);
+        pendingVisionCoordinates.set(requestId, {
+          resolve: (value) => {
+            clearTimeout(timeout);
+            resolve(value);
+          },
+          reject: (error: Error) => {
+            clearTimeout(timeout);
+            reject(error);
+          },
+        });
+        sendAssistant({ type: "desktop_agent.vision_request", requestId, description: description.slice(0, 500) });
+      });
+      return JSON.stringify(coordinate);
+    }
+    default:
+      throw new Error(`Unknown native screen tool: ${toolName}`);
+  }
+}
+
+function clippedUtf8(value: string, maxBytes = 100_000) {  const bytes = Buffer.from(value, "utf8");
   if (bytes.byteLength <= maxBytes) return { text: value, truncated: false };
   let text = bytes.subarray(0, maxBytes).toString("utf8");
   if (text.endsWith("\uFFFD")) text = text.slice(0, -1);
@@ -781,8 +1146,11 @@ async function runDesktopMcpCall(input: unknown) {
   const controller = new AbortController();
   desktopMcpCalls.set(call.requestId, controller);
   try {
+    const isNativeScreenCall = call.serverId === NATIVE_SCREEN_SERVER_ID;
     const isLocalWorkspaceCall = call.serverId === localWorkspaceSessionId;
-    const rawOutput = isLocalWorkspaceCall
+    const rawOutput = isNativeScreenCall
+      ? await runNativeScreenTool(call.toolName, call.arguments)
+      : isLocalWorkspaceCall
       ? await runLocalProjectTool(
           call.serverId,
           call.toolName,
@@ -796,6 +1164,7 @@ async function runDesktopMcpCall(input: unknown) {
           controller.signal,
         );
     if (
+      !isNativeScreenCall &&
       !isLocalWorkspaceCall &&
       (JSON.parse(rawOutput) as { isError?: boolean }).isError
     ) {
@@ -809,7 +1178,7 @@ async function runDesktopMcpCall(input: unknown) {
       });
       return;
     }
-    const output = clippedUtf8(rawOutput, 110_000).text;
+    const output = clippedUtf8(rawOutput, 320_000).text;
     sendAssistant({
       type: "desktop.mcp.result",
       requestId: call.requestId,
@@ -832,7 +1201,6 @@ async function runDesktopMcpCall(input: unknown) {
     desktopMcpCalls.delete(call.requestId);
   }
 }
-
 ipcMain.handle("mcp.list", (event) => requireMcpRegistry(event).list());
 ipcMain.handle("mcp.add", async (event, input: unknown) => {
   if (!input || typeof input !== "object" || Array.isArray(input))
@@ -924,8 +1292,112 @@ async function openEmbeddedBrowser(value: string) {
 }
 
 function sendAssistant(message: Record<string, unknown>) {
+  if (message.type === "desktop_agent.event")
+    mainWindow?.webContents.send("desktop:agent-event", message);
   if (assistantSocket?.readyState === 1)
     assistantSocket.send(JSON.stringify(message));
+}
+
+type NativeScreenRecording = {
+  stop: () => Promise<string | null>;
+};
+
+const RECORDING_INLINE_LIMIT = 8 * 1024 * 1024;
+const RECORDING_CHUNK_BYTES = 3 * 1024 * 1024;
+
+async function sendRecordingPayload(taskId: string, base64: string): Promise<void> {
+  const payload = base64.startsWith("data:") ? base64.slice(base64.indexOf(",") + 1) : base64;
+  const byteLength = Math.floor((payload.length * 3) / 4);
+  if (byteLength <= RECORDING_INLINE_LIMIT) {
+    sendAssistant({
+      type: "desktop_agent.event",
+      taskId,
+      eventType: "evidence",
+      detail: "Native screen recording captured.",
+      result: {
+        summary: "Native screen recording captured.",
+        evidence: [{ kind: "recording", title: "Native screen recording" }],
+        recordingBase64: `data:video/webm;base64,${payload}`,
+      },
+    });
+    return;
+  }
+  const uploadId = randomUUID();
+  const totalChunks = Math.ceil(payload.length / (RECORDING_CHUNK_BYTES - (RECORDING_CHUNK_BYTES % 4)));
+  const chunkSize = Math.ceil(payload.length / totalChunks / 4) * 4;
+  for (let index = 0; index < totalChunks; index += 1) {
+    const chunk = payload.slice(index * chunkSize, (index + 1) * chunkSize);
+    sendAssistant({
+      type: "desktop_agent.recording_chunk",
+      taskId,
+      uploadId,
+      chunkIndex: index,
+      totalChunks,
+      isLast: index === totalChunks - 1,
+      data: chunk,
+    });
+  }
+}
+
+async function startNativeScreenRecording(options: { withAudio?: boolean } = {}): Promise<NativeScreenRecording> {
+  const { desktopCapturer } = await import("electron");
+  const sources = await desktopCapturer.getSources({
+    types: ["screen"],
+    thumbnailSize: { width: 1, height: 1 },
+  });
+  const source = sources[0];
+  if (!source) throw new Error("No screen source is available for native recording.");
+  const recorder = await ensureRecorderWindow();
+  const withAudio = options.withAudio !== false;
+  const started = new Promise<void>((resolve, reject) => {
+    const onStarted = () => {
+      cleanup();
+      resolve();
+    };
+    const onFailed = (_event: Electron.IpcMainEvent, message: string) => {
+      cleanup();
+      reject(new Error(message || "Native screen recording failed to start."));
+    };
+    const cleanup = () => {
+      ipcMain.removeListener("recorder.native-started", onStarted);
+      ipcMain.removeListener("recorder.native-failed", onFailed);
+    };
+    ipcMain.once("recorder.native-started", onStarted);
+    ipcMain.once("recorder.native-failed", onFailed);
+    setTimeout(() => {
+      cleanup();
+      reject(new Error("Native screen recording did not start in time."));
+    }, 8_000);
+  });
+  recorder.webContents.send("recorder.start-native", source.id, withAudio);
+  await started;
+  let stopped = false;
+  return {
+    stop: () =>
+      new Promise<string | null>((resolve) => {
+        if (stopped || recorder.isDestroyed()) {
+          resolve(null);
+          return;
+        }
+        stopped = true;
+        let settled = false;
+        const timeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          ipcMain.removeListener("recorder.complete", onComplete);
+          resolve(null);
+        }, 15_000);
+        const onComplete = (_event: Electron.IpcMainEvent, base64: unknown) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          ipcMain.removeListener("recorder.complete", onComplete);
+          resolve(typeof base64 === "string" && base64.length > 0 ? base64 : null);
+        };
+        ipcMain.once("recorder.complete", onComplete);
+        recorder.webContents.send("recorder.stop");
+      }),
+  };
 }
 
 async function ensureRecorderWindow() {
@@ -1132,6 +1604,13 @@ function desktopCapabilityForAction(action: DesktopAgentAction) {
     type: "browser.type",
     native_click: "window.click",
     native_type: "window.type",
+    native_key: "window.key",
+    native_scroll: "window.scroll",
+    native_drag: "window.drag",
+    native_double_click: "window.click",
+    native_right_click: "window.click",
+    wait: "window.click",
+    native_wait_for_text: "screen.read",
   };
   return capabilities[action.kind];
 }
@@ -1144,12 +1623,24 @@ function finishDesktopAgentTask(taskId: string) {
   desktopAgentPlans.delete(taskId);
   desktopAgentTasks.delete(taskId);
   desktopTaskTabs.delete(taskId);
+  desktopAgentRounds.delete(taskId);
+  const recording = nativeTaskRecordings.get(taskId);
+  if (recording) {
+    nativeTaskRecordings.delete(taskId);
+    void recording.stop().catch(() => undefined);
+  }
 }
 
 async function completeDesktopAgentTask(taskId: string) {
   const task = desktopAgentTasks.get(taskId);
   if (!task) return;
   try {
+    let recordingBase64: string | null = null;
+    const recording = nativeTaskRecordings.get(taskId);
+    if (recording) {
+      nativeTaskRecordings.delete(taskId);
+      recordingBase64 = await recording.stop();
+    }
     if (isNativeDesktopTask(task)) {
       const evidence = await inspectNativeDesktop({
         platform: process.platform,
@@ -1158,6 +1649,7 @@ async function completeDesktopAgentTask(taskId: string) {
         preferVision: task.executionMode === "visual_ocr",
       });
       const summary = [`Active window: ${evidence.windowTitle}`, evidence.ocrText].filter(Boolean).join("\n\n").slice(0, 8_000);
+      if (recordingBase64) await sendRecordingPayload(taskId, recordingBase64);
       sendAssistant({
         type: "desktop_agent.event",
         taskId,
@@ -1177,6 +1669,7 @@ async function completeDesktopAgentTask(taskId: string) {
       const page = task.capabilities.includes("browser.read") ? await readEmbeddedPage(browser) : undefined;
       const screenshotBase64 = task.capabilities.includes("browser.capture") ? (await browser.webContents.capturePage()).toJPEG(76).toString("base64") : undefined;
       const summary = [page?.title, page?.description, ...(page?.headings ?? []).slice(0, 5)].filter(Boolean).join("\n").slice(0, 8_000);
+      if (recordingBase64) await sendRecordingPayload(taskId, recordingBase64);
       sendAssistant({
         type: "desktop_agent.event",
         taskId,
@@ -1203,6 +1696,33 @@ async function continueDesktopAgentPlan(taskId: string) {
   const plan = desktopAgentPlans.get(taskId) ?? [];
   const action = plan[0];
   if (!action) {
+    const currentRound = desktopAgentRounds.get(taskId) ?? 0;
+    if (isNativeDesktopTask(task) && task.maxDurationSeconds > 0 && currentRound < MAX_NATIVE_AGENT_ROUNDS) {
+      const nextRound = currentRound + 1;
+      desktopAgentRounds.set(taskId, nextRound);
+      const evidence = await inspectNativeDesktop({
+        platform: process.platform,
+        userDataPath: app.getPath("userData"),
+        sessionType: process.env.XDG_SESSION_TYPE,
+        preferVision: task.executionMode === "visual_ocr",
+      });
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId,
+        eventType: "step",
+        stepId: "reobserve",
+        progress: 70,
+        detail: `Plan exhausted; requesting round ${nextRound} from the planner.`,
+        result: {
+          summary: evidence.ocrText.slice(0, 4_000),
+          evidence: [{ kind: "window", title: evidence.windowTitle, excerpt: evidence.controls.map((control) => control.title).join("; ").slice(0, 4_000) }],
+          screenshotBase64: evidence.screenshotBase64,
+          screenshotMimeType: evidence.screenshotMimeType,
+        },
+      });
+      sendAssistant({ type: "desktop_agent.observe", taskId, round: nextRound, goal: task.goal, observation: evidence.ocrText.slice(0, 4_000), windowTitle: evidence.windowTitle });
+      return;
+    }
     await completeDesktopAgentTask(taskId);
     return;
   }
@@ -1230,6 +1750,19 @@ async function runDesktopAgentTask(rawTask: unknown) {
   }
   const task = parsed.data;
   try {
+    if (task.capabilities.includes("browser.record")) {
+      try {
+        nativeTaskRecordings.set(task.taskId, await startNativeScreenRecording());
+      } catch (error) {
+        sendAssistant({
+          type: "desktop_agent.event",
+          taskId: task.taskId,
+          eventType: "failed",
+          detail: error instanceof Error ? error.message : "原生录屏启动失败。",
+        });
+        return;
+      }
+    }
     if (task.executionMode === "windows_ui" || task.executionMode === "visual_ocr") {
       const evidence = await inspectNativeDesktop({
         platform: process.platform,
@@ -1262,7 +1795,8 @@ async function runDesktopAgentTask(rawTask: unknown) {
       return;
     }
     if (task.executionMode === "connected_browser_tab") {
-      throw new Error("Use the connected-browser website capture workflow for authorized Edge/Chrome tabs; this native task channel cannot target extension tabs yet.");
+      sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "failed", detail: "Connected-tab tasks run on the browser extension channel; this desktop connection cannot execute them. Install the Helstera Local Browser Assistant and retry." });
+      return;
     }
     const browser = embeddedBrowserWindow;
     if (!browser || browser.isDestroyed())
@@ -1290,9 +1824,6 @@ async function runDesktopAgentTask(rawTask: unknown) {
     const screenshotBase64 = task.capabilities.includes("browser.capture")
       ? (await browser.webContents.capturePage()).toJPEG(76).toString("base64")
       : undefined;
-    if (task.capabilities.includes("browser.record")) {
-      throw new Error("当前桌面控制通道不支持录屏；请使用网站录屏任务生成视频草稿。");
-    }
     if (!page && !screenshotBase64) throw new Error("该任务没有请求当前浏览器可执行的能力。");
     const summary = page
       ? [page.title, page.description, ...(page.headings ?? []).slice(0, 5)].filter(Boolean).join("\n")
@@ -1367,16 +1898,71 @@ async function executeDesktopAgentAction(rawAction: unknown) {
   }
   try {
     if (isNativeDesktopTask(task)) {
-      if (action.kind === "native_click") {
-        await clickNativeText(String(action.target ?? ""), app.getPath("userData"));
+      if (action.kind === "native_click" || action.kind === "native_double_click" || action.kind === "native_right_click") {
+        const button = action.kind === "native_right_click" ? "right" : "left";
+        const double = action.kind === "native_double_click";
+        const hasCoordinates = typeof action.x === "number" && typeof action.y === "number";
+        if (hasCoordinates || (!action.target && hasCoordinates)) {
+          const grounded = await clickGroundedTarget({ x: action.x, y: action.y, text: action.target }, app.getPath("userData"), button, double);
+          sendAssistant({
+            type: "desktop_agent.event",
+            taskId: action.taskId,
+            eventType: "progress",
+            detail: `grounded ${action.kind} at (${Math.round(grounded.x)}, ${Math.round(grounded.y)}) via ${grounded.source}`,
+          });
+        } else {
+          await clickNativeText(String(action.target ?? ""), app.getPath("userData"));
+        }
       } else if (action.kind === "native_type") {
         await typeIntoNativeControl(String(action.target ?? ""), String(action.value ?? ""), app.getPath("userData"));
+      } else if (action.kind === "native_key") {
+        await pressNativeKey(String(action.key ?? ""), action.modifiers ?? []);
+      } else if (action.kind === "native_scroll") {
+        await scrollNativeWindow(Number(action.dx ?? 0), Number(action.dy ?? 0));
+      } else if (action.kind === "native_drag") {
+        const dragEvidence = await inspectNativeDesktop({
+          platform: process.platform,
+          userDataPath: app.getPath("userData"),
+          sessionType: process.env.XDG_SESSION_TYPE,
+          preferVision: false,
+        });
+        await dragNativeMouse(Number(action.x), Number(action.y), Number(action.toX), Number(action.toY), dragEvidence.windowRegion);
+      } else if (action.kind === "wait") {
+        const duration = Math.min(10_000, Math.max(50, Number(action.durationMs ?? 500)));
+        await new Promise((resolve) => setTimeout(resolve, duration));
+      } else if (action.kind === "native_wait_for_text") {
+        const result = await waitForNativeText(String(action.target ?? ""), app.getPath("userData"), {
+          timeoutMs: action.durationMs,
+        });
+        if (!result.found) throw new Error(`wait_for_text timed out after ${Math.round(result.elapsedMs / 1000)}s: the text never appeared.`);
+      } else if (action.kind === "start_recording") {
+        if (nativeTaskRecordings.has(action.taskId)) throw new Error("A native recording is already active for this task.");
+        nativeTaskRecordings.set(action.taskId, await startNativeScreenRecording());
+      } else if (action.kind === "stop_recording") {
+        const active = nativeTaskRecordings.get(action.taskId);
+        if (!active) throw new Error("No native recording is active for this task.");
+        nativeTaskRecordings.delete(action.taskId);
+        const base64 = await active.stop();
+        if (base64) await sendRecordingPayload(action.taskId, base64);
+        else
+          sendAssistant({
+            type: "desktop_agent.event",
+            taskId: action.taskId,
+            eventType: "evidence",
+            detail: "Native screen recording captured.",
+            result: {
+              summary: "Native screen recording captured.",
+              evidence: [{ kind: "recording", title: "Native screen recording" }],
+            },
+          });
       } else if (action.kind === "focus_window") {
-        const { getActiveWindow } = await import("@nut-tree/nut-js");
-        const active = await getActiveWindow();
-        const currentTitle = await active.title;
-        if (action.target && currentTitle !== action.target) throw new Error("The requested native window is not the active window.");
-        await active.focus();
+        if (action.target) {
+          const result = await focusNativeWindowByTitle(String(action.target));
+          if (!result.focused) throw new Error(`No visible window matched "${action.target}".`);
+        } else {
+          const { getActiveWindow } = await import("@nut-tree/nut-js");
+          await (await getActiveWindow()).focus();
+        }
       } else if (action.kind === "capture_screen" || action.kind === "read_page") {
         const evidence = await inspectNativeDesktop({
           platform: process.platform,
@@ -1691,6 +2277,61 @@ function connectEmbeddedAssistant(wssUrl: string, code: string) {
       void executeDesktopAction(message);
     if (message.type === "desktop_agent.task")
       void runDesktopAgentTask(message.task);
+    if (message.type === "desktop_agent.plan_next") {
+      void (async () => {
+        const taskId = String(message.taskId ?? "");
+        const parsedActions = desktopAgentActionSchema.array().safeParse(message.actions ?? []);
+        const round = Number(message.round ?? 0);
+        if (desktopAgentTasks.has(taskId) && parsedActions.success && parsedActions.data.length > 0) {
+          if (round > MAX_NATIVE_AGENT_ROUNDS) {
+            await completeDesktopAgentTask(taskId);
+            return;
+          }
+          desktopAgentRounds.set(taskId, round);
+          desktopAgentPlans.set(taskId, parsedActions.data);
+          await continueDesktopAgentPlan(taskId);
+        } else if (desktopAgentTasks.has(taskId)) {
+          await completeDesktopAgentTask(taskId);
+        }
+      })();
+    }
+    if (message.type === "desktop_agent.vision_request") {
+      void (async () => {
+        const requestId = String(message.requestId ?? "");
+        const description = String(message.description ?? "").slice(0, 500);
+        if (!requestId) return;
+        try {
+          const evidence = await inspectNativeDesktop({
+            platform: process.platform,
+            userDataPath: app.getPath("userData"),
+            sessionType: process.env.XDG_SESSION_TYPE,
+            preferVision: true,
+          });
+          sendAssistant({
+            type: "desktop_agent.vision_result",
+            requestId,
+            found: false,
+            x: -1,
+            y: -1,
+            confidence: 0,
+            screenshotBase64: evidence.screenshotBase64,
+            screenshotMimeType: evidence.screenshotMimeType,
+            screenshotWidth: evidence.screenshotWidth,
+            screenshotHeight: evidence.screenshotHeight,
+          });
+        } catch (error) {
+          sendAssistant({
+            type: "desktop_agent.vision_result",
+            requestId,
+            found: false,
+            x: -1,
+            y: -1,
+            confidence: 0,
+            error: error instanceof Error ? error.message.slice(0, 500) : "screenshot failed",
+          });
+        }
+      })();
+    }
     if (message.type === "desktop_agent.action")
       void executeDesktopAgentAction(message.action);
     if (message.type === "desktop_agent.stop") {

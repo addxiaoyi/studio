@@ -51,4 +51,41 @@ describe("desktop control policy", () => {
     expect(isDesktopActionAuthorized(action, ["browser.read"])).toBe(false);
     expect(isDesktopActionAuthorized(action, ["browser.type"])).toBe(true);
   });
+
+  it("classifies new native actions", () => {
+    expect(classifyDesktopAction({ requestId: "n1", taskId: "00000000-0000-0000-0000-000000000001", kind: "native_key", key: "Enter" })).toBe("deny");
+    expect(classifyDesktopAction({ requestId: "n2", taskId: "00000000-0000-0000-0000-000000000001", kind: "native_key", key: "Enter", approvalToken: "abcdefghijklmnop" })).toBe("confirm");
+    expect(classifyDesktopAction({ requestId: "n3", taskId: "00000000-0000-0000-0000-000000000001", kind: "native_key", key: "Win" })).toBe("deny");
+    expect(classifyDesktopAction({ requestId: "n4", taskId: "00000000-0000-0000-0000-000000000001", kind: "native_key", key: "F5", modifiers: ["ctrl"] })).toBe("deny");
+    expect(classifyDesktopAction({ requestId: "n5", taskId: "00000000-0000-0000-0000-000000000001", kind: "native_scroll", dx: 0, dy: -3 })).toBe("allow");
+    expect(classifyDesktopAction({ requestId: "n6", taskId: "00000000-0000-0000-0000-000000000001", kind: "wait", durationMs: 500 })).toBe("allow");
+    expect(classifyDesktopAction({ requestId: "n7", taskId: "00000000-0000-0000-0000-000000000001", kind: "native_drag", x: 1, y: 2 })).toBe("deny");
+    expect(classifyDesktopAction({ requestId: "n8", taskId: "00000000-0000-0000-0000-000000000001", kind: "native_drag", x: 1, y: 2, toX: 3, toY: 4, approvalToken: "abcdefghijklmnop" })).toBe("confirm");
+  });
+
+  it("authorizes new native capabilities", () => {
+    const key = desktopAgentActionSchema.parse({ requestId: "k1", taskId: "00000000-0000-0000-0000-000000000001", kind: "native_key", key: "Tab" });
+    expect(isDesktopActionAuthorized(key, ["window.key"])).toBe(true);
+    const drag = desktopAgentActionSchema.parse({ requestId: "k2", taskId: "00000000-0000-0000-0000-000000000001", kind: "native_drag", x: 1, y: 2, toX: 3, toY: 4 });
+    expect(isDesktopActionAuthorized(drag, ["window.drag"])).toBe(true);
+    const dbl = desktopAgentActionSchema.parse({ requestId: "k3", taskId: "00000000-0000-0000-0000-000000000001", kind: "native_double_click", x: 1, y: 2 });
+    expect(isDesktopActionAuthorized(dbl, ["window.click"])).toBe(true);
+  });
+
+  it("parses planned actions with coordinates, keys, and waits", () => {
+    const plan = desktopAgentTaskRequestSchema.parse({
+      goal: "切换窗口并发送回车",
+      role: "operator",
+      capabilities: ["window.focus", "window.key", "window.click", "window.scroll", "window.drag"],
+      executionMode: "windows_ui",
+      plannedActions: [
+        { kind: "native_key", key: "Enter", modifiers: ["ctrl"] },
+        { kind: "native_scroll", dx: 0, dy: -5 },
+        { kind: "native_double_click", x: 120, y: 340 },
+        { kind: "native_drag", x: 10, y: 10, toX: 200, toY: 220 },
+        { kind: "wait", durationMs: 800 },
+      ],
+    });
+    expect(plan.plannedActions).toHaveLength(5);
+  });
 });

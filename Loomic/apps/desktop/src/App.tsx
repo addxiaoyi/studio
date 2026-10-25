@@ -10,6 +10,9 @@
  */
 import React from "react";
 
+import DesktopAgentProgressCards from "./AgentProgressCards";
+import DesktopAgentHistoryPanel from "./AgentHistoryPanel";
+
 type DesktopUpdateState = {
   status: "idle" | "checking" | "available" | "downloading" | "downloaded" | "not-available" | "error";
   currentVersion: string;
@@ -37,6 +40,7 @@ function AppShell() {
   const api = (window as Window & { electronAPI?: DesktopApi }).electronAPI;
   const [update, setUpdate] = React.useState<DesktopUpdateState | null>(null);
   const [updateBusy, setUpdateBusy] = React.useState(false);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!api) return;
@@ -79,9 +83,16 @@ function AppShell() {
 
   return (
     <div style={{ minHeight: "100vh", padding: 32, background: "#f7f7f4", color: "#191918", fontFamily: "system-ui, sans-serif" }}>
+      <DesktopAgentProgressCards />
+      <DesktopAgentHistoryPanel open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <main style={{ maxWidth: 760, margin: "0 auto" }}>
         <p style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", opacity: 0.6 }}>Helstera Desktop</p>
-        <h1 style={{ margin: "12px 0 8px", fontSize: 28 }}>本地浏览助手已就绪</h1>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <h1 style={{ margin: "12px 0 8px", fontSize: 28 }}>本地浏览助手已就绪</h1>
+          <button type="button" onClick={() => setHistoryOpen(true)} style={{ minHeight: 34, borderRadius: 8, border: "1px solid #d8d8d2", background: "#fff", cursor: "pointer", padding: "0 14px", fontSize: 13 }}>
+            Agent 任务历史
+          </button>
+        </div>
         <p style={{ maxWidth: 600, lineHeight: 1.7, color: "#666660" }}>
           通过设置页生成一次性配对码后，可以连接桌面内嵌浏览器，读取用户明确选择的网站页面并生成截图、录屏和中文介绍。
         </p>

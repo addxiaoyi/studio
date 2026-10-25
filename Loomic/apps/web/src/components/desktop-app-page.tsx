@@ -7,6 +7,7 @@ import { Suspense, useCallback, useEffect, useRef, useState, type FormEvent, typ
 import type { WebsiteCaptureAssistantConnection, WebsiteCapturePairing } from "@helstera/shared";
 
 import { DesktopMcpPanel } from "@/components/desktop-mcp-panel";
+import { DesktopSettingsPage } from "@/components/desktop-settings-page";
 import { DesktopWorkbench } from "@/components/desktop-workbench";
 import { Button } from "@/components/ui/button";
 import ProjectsPage from "@/app/(workspace)/projects/page";
@@ -16,7 +17,7 @@ import { useAuth } from "@/lib/auth-context";
 import { createProject, createWebsiteCapturePairing, fetchWebsiteAssistantConnection, revokeWebsiteAssistant, setWebsiteAssistantPaused } from "@/lib/server-api";
 
 type LoginStatus = "waiting" | "exchanging" | "completed" | "failed" | "canceled" | "expired";
-type BrowserMode = "isolated_browser" | "connected_browser_tab";
+type BrowserMode = "isolated_browser" | "connected_browser_tab" | "windows_ui" | "visual_ocr";
 type DesktopApi = {
   startBrowserLogin: () => Promise<{ ok: boolean; message?: string }>;
   cancelBrowserLogin: () => Promise<{ ok: boolean }>;
@@ -42,7 +43,7 @@ function isDesktopShell() {
   return typeof document !== "undefined" && document.documentElement.dataset.helsteraDesktop === "true";
 }
 
-export function DesktopAppPage({ mode }: { mode: "home" | "canvas" | "projects" | "assets" | "mcp" | "development" }) {
+export function DesktopAppPage({ mode }: { mode: "home" | "canvas" | "projects" | "assets" | "mcp" | "development" | "settings" }) {
   const { user, session, loading } = useAuth();
   const router = useRouter();
   const [loginBusy, setLoginBusy] = useState(false);
@@ -109,9 +110,10 @@ export function DesktopAppPage({ mode }: { mode: "home" | "canvas" | "projects" 
     return <main className="desktop-app-login"><section><div className="desktop-app-login__mark"><Sparkles aria-hidden="true" /></div><p className="desktop-command-center__eyebrow">HELSTERA DESKTOP</p><h1>桌面 AI 工作台</h1><p>在系统浏览器完成登录，确认后将自动返回桌面。浏览器 Cookie 不会传给桌面应用。</p><Button size="lg" disabled={loginBusy || waiting} onClick={startLogin}>{loginBusy ? "正在打开浏览器…" : waiting ? "等待浏览器确认…" : loginStatus === "failed" || loginStatus === "expired" || loginStatus === "canceled" ? "重新发起登录" : "登录并进入工作台"}<ArrowUpRight aria-hidden="true" /></Button>{waiting ? <Button variant="outline" className="mt-3 w-full" onClick={cancelLogin}>取消登录</Button> : null}{loginStatus ? <p className="desktop-app-login__status" role="status">{loginStatus === "waiting" ? "已打开系统浏览器，请完成登录。" : loginStatus === "exchanging" ? "正在安全完成桌面登录…" : loginStatus === "completed" ? "登录成功，正在返回桌面…" : "登录请求已结束，请重新发起。"}</p> : null}{loginError ? <p role="alert" className="desktop-home__error">{loginError}</p> : null}</section></main>;
   }
 
-  if (mode === "canvas") return <DesktopModule title="画布" active="canvas"><Suspense fallback={<DesktopLoading />}><CanvasPage /></Suspense></DesktopModule>;
-  if (mode === "projects") return <DesktopModule title="项目" active="projects"><Suspense fallback={<DesktopLoading />}><ProjectsPage /></Suspense></DesktopModule>;
-  if (mode === "assets") return <DesktopModule title="素材库" active="assets"><Suspense fallback={<DesktopLoading />}><AssetsPage /></Suspense></DesktopModule>;
+  if (mode === "canvas") return <DesktopModule active="canvas"><Suspense fallback={<DesktopLoading />}><CanvasPage /></Suspense></DesktopModule>;
+  if (mode === "projects") return <DesktopModule active="projects"><Suspense fallback={<DesktopLoading />}><ProjectsPage /></Suspense></DesktopModule>;
+  if (mode === "assets") return <DesktopModule active="assets"><Suspense fallback={<DesktopLoading />}><AssetsPage /></Suspense></DesktopModule>;
+  if (mode === "settings") return <DesktopSettingsPage />;
   if (mode === "mcp") return <DesktopAdvancedPage initialView="mcp" />;
   if (mode === "development") return <DesktopAdvancedPage initialView="development" />;
   return <DesktopAgentHome email={user.email} accessToken={session?.access_token ?? ""} />;
@@ -287,7 +289,7 @@ function DesktopAgentHome({ email, accessToken }: { email: string; accessToken: 
 
   return <main className="desktop-agent-home">
     <header className="desktop-agent-home__header"><div><p className="desktop-command-center__eyebrow">HELSTERA DESKTOP / AGENT</p><h1>你想让 Agent 帮你做什么？</h1><p>用一句话描述目标。浏览器、屏幕与视觉能力由 Agent 按任务需要自动调度。</p></div><div className="desktop-command-center__identity"><span className="desktop-command-center__status" />{email}<span>已连接</span></div></header>
-    <section className="desktop-agent-composer" aria-label="与 Agent 对话"><form onSubmit={startAgent}><label htmlFor="desktop-agent-prompt">任务目标</label><textarea id="desktop-agent-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="例如：打开 https://example.com，介绍产品功能并整理关键页面截图。" rows={4} maxLength={4000} disabled={busy} /><div className="desktop-agent-composer__footer"><fieldset><legend>浏览器访问方式</legend><button type="button" role="radio" aria-checked={browserMode === "isolated_browser"} className={browserMode === "isolated_browser" ? "is-selected" : ""} onClick={() => setBrowserMode("isolated_browser")}>隔离浏览器</button><button type="button" role="radio" aria-checked={browserMode === "connected_browser_tab"} className={browserMode === "connected_browser_tab" ? "is-selected" : ""} onClick={() => setBrowserMode("connected_browser_tab")}>授权的 Edge / Chrome 标签页</button></fieldset><Button type="submit" disabled={busy || !prompt.trim() || !accessToken}>{busy ? <><LoaderCircle className="animate-spin" aria-hidden="true" />正在准备任务…</> : <>开始任务<ArrowRight aria-hidden="true" /></>}</Button></div></form>{error ? <p className="desktop-agent-home__error" role="alert">{error}</p> : null}</section>
+    <section className="desktop-agent-composer" aria-label="与 Agent 对话"><form onSubmit={startAgent}><label htmlFor="desktop-agent-prompt">任务目标</label><textarea id="desktop-agent-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="例如：打开 https://example.com，介绍产品功能并整理关键页面截图。" rows={4} maxLength={4000} disabled={busy} /><div className="desktop-agent-composer__footer"><fieldset><legend>浏览器访问方式</legend><button type="button" role="radio" aria-checked={browserMode === "isolated_browser"} className={browserMode === "isolated_browser" ? "is-selected" : ""} onClick={() => setBrowserMode("isolated_browser")}>隔离浏览器</button><button type="button" role="radio" aria-checked={browserMode === "connected_browser_tab"} className={browserMode === "connected_browser_tab" ? "is-selected" : ""} onClick={() => setBrowserMode("connected_browser_tab")}>授权的 Edge / Chrome 标签页</button><button type="button" role="radio" aria-checked={browserMode === "windows_ui"} className={browserMode === "windows_ui" ? "is-selected" : ""} onClick={() => setBrowserMode("windows_ui")}>本机应用（控件树）</button><button type="button" role="radio" aria-checked={browserMode === "visual_ocr"} className={browserMode === "visual_ocr" ? "is-selected" : ""} onClick={() => setBrowserMode("visual_ocr")}>本机应用（视觉 OCR）</button></fieldset><Button type="submit" disabled={busy || !prompt.trim() || !accessToken}>{busy ? <><LoaderCircle className="animate-spin" aria-hidden="true" />正在准备任务…</> : <>开始任务<ArrowRight aria-hidden="true" /></>}</Button></div></form>{error ? <p className="desktop-agent-home__error" role="alert">{error}</p> : null}</section>
     {browserMode === "connected_browser_tab" ? <section className="desktop-browser-connection" aria-label="Edge 与 Chrome 连接状态">
       <div className="desktop-browser-connection__status" role="status" aria-live="polite">
         <span className={browserConnection?.status === "connected" ? "is-connected" : "is-disconnected"} aria-hidden="true" />
@@ -306,15 +308,14 @@ function DesktopAgentHome({ email, accessToken }: { email: string; accessToken: 
 }
 
 function DesktopAdvancedPage({ initialView }: { initialView: "mcp" | "development" }) {
-  const router = useRouter();
   const view = initialView;
-  return <main className="desktop-feature"><header className="desktop-feature__header"><div><p>HELSTERA DESKTOP / ADVANCED</p><h1>{view === "mcp" ? "MCP 连接" : "本地开发"}</h1></div><button type="button" onClick={() => router.replace("/desktop-app/")}>返回 Agent</button></header><nav className="desktop-feature__nav" aria-label="高级能力"><button type="button" aria-current={view === "mcp" ? "page" : undefined} onClick={() => router.replace("/desktop-app/mcp/")}>MCP 连接</button><button type="button" aria-current={view === "development" ? "page" : undefined} onClick={() => router.replace("/desktop-app/development/")}>本地开发</button></nav><section className={`desktop-feature__content desktop-feature__content--${view}`}>{view === "mcp" ? <DesktopMcpPanel /> : <DesktopWorkbench />}</section></main>;
+  const title = view === "mcp" ? "MCP 连接" : "本地开发";
+  return <main className="desktop-feature"><section className={`desktop-feature__content desktop-feature__content--${view}`}><h1 className="desktop-feature__page-title">{title}</h1>{view === "mcp" ? <DesktopMcpPanel /> : <DesktopWorkbench />}</section></main>;
 }
 
-function DesktopModule({ title, active, children }: { title: string; active: string; children: ReactNode }) {
-  const router = useRouter();
-  const items = [{ id: "canvas", label: "Agent / 画布", href: "/desktop-app/canvas/" }, { id: "projects", label: "项目", href: "/desktop-app/projects/" }, { id: "assets", label: "素材库", href: "/desktop-app/assets/" }];
-  return <main className="desktop-feature"><header className="desktop-feature__header"><div><p>HELSTERA DESKTOP / WORKSPACE</p><h1>{title}</h1></div><button type="button" onClick={() => router.replace("/desktop-app/")}>返回 Agent 首页</button></header><nav className="desktop-feature__nav" aria-label="桌面工作区">{items.map((item) => <button key={item.id} type="button" aria-current={active === item.id ? "page" : undefined} onClick={() => router.replace(item.href)}>{item.label}</button>)}</nav><section className={`desktop-feature__content desktop-feature__content--${active}`}>{children}</section></main>;
+function DesktopModule({ active, children }: { active: string; children: ReactNode }) {
+  if (active === "canvas") return <main className="desktop-canvas-workspace">{children}</main>;
+  return <main className="desktop-feature"><section className={`desktop-feature__content desktop-feature__content--${active}`}>{children}</section></main>;
 }
 
 function DesktopLoading() { return <div className="desktop-module-loading" aria-busy="true"><span /></div>; }

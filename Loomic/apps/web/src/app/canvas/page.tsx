@@ -18,7 +18,8 @@ import { CanvasLogoMenu } from "../../components/canvas-logo-menu";
 import { EditableProjectName } from "../../components/editable-project-name";
 import { createExcalidrawImageElement, insertImageOnCanvas, insertVideoOnCanvas } from "../../lib/canvas-elements";
 import { getServerBaseUrl } from "../../lib/env";
-import { deleteEmptyProject, fetchCanvas, fetchProject, fetchWorkspaceSettings, ApiAuthError } from "../../lib/server-api";
+import { ApiApplicationError, ApiAuthError, createProject, deleteEmptyProject, fetchCanvas, fetchProject, fetchWorkspaceSettings } from "../../lib/server-api";
+import { clearLastDesktopCanvas, getLastDesktopCanvasId, rememberDesktopCanvas } from "../../lib/desktop-canvas";
 import { BrandKitSelector } from "../../components/brand-kit-selector";
 import { CanvasBottomBar } from "../../components/canvas-bottom-bar";
 import { CanvasFilesPanel } from "../../components/canvas-files-panel";
@@ -38,6 +39,7 @@ function isBlankCanvasContent(content: {
 function CanvasPageContent() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
+  const desktopMode = pathname.startsWith("/desktop-app/");
   const canvasId = searchParams.get("id");
   const assetId = searchParams.get("assetId");
   const assetMediaType = searchParams.get("mediaType");
@@ -48,11 +50,23 @@ function CanvasPageContent() {
   const browserMode = searchParams.get("browserMode");
   const desktopExecutionContext: DesktopExecutionContext | undefined =
     pathname.startsWith("/desktop-app/") &&
-    (browserMode === "isolated_browser" || browserMode === "connected_browser_tab")
-      ? { browserMode, executionMode: "automatic" }
+    (browserMode === "isolated_browser" ||
+      browserMode === "connected_browser_tab" ||
+      browserMode === "windows_ui" ||
+      browserMode === "visual_ocr")
+      ? {
+          browserMode,
+          executionMode:
+            browserMode === "windows_ui"
+              ? "windows_ui"
+              : browserMode === "visual_ocr"
+                ? "visual_ocr"
+                : "automatic",
+        }
       : undefined;
   const { user, session, loading: authLoading, signOut } = useAuth();
   const router = useRouter();
+  const userId = user?.id;
 
   const [canvasData, setCanvasData] = useState<{
     id: string;
@@ -92,6 +106,7 @@ function CanvasPageContent() {
 
   const excalidrawApiRef = useRef<any>(null);
   const [excalidrawApi, setExcalidrawApi] = useState<any>(null);
+  const [canvasReady, setCanvasReady] = useState(false);
 
   const signOutRef = useRef(signOut);
   signOutRef.current = signOut;
@@ -134,6 +149,47 @@ function CanvasPageContent() {
   const accessToken = session?.access_token;
   const accessTokenRef = useRef(accessToken);
   accessTokenRef.current = accessToken;
+  const autoCreateStarted = useRef(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+  useEffect(() => {
+    if (!desktopMode || authLoading || !accessToken || !userId || canvasId || autoCreateStarted.current) return;
+    const token = accessToken;
+    const ownerId = userId;
+    autoCreateStarted.current = true;
+    async function openOrCreateCanvas() {
+      const rememberedId = getLastDesktopCanvasId(ownerId);
+      if (rememberedId) {
+        try {
+          await fetchCanvas(token, rememberedId);
+          router.replace(desktopCanvasHrefWithParams(rememberedId, searchParams));
+          return;
+        } catch (cause) {
+          if (!(cause instanceof ApiApplicationError) || cause.code !== "canvas_not_found") throw cause;
+          clearLastDesktopCanvas(ownerId, rememberedId);
+        }
+      }
+
+      const { project } = await createProject(
+        token,
+        { name: "未命名桌面画布" },
+        { idempotencyKey: `desktop-canvas-${crypto.randomUUID()}` },
+      );
+      rememberDesktopCanvas(ownerId, project.primaryCanvas.id);
+      router.replace(desktopCanvasHrefWithParams(project.primaryCanvas.id, searchParams));
+    }
+
+    void openOrCreateCanvas().catch((cause) => {
+      autoCreateStarted.current = false;
+      setError(cause instanceof Error ? cause.message : "无法打开或创建画布，请重试。");
+    });
+  }, [accessToken, authLoading, canvasId, desktopMode, retryCount, router, searchParams, userId]);
+
+  function retryDesktopCanvas() {
+    autoCreateStarted.current = false;
+    setError(null);
+    setRetryCount((count) => count + 1);
+  }
 
   const getToken = useCallback(() => accessTokenRef.current ?? null, []);
   const ws = useWebSocket(getToken);
@@ -152,7 +208,7 @@ function CanvasPageContent() {
     }
 
     return () => {
-      if (!autoDeleteEmptyCanvasRef.current || !projectIdRef.current) return;
+      if (desktopMode || !autoDeleteEmptyCanvasRef.current || !projectIdRef.current) return;
       emptyCleanupTimerRef.current = window.setTimeout(() => {
         const content = canvasContentRef.current;
         const token = accessTokenRef.current;
@@ -163,12 +219,14 @@ function CanvasPageContent() {
         emptyCleanupTimerRef.current = null;
       }, 2000);
     };
-  }, []);
+  }, [desktopMode]);
 
   const handleApiReady = useCallback((api: any) => {
     excalidrawApiRef.current = api;
     setExcalidrawApi(api);
+    setCanvasReady(false);
   }, []);
+  const handleCanvasReady = useCallback(() => setCanvasReady(true), []);
 
   useEffect(() => {
     if (!assetId || !excalidrawApi || !accessToken || openedAssetRef.current === assetId) return;
@@ -318,8 +376,6 @@ function CanvasPageContent() {
   // Only re-fetch when canvasId changes or on initial auth resolution.
   // Token refreshes (e.g. tab switch back) should NOT trigger a reload —
   // we depend on user.id (stable string) instead of the user object ref.
-  const userId = user?.id;
-
   useEffect(() => {
     if (authLoading) return;
     if (!userId) {
@@ -333,6 +389,7 @@ function CanvasPageContent() {
     fetchCanvas(token, canvasId)
       .then((data) => {
         const c = data.canvas;
+        if (desktopMode) rememberDesktopCanvas(userId, c.id);
         setCanvasData({
           id: c.id,
           name: c.name,
@@ -352,21 +409,35 @@ function CanvasPageContent() {
           })
           .catch((err) => console.warn("Failed to fetch project for brand kit:", err));
       })
-      .catch((err) => {
-        if (err instanceof ApiAuthError) {
+      .catch((cause) => {
+        if (cause instanceof ApiAuthError) {
           signOutRef.current().then(() => routerRef.current.replace("/login"));
           return;
         }
-        setError("Failed to load canvas.");
+        if (desktopMode && cause instanceof ApiApplicationError && cause.code === "canvas_not_found") {
+          clearLastDesktopCanvas(userId, canvasId);
+          autoCreateStarted.current = false;
+          setPageLoading(true);
+          const params = new URLSearchParams(searchParams.toString());
+          params.delete("id");
+          const query = params.toString();
+          routerRef.current.replace(`/desktop-app/canvas/${query ? `?${query}` : ""}`);
+          return;
+        }
+        setError(cause instanceof Error ? cause.message : "画布加载失败，请重试。");
         setPageLoading(false);
       });
     // Intentionally omitting accessTokenRef (stable ref) and signOutRef/routerRef
     // (ref wrappers) from deps — only re-run when auth resolves, user changes, or
     // canvasId changes. Token refresh (e.g. tab switch) must NOT trigger a reload.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, userId, canvasId]);
+  }, [authLoading, userId, canvasId, desktopMode, retryCount, searchParams]);
 
   if (!canvasId) {
+    if (desktopMode) {
+      if (!error) return <LoadingScreen />;
+      return <main className="desktop-canvas-recovery" role="alert"><h1>无法打开画布</h1><p>{error}</p><button type="button" onClick={retryDesktopCanvas}>重试</button></main>;
+    }
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-6">
         <div className="w-full max-w-md rounded-2xl border border-border/60 bg-card p-8 text-center shadow-sm">
@@ -388,8 +459,9 @@ function CanvasPageContent() {
 
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className={desktopMode ? "desktop-canvas-recovery" : "flex min-h-screen items-center justify-center"}>
         <p className="text-sm text-destructive">{error}</p>
+        {desktopMode ? <button type="button" onClick={retryDesktopCanvas}>重试</button> : null}
       </div>
     );
   }
@@ -397,13 +469,14 @@ function CanvasPageContent() {
   if (!canvasData || !accessToken) return null;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <div className={`flex ${desktopMode ? "h-full w-full" : "h-screen w-screen"} overflow-hidden ${desktopMode ? "desktop-canvas-surface" : ""}`}>
       {/* Top-left navigation bar */}
       <div className="absolute left-3 right-3 top-3 z-20 flex max-w-[calc(100vw-5rem)] flex-wrap items-center gap-1.5">
         <CanvasLogoMenu
           accessToken={accessToken}
           projectId={canvasData.projectId}
           canvasId={canvasData.id}
+          desktopMode={desktopMode}
           excalidrawApi={excalidrawApi}
         />
         <EditableProjectName
@@ -425,17 +498,21 @@ function CanvasPageContent() {
           <CreditHeaderButton />
         </div>
         <CanvasEditor
+          key={canvasData.id}
           canvasId={canvasData.id}
           projectId={canvasData.projectId}
           accessToken={accessToken}
           initialContent={canvasData.content}
           onApiReady={handleApiReady}
+          onReady={handleCanvasReady}
           ws={ws}
           leftPanelOpen={layersOpen || filesOpen}
           onSelectionChange={setSelectedCanvasElements}
         />
         <CanvasEmptyHint
           excalidrawApi={excalidrawApi}
+          ready={canvasReady}
+          desktopMode={desktopMode}
           onOpenChat={handleOpenChat}
         />
         <CanvasBottomBar
@@ -495,6 +572,12 @@ function CanvasPageContent() {
       />
     </div>
   );
+}
+
+function desktopCanvasHrefWithParams(canvasId: string, current: { toString(): string }) {
+  const next = new URLSearchParams(current.toString());
+  next.set("id", canvasId);
+  return `/desktop-app/canvas/?${next.toString()}`;
 }
 
 export default function CanvasPage() {
