@@ -722,6 +722,8 @@ function createNativeScreenToolCatalog(): Array<{
         "Inspect the active native window: accessible controls, OCR text (untrusted), and a screenshot. Read-only. Blocked automatically when password/OTP fields are visible.",
       inputSchema: objectSchema({
         preferVision: { type: "boolean", description: "Skip the accessibility tree and rely on visual/OCR evidence." },
+        includeScreenshot: { type: "boolean", description: "Include the screenshot base64 (default false to save bandwidth; text/controls/OCR are always returned)." },
+        maxScreenshotBytes: { type: "integer", minimum: 20_000, maximum: 300_000, description: "Clamp for the returned screenshot base64, default 300000." },
       }),
     },
     {
@@ -874,7 +876,10 @@ async function runNativeScreenTool(
         sessionType,
         preferVision: args.preferVision === true,
       });
-      const includeScreenshot = args.includeScreenshot !== false;
+      const includeScreenshot = args.includeScreenshot === true;
+      const maxScreenshotBytes = typeof args.maxScreenshotBytes === "number" && Number.isFinite(args.maxScreenshotBytes)
+        ? Math.max(20_000, Math.min(300_000, args.maxScreenshotBytes))
+        : 300_000;
       return JSON.stringify({
         windowTitle: evidence.windowTitle,
         windowRegion: evidence.windowRegion,
@@ -886,9 +891,9 @@ async function runNativeScreenTool(
         screenshotHeight: evidence.screenshotHeight,
         ...(includeScreenshot
           ? {
-              screenshotBase64: evidence.screenshotBase64.slice(0, 300_000),
+              screenshotBase64: evidence.screenshotBase64.slice(0, maxScreenshotBytes),
               screenshotMimeType: evidence.screenshotMimeType,
-              screenshotTruncated: evidence.screenshotBase64.length > 300_000,
+              screenshotTruncated: evidence.screenshotBase64.length > maxScreenshotBytes,
             }
           : {}),
         ...(evidence.fallbackReason ? { fallbackReason: evidence.fallbackReason } : {}),

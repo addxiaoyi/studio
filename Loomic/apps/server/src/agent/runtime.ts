@@ -1852,7 +1852,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               input.observation.slice(0, 4_000),
               `Granted capabilities: ${input.capabilities.join(", ")}`,
               `Decide the next batch of native actions (0-8 items). Use ONLY kinds enabled by the granted capabilities.`,
-              `If the goal is already achieved, return [].`,
+              `Evaluate the observation against the goal first: if the goal is already achieved, or it cannot progress further in this mode, return []. Do not invent actions that repeat a step that visibly already succeeded.`,
               `Respond with JSON: {"actions": [ ... ]} where each action matches the schema.`,
             ].join("\n");
             const response = await planModel.invoke([new HumanMessage(prompt)]);
