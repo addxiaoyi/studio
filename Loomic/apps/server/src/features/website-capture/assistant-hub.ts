@@ -331,6 +331,8 @@ export class WebsiteAssistantHub {
     timeoutMs?: number;
   }): Promise<{ found: boolean; x: number; y: number; confidence: number }> {
     const handler = this.visionAnalyzer ?? this.options.analyzeDesktopScreenshot;
+    if (!handler)
+      throw new Error("Visual grounding is not configured on the server.");
     const live = [...this.connections.values()]
       .reverse()
       .find(
@@ -342,8 +344,6 @@ export class WebsiteAssistantHub {
       );
     if (!live)
       throw new Error("The authorized desktop MCP connection is unavailable or paused.");
-    if (!handler)
-      throw new Error("Visual grounding is not configured on the server.");
     const requestId = randomUUID();
     const timeoutMs = Math.min(30_000, Math.max(3_000, input.timeoutMs ?? 15_000));
     try {

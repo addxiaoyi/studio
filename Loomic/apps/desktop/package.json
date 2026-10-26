@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.electron.json && vite build && electron-builder",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.electron.json --noEmit",
-    "test": "vitest run --config vitest.config.ts electron/local-workspace.test.ts electron/mcp-registry.test.ts electron/window-controls.test.ts electron/browser-pairing.test.ts electron/desktop-login.test.ts electron/native-automation.test.ts"
+    "test": "vitest run --config vitest.config.ts electron/local-workspace.test.ts electron/mcp-registry.test.ts electron/window-controls.test.ts electron/browser-pairing.test.ts electron/desktop-login.test.ts electron/native-automation.test.ts",
+    "smoke": "node scripts/smoke-desktop-agent.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

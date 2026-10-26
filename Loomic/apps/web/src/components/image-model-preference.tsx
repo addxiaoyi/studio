@@ -3,12 +3,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { ImageModelInfo } from "../lib/server-api";
-import type { VideoModelInfo } from "../lib/server-api";
-import { fetchImageModels, fetchVideoModels } from "../lib/server-api";
+import { getConfiguredVideoPriceRates } from "@helstera/shared";
 import { useImageModelPreference } from "../hooks/use-image-model-preference";
 import { useVideoModelPreference } from "../hooks/use-video-model-preference";
 import { getModelPricingLabel } from "../lib/model-pricing";
+import type { ImageModelInfo } from "../lib/server-api";
+import type { VideoModelInfo } from "../lib/server-api";
+import { fetchImageModels, fetchVideoModels } from "../lib/server-api";
 
 const POPOVER_WIDTH = 380;
 const POPOVER_GAP = 8;
@@ -49,6 +50,42 @@ function modelIdentity(id: string) {
     : id;
 }
 
+function normalizeModelId(id: string) {
+  return id.trim().toLowerCase();
+}
+
+function flagshipRates(model: VideoModelInfo) {
+  return model.resolutionRates?.length
+    ? model.resolutionRates
+    : getConfiguredVideoPriceRates(model.id);
+}
+
+function rankVideoModels(models: VideoModelInfo[]) {
+  const unique = new Map<string, VideoModelInfo>();
+  for (const model of models) {
+    const key = normalizeModelId(model.id);
+    const current = unique.get(key);
+    if (!current || compareVideoModelHealth(model, current) < 0) unique.set(key, model);
+  }
+
+  return [...unique.values()].sort((left, right) => {
+    const leftFeatured = Number(normalizeModelId(left.id) !== "minimax-h3");
+    const rightFeatured = Number(normalizeModelId(right.id) !== "minimax-h3");
+    if (leftFeatured !== rightFeatured) return leftFeatured - rightFeatured;
+    return compareVideoModelHealth(left, right);
+  });
+}
+
+function compareVideoModelHealth(left: VideoModelInfo, right: VideoModelInfo) {
+  const availabilityRank = (model: VideoModelInfo) => model.availability === "unavailable" ? 2 : model.availability === "available" ? 0 : 1;
+  const healthRank = (model: VideoModelInfo) => model.healthStatus === "healthy" ? 0 : model.healthStatus === "degraded" ? 1 : 2;
+  return availabilityRank(left) - availabilityRank(right)
+    || healthRank(left) - healthRank(right)
+    || (left.failureCount ?? 0) - (right.failureCount ?? 0)
+    || (Number(left.id !== "minimax-h3") - Number(right.id !== "minimax-h3"))
+    || left.id.localeCompare(right.id);
+}
+
 export function ImageModelPreferencePopover({
   open,
   onClose,
@@ -70,6 +107,10 @@ export function ImageModelPreferencePopover({
   const [retry, setRetry] = useState(0);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<ReturnType<typeof calculateModelPopoverLayout> | null>(null);
+  const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
+  const featuredResolution = videoPreference.preference.resolution ?? "768p";
+  const videoPreferenceRef = useRef(videoPreference);
+  videoPreferenceRef.current = videoPreference;
 
   useEffect(() => {
     if (!open) return;
@@ -90,12 +131,18 @@ export function ImageModelPreferencePopover({
     fetchVideoModels()
       .then((data) => {
         if (cancelled) return;
-        setVideoModels(data.models);
-        setUnavailableVideoModels(data.unavailableModels.filter((model) => model.availability === "unavailable"));
-        const selectableModels = data.models.filter((model) => model.availability !== "unavailable");
-        const availableIds = new Set(selectableModels.map((model) => model.id));
-        const selectedModels = videoPreference.preference.models.filter((model) => availableIds.has(model));
-        if (videoPreference.preference.mode === "manual" && selectedModels.length !== videoPreference.preference.models.length) {
+        const currentPreference = videoPreferenceRef.current.preference;
+        const selectableModels = rankVideoModels(data.models.filter((model) => model.availability !== "unavailable"));
+        setVideoModels(rankVideoModels(data.models));
+        setUnavailableVideoModels(rankVideoModels(data.unavailableModels.filter((model) => model.availability === "unavailable")));
+        const selectedModels = [...new Set(currentPreference.models.flatMap((modelId) => {
+          const selected = selectableModels.find((model) => model.id === modelId)
+            ?? selectableModels.find((model) => normalizeModelId(model.id) === normalizeModelId(modelId));
+          return selected ? [selected.id] : [];
+        }))];
+        const preferenceChanged = selectedModels.length !== currentPreference.models.length
+          || selectedModels.some((modelId, index) => modelId !== currentPreference.models[index]);
+        if (currentPreference.mode === "manual" && preferenceChanged) {
           const fallbackModel = selectableModels[0]?.id;
           const models = selectedModels.length > 0
             ? selectedModels
@@ -103,11 +150,13 @@ export function ImageModelPreferencePopover({
               ? [fallbackModel]
               : [];
           if (models.length > 0) {
-            videoPreference.setPreference({
-              ...videoPreference.preference,
+            videoPreferenceRef.current.setPreference({
+              ...currentPreference,
+              mode: currentPreference.mode,
+              duration: currentPreference.duration,
               models,
             });
-            setVideoModelNotice(
+            if (selectedModels.length < currentPreference.models.length) setVideoModelNotice(
               selectedModels.length > 0
                 ? "已移除当前不可用的模型"
                 : "原选择已不可用，已切换到可用模型",
@@ -187,13 +236,7 @@ export function ImageModelPreferencePopover({
     if (!seconds) return null;
     return seconds >= 60 ? `冷却 ${Math.ceil(seconds / 60)} 分钟` : `冷却 ${seconds} 秒`;
   };
-  const rankedModels = activeTab === "video"
-    ? [...currentModels].sort((a, b) => {
-        const aCooling = a.cooldownUntil && new Date(a.cooldownUntil).getTime() > Date.now() ? 1 : 0;
-        const bCooling = b.cooldownUntil && new Date(b.cooldownUntil).getTime() > Date.now() ? 1 : 0;
-        return aCooling - bCooling || (a.failureCount ?? 0) - (b.failureCount ?? 0);
-      })
-    : currentModels;
+  const rankedModels = activeTab === "video" ? rankVideoModels(videoModels) : currentModels;
 
   if (!open || !pos) return null;
 
@@ -262,7 +305,7 @@ export function ImageModelPreferencePopover({
         </div>
 
         {/* Manual model list */}
-        {currentPreference.mode === "manual" && (
+        {(currentPreference.mode === "manual" || activeTab === "video") && (
           <div className="scrollbar-hidden min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-1">
             {loadState[activeTab] === "loading" && (
               <div className="px-3 py-6 text-center text-xs text-muted-foreground">正在加载模型...</div>
@@ -293,19 +336,22 @@ export function ImageModelPreferencePopover({
                 </div>
               </details>
             )}
-            {loadState[activeTab] === "ready" && rankedModels.map((m) => {
-            const selected = currentPreference.models.includes(m.id);
+            {loadState[activeTab] === "ready" && rankedModels.filter((model) => currentPreference.mode === "manual" || normalizeModelId(model.id) === "minimax-h3").map((m) => {
+            const selected = currentPreference.models.some((modelId) => normalizeModelId(modelId) === normalizeModelId(m.id));
             const canSelect = activeTab !== "video" || ("availability" in m && m.availability !== "unavailable");
+            const isFlagship = activeTab === "video" && m.id.trim().toLowerCase() === "minimax-h3";
+            const isExpanded = expandedModelId === m.id;
+            const rates = isFlagship ? flagshipRates(m as VideoModelInfo) : [];
+            const selectedRate = rates.find((rate) => rate.resolution === featuredResolution) ?? rates[0];
             return (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => currentToggleModel(m.id)}
-                disabled={!canSelect}
-                className={`group flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-all duration-300 ${
-                  selected ? "bg-accent/10 hover:bg-accent/15" : "hover:bg-foreground/[0.04]"
-                } disabled:cursor-not-allowed disabled:opacity-50`}
-              >
+              <div key={m.id} className={`rounded-lg ${selected ? "bg-accent/10" : ""}`}>
+              <div className={`group flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-all duration-300 ${selected ? "hover:bg-accent/15" : "hover:bg-foreground/[0.04]"} ${!canSelect ? "cursor-not-allowed opacity-50" : ""}`}>
+                <button type="button" onClick={() => {
+                  if (isFlagship) {
+                    videoPreference.selectResolution(m.id, selectedRate?.resolution ?? "768p");
+                    setExpandedModelId(isExpanded ? null : m.id);
+                  } else currentToggleModel(m.id);
+                }} disabled={!canSelect} className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-not-allowed">
                 {m.iconUrl && (
                   <img
                     src={m.iconUrl}
@@ -313,15 +359,20 @@ export function ImageModelPreferencePopover({
                     className="h-5 w-5 shrink-0 rounded-full object-cover"
                   />
                 )}
-                <div className="flex flex-1 flex-col">
-                  <span className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="flex flex-wrap items-center gap-1.5 text-[13px] font-medium text-foreground">
                     {m.displayName}
+                    {isFlagship && (
+                      <span className="rounded-full bg-foreground px-1.5 py-0.5 text-[10px] font-semibold text-background">
+                        {"旗舰首推"}
+                      </span>
+                    )}
                     <span className="font-mono text-[10px] font-normal text-muted-foreground">
                       {modelIdentity(m.id)}
                     </span>
                     {activeTab === "video" && (
                       <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">
-                        已探查（未验证）
+                        {("healthStatus" in m && m.healthStatus === "healthy") ? "已验证" : ("availability" in m && m.availability === "unavailable") ? "暂不可用" : "待生成验证"}
                       </span>
                     )}
                   </span>
@@ -330,8 +381,8 @@ export function ImageModelPreferencePopover({
                       {cooldownText(m.cooldownUntil) ?? (m.failureCount ? `近期失败 ${m.failureCount} 次` : "")}
                     </span>
                   )}
-                  <span className="flex items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
-                    <span className="font-medium text-foreground">{getModelPricingLabel(m, activeTab)}</span>
+                  <span className="flex flex-wrap items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
+                    <span className="font-medium text-foreground">{isFlagship && selectedRate ? `${selectedRate.resolution} · ¥${selectedRate.priceCnyPerSecond.toFixed(2)}/秒` : getModelPricingLabel(m, activeTab)}</span>
                     <span>{m.description}</span>
                   </span>
                   {activeTab === "video" && (
@@ -355,7 +406,24 @@ export function ImageModelPreferencePopover({
                     />
                   </svg>
                 )}
-              </button>
+                </button>
+                {isFlagship && (
+                  <button type="button" aria-expanded={isExpanded} aria-label="展开 MiniMax H3 分辨率价格" onClick={() => setExpandedModelId(isExpanded ? null : m.id)} className="shrink-0 rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
+                    {isExpanded ? "收起" : "价格"}
+                  </button>
+                )}
+              </div>
+              {isFlagship && isExpanded && rates.length > 0 ? (
+                <div role="radiogroup" aria-label="MiniMax H3 分辨率价格" className="grid grid-cols-2 gap-1.5 border-t border-border/40 px-2 pb-2 pt-1.5">
+                  {rates.map((rate) => (
+                    <button key={rate.resolution} type="button" role="radio" aria-checked={featuredResolution === rate.resolution} disabled={!canSelect} onClick={() => videoPreference.selectResolution(m.id, rate.resolution)} className={`flex items-center justify-between rounded-md px-2 py-1.5 text-[11px] disabled:opacity-50 ${featuredResolution === rate.resolution ? "bg-foreground text-background" : "bg-background/70 hover:bg-muted"}`}>
+                      <span className="font-medium">{rate.resolution}</span>
+                      <span className="tabular-nums opacity-80">¥{rate.priceCnyPerSecond.toFixed(2)}/秒</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              </div>
             );
             })}
           </div>

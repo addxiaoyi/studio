@@ -99,10 +99,18 @@ export async function inspectNativeDesktop(options: {
     worker = await createWorker(["eng", "chi_sim"], undefined, {
       cachePath: join(options.userDataPath, "ocr-cache"),
     });
-    const recognized = await worker.recognize(screenshotPath);
-    const recognizedWords = (recognized.data as typeof recognized.data & {
-      words?: Array<{ confidence: number; text: string; bbox: { x0: number; y0: number; x1: number; y1: number } }>;
-    }).words ?? [];
+    // tesseract.js v7 requires blocks output to be requested explicitly.
+    const recognized = await worker.recognize(screenshotPath, {}, { blocks: true, text: true });
+    // Word data lives in blocks → paragraphs → lines → words.
+    const collectWords = (node: unknown): Array<{ confidence: number; text: string; bbox: { x0: number; y0: number; x1: number; y1: number } }> => {
+      if (!node || typeof node !== "object") return [];
+      if (Array.isArray(node)) return node.flatMap((child) => collectWords(child));
+      const current = node as { words?: unknown[]; paragraphs?: unknown[]; lines?: unknown[]; confidence?: number; text?: string; bbox?: { x0: number; y0: number; x1: number; y1: number } };
+      const own = Array.isArray(current.words) ? current.words as Array<{ confidence: number; text: string; bbox: { x0: number; y0: number; x1: number; y1: number } }> : [];
+      const nested = [...(current.paragraphs ?? []), ...(current.lines ?? [])].flatMap((child) => collectWords(child));
+      return [...own, ...nested];
+    };
+    const recognizedWords = collectWords(recognized.data.blocks);
     if (SECRET_HINT.test(recognized.data.text)) {
       throw new Error("OCR detected a password, OTP, or verification label. Screenshot and recognized text were blocked.");
     }

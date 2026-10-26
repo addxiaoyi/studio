@@ -1,5 +1,7 @@
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom/vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OfficialModelPriceCatalog } from "@helstera/shared";
 import ModelPricingPage from "../src/app/model-pricing/page";
 
@@ -72,6 +74,8 @@ const catalog: OfficialModelPriceCatalog = {
 };
 
 describe("model pricing comparison", () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
     api.fetchOfficialModelPrices.mockReset().mockResolvedValue(catalog);
     api.fetchWorkspaceModelPrices.mockReset().mockResolvedValue({ authenticated: false, models: [] });
@@ -95,6 +99,18 @@ describe("model pricing comparison", () => {
     expect(screen.getAllByText("¥0.45 / 秒").length).toBeGreaterThan(0);
     expect(screen.getAllByText("低于官方最高价 52%").length).toBeGreaterThan(0);
     expect(screen.queryByText("¥12.00 / 秒")).toBeNull();
+  });
+
+  it("lets users expand the MiniMax H3 price card and compare resolution rates", async () => {
+    render(<ModelPricingPage />);
+
+    const featured = screen.getByRole("region", { name: "旗舰首推视频模型" });
+    await userEvent.click(within(featured).getByRole("button"));
+    await userEvent.click(screen.getByRole("radio", { name: "1440p" }));
+
+    expect(screen.getByRole("radio", { name: "1440p" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(featured).getByText("¥0.38")).toBeInTheDocument();
+    expect(within(featured).getByText("¥1.90")).toBeInTheDocument();
   });
 
   it("includes authenticated workspace models when the public catalog does not list them", async () => {
