@@ -87,3 +87,10 @@ release-candidates/
 
 # Legacy desktop build directories
 apps/desktop/release-*/
+
+# Agent scratch and local deploy artifacts
+deploy/
+.codex/
+.dsh-switchman/
+/eng.traineddata
+.tmp-*.py
