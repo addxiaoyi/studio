@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   brandKitAssetCreateRequestSchema,
   brandKitAssetUpdateRequestSchema,
   brandKitCreateRequestSchema,
@@ -179,7 +179,7 @@ export async function registerBrandKitRoutes(
       const file = await request.file();
       if (!file) {
         return reply.code(400).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "brand_kit_asset_create_failed",
               message: "No file provided.",
@@ -191,7 +191,7 @@ export async function registerBrandKitRoutes(
       const mimeType = file.mimetype;
       if (!ALLOWED_UPLOAD_MIME_TYPES.has(mimeType)) {
         return reply.code(400).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "brand_kit_asset_create_failed",
               message: `Unsupported file type: ${mimeType}. Allowed: ${[...ALLOWED_UPLOAD_MIME_TYPES].join(", ")}`,
@@ -211,7 +211,7 @@ export async function registerBrandKitRoutes(
 
       if (assetType !== "logo" && assetType !== "image") {
         return reply.code(400).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "brand_kit_asset_create_failed",
               message: "asset_type must be 'logo' or 'image'.",
@@ -346,7 +346,7 @@ function sendBrandKitError(
 ) {
   if (error instanceof BrandKitServiceError) {
     return reply.code(error.statusCode).send(
-      applicationErrorResponseSchema.parse({
+      applicationErrorResponseSchemaLoose.parse({
         error: {
           code: error.code,
           message: error.message,
@@ -356,7 +356,7 @@ function sendBrandKitError(
   }
 
   return reply.code(500).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: {
         code: fallbackCode,
         message: "An unexpected error occurred.",

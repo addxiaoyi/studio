@@ -12,7 +12,7 @@ import {
 import { imageArtifactSchema, videoArtifactSchema } from "@helstera/shared";
 import type { StreamEvent, ToolArtifact } from "@helstera/shared";
 
-import { classifyErrorForClient } from "../utils/error-sanitizer.js";
+import { classifyErrorForClient, isRetryableUpstreamError } from "../utils/error-sanitizer.js";
 
 /**
  * Shape of a LangChain v2 stream event from `streamEvents()`.
@@ -34,8 +34,53 @@ type AdaptDeepAgentStreamOptions = {
   singleImageTask?: boolean;
   signal?: AbortSignal;
   stream: AsyncIterable<LangChainStreamEvent | unknown>;
+  /**
+   * 可选的“上游流工厂”。已消费的 async iterable 无法复活，所以供应商 503 这类
+   * 首包前的失败只有能重建上游流时才可能重试；不提供时行为与改动前完全一致（不重试）。
+   */
+  createStream?: () => AsyncIterable<LangChainStreamEvent | unknown> | Promise<AsyncIterable<LangChainStreamEvent | unknown>>;
+  retry?: StreamRetryOptions;
   onModelUsage?: (usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number }) => void;
 };
+
+/** 重试尝试的观测信息（用于日志与测试断言）。 */
+export type StreamRetryAttempt = {
+  attempt: number;
+  delayMs: number;
+  errorCode: string;
+  errorType: string;
+  maxRetries: number;
+  runId: string;
+};
+
+/** 首包前有限重试的配置；默认最多 2 次、指数退避 + 抖动。 */
+export type StreamRetryOptions = {
+  /** 首次尝试之外的重试次数，默认 2。 */
+  maxRetries?: number;
+  /** 首次退避基数（毫秒），默认 250。 */
+  baseDelayMs?: number;
+  /** 单次退避上限（毫秒），默认 4000。 */
+  maxDelayMs?: number;
+  /** 抖动比例 0..1，默认 0.2（±20%）。 */
+  jitterRatio?: number;
+  /** 随机源，测试可注入。 */
+  random?: () => number;
+  /** 睡眠实现，测试可注入以避免真实等待。 */
+  sleep?: (delayMs: number) => Promise<void>;
+  /** 每次真正重试前的回调。 */
+  onRetry?: (info: StreamRetryAttempt) => void;
+};
+
+type ResolvedRetryOptions = Required<Omit<StreamRetryOptions, "onRetry">> & {
+  onRetry?: (info: StreamRetryAttempt) => void;
+};
+
+const DEFAULT_STREAM_RETRY = {
+  baseDelayMs: 250,
+  jitterRatio: 0.2,
+  maxDelayMs: 4000,
+  maxRetries: 2,
+} as const;
 
 /**
  * Sub-agent parent tool names whose inner tools should have their
@@ -49,12 +94,7 @@ export async function* adaptDeepAgentStream(
   options: AdaptDeepAgentStreamOptions,
 ): AsyncGenerator<StreamEvent> {
   const now = options.now ?? (() => new Date().toISOString());
-  const seenCompletedToolCalls = new Set<string>();
-  const seenStreamedMessageIds = new Set<string>();
-  let streamedVisibleText = false;
-  const seenStartedToolCalls = new Set<string>();
-  /** Tracks active sub-agent parent runs so we can detect nested inner tools. */
-  const activeSubAgentRuns = new Set<string>();
+  const retry = resolveRetryOptions(options.retry);
 
   yield {
     conversationId: options.conversationId,
@@ -63,6 +103,117 @@ export async function* adaptDeepAgentStream(
     timestamp: now(),
     type: "run.started",
   };
+
+  let attempt = 0;
+  for (;;) {
+    const source = options.createStream
+      ? await options.createStream()
+      : options.stream;
+    const iterator = adaptDeepAgentStreamAttempt({
+      ...options,
+      now,
+      stream: source,
+    });
+    /** 本次尝试已产出的事件数；>0 说明已经对外输出过内容，禁止重试。 */
+    let emitted = 0;
+    let terminalEmitted = false;
+    let failure: unknown;
+    let failed = false;
+
+    try {
+      for (;;) {
+        const step = await iterator.next();
+        if (step.done) break;
+        emitted += 1;
+        terminalEmitted = isTerminalEvent(step.value);
+        yield step.value;
+      }
+    } catch (error) {
+      failed = true;
+      failure = error;
+    } finally {
+      await iterator.return?.(undefined);
+    }
+
+    if (!failed) {
+      // 内层已给出终态（run.failed / run.canceled）时不再补 run.completed。
+      if (!terminalEmitted) {
+        yield {
+          runId: options.runId,
+          timestamp: now(),
+          type: "run.completed",
+        };
+      }
+      return;
+    }
+
+    // 取消（含超时看门狗触发的中断）绝不能被重试吞掉。
+    if (isAbortError(failure) || options.signal?.aborted) {
+      yield canceledEvent(options.runId, now);
+      return;
+    }
+
+    const classification = classifyErrorForClient(failure);
+    const canRetry =
+      emitted === 0 &&
+      attempt < retry.maxRetries &&
+      typeof options.createStream === "function" &&
+      isRetryableUpstreamError(failure);
+
+    if (canRetry) {
+      attempt += 1;
+      const delayMs = retryDelayMs(retry, attempt);
+      const errorType = errorTypeOf(failure);
+      const attemptInfo: StreamRetryAttempt = {
+        attempt,
+        delayMs,
+        errorCode: classification.code,
+        errorType,
+        maxRetries: retry.maxRetries,
+        runId: options.runId,
+      };
+      logRetryAttempt(attemptInfo);
+      retry.onRetry?.(attemptInfo);
+      await retry.sleep(delayMs);
+      if (options.signal?.aborted) {
+        yield canceledEvent(options.runId, now);
+        return;
+      }
+      continue;
+    }
+
+    // Log full error detail server-side
+    console.error(
+      `[stream-adapter] Stream error for run ${options.runId}:`,
+      failure,
+    );
+
+    yield {
+      error: {
+        ...classification,
+      },
+      runId: options.runId,
+      timestamp: now(),
+      type: "run.failed",
+    };
+    return;
+  }
+}
+
+/**
+ * 单次尝试：把 LangChain 事件流翻译成 StreamEvent。
+ * 不产出 run.started / run.completed，错误一律抛给外层重试包装器决策。
+ */
+async function* adaptDeepAgentStreamAttempt(
+  options: AdaptDeepAgentStreamOptions,
+): AsyncGenerator<StreamEvent> {
+  const now = options.now ?? (() => new Date().toISOString());
+  const seenCompletedToolCalls = new Set<string>();
+  const seenStreamedMessageIds = new Set<string>();
+  let streamedVisibleText = false;
+  const seenStartedToolCalls = new Set<string>();
+  /** Tracks active sub-agent parent runs so we can detect nested inner tools. */
+  const activeSubAgentRuns = new Set<string>();
 
   if (options.signal?.aborted) {
     yield canceledEvent(options.runId, now);
@@ -377,30 +528,60 @@ export async function* adaptDeepAgentStream(
       yield canceledEvent(options.runId, now);
       return;
     }
-
-    // Log full error detail server-side
-    console.error(
-      `[stream-adapter] Stream error for run ${options.runId}:`,
-      error,
-    );
-
-    const failure = classifyErrorForClient(error);
-    yield {
-      error: {
-        ...failure,
-      },
-      runId: options.runId,
-      timestamp: now(),
-      type: "run.failed",
-    };
-    return;
+    // 交给外层重试包装器：由它决定是否重试、以及最终是否产出 run.failed。
+    throw error;
   }
+}
 
-  yield {
-    runId: options.runId,
-    timestamp: now(),
-    type: "run.completed",
+/** 已经对外宣告结束的事件：出现后不再补 run.completed。 */
+function isTerminalEvent(event: StreamEvent): boolean {
+  return event.type === "run.failed" || event.type === "run.canceled";
+}
+
+/** 仅取错误类型名用于日志，绝不取 message（可能含凭证、URL、请求体）。 */
+function errorTypeOf(error: unknown): string {
+  if (error instanceof Error && error.name) return error.name;
+  return typeof error;
+}
+
+function resolveRetryOptions(options?: StreamRetryOptions): ResolvedRetryOptions {
+  return {
+    baseDelayMs: Math.max(0, options?.baseDelayMs ?? DEFAULT_STREAM_RETRY.baseDelayMs),
+    jitterRatio: Math.min(1, Math.max(0, options?.jitterRatio ?? DEFAULT_STREAM_RETRY.jitterRatio)),
+    maxDelayMs: Math.max(0, options?.maxDelayMs ?? DEFAULT_STREAM_RETRY.maxDelayMs),
+    maxRetries: Math.max(0, Math.floor(options?.maxRetries ?? DEFAULT_STREAM_RETRY.maxRetries)),
+    random: options?.random ?? Math.random,
+    sleep: options?.sleep ?? defaultSleep,
+    ...(options?.onRetry ? { onRetry: options.onRetry } : {}),
   };
+}
+
+function defaultSleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+}
+
+/** 指数退避 + 抖动：base * 2^(attempt-1)，叠加 ±jitterRatio 随机抖动，最后按 maxDelayMs 截顶。 */
+function retryDelayMs(retry: ResolvedRetryOptions, attempt: number): number {
+  const capped = Math.min(
+    retry.maxDelayMs,
+    retry.baseDelayMs * 2 ** Math.max(0, attempt - 1),
+  );
+  if (capped <= 0) return 0;
+  const spread = capped * retry.jitterRatio;
+  const jittered = capped - spread + retry.random() * spread * 2;
+  return Math.max(0, Math.round(jittered));
+}
+
+/**
+ * 重试的可观测日志：只输出 run id、第几次、错误类别、错误类型名、退避时长。
+ * 刻意不输出错误 message / 堆栈 / 请求体 / 凭证，避免日志成为泄漏渠道。
+ */
+function logRetryAttempt(info: StreamRetryAttempt): void {
+  console.warn(
+    `[stream-adapter] retrying run ${info.runId} attempt ${info.attempt}/${info.maxRetries} after ${info.errorCode} (error=${info.errorType}, backoff=${info.delayMs}ms)`,
+  );
 }
 
 function parseApprovalRequired(message: string): Record<string, unknown> | null {

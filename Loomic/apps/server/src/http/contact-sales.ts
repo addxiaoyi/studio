@@ -2,7 +2,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   unauthenticatedErrorResponseSchema,
 } from "@helstera/shared";
 
@@ -35,7 +35,7 @@ export async function registerContactSalesRoutes(
     if (!parsed.success) {
       const firstIssue = parsed.error.issues[0];
       return reply.code(400).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: {
             code: "invalid_request",
             message: firstIssue
@@ -70,7 +70,7 @@ export async function registerContactSalesRoutes(
     if (insertError) {
       console.error("[ContactSales] DB insert failed:", insertError);
       return reply.code(500).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: {
             code: "submission_failed",
             message: "保存咨询失败，请稍后重试。",
@@ -102,7 +102,7 @@ export async function registerContactSalesRoutes(
 
     if (error) {
       return reply.code(500).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: { code: "query_failed", message: "查询失败" },
         }),
       );

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   skillCreateRequestSchema,
   skillDetailResponseSchema,
   skillImportRequestSchema,
@@ -340,7 +340,7 @@ export async function registerSkillRoutes(
 
       if (Object.keys(updates).length === 0) {
         return reply.code(400).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "skill_update_failed",
               message: "No fields to update.",
@@ -491,7 +491,7 @@ export async function registerSkillRoutes(
       const body = request.body as { skillId?: string };
       if (!body.skillId || typeof body.skillId !== "string") {
         return reply.code(400).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "skill_install_failed",
               message: "skillId is required.",
@@ -765,7 +765,7 @@ function sendSkillError(
   statusCode = 500,
 ) {
   return reply.code(statusCode).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: { code, message },
     }),
   );

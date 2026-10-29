@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { WifiOff } from "lucide-react";
+import { useOptionalAuth } from "@/lib/auth-context";
 import { getRealtimeStatus, hasEverConnected, subscribeRealtimeStatus } from "@/lib/realtime-status";
 
 type BannerState = "idle" | "disconnected" | "recovered";
@@ -11,11 +12,15 @@ const COPY = {
     disconnected: "连接已断开，正在重新连接…",
     recovered: "连接已恢复",
     offline: "网络不可用，请检查网络连接",
+    // 会话加载失败时登录状态未知：横幅不依赖 socket，必须能说话，
+    // 否则"连不上工作区"在登录页上永远没有任何提示。
+    sessionFailed: "无法确认登录状态，正在重新连接…",
   },
   "en-US": {
     disconnected: "Connection lost — reconnecting…",
     recovered: "Connection restored",
     offline: "You are offline — check your network",
+    sessionFailed: "Unable to confirm sign-in state — reconnecting…",
   },
 } as const;
 
@@ -34,6 +39,8 @@ export function DesktopConnectionBanner({ locale = "zh-CN" }: { locale?: keyof t
   const [offline, setOffline] = useState(false);
   const sawConnected = useRef(hasEverConnected());
   const copy = COPY[locale];
+  // Optional: the banner also renders outside the provider (tests, bare routes).
+  const sessionFailed = useOptionalAuth()?.sessionError != null;
 
   useEffect(() => {
     const unsubscribe = subscribeRealtimeStatus((status) => {
@@ -67,6 +74,17 @@ export function DesktopConnectionBanner({ locale = "zh-CN" }: { locale?: keyof t
       window.removeEventListener("offline", sync);
     };
   }, []);
+
+  // A failed session lookup leaves the sign-in state unknown — that is a connection
+  // fault, not a signed-out user, so the banner speaks up without waiting for a socket.
+  if (sessionFailed) {
+    return (
+      <div className="desktop-connection-banner desktop-connection-banner--error" role="alert">
+        <WifiOff aria-hidden="true" />
+        <span>{copy.sessionFailed}</span>
+      </div>
+    );
+  }
 
   if (offline) {
     return (

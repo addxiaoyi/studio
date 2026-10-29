@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   runCancelResponseSchema,
   runCreateRequestSchema,
   runCreateResponseSchema,
@@ -145,7 +145,7 @@ export async function registerRunRoutes(
     } catch (error) {
       if (error instanceof ThreadServiceError) {
         return reply.code(error.statusCode).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: error.code,
               message: error.message,
@@ -156,7 +156,7 @@ export async function registerRunRoutes(
 
       if (error instanceof AgentRunPersistenceError) {
         return reply.code(error.statusCode).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: error.code,
               message: error.message,

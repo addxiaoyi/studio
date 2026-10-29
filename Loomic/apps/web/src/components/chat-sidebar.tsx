@@ -104,6 +104,8 @@ type ChatSidebarProps = {
   /** Called for every stream event — used by job fallback polling to detect timed-out jobs */
   onStreamEvent?: (event: StreamEvent) => void;
   initialPrompt?: string | undefined;
+  /** Called once the stashed goal was handed to the run pipeline ("sent") or dropped by the user ("dismissed"), so the caller can clear its URL/storage copy. */
+  onInitialPromptHandoff?: ((outcome: "sent" | "dismissed") => void) | undefined;
   initialSessionId?: string | undefined;
   onSessionChange?: (sessionId: string) => void;
   onRequestCanvasImages?: () => CanvasImageItem[];
@@ -129,6 +131,7 @@ export function ChatSidebar({
   onCanvasSync,
   onStreamEvent,
   initialPrompt,
+  onInitialPromptHandoff,
   initialSessionId,
   onSessionChange,
   onRequestCanvasImages,
@@ -301,6 +304,10 @@ export function ChatSidebar({
   const chatInputRef = useRef<import("./chat-input").ChatInputHandle>(null);
 
   const initialPromptSent = useRef(false);
+  // waiting = 目标已暂存但 ws/会话还没就绪，sending = 正在发送，failed = 发送失败（保留目标）
+  const [initialPromptState, setInitialPromptState] = useState<"idle" | "waiting" | "sending" | "failed">("idle");
+  const [initialPromptRetry, setInitialPromptRetry] = useState(0);
+  const initialPromptDelivered = useRef(false);
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const chatPanelRef = useRef<HTMLDivElement>(null);
   const chatCloseButtonRef = useRef<HTMLButtonElement>(null);
@@ -1235,13 +1242,16 @@ export function ChatSidebar({
 
   // ── Auto-send initial prompt ──
   useEffect(() => {
-    if (
-      !initialPrompt ||
-      sessionsLoading ||
-      !ws.connected ||
-      initialPromptSent.current
-    )
+    if (!initialPrompt || sessionsLoading || initialPromptSent.current) return;
+
+    // Previously this returned silently when the socket was down. The caller had
+    // already rewritten the URL by then, so the user's goal disappeared with no
+    // visible sign. Park it instead: keep it in state, say so, and let the effect
+    // re-run (ws.connected / activeSessionId are deps) or the user retry.
+    if (!ws.connected || !activeSessionId) {
+      setInitialPromptState("waiting");
       return;
+    }
 
     let storedAttachments: ReadyAttachment[] | undefined;
     let storedImageGenerationPreference: ImageGenerationPreference | undefined;
@@ -1287,26 +1297,77 @@ export function ChatSidebar({
       agentModelRef.current = storedAgentModel;
     }
 
-    if (!activeSessionIdRef.current) return;
+    if (!activeSessionIdRef.current) {
+      setInitialPromptState("waiting");
+      return;
+    }
+    // Single-shot guard stays synchronous so repeated renders can never double-send.
     initialPromptSent.current = true;
+    setInitialPromptState("sending");
+    let fired = false;
     const timer = setTimeout(() => {
+      fired = true;
       void handleSend(
         initialPrompt,
         storedAttachments,
         storedImageGenerationPreference,
         undefined,
         storedVideoGenerationPreference,
+      ).then(
+        () => {
+          // Resolves when the run ends. If the run never started streaming the goal
+          // was dropped by the send guard — keep it and ask the user to retry.
+          if (initialPromptDelivered.current) return;
+          setInitialPromptState("failed");
+        },
+        (cause: unknown) => {
+          // Keep the goal: a failed send must be recoverable, not silently lost.
+          // The single-shot guard stays set so a re-render cannot silently resend;
+          // the retry button is the only way back in.
+          console.warn("[chat] initial prompt send failed:", cause);
+          setInitialPromptState("failed");
+        },
       );
     }, 0);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      // Re-ran before the send actually started (dependency churn): release the
+      // guard so the goal is delivered. Once fired, keep it — never send twice.
+      if (!fired) initialPromptSent.current = false;
+    };
   }, [
     initialPrompt,
     sessionsLoading,
     ws.connected,
+    activeSessionId,
     handleSend,
-    activeSessionIdRef,
+    onInitialPromptHandoff,
+    initialPromptRetry,
   ]);
+
+  // Delivery = the run actually started (`streaming` is set synchronously by the send
+  // pipeline right before the transport call). The send promise only resolves when the
+  // whole run ends, far too late to release the caller's URL copy.
+  useEffect(() => {
+    if (initialPromptState !== "sending" || !streaming) return;
+    initialPromptDelivered.current = true;
+    setInitialPromptState("idle");
+    onInitialPromptHandoff?.("sent");
+  }, [initialPromptState, streaming, onInitialPromptHandoff]);
+
+  const retryInitialPrompt = useCallback(() => {
+    initialPromptSent.current = false;
+    initialPromptDelivered.current = false;
+    setInitialPromptState("waiting");
+    setInitialPromptRetry((count) => count + 1);
+  }, []);
+
+  const dismissInitialPrompt = useCallback(() => {
+    initialPromptSent.current = true;
+    setInitialPromptState("idle");
+    onInitialPromptHandoff?.("dismissed");
+  }, [onInitialPromptHandoff]);
 
   // ── Reconnection: resume canvas binding + reload messages ──
   // Uses the shared applyStreamEvent to handle live events — no duplicated logic.
@@ -1700,6 +1761,29 @@ export function ChatSidebar({
           {showLatestButton && <button type="button" onClick={() => { shouldAutoFollowRef.current = true; setShowLatestButton(false); scrollToBottom(); }} className="sticky bottom-2 self-center rounded-md border border-border/60 bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm" aria-label="回到最新消息">回到最新消息</button>}
         </div>
       </ErrorBoundary>
+
+      {/* 首页目标（?prompt=）的待发送状态：暂存 / 发送中 / 失败可重试 */}
+      {initialPromptState !== "idle" && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mx-1 mb-1 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+        >
+          <span>
+            {initialPromptState === "failed"
+              ? "目标发送失败，已为你保留，可以重试。"
+              : initialPromptState === "sending"
+                ? "正在发送已暂存的目标…"
+                : "正在连接工作区，目标已暂存；连接成功后自动发送。"}
+          </span>
+          {initialPromptState === "sending" ? null : (
+            <span className="flex shrink-0 items-center gap-1">
+              <button type="button" onClick={retryInitialPrompt} className="min-h-8 rounded-md border border-border/60 px-2.5 font-medium text-foreground hover:bg-muted">重试发送</button>
+              <button type="button" onClick={dismissInitialPrompt} className="min-h-8 rounded-md px-2.5 hover:bg-muted">放弃目标</button>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Input */}
       <div className="relative">

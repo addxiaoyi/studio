@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   unauthenticatedErrorResponseSchema,
 } from "@helstera/shared";
 
@@ -214,7 +214,7 @@ function sendCreditError(
 ) {
   if (error instanceof CreditServiceError) {
     return reply.code(error.statusCode).send(
-      applicationErrorResponseSchema.parse({
+      applicationErrorResponseSchemaLoose.parse({
         error: { code: error.code, message: error.message },
       }),
     );
@@ -223,7 +223,7 @@ function sendCreditError(
     error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   console.error("[credits] unexpected error:", error);
   return reply.code(500).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: {
         code: fallbackCode,
         message: `An unexpected error occurred. ${errorMessage}`,

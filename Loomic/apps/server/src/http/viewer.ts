@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool } from "pg";
 
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   profileUpdateRequestSchema,
   profileUpdateResponseSchema,
   unauthenticatedErrorResponseSchema,
@@ -109,7 +109,7 @@ export async function registerViewerRoutes(
       const data = rows[0];
       if (!data) {
         return reply.code(500).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "profile_update_failed",
               message: "Unable to update profile.",
@@ -165,7 +165,7 @@ function sendApplicationError(
 ) {
   if (error instanceof BootstrapError) {
     return reply.code(error.statusCode).send(
-      applicationErrorResponseSchema.parse({
+      applicationErrorResponseSchemaLoose.parse({
         error: {
           code: error.code,
           message: error.message,
@@ -175,7 +175,7 @@ function sendApplicationError(
   }
 
   return reply.code(500).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: {
         code: fallbackCode,
         message: fallbackMessage,

@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   resolveVideoResolution,
   unauthenticatedErrorResponseSchema,
   type ImageQualityLevel,
@@ -86,7 +86,7 @@ export async function registerGenerateRoutes(
       payload = generateImageRequestSchema.parse(request.body);
     } catch (error) {
       return reply.code(400).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: {
             code: "invalid_request",
             message: "Invalid request body.",
@@ -221,14 +221,14 @@ export async function registerGenerateRoutes(
       // Handle tier/credit errors
       if (error instanceof TierGuardError) {
         return reply.code(error.statusCode).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: { code: error.code, message: error.message },
           }),
         );
       }
       if (error instanceof CreditServiceError) {
         return reply.code(error.statusCode).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: { code: error.code, message: error.message },
           }),
         );
@@ -239,7 +239,7 @@ export async function registerGenerateRoutes(
 
       if (message.includes("No provider registered")) {
         return reply.code(400).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "provider_not_configured",
               message: "Image generation is not available.",
@@ -249,7 +249,7 @@ export async function registerGenerateRoutes(
       }
 
       return reply.code(502).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: {
             code: "generation_failed",
             message,
@@ -278,7 +278,7 @@ export async function registerGenerateRoutes(
       payload = generateVideoRequestSchema.parse(request.body);
     } catch {
       return reply.code(400).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: {
             code: "invalid_request",
             message: "Invalid request body.",
@@ -289,7 +289,7 @@ export async function registerGenerateRoutes(
 
     if (!options.jobService) {
       return reply.code(503).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: {
             code: "service_unavailable",
             message: "Video generation is not available (job service not configured).",
@@ -308,7 +308,7 @@ export async function registerGenerateRoutes(
     const model = payload.model ?? configuredModel?.model_id ?? registeredModel;
     if (!model) {
       return reply.code(503).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: {
             code: "service_unavailable",
             message: "当前没有可用的视频模型，请先启用并探测一个视频模型。",
@@ -321,7 +321,7 @@ export async function registerGenerateRoutes(
     const registeredAudioSupport = getAvailableVideoModels().find((candidate) => candidate.id === model)?.capabilities.audio;
     if (payload.enableAudio === true && (configuredAudioSupport === false || registeredAudioSupport === false)) {
       return reply.code(422).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: {
             code: "invalid_input",
             message: "The selected video model does not support generated audio.",
@@ -439,7 +439,7 @@ export async function registerGenerateRoutes(
 
       if ("error" in result) {
         return reply.code(502).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "generation_failed",
               message: result.error,
@@ -460,21 +460,21 @@ export async function registerGenerateRoutes(
     } catch (error) {
       if (error instanceof TierGuardError) {
         return reply.code(error.statusCode).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: { code: error.code, message: error.message },
           }),
         );
       }
       if (error instanceof CreditServiceError) {
         return reply.code(error.statusCode).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: { code: error.code, message: error.message },
           }),
         );
       }
       if (error instanceof JobServiceError) {
         return reply.code(error.statusCode).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: { code: error.code, message: error.message },
           }),
         );
@@ -490,7 +490,7 @@ export async function registerGenerateRoutes(
         error instanceof Error ? error.message : "Video generation failed.";
 
       return reply.code(502).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: {
             code: "generation_failed",
             message,

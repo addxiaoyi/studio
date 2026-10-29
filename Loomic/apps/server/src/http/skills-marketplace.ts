@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool } from "pg";
 
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   marketplaceInstallRequestSchema,
   skillDetailResponseSchema,
   unauthenticatedErrorResponseSchema,
@@ -149,7 +149,7 @@ export async function registerMarketplaceRoutes(
       const { name } = request.query as { name?: string };
       if (!name) {
         return reply.code(400).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: { code: "marketplace_detail_failed", message: "Package name is required (use ?name=package-name)" },
           }),
         );
@@ -290,7 +290,7 @@ function sendError(
   statusCode = 500,
 ) {
   return reply.code(statusCode).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: { code, message },
     }),
   );

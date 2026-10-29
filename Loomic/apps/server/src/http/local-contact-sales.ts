@@ -2,7 +2,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { z } from "zod";
-import { applicationErrorResponseSchema } from "@helstera/shared";
+import { applicationErrorResponseSchemaLoose } from "@helstera/shared";
 
 const contactInquirySchema = z.object({
   name: z.string().min(1, "请填写姓名").max(100),
@@ -29,7 +29,7 @@ export async function registerLocalContactSalesRoutes(
     if (!parsed.success) {
       const firstIssue = parsed.error.issues[0];
       return reply.code(400).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: {
             code: "invalid_request",
             message: firstIssue
@@ -76,7 +76,7 @@ export async function registerLocalContactSalesRoutes(
     } catch (error) {
       console.error("[ContactSales] DB insert failed:", error);
       return reply.code(500).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: {
             code: "submission_failed",
             message: "保存咨询失败，请稍后重试。",
@@ -100,7 +100,7 @@ export async function registerLocalContactSalesRoutes(
     } catch (error) {
       console.error("[ContactSales] Query failed:", error);
       return reply.code(500).send(
-        applicationErrorResponseSchema.parse({
+        applicationErrorResponseSchemaLoose.parse({
           error: { code: "query_failed", message: "查询失败" },
         }),
       );

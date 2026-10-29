@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ApiAuthError,
   createProject,
   createRun,
   fetchProjects,
@@ -251,7 +252,13 @@ describe("authenticated server API", () => {
       }),
     });
 
-    await expect(fetchViewer("expired")).rejects.toThrow("unauthorized");
+    // 401 的文案必须是“登录失效 + 重新登录”，不能是英文 "unauthorized"。
+    const err = await fetchViewer("expired").catch((error: unknown) => error);
+    expect(err).toBeInstanceOf(ApiAuthError);
+    expect((err as ApiAuthError).kind).toBe("unauthorized");
+    expect((err as ApiAuthError).message).toContain("登录状态已失效");
+    expect((err as ApiAuthError).message).toContain("请重新登录");
+    expect((err as ApiAuthError).message).not.toContain("unauthorized");
   });
 
   it("fetchProjects throws ApiAuthError on 401", async () => {
@@ -263,6 +270,10 @@ describe("authenticated server API", () => {
       }),
     });
 
-    await expect(fetchProjects("expired")).rejects.toThrow("unauthorized");
+    const err = await fetchProjects("expired").catch((error: unknown) => error);
+    expect(err).toBeInstanceOf(ApiAuthError);
+    expect((err as ApiAuthError).kind).toBe("unauthorized");
+    expect((err as ApiAuthError).message).toContain("登录状态已失效");
+    expect((err as ApiAuthError).message).not.toContain("unauthorized");
   });
 });

@@ -35,15 +35,29 @@ import type {
   DesktopAgentTaskRequest,
 } from "@helstera/shared";
 
+import {
+  type ApiErrorKind,
+  type ApiErrorLocale,
+  classifyApiError,
+  localizedApiErrorMessage,
+  resolveApiErrorLocale,
+} from "./api-error-message";
 import { dedupeRequest } from "./dedupe-request";
 import { getServerBaseUrl } from "./env";
+
+/** 单次请求的最长等待时间；超时文案里写死的 30 秒必须与它一致。 */
+export const API_REQUEST_TIMEOUT_MS = 30_000;
 
 function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 30_000);
+  let timedOut = false;
+  const timeout = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, API_REQUEST_TIMEOUT_MS);
   const callerSignal = init?.signal;
   const abortFromCaller = () => controller.abort(callerSignal?.reason);
   if (callerSignal) {
@@ -52,10 +66,37 @@ function apiFetch(
   }
 
   return fetch(input, { ...init, credentials: "include", signal: controller.signal })
+    .catch((cause: unknown) => {
+      throw toTransportError(cause, {
+        timedOut,
+        callerAborted: callerSignal?.aborted === true,
+      });
+    })
     .finally(() => {
       window.clearTimeout(timeout);
       callerSignal?.removeEventListener("abort", abortFromCaller);
     });
+}
+
+/**
+ * 把 fetch 层抛出的原生异常归一成结构化错误。
+ *
+ * 三类原始形态：断网 `TypeError: Failed to fetch`、超时 `DOMException:
+ * The operation was aborted`、其他未知。调用方主动取消（组件卸载 / 用户切页）
+ * 不算错误，原样抛出，避免把“取消”显示成“超时”。
+ */
+function toTransportError(
+  cause: unknown,
+  state: { timedOut: boolean; callerAborted: boolean },
+): unknown {
+  if (cause instanceof ApiRequestError) return cause;
+  if (state.callerAborted && !state.timedOut) return cause;
+  const kind = state.timedOut ? "timeout" : classifyApiError(cause);
+  const locale = resolveApiErrorLocale();
+  const message = localizedApiErrorMessage(kind, locale);
+  if (kind === "timeout") return new ApiTimeoutError(message, cause);
+  if (kind === "network") return new ApiNetworkError(message, cause);
+  return new ApiRequestError(kind, message, cause);
 }
 
 export async function requestMagicLink(email: string): Promise<void> {
@@ -68,22 +109,102 @@ export async function requestMagicLink(email: string): Promise<void> {
 }
 
 // --- Error types ---
+//
+// 设计取舍：`error.message` 本身就是给用户看的中文文案（界面语言取
+// `<html lang>`，默认 zh-CN），这样 43 个文件、168 处直接展示 `error.message`
+// 的调用方不改一行也不会再漏出英文。原始异常留在 `cause` 里，只给排障用，
+// UI 不该读 `cause.message`。
+//
+// 分类字段 `kind` 让调用方能分支：network / timeout / server / unauthorized /
+// business / unknown，见 `api-error-message.ts`。
 
-export class ApiAuthError extends Error {
-  constructor(message = "unauthorized") {
-    super(message);
+export class ApiRequestError extends Error {
+  readonly kind: ApiErrorKind;
+  constructor(kind: ApiErrorKind, message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.name = "ApiRequestError";
+    this.kind = kind;
+  }
+}
+
+/** 断网、DNS 失败、CORS 被拦 —— 请求根本没到服务器。 */
+export class ApiNetworkError extends ApiRequestError {
+  constructor(message?: string, cause?: unknown) {
+    super(
+      "network",
+      message ?? localizedApiErrorMessage("network", resolveApiErrorLocale()),
+      cause,
+    );
+    this.name = "ApiNetworkError";
+  }
+}
+
+/** 30 秒内没有响应（或底层主动 abort）。 */
+export class ApiTimeoutError extends ApiRequestError {
+  constructor(message?: string, cause?: unknown) {
+    super(
+      "timeout",
+      message ?? localizedApiErrorMessage("timeout", resolveApiErrorLocale()),
+      cause,
+    );
+    this.name = "ApiTimeoutError";
+  }
+}
+
+/** 服务端 5xx：不是用户操作的问题，文案必须提示“稍后重试 / 找管理员”。 */
+export class ApiServerError extends ApiRequestError {
+  readonly statusCode: number;
+  readonly code: string;
+  constructor(
+    statusCode: number,
+    code = "server_error",
+    message?: string,
+    cause?: unknown,
+  ) {
+    super(
+      "server",
+      message ?? localizedApiErrorMessage("server", resolveApiErrorLocale()),
+      cause,
+    );
+    this.name = "ApiServerError";
+    this.statusCode = statusCode;
+    this.code = code;
+  }
+}
+
+export class ApiAuthError extends ApiRequestError {
+  constructor(message?: string) {
+    super(
+      "unauthorized",
+      message ?? localizedApiErrorMessage("unauthorized", resolveApiErrorLocale()),
+    );
     this.name = "ApiAuthError";
   }
 }
 
-export class ApiApplicationError extends Error {
+export class ApiApplicationError extends ApiRequestError {
   code: string;
   details?: Record<string, unknown>;
-  constructor(code: string, message: string, details?: Record<string, unknown>) {
-    super(message);
+  /** 服务端原始提示，仅供日志/排障；UI 请用 `message`。 */
+  readonly serverMessage?: string;
+  readonly statusCode?: number;
+  constructor(
+    code: string,
+    message: string,
+    details?: Record<string, unknown>,
+    extra?: {
+      cause?: unknown;
+      serverMessage?: string;
+      statusCode?: number;
+      locale?: ApiErrorLocale;
+    },
+  ) {
+    super("business", message, extra?.cause);
     this.name = "ApiApplicationError";
     this.code = code;
     if (details !== undefined) this.details = details;
+    if (extra?.serverMessage !== undefined) this.serverMessage = extra.serverMessage;
+    if (extra?.statusCode !== undefined) this.statusCode = extra.statusCode;
   }
 }
 
@@ -107,7 +228,7 @@ export async function createRun(
   });
 
   if (!response.ok) {
-    throw new Error(`Run creation failed with status ${response.status}`);
+    throw new ApiServerError(response.status, "run_create_failed");
   }
 
   return (await response.json()) as RunCreateResponse;
@@ -175,12 +296,36 @@ async function handleErrorResponse(response: Response): Promise<never> {
     throw new ApiApplicationError(
       "upload_too_large",
       "请求内容超过 50MB，请压缩参考图或视频后重试。",
+      undefined,
+      { statusCode: response.status },
     );
   }
   const body = await response.json().catch(() => null);
-  const code = body?.error?.code ?? "application_error";
-  const message = body?.error?.message ?? "Request failed";
-  throw new ApiApplicationError(code, message, body?.data ?? body?.error);
+  const rawCode = body?.error?.code;
+  const code =
+    typeof rawCode === "string" && rawCode ? rawCode : "application_error";
+  const rawMessage = body?.error?.message;
+  const serverMessage = typeof rawMessage === "string" ? rawMessage : "";
+  const locale = resolveApiErrorLocale();
+  const details = body?.data ?? body?.error;
+
+  // 5xx 一律按“服务端出错”处理：用户改不了任何东西，只能重试或找管理员。
+  // 服务端自己写的英文/内部提示不进 UI，只留在 cause 里排障。
+  if (response.status >= 500) {
+    throw new ApiServerError(
+      response.status,
+      code,
+      localizedApiErrorMessage("server", locale),
+      { status: response.status, code, serverMessage, details },
+    );
+  }
+
+  throw new ApiApplicationError(
+    code,
+    localizedApiErrorMessage("business", locale, serverMessage),
+    details,
+    { statusCode: response.status, serverMessage, locale },
+  );
 }
 
 export async function fetchViewer(
@@ -1240,7 +1385,7 @@ export async function cancelGenerationApproval(accessToken: string, approvalId: 
 export async function fetchModels(): Promise<ModelListResponse> {
   const response = await apiFetch(`${getServerBaseUrl()}/api/models`);
   if (!response.ok) {
-    throw new Error(`Failed to fetch models: ${response.status}`);
+    throw new ApiServerError(response.status, "model_list_failed");
   }
   return (await response.json()) as ModelListResponse;
 }
@@ -1608,7 +1753,7 @@ export async function fetchImageModels(): Promise<{
 }> {
   const response = await apiFetch(`${getServerBaseUrl()}/api/image-models`);
   if (!response.ok) {
-    throw new Error(`Failed to fetch image models: ${response.status}`);
+    throw new ApiServerError(response.status, "image_model_list_failed");
   }
   const payload = (await response.json()) as {
     models: ImageModelInfo[];
@@ -1675,7 +1820,7 @@ export async function fetchVideoModels(): Promise<{
 }> {
   const response = await apiFetch(`${getServerBaseUrl()}/api/video-models`);
   if (!response.ok) {
-    throw new Error(`Failed to fetch video models: ${response.status}`);
+    throw new ApiServerError(response.status, "video_model_list_failed");
   }
   const payload = (await response.json()) as {
     models: VideoModelInfo[];

@@ -1,6 +1,7 @@
 import { AIMessage, AIMessageChunk } from "@langchain/core/messages";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import type { StreamRetryAttempt, StreamRetryOptions } from "./stream-adapter.js";
 import { adaptDeepAgentStream } from "./stream-adapter.js";
 
 async function collect(events: unknown[], singleImageTask = false, onModelUsage?: (usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number }) => void) {
@@ -209,5 +210,209 @@ describe("adaptDeepAgentStream", () => {
       toolCallId: "provider-tool",
       output: expect.objectContaining({ status: "job_failed", errorCode: "provider_auth_failed" }),
     }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 首包（首个 token / 首个内容事件）之前的有限重试
+// ---------------------------------------------------------------------------
+
+type CollectedEvent = { type: string } & Record<string, unknown>;
+
+function emptyStream(): AsyncIterable<unknown> {
+  return (async function* nothing() {})();
+}
+
+function textEvent(text: string) {
+  return { event: "on_chat_model_stream", data: { chunk: new AIMessageChunk({ id: "a", content: text }) } };
+}
+
+/** 上游 503，等价于生产日志里的 `MiddlewareError: 503 Service temporarily unavailable`。 */
+function unavailableError(detail = "MiddlewareError: 503 Service temporarily unavailable") {
+  return new Error(detail);
+}
+
+/** 用可重建的流工厂驱动 adapter，并记录尝试次数、退避时长与重试次数。 */
+async function collectWithFactory(
+  factory: (call: number) => AsyncIterable<unknown>,
+  options: { retry?: StreamRetryOptions; signal?: AbortSignal } = {},
+): Promise<{
+  calls: number;
+  delays: number[];
+  events: CollectedEvent[];
+  retries: StreamRetryAttempt[];
+}> {
+  let calls = 0;
+  const delays: number[] = [];
+  const retries: StreamRetryAttempt[] = [];
+  const events: CollectedEvent[] = [];
+
+  for await (const event of adaptDeepAgentStream({
+    conversationId: "conversation",
+    createStream: () => {
+      calls += 1;
+      return factory(calls);
+    },
+    runId: "run-retry",
+    sessionId: "session",
+    ...(options.signal ? { signal: options.signal } : {}),
+    stream: emptyStream(),
+    retry: {
+      onRetry: (info) => retries.push(info),
+      random: () => 0.5,
+      sleep: async (delayMs: number) => {
+        delays.push(delayMs);
+      },
+      ...options.retry,
+    },
+  })) {
+    events.push(event as unknown as CollectedEvent);
+  }
+
+  return { calls, delays, events, retries };
+}
+
+describe("adaptDeepAgentStream 首包前重试", () => {
+  it("503 在前三次尝试内恢复时不放弃，并只输出一次 run.started / run.completed", async () => {
+    const { calls, delays, events, retries } = await collectWithFactory(async function* recover(call) {
+      if (call <= 2) throw unavailableError();
+      yield textEvent("好");
+      yield textEvent("的");
+    });
+
+    expect(calls).toBe(3);
+    expect(events.filter((event) => event.type === "run.started")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "run.failed")).toHaveLength(0);
+    expect(events.at(-1)).toMatchObject({ type: "run.completed" });
+    expect(events.filter((event) => event.type === "message.delta")).toMatchObject([
+      { delta: "好" },
+      { delta: "的" },
+    ]);
+    expect(retries.map((info) => info.attempt)).toEqual([1, 2]);
+    expect(retries.every((info) => info.errorCode === "provider_unavailable")).toBe(true);
+    expect(retries.every((info) => info.runId === "run-retry")).toBe(true);
+    // 指数退避：250ms → 500ms（抖动固定为 0.5 时等于基数）
+    expect(delays).toEqual([250, 500]);
+  });
+
+  it("超过重试上限后放弃，并以 provider_unavailable 结束", async () => {
+    const { calls, delays, events, retries } = await collectWithFactory(async function* alwaysDown() {
+      throw unavailableError();
+    });
+
+    expect(calls).toBe(3); // 1 次初始 + 2 次重试
+    expect(delays).toEqual([250, 500]);
+    expect(retries).toHaveLength(2);
+    expect(events.filter((event) => event.type === "run.failed")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({
+      type: "run.failed",
+      error: { code: "provider_unavailable", retryable: true },
+    });
+  });
+
+  it("已经产出内容事件之后不再重试，不会重复输出", async () => {
+    const { calls, events, retries } = await collectWithFactory(async function* partial() {
+      yield textEvent("前半句");
+      throw unavailableError();
+    });
+
+    expect(calls).toBe(1);
+    expect(retries).toHaveLength(0);
+    expect(events.filter((event) => event.type === "message.delta")).toMatchObject([
+      { delta: "前半句" },
+    ]);
+    expect(events.at(-1)).toMatchObject({
+      type: "run.failed",
+      error: { code: "provider_unavailable", retryable: true },
+    });
+  });
+
+  it("取消不被重试吞掉：中断错误直接走 canceled", async () => {
+    const { calls, events, retries } = await collectWithFactory(async function* aborted() {
+      throw Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
+    });
+
+    expect(calls).toBe(1);
+    expect(retries).toHaveLength(0);
+    expect(events.at(-1)).toMatchObject({ type: "run.canceled" });
+    expect(events.filter((event) => event.type === "run.failed")).toHaveLength(0);
+  });
+
+  it("取消不被重试吞掉：退避期间被取消则不再发起下一次尝试", async () => {
+    const controller = new AbortController();
+    const { calls, retries, events } = await collectWithFactory(
+      async function* down() {
+        throw unavailableError();
+      },
+      {
+        signal: controller.signal,
+        retry: {
+          // 模拟用户在退避等待中点了取消
+          sleep: async () => {
+            controller.abort();
+          },
+        },
+      },
+    );
+
+    expect(calls).toBe(1);
+    expect(retries).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ type: "run.canceled" });
+    expect(events.filter((event) => event.type === "run.failed")).toHaveLength(0);
+  });
+
+  it("非可重试错误不重试", async () => {
+    const { calls, delays, events, retries } = await collectWithFactory(async function* unauthorized() {
+      throw new Error("HTTP 401 provider unauthorized");
+    });
+
+    expect(calls).toBe(1);
+    expect(delays).toEqual([]);
+    expect(retries).toHaveLength(0);
+    expect(events.at(-1)).toMatchObject({
+      type: "run.failed",
+      error: { code: "provider_auth_failed", retryable: false },
+    });
+  });
+
+  it("没有可重建的流工厂时保持单次尝试（不重试）", async () => {
+    async function* failing(): AsyncGenerator<unknown> {
+      throw unavailableError();
+    }
+    const events: CollectedEvent[] = [];
+    for await (const event of adaptDeepAgentStream({
+      conversationId: "conversation",
+      runId: "run-legacy",
+      sessionId: "session",
+      stream: failing(),
+    })) {
+      events.push(event as unknown as CollectedEvent);
+    }
+
+    expect(events.filter((event) => event.type === "run.started")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({
+      type: "run.failed",
+      error: { code: "provider_unavailable", retryable: true },
+    });
+  });
+
+  it("重试日志带 run id / 第几次 / 错误类别，且不泄漏敏感信息", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await collectWithFactory(async function* leaky() {
+        throw new Error("HTTP 503 Authorization: Bearer sk-live-secret-value");
+      });
+
+      const logged = warn.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(logged).toContain("run-retry");
+      expect(logged).toContain("attempt 1/2");
+      expect(logged).toContain("provider_unavailable");
+      expect(logged).not.toContain("sk-live-secret-value");
+      expect(logged).not.toContain("Bearer");
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
   });
 });

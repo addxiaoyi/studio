@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   assetSignedUrlResponseSchema,
   unauthenticatedErrorResponseSchema,
   uploadResponseSchema,
@@ -49,7 +49,7 @@ export async function registerUploadRoutes(
       const file = await request.file();
       if (!file) {
         return reply.code(400).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "upload_failed",
               message: "No file provided.",
@@ -63,7 +63,7 @@ export async function registerUploadRoutes(
         : file.mimetype;
       if (!mimeType || !ALLOWED_MIME_TYPES.has(mimeType)) {
         return reply.code(400).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "upload_failed",
               message: `Unsupported file type: ${mimeType}. Allowed: ${[...ALLOWED_MIME_TYPES].join(", ")}`,
@@ -160,7 +160,7 @@ function sendUnauthorized(reply: FastifyReply) {
 function sendUploadError(error: unknown, reply: FastifyReply) {
   if (error instanceof UploadServiceError) {
     return reply.code(error.statusCode).send(
-      applicationErrorResponseSchema.parse({
+      applicationErrorResponseSchemaLoose.parse({
         error: {
           code: error.code,
           message: error.message,
@@ -170,7 +170,7 @@ function sendUploadError(error: unknown, reply: FastifyReply) {
   }
 
   return reply.code(500).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: {
         code: "application_error",
         message: "Internal server error.",

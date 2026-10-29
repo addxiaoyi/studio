@@ -4,7 +4,7 @@ import type { BillingPeriod, SubscriptionPlan } from "@helstera/shared";
 import {
   subscriptionPlanSchema,
   billingPeriodSchema,
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   unauthenticatedErrorResponseSchema,
 } from "@helstera/shared";
 
@@ -126,14 +126,14 @@ function sendPaymentError(
 ) {
   if (error instanceof PaymentServiceError) {
     return reply.code(error.statusCode).send(
-      applicationErrorResponseSchema.parse({
+      applicationErrorResponseSchemaLoose.parse({
         error: { code: error.code, message: error.message },
       }),
     );
   }
   console.error("[PaymentRoutes] Unexpected error:", error);
   return reply.code(500).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: {
         code: fallbackCode,
         message: "An unexpected error occurred.",

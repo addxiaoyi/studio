@@ -1,5 +1,5 @@
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   unauthenticatedErrorResponseSchema,
 } from "@helstera/shared";
 import { TOPUP_PACKAGES } from "@helstera/shared";
@@ -39,7 +39,7 @@ export async function registerYeePayRoutes(
 
       if (!packageId) {
         return reply.code(400).send(
-          applicationErrorResponseSchema.parse({
+          applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "invalid_request",
               message: "Invalid request. `packageId` is required.",
@@ -152,7 +152,7 @@ function sendYeePayError(
 ) {
   console.error("[YeePayRoutes] Unexpected error:", error);
   return reply.code(500).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: {
         code: fallbackCode,
         message:

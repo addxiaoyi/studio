@@ -72,7 +72,18 @@ export const unauthenticatedErrorResponseSchema = z.object({
   }),
 });
 
-export const applicationErrorCodeSchema = z.enum([
+/**
+ * 已知错误码白名单（对外契约的一部分：前端可按这些码做分支/文案映射）。
+ *
+ * 重要：这份清单**不是**出站校验闸门。
+ * - `applicationErrorCodeSchema`（封闭枚举）只回答"这是不是我们已经约定过的码"，
+ *   适合前端 `switch` 与测试断言；
+ * - 服务端还会发送清单之外的码（平台/支付/第三方通道回传、服务层细分码），
+ *   出站响应必须用 `applicationErrorCodeSchemaLoose` /
+ *   `applicationErrorResponseSchemaLoose` 校验，否则 Fastify 会因 ZodError
+ *   抛出 500 通用错误，客户端拿不到可读 `code`（历史上已发生 13 处）。
+ */
+export const applicationErrorCodeValues = [
   "application_error",
   "bootstrap_failed",
   "brand_kit_not_found",
@@ -127,11 +138,62 @@ export const applicationErrorCodeSchema = z.enum([
   "checkout_failed",
   "generation_failed",
   "generation_confirmation_required",
+  // ── 补登记：服务端实际会发送、原先漏在枚举外的码 ────────────────────
+  // 补登记 ≠ 不再需要兜底：下面这些只是"已知且稳定"的那部分。
+  "invalid_request",
+  "invalid_input",
+  "submission_failed",
+  "query_failed",
+  "provider_not_configured",
+  "service_unavailable",
+  "model_retired",
+  "canvas_version_conflict",
+  "invalid_if_match",
+  "topup_failed",
+  "topup_activate_failed",
+  "settings_read_failed",
+  "payment_not_configured",
+  "subscription_not_found",
+  "subscription_update_failed",
+  "webhook_processing_failed",
+] as const;
+
+/** 已知码枚举：问"这个码是不是我们约定过的"，**不要**拿它校验出站响应。 */
+export const applicationErrorCodeSchema = z.enum(applicationErrorCodeValues);
+
+/**
+ * 宽松兜底格式：小写字母开头的 snake_case，长度 3~64。
+ * 仍然拒绝空串、大写、含空格/连字符/其他标点、超长、数字开头的垃圾 code。
+ */
+export const applicationErrorCodePattern = /^[a-z][a-z0-9_]{2,63}$/u;
+
+/**
+ * 出站错误码校验：已知码白名单优先，白名单外的"格式合法"码兜底放行。
+ *
+ * 之所以不是 `z.string()` 全放开：code 会进日志、指标标签、前端分支，
+ * 需要保证它始终是可控形状的标识符。
+ */
+export const applicationErrorCodeSchemaLoose = z.union([
+  applicationErrorCodeSchema,
+  z
+    .string()
+    .regex(
+      applicationErrorCodePattern,
+      "Error code must be a 3-64 char lowercase snake_case identifier.",
+    ),
 ]);
 
 export const applicationErrorResponseSchema = z.object({
   error: z.object({
     code: applicationErrorCodeSchema,
+    message: z.string().min(1),
+  }),
+});
+
+/** 出站（服务端 → 客户端）错误响应契约：任何现有 code 都不再抛 ZodError。 */
+export const applicationErrorResponseSchemaLoose = z.object({
+  error: z.object({
+    code: applicationErrorCodeSchemaLoose,
     message: z.string().min(1),
   }),
 });
@@ -159,8 +221,14 @@ export type UnauthenticatedErrorResponse = z.infer<
   typeof unauthenticatedErrorResponseSchema
 >;
 export type ApplicationErrorCode = z.infer<typeof applicationErrorCodeSchema>;
+export type ApplicationErrorCodeLoose = z.infer<
+  typeof applicationErrorCodeSchemaLoose
+>;
 export type ApplicationErrorResponse = z.infer<
   typeof applicationErrorResponseSchema
+>;
+export type ApplicationErrorResponseLoose = z.infer<
+  typeof applicationErrorResponseSchemaLoose
 >;
 export const profileUpdateResponseSchema = z.object({
   profile: viewerProfileSchema,
@@ -200,8 +268,12 @@ export type CanvasGetResponse = z.infer<typeof canvasGetResponseSchema>;
 export type CanvasSaveRequest = z.infer<typeof canvasSaveRequestSchema>;
 export type CanvasSaveResponse = z.infer<typeof canvasSaveResponseSchema>;
 export type ProfileUpdateResponse = z.infer<typeof profileUpdateResponseSchema>;
-export type WorkspaceSettingsResponse = z.infer<typeof workspaceSettingsResponseSchema>;
-export type WorkspaceSettingsUpdateRequest = z.infer<typeof workspaceSettingsUpdateRequestSchema>;
+export type WorkspaceSettingsResponse = z.infer<
+  typeof workspaceSettingsResponseSchema
+>;
+export type WorkspaceSettingsUpdateRequest = z.infer<
+  typeof workspaceSettingsUpdateRequestSchema
+>;
 export type ModelListResponse = z.infer<typeof modelListResponseSchema>;
 
 export const uploadResponseSchema = z.object({
@@ -214,7 +286,9 @@ export const assetSignedUrlResponseSchema = z.object({
 });
 
 export type UploadResponse = z.infer<typeof uploadResponseSchema>;
-export type AssetSignedUrlResponse = z.infer<typeof assetSignedUrlResponseSchema>;
+export type AssetSignedUrlResponse = z.infer<
+  typeof assetSignedUrlResponseSchema
+>;
 
 export const projectUpdateRequestSchema = z.object({
   brand_kit_id: z.string().uuid().nullable().optional(),

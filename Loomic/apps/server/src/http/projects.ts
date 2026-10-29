@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   projectCreateRequestSchema,
   projectCreateResponseSchema,
   projectListResponseSchema,
@@ -262,7 +262,7 @@ export async function registerProjectRoutes(
         const file = await request.file();
         if (!file) {
           return reply.code(400).send(
-            applicationErrorResponseSchema.parse({
+            applicationErrorResponseSchemaLoose.parse({
               error: {
                 code: "upload_failed",
                 message: "No file uploaded.",
@@ -301,7 +301,7 @@ function sendProjectError(
 ) {
   if (error instanceof ProjectServiceError) {
     return reply.code(error.statusCode).send(
-      applicationErrorResponseSchema.parse({
+      applicationErrorResponseSchemaLoose.parse({
         error: {
           code: error.code,
           message: error.message,
@@ -311,7 +311,7 @@ function sendProjectError(
   }
 
   return reply.code(500).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: {
         code: fallbackCode,
         message:

@@ -45,6 +45,13 @@ const DESKTOP_COPY = {
       stateError: "无法读取桌面登录状态。", desktopOnly: "请在 Helstera Desktop 应用中发起登录。",
       openError: "暂时无法打开浏览器登录。", cancelError: "取消登录失败，请重试。",
     },
+    // 会话加载失败（断网 / 超时 / 5xx）≠ 未登录：这种情况不能渲染登录页。
+    // 文案留在本组件的 DESKTOP_COPY 里而不是 `desktop-copy.ts`，因为后者不在本批写入范围。
+    sessionFailed: {
+      title: "无法连接工作区",
+      description: "登录状态未知：网络中断或服务暂时不可用。你的目标不会丢失，恢复后可以继续。",
+      retry: "重新连接",
+    },
     heading: "你想让 Agent 帮你做什么？", intro: "描述目标，Agent 会按需要调度浏览器、桌面控件和视觉能力。", connected: "已连接",
     goal: "任务目标", placeholder: "例如：打开网站并介绍主要功能，或整理当前文件窗口。", modeLegend: "执行方式",
     modes: { isolated_browser: "隔离浏览器", connected_browser_tab: "授权 Edge / Chrome 标签页", windows_ui: "本机应用（控件树）", visual_ocr: "本机应用（视觉 OCR）" },
@@ -70,6 +77,11 @@ const DESKTOP_COPY = {
     login: {
       stateError: "Unable to read desktop sign-in status.", desktopOnly: "Start sign-in from the Helstera Desktop app.",
       openError: "Unable to open browser sign-in.", cancelError: "Unable to cancel sign-in. Please retry.",
+    },
+    sessionFailed: {
+      title: "Workspace unreachable",
+      description: "Sign-in state is unknown — the network dropped or the service is temporarily unavailable. Your goal is kept and you can continue once it recovers.",
+      retry: "Retry connection",
     },
     heading: "What should your Agent do?", intro: "Describe the goal. The Agent chooses browser, desktop control, and vision tools as needed.", connected: "Connected",
     goal: "Task goal", placeholder: "For example: introduce a website's key features or organize the active file window.", modeLegend: "Execution mode",
@@ -103,7 +115,7 @@ function isDesktopShell() {
 }
 
 export function DesktopAppPage({ mode }: { mode: "home" | "canvas" | "projects" | "assets" | "marketplace" | "mcp" | "development" | "settings" }) {
-  const { user, session, loading } = useAuth();
+  const { user, session, loading, sessionError, retrySession } = useAuth();
   const router = useRouter();
   const locale = useLocale();
   const copy = DESKTOP_COPY[locale];
@@ -169,6 +181,24 @@ export function DesktopAppPage({ mode }: { mode: "home" | "canvas" | "projects" 
 
   if (!desktopShellReady) return null;
   if (loading) return <DesktopLoading />;
+  // An unknown sign-in state is not a signed-out user. Rendering the login screen here
+  // (the old behaviour, because a thrown session lookup only cleared `user`) tells the
+  // user to sign in for what is really an offline / 5xx / timeout fault — and the login
+  // screen owns no socket, so the connectivity banner could never speak up on it.
+  // Only replace the page when we have no user: a signed-in user keeps working, and the
+  // banner carries the uncertainty.
+  if (!user && sessionError) {
+    return <main className="desktop-app-login">
+      <section>
+        <div className="desktop-app-login__mark"><WifiOff aria-hidden="true" /></div>
+        <p className="desktop-command-center__eyebrow">HELSTERA DESKTOP</p>
+        <h1>{copy.sessionFailed.title}</h1>
+        <p>{copy.sessionFailed.description}</p>
+        <Button size="lg" onClick={() => void retrySession()}>{copy.sessionFailed.retry}<ArrowRight aria-hidden="true" /></Button>
+        <p className="desktop-app-login__status" role="status">{sessionError.message}</p>
+      </section>
+    </main>;
+  }
   if (!user) {
     const loginCopy = locale === "en-US" ? {
       title: "Helstera AI workspace", description: "Confirm sign-in in your system browser and you will return here automatically. Cookies are not sent to the desktop app.",

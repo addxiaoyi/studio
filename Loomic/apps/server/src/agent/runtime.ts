@@ -2239,6 +2239,11 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         }
 
         let stream: AsyncIterable<unknown>;
+        // `stream` is a one-shot iterable: once the adapter consumes it there is nothing left
+        // to restart. Retrying a 503 therefore requires a factory that can produce a *new*
+        // stream, which is what the adapter's before-first-token retry consumes. Without this
+        // the retry path exists in code but never fires in production.
+        let createEventStream: (() => AsyncIterable<unknown>) | undefined;
         try {
           // Auto-inject canvas state summary so the agent has immediate awareness
           // of what's on the canvas without needing to call inspect_canvas first.
@@ -2447,7 +2452,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           }
 
           rlog.lap("stream_call_start");
-          stream = agent.streamEvents(
+          createEventStream = () => agent.streamEvents(
             {
               messages: [userMessage],
             },
@@ -2475,6 +2480,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               version: "v2",
             },
           );
+          stream = createEventStream();
           rlog.lap("stream_call_returned");
         } catch (error) {
           const failedEvent = toFailedEvent(runId, now, error);
@@ -2512,6 +2518,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         resetSilenceTimer();
         try {
           for await (const event of adaptDeepAgentStream({
+            ...(createEventStream ? { createStream: createEventStream } : {}),
             conversationId: run.conversationId,
             singleImageTask: Boolean(
               options.jobService &&

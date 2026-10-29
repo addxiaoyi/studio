@@ -36,6 +36,37 @@ function isBlankCanvasContent(content: {
   return !hasVisibleElement && Object.keys(content.files).length === 0;
 }
 
+// ── 首页目标（?prompt=）的一次性交接 ──
+// 目标以前在挂载时就被 router.replace 从 URL 删掉。ws 还没连上时 ChatSidebar 的
+// 自动发送会静默 return，于是"目标"既不发送也不在 URL 里，彻底丢失。
+// 现在的规则：URL 是持久副本，sessionStorage 是第二份副本（`?session=` / `?id=`
+// 这类中间态导航会把 prompt 从 URL 拿掉），只有确认交接给发送流程后才清理两者。
+const PENDING_INITIAL_PROMPT_KEY = "helstera:pending-initial-prompt";
+
+function stashInitialPrompt(text: string) {
+  try {
+    window.sessionStorage.setItem(PENDING_INITIAL_PROMPT_KEY, text);
+  } catch {
+    // Private mode / quota: the URL copy still carries the goal.
+  }
+}
+
+function readStashedInitialPrompt(): string | undefined {
+  try {
+    return window.sessionStorage.getItem(PENDING_INITIAL_PROMPT_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function clearStashedInitialPrompt() {
+  try {
+    window.sessionStorage.removeItem(PENDING_INITIAL_PROMPT_KEY);
+  } catch {
+    // Nothing to clean up when storage is unavailable.
+  }
+}
+
 function CanvasPageContent() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -44,9 +75,22 @@ function CanvasPageContent() {
   const assetId = searchParams.get("assetId");
   const assetMediaType = searchParams.get("mediaType");
   const initialSessionId = searchParams.get("session") ?? undefined;
-  // Capture prompt once — router.replace will strip it from URL, but the
-  // value must survive for the auto-send effect in ChatSidebar.
-  const [initialPrompt] = useState(() => searchParams.get("prompt") ?? undefined);
+  // Capture the goal once. It stays in the URL until the send pipeline confirms the
+  // handoff (see `handleInitialPromptHandoff`), and a second copy lives in
+  // sessionStorage because intermediate `?session=` / `?id=` rewrites drop `prompt`.
+  const [initialPrompt] = useState(() => {
+    const fromUrl = searchParams.get("prompt") ?? undefined;
+    if (fromUrl) {
+      stashInitialPrompt(fromUrl);
+      return fromUrl;
+    }
+    return readStashedInitialPrompt();
+  });
+  const [initialPromptSettled, setInitialPromptSettled] = useState(false);
+  const handleInitialPromptHandoff = useCallback(() => {
+    clearStashedInitialPrompt();
+    setInitialPromptSettled(true);
+  }, []);
   const browserMode = searchParams.get("browserMode");
   const desktopExecutionContext: DesktopExecutionContext | undefined =
     pathname.startsWith("/desktop-app/") &&
@@ -222,12 +266,15 @@ function CanvasPageContent() {
   }, [desktopMode]);
 
   useEffect(() => {
+    // 只有确认目标已交给发送流程（发送成功或用户明确放弃）后才清理 URL。
+    // 在此之前 URL 就是目标的唯一可靠副本，删掉等于让用户目标静默消失。
+    if (!initialPromptSettled) return;
     if (!searchParams.has("prompt")) return;
     const next = new URLSearchParams(searchParams.toString());
     next.delete("prompt");
     const query = next.toString();
     router.replace(query ? `${pathname}?${query}` : pathname);
-  }, [pathname, router, searchParams]);
+  }, [initialPromptSettled, pathname, router, searchParams]);
 
   const handleApiReady = useCallback((api: any) => {
     excalidrawApiRef.current = api;
@@ -570,6 +617,7 @@ function CanvasPageContent() {
         onCanvasSync={handleCanvasSync}
         onStreamEvent={checkForTimedOutJobs}
         initialPrompt={initialPrompt}
+        {...(initialPrompt ? { onInitialPromptHandoff: handleInitialPromptHandoff } : {})}
         initialSessionId={initialSessionId}
         onSessionChange={handleSessionChange}
         onRequestCanvasImages={handleRequestCanvasImages}

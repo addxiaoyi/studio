@@ -5,7 +5,7 @@ import type { Pool } from "pg";
 
 import type { BackgroundJobStatus, BackgroundJobType, ImageQualityLevel, VideoResolution } from "@helstera/shared";
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   createImageJobRequestSchema,
   createVideoJobRequestSchema,
   getPlanConfig,
@@ -527,21 +527,21 @@ function sendJobError(
   }
   if (error instanceof JobServiceError) {
     return reply.code(error.statusCode).send(
-      applicationErrorResponseSchema.parse({
+      applicationErrorResponseSchemaLoose.parse({
         error: { code: error.code, message: error.message },
       }),
     );
   }
   if (error instanceof TierGuardError) {
     return reply.code(error.statusCode).send(
-      applicationErrorResponseSchema.parse({
+      applicationErrorResponseSchemaLoose.parse({
         error: { code: error.code, message: error.message },
       }),
     );
   }
   if (error instanceof CreditServiceError) {
     return reply.code(error.statusCode).send(
-      applicationErrorResponseSchema.parse({
+      applicationErrorResponseSchemaLoose.parse({
         error: { code: error.code, message: error.message },
       }),
     );
@@ -553,7 +553,7 @@ function sendJobError(
     });
   }
   return reply.code(500).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: {
         code: fallbackCode,
         message: "An unexpected error occurred.",

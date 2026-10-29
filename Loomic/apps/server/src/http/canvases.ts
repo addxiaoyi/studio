@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import {
   type CanvasGetResponse,
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   canvasGetResponseSchema,
   canvasSaveRequestSchema,
   canvasSaveResponseSchema,
@@ -37,9 +37,10 @@ export type VersionedCanvasGetResponse = CanvasGetResponse & {
 /**
  * 409 冲突包体。
  *
- * 为什么不复用 `applicationErrorResponseSchema`：`applicationErrorCodeSchema` 是
- * shared 里的封闭枚举，`canvas_version_conflict` 不在其中，本次又不允许改 shared，
- * 所以冲突的响应形状在这里局部定义并显式带上服务端当前 `version`。
+ * 为什么这里另起一个局部 schema：冲突包体多了服务端当前 `version` 字段，
+ * 而 `applicationErrorResponseSchemaLoose` 只描述 `{ error: { code, message } }`。
+ * （`canvas_version_conflict` / `invalid_if_match` 已登记进 shared 已知码白名单，
+ * 出站错误仍统一用 `applicationErrorResponseSchemaLoose` 校验。）
  */
 const canvasVersionConflictResponseSchema = z.object({
   error: z.object({
@@ -265,7 +266,7 @@ function sendUnauthorized(reply: FastifyReply) {
 function sendCanvasError(error: unknown, reply: FastifyReply) {
   if (error instanceof CanvasServiceError) {
     return reply.code(error.statusCode).send(
-      applicationErrorResponseSchema.parse({
+      applicationErrorResponseSchemaLoose.parse({
         error: {
           code: error.code,
           message: error.message,
@@ -282,7 +283,7 @@ function sendCanvasError(error: unknown, reply: FastifyReply) {
   }
 
   return reply.code(500).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: {
         code: "application_error",
         message: "Internal server error.",

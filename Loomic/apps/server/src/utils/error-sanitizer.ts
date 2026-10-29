@@ -12,6 +12,26 @@ const AUTH_PATTERN =
 const INFRA_PATTERN =
   /econnrefused|econnreset|etimedout|dns|socket|tls|certificate/i;
 
+/**
+ * 上游“瞬时不可用”的文本特征。
+ * 只作为回退依据：一旦拿到显式 HTTP 状态码，就以状态码为准（见 classifyErrorForClient）。
+ */
+const TRANSIENT_UPSTREAM_PATTERN =
+  /service temporarily unavailable|temporarily unavailable|temporarily overloaded|overloaded|bad gateway|gateway time(?:d)? ?out|service unavailable|upstream connect error|no healthy upstream|premature close|socket hang up|connection reset|connection refused|econnreset|econnrefused|etimedout|服务暂不可用|上游服务不可用/i;
+
+/**
+ * 用户输入 / 请求本身不合法：重试不会变好，必须判为不可重试。
+ * 该判定优先于任何“看起来像上游故障”的文本特征。
+ */
+const USER_INPUT_PATTERN =
+  /invalid[_ -]?(?:input|request|argument|parameter|value)|unsupported|validation|prompt (?:is )?too long|context[ _]length|参数(?:错误|不合法|不支持)|不支持|内容过长/i;
+
+/** 仅这些类别值得让调用方自动重试；其余错误重试只会放大损失。 */
+const RETRYABLE_UPSTREAM_CODES: ReadonlySet<ClientError["code"]> = new Set([
+  "provider_unavailable",
+  "upstream_rate_limited",
+]);
+
 export type ClientError = {
   code:
     | "model_disabled"
@@ -25,13 +45,24 @@ export type ClientError = {
   retryable: boolean;
 };
 
+/**
+ * 判定优先级（高 → 低）：
+ *   1. 结构化字段里的显式 HTTP 状态码（error.status / statusCode / response.status，含 cause 链与 AggregateError）
+ *   2. 错误文本里的显式状态码（HTTP 503 / status: 429 / provider returned 500 / 独立的 429·502·503·504）
+ *   3. 文本特征（瞬时不可用、用户输入不合法、认证、模型不存在、限流、超时……）
+ * 只有 1、2 全程未命中时才走 3，避免把“用户输入错误”或“认证失败”误判成可重试的上游故障。
+ */
 export function classifyErrorForClient(error: unknown): ClientError {
-  const raw = error instanceof Error ? error.message : String(error);
   const messages = collectErrorMessages(error);
   const diagnosticText = messages.join("\n");
-  const status = diagnosticText.match(/\b(?:provider returned|status|HTTP)\s*(\d{3})\b/i)?.[1];
 
-  if (status === "401" || status === "403" || AUTH_PATTERN.test(diagnosticText)) {
+  const explicitStatus = extractExplicitStatus(error) ?? extractTextStatus(diagnosticText);
+  if (explicitStatus !== undefined) {
+    const byStatus = classifyByStatus(explicitStatus);
+    if (byStatus) return byStatus;
+  }
+
+  if (AUTH_PATTERN.test(diagnosticText)) {
     return {
       code: "provider_auth_failed",
       message: "当前 AI 渠道认证失败，请切换模型或联系管理员检查渠道配置。",
@@ -46,28 +77,40 @@ export function classifyErrorForClient(error: unknown): ClientError {
       retryable: false,
     };
   }
-  if (status === "404" || /model[_ -]?not[_ -]?found|model disabled|模型不存在|模型已停用|未开通/i.test(diagnosticText)) {
+  if (/model[_ -]?not[_ -]?found|model disabled|模型不存在|模型已停用|未开通/i.test(diagnosticText)) {
     return {
       code: "model_disabled",
       message: "当前模型已停用或未开通，请选择其他可用模型。",
       retryable: false,
     };
   }
-  if (status === "429" || /rate.?limit|too many requests|限流/i.test(diagnosticText)) {
+  if (/rate.?limit|too many requests|限流/i.test(diagnosticText)) {
     return {
       code: "upstream_rate_limited",
       message: "AI 渠道当前限流，请稍后重试或选择其他模型。",
       retryable: true,
     };
   }
-  if (/timeout|timed out|etimedout|超时/i.test(diagnosticText)) {
+  if (/timeout|timed out|超时/i.test(diagnosticText)) {
     return {
       code: "upstream_timeout",
       message: "AI 渠道响应超时，本次运行已停止，请稍后重试。",
       retryable: true,
     };
   }
-  if (PROVIDER_PATTERN.test(diagnosticText) || INFRA_PATTERN.test(diagnosticText)) {
+  // 用户输入不合法优先于“上游不可用”的泛化文本特征：这类错误重试无用。
+  if (USER_INPUT_PATTERN.test(diagnosticText)) {
+    return {
+      code: "run_failed",
+      message: sanitizeErrorForClient(error),
+      retryable: false,
+    };
+  }
+  if (
+    TRANSIENT_UPSTREAM_PATTERN.test(diagnosticText) ||
+    PROVIDER_PATTERN.test(diagnosticText) ||
+    INFRA_PATTERN.test(diagnosticText)
+  ) {
     return {
       code: "provider_unavailable",
       message: "AI 服务当前不可用，本次运行已停止。请切换模型或稍后重试。",
@@ -79,6 +122,110 @@ export function classifyErrorForClient(error: unknown): ClientError {
     message: sanitizeErrorForClient(error),
     retryable: true,
   };
+}
+
+/** 按显式 HTTP 状态码归类；返回 undefined 表示该状态码不足以定性。 */
+function classifyByStatus(status: number): ClientError | undefined {
+  if (status === 401 || status === 403) {
+    return {
+      code: "provider_auth_failed",
+      message: "当前 AI 渠道认证失败，请切换模型或联系管理员检查渠道配置。",
+      retryable: false,
+    };
+  }
+  if (status === 402) {
+    return {
+      code: "run_failed",
+      message: "当前 AI 渠道额度不足，请切换渠道或补充额度。",
+      retryable: false,
+    };
+  }
+  if (status === 404) {
+    return {
+      code: "model_disabled",
+      message: "当前模型已停用或未开通，请选择其他可用模型。",
+      retryable: false,
+    };
+  }
+  if (status === 429) {
+    return {
+      code: "upstream_rate_limited",
+      message: "AI 渠道当前限流，请稍后重试或选择其他模型。",
+      retryable: true,
+    };
+  }
+  if (status === 408) {
+    return {
+      code: "upstream_timeout",
+      message: "AI 渠道响应超时，本次运行已停止，请稍后重试。",
+      retryable: true,
+    };
+  }
+  // 502/503/504 及所有 5xx：供应商暂时不可用，属于可重试的瞬时故障。
+  if (status >= 500 && status <= 599) {
+    return {
+      code: "provider_unavailable",
+      message: "AI 服务当前不可用，本次运行已停止。请切换模型或稍后重试。",
+      retryable: true,
+    };
+  }
+  // 其余 4xx：请求本身有问题，重试不会变好。
+  if (status >= 400 && status <= 499) {
+    return {
+      code: "run_failed",
+      message: "请求被上游拒绝，请检查输入后重试。",
+      retryable: false,
+    };
+  }
+  return undefined;
+}
+
+/** 从结构化字段里取显式状态码（外层优先），遍历 cause 链与 AggregateError。 */
+function extractExplicitStatus(error: unknown): number | undefined {
+  const visited = new Set<object>();
+  const queue: unknown[] = [error];
+  while (queue.length > 0) {
+    const value = queue.shift();
+    if (value == null) continue;
+    if (typeof value !== "object" || visited.has(value)) continue;
+    visited.add(value);
+    const record = value as Record<string, unknown>;
+    if (value instanceof AggregateError) queue.push(...(value.errors as unknown[]));
+    const response = (record.response ?? undefined) as Record<string, unknown> | undefined;
+    const candidates: unknown[] = [
+      record.status,
+      record.statusCode,
+      response?.status,
+      response?.statusCode,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === "number" && candidate >= 100 && candidate <= 599) return candidate;
+      if (typeof candidate === "string" && /^[1-5]\d{2}$/.test(candidate)) return Number(candidate);
+    }
+    if (record.cause) queue.push(record.cause);
+  }
+  return undefined;
+}
+
+/**
+ * 文本里的状态码：先找带标签的（HTTP 503 / status: 429 / provider returned 500），
+ * 再接受独立出现的著名瞬时状态码（429/502/503/504），避免把 "1803 tokens" 这类数字误判成状态码。
+ */
+function extractTextStatus(text: string): number | undefined {
+  const labelled = text.match(/\b(?:http(?:\/\d(?:\.\d)?)?|status(?: ?code)?|provider returned|error code)\b\s*[:=]?\s*(\d{3})\b/i);
+  if (labelled?.[1]) return Number(labelled[1]);
+  const bare = text.match(/(?:^|[^\d.])(429|502|503|504)(?![\d.])/);
+  if (bare?.[1]) return Number(bare[1]);
+  return undefined;
+}
+
+/**
+ * 错误是否属于“上游瞬时故障”且值得自动重试。
+ * 认证失败、模型不存在、用户输入错误、额度不足一律返回 false。
+ */
+export function isRetryableUpstreamError(error: unknown): boolean {
+  const classified = classifyErrorForClient(error);
+  return classified.retryable && RETRYABLE_UPSTREAM_CODES.has(classified.code);
 }
 
 function collectErrorMessages(error: unknown): string[] {

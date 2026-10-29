@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import {
-  applicationErrorResponseSchema,
+  applicationErrorResponseSchemaLoose,
   unauthenticatedErrorResponseSchema,
   workspaceSettingsResponseSchema,
   workspaceSettingsUpdateRequestSchema,
@@ -77,7 +77,7 @@ function sendUnauthorized(reply: FastifyReply) {
 function sendSettingsError(error: unknown, reply: FastifyReply) {
   if (error instanceof SettingsServiceError) {
     return reply.code(error.statusCode).send(
-      applicationErrorResponseSchema.parse({
+      applicationErrorResponseSchemaLoose.parse({
         error: {
           code: error.code,
           message: error.message,
@@ -94,7 +94,7 @@ function sendSettingsError(error: unknown, reply: FastifyReply) {
   }
 
   return reply.code(500).send(
-    applicationErrorResponseSchema.parse({
+    applicationErrorResponseSchemaLoose.parse({
       error: {
         code: "application_error",
         message: "Internal server error.",

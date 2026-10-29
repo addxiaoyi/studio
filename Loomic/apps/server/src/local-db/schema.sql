@@ -227,15 +227,9 @@ alter table workspace_settings add column if not exists default_model_key_cipher
 alter table workspace_settings add column if not exists chat_model_url text;
 alter table workspace_settings add column if not exists chat_model_key_ciphertext text;
 
-update workspace_settings set default_model='auto' where lower(default_model) in ('agnes-3.0-flash','openai:agnes-3.0-flash');
-update workspace_settings set chat_model='auto' where lower(chat_model) in ('agnes-3.0-flash','openai:agnes-3.0-flash');
-update provider_models set enabled=false, health_status='degraded', last_error='model_removed_by_product_policy', updated_at=now() where lower(model_id)='agnes-3.0-flash';
-update provider_configs pc set models=coalesce((select jsonb_agg(model_value order by ordinal) from jsonb_array_elements(pc.models) with ordinality as item(model_value, ordinal) where lower(trim(both '"' from model_value::text)) <> 'agnes-3.0-flash'),'[]'::jsonb), updated_at=now() where jsonb_typeof(pc.models)='array' and exists (select 1 from jsonb_array_elements_text(pc.models) configured(model_id) where lower(configured.model_id)='agnes-3.0-flash');
-update provider_models set enabled=true, health_status='unknown', failure_count=0, last_error=null, cooldown_until=null, updated_at=now() where lower(model_id)='minimax-h3';
-update provider_models set enabled=true, health_status='unknown', failure_count=0, last_error=null, cooldown_until=null, updated_at=now() where lower(model_id) in ('hailuo-h3','hailuo-h3-cankaosheng','hailuo-h3-max','hailuo-h3-max-shouweizhen','hailuo-h3-quannengcankao','hailuo-h3-shouweizhen','hailuo-h3-zaishengcheng','happyhorse-1.1-i2v','happyhorse-1.1-r2v','kling-avatar-image2video','kling-motion-control','kling-motion-control-v3','minimax-h3-max');
-update provider_models set enabled=false, health_status='degraded', last_error='token_billing_disabled_by_product_policy', updated_at=now() where billing_unit='per_million_tokens';
-update provider_models set price_credits=0.432, updated_at=now() where lower(model_id) in ('minimax-h3','hailuo-h3','hailuo-h3-cankaosheng','hailuo-h3-max','hailuo-h3-max-shouweizhen','hailuo-h3-quannengcankao','hailuo-h3-shouweizhen','kling-motion-control','kling-motion-control-v3');
-update provider_models set price_credits=0.432, updated_at=now() where lower(model_id)='kling-avatar-image2video';
+-- Provider/product model policy lives in migration 20261029000001_provider_model_policy_once.sql.
+-- It must NOT live here: schema.sql is replayed on every deploy, so policy updates placed here
+-- reset the model circuit breaker and pricing on each release.
 
 alter table workspace_settings add column if not exists auto_approve_paid_generation boolean not null default false;
 alter table workspace_settings add column if not exists auto_delete_empty_canvas boolean not null default false;
@@ -363,20 +357,8 @@ create table if not exists official_model_price_sources (
   last_error text
 );
 
-update provider_models
-set enabled=false, health_status='degraded', last_error='model_removed_by_product_policy', updated_at=now()
-where lower(model_id) ~ '(^|[/ :])gpt-image-1[.]5$';
-
-update provider_configs pc
-set models=coalesce((
-  select jsonb_agg(model_value order by ordinal)
-  from jsonb_array_elements(pc.models) with ordinality as item(model_value, ordinal)
-  where lower(trim(both '"' from model_value::text)) !~ '(^|[/ :])gpt-image-1[.]5$'
-),'[]'::jsonb), updated_at=now()
-where jsonb_typeof(pc.models)='array' and exists (
-  select 1 from jsonb_array_elements_text(pc.models) as configured(model_id)
-  where lower(configured.model_id) ~ '(^|[/ :])gpt-image-1[.]5$'
-);
+-- gpt-image-1.5 retirement policy lives in 20261029000001_provider_model_policy_once.sql
+-- for the same reason as the block above.
 
 create table if not exists brand_kits (
   id uuid primary key default gen_random_uuid(),
