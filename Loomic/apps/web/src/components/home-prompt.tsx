@@ -34,6 +34,7 @@ type HomePromptProps = {
     model?: string,
   ) => void;
   disabled?: boolean;
+  submitting?: boolean;
   attachments?: ImageAttachmentState[];
   onAddFiles?: (files: File[]) => void;
   onRemoveAttachment?: (id: string) => void;
@@ -66,6 +67,7 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
     {
       onSubmit,
       disabled,
+      submitting,
       attachments,
       onAddFiles,
       onRemoveAttachment,
@@ -369,6 +371,11 @@ export const HomePrompt = forwardRef<HomePromptHandle, HomePromptProps>(
                 );
               })}
             </div>
+            {submitting && (
+              <span role="status" aria-live="polite" className="shrink-0 text-[11px] text-muted-foreground">
+                正在创建项目…
+              </span>
+            )}
             <button
               type="submit"
               onClick={handleSubmit}

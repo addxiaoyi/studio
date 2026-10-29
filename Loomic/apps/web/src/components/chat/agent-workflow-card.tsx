@@ -119,7 +119,7 @@ export function AgentWorkflowCard({ workflowId }: { workflowId: string }) {
           : "准备中";
 
   return (
-    <section className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-4" aria-label="Agent workflow">
+    <section className="rounded-xl border border-info/30 bg-info/5 p-4" aria-label="Agent workflow">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">Agent 工作流</h3>
@@ -129,7 +129,7 @@ export function AgentWorkflowCard({ workflowId }: { workflowId: string }) {
       </div>
 
       {workflow?.status === "paused" && approvalStep && (
-        <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+        <div className="mt-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground">
           <p>{plan.approvalGate?.reason ?? "该步骤需要确认后继续。"}</p>
           <button type="button" onClick={approve} disabled={busy} className="mt-3 rounded-lg bg-foreground px-3 py-2 text-xs font-medium text-background disabled:opacity-50">
             {busy ? "处理中" : "确认并继续"}
@@ -141,7 +141,7 @@ export function AgentWorkflowCard({ workflowId }: { workflowId: string }) {
         <div className="mt-3 rounded-lg border border-border/40 bg-background/50 px-3 py-2 text-xs">
           <div className="flex items-center justify-between gap-2">
             <span className="text-muted-foreground">生成任务</span>
-            <span className={job.status === "succeeded" ? "text-emerald-700 dark:text-emerald-300" : job.status === "failed" || job.status === "dead_letter" ? "text-destructive" : "text-foreground"}>
+            <span className={job.status === "succeeded" ? "text-success" : job.status === "failed" || job.status === "dead_letter" ? "text-destructive" : "text-foreground"}>
               {job.status}
             </span>
           </div>

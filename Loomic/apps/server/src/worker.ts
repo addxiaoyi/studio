@@ -569,7 +569,7 @@ async function reconcileTokenBilling(
   const current = await loadReservedCredits(jobId, ctx);
   const delta = actualCost - current;
   if (delta === 0) return;
-  const description = `Token usage: ${model}, input=${usage.inputTokens}@¥${billing.inputTokenPriceCny}/1M, output=${usage.outputTokens}@¥${billing.outputTokenPriceCny}/1M`;
+  const description = `HelsterAgent usage (${usage.inputTokens} input, ${usage.outputTokens} output tokens)`;
   const txId =
     delta > 0
       ? await creditService.deductCredits(

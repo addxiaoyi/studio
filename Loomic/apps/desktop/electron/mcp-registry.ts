@@ -20,6 +20,7 @@ export type McpServerInput = {
   env?: Record<string, string>;
   url?: string;
   token?: string;
+  sensitiveArgs?: boolean;
 };
 
 export type McpTool = {
@@ -37,7 +38,10 @@ export type McpTool = {
   };
 };
 
-type StoredServer = Omit<McpServerInput, "env" | "token"> & {
+type StoredServer = Omit<McpServerInput, "env" | "token" | "sensitiveArgs" | "args"> & {
+  args?: string[];
+  sensitiveArgs?: boolean;
+  encryptedArgs?: string;
   id: string;
   encryptedEnv?: string;
   encryptedToken?: string;
@@ -54,6 +58,66 @@ const MAX_CONFIG_BYTES = 512_000;
 const MAX_ARGUMENT_BYTES = 64_000;
 const MAX_RESULT_BYTES = 80_000;
 const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const WINDOWS_SCRIPT_COMMANDS = new Set(["npx", "npm", "pnpm", "npx.cmd", "npm.cmd", "pnpm.cmd"]);
+
+export function resolveMcpStdioLaunch(
+  command: string,
+  args: string[],
+  platform = process.platform,
+  comspec = process.env.ComSpec ?? "cmd.exe",
+) {
+  if (platform !== "win32" || !WINDOWS_SCRIPT_COMMANDS.has(command.toLowerCase())) {
+    return { command, args };
+  }
+  if (args.some((argument) => /[\0\r\n%!\"]/.test(argument))) {
+    throw new Error("Windows package-runner arguments contain unsupported command characters.");
+  }
+  const executable = command.toLowerCase().endsWith(".cmd") ? command : `${command}.cmd`;
+  const commandLine = `"${[executable, ...args]
+    .map((argument) => `"${argument.replace(/"/g, '""')}"`)
+    .join(" ")}"`;
+  return { command: comspec, args: ["/d", "/s", "/c", commandLine] };
+}
+
+export type MarketplaceMcpConfigField = {
+  envName: string;
+  label: string;
+  kind: "text" | "secret" | "directory";
+  required: boolean;
+  sensitive: boolean;
+};
+
+export function resolveMarketplaceMcpConfig(
+  args: string[],
+  fields: MarketplaceMcpConfigField[],
+  values: Record<string, unknown>,
+) {
+  const env: Record<string, string> = {};
+  const allowedNames = new Set(fields.map((field) => field.envName));
+  if (Object.keys(values).some((key) => !allowedNames.has(key))) {
+    throw new Error("Marketplace MCP configuration contains an unapproved field.");
+  }
+  for (const field of fields) {
+    if (!/^[A-Z_][A-Z0-9_]{0,79}$/.test(field.envName)) {
+      throw new Error("Marketplace MCP configuration schema is invalid.");
+    }
+    const value = values[field.envName];
+    if (field.required && (typeof value !== "string" || !value.trim())) {
+      throw new Error(field.label + " is required.");
+    }
+    if (typeof value === "string" && value.trim()) env[field.envName] = value.trim().slice(0, 4_096);
+  }
+  const sensitiveNames = new Set(fields.filter((field) => field.sensitive).map((field) => field.envName));
+  const resolvedArgs = args.map((argument) => argument.replace(/\{\{([A-Z_][A-Z0-9_]*)\}\}/g, (_match, name: string) => {
+    if (sensitiveNames.has(name)) {
+      throw new Error("Sensitive MCP configuration must be passed through encrypted local environment storage.");
+    }
+    const value = env[name];
+    if (!value) throw new Error("Configuration for " + name + " is required.");
+    return value;
+  }));
+  return { args: resolvedArgs, env };
+}
 
 export function validateMcpServer(input: McpServerInput) {
   if (
@@ -123,12 +187,12 @@ export class McpRegistry {
 
   async list() {
     const servers = await this.readServers();
-    return servers.map(({ id, name, transport, command, args, cwd, url }) => ({
+    return servers.map(({ id, name, transport, command, args, cwd, url, encryptedArgs }) => ({
       id,
       name,
       transport,
       command,
-      args,
+      ...(encryptedArgs ? { hasSensitiveArgs: true } : args ? { args } : {}),
       cwd,
       url,
       connected: this.live.has(id),
@@ -150,7 +214,14 @@ export class McpRegistry {
       if (!command)
         throw new Error("A stdio server needs an executable command.");
       stored.command = command.trim();
-      stored.args = input.args ?? [];
+      const args = input.args ?? [];
+      if (input.sensitiveArgs && args.length) {
+        if (!this.storage.isEncryptionAvailable()) throw new Error("This device cannot encrypt sensitive MCP launch parameters.");
+        stored.encryptedArgs = this.storage.encryptString(JSON.stringify(args)).toString("base64");
+        stored.sensitiveArgs = true;
+      } else {
+        stored.args = args;
+      }
       if (input.cwd?.trim()) stored.cwd = input.cwd.trim();
     } else {
       stored.url = input.url;
@@ -217,9 +288,10 @@ export class McpRegistry {
       );
       if (!server.command)
         throw new Error("The configured stdio executable is missing.");
+      const launch = resolveMcpStdioLaunch(server.command, server.args ?? []);
       transport = new StdioClientTransport({
-        command: server.command,
-        args: server.args,
+        command: launch.command,
+        args: launch.args,
         cwd: server.cwd,
         env: { ...inherited, ...env },
         stderr: "pipe",
@@ -402,7 +474,10 @@ export class McpRegistry {
       const parsed: unknown = JSON.parse(raw.toString("utf8"));
       if (!Array.isArray(parsed))
         throw new Error("MCP registry file is invalid.");
-      return parsed as StoredServer[];
+      return (parsed as StoredServer[]).map((server) => {
+        if (!server.encryptedArgs) return server;
+        return { ...server, args: JSON.parse(this.decrypt(server.encryptedArgs)) as string[] };
+      });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
@@ -412,7 +487,12 @@ export class McpRegistry {
   private async writeServers(servers: StoredServer[]) {
     await mkdir(dirname(this.configPath), { recursive: true });
     const temporaryPath = `${this.configPath}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify(servers), {
+    const persisted = servers.map((server) => {
+      if (!server.encryptedArgs) return server;
+      const { args: _args, ...encrypted } = server;
+      return encrypted;
+    });
+    await writeFile(temporaryPath, JSON.stringify(persisted), {
       mode: 0o600,
       flag: "wx",
     });

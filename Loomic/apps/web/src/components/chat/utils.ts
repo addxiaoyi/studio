@@ -68,10 +68,40 @@ export function formatToolName(name: string): string {
 /** Format raw model IDs for display. */
 export function formatModelDisplayName(model: string): string {
   const slug = model.split("/").pop() ?? model;
-  return slug
-    .split("-")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  const normalizedSlug = slug.split(":").pop() ?? slug;
+  const publicNames: Record<string, string> = {
+    "codex-auto-review": "HelsterAgent",
+    auto: "HelsterAgent",
+    "hy4-preview-f": "HelsterAgent",
+    "hy3-x": "HelsterAgent",
+    "deepseek-v4-pro": "HelsterAgent",
+    "minimax-h3": "MiniMax H3",
+  };
+  if (publicNames[normalizedSlug]) return publicNames[normalizedSlug];
+  return "Helstera AI";
+}
+
+export function formatPublicTransactionDescription(description: string | null, transactionType: string): string {
+  const raw = description?.trim() ?? "";
+  const looksCorrupted = /[\uFFFD\u25C6\u25A1]/u.test(raw) || /(?:Ã.|Â.|ï¿½|â€)/u.test(raw);
+  const exposesModelId = /(codex-auto-review|(?:video_generation|image_generation|generation)\s*:\s*\S+|\b[a-z0-9]+(?:[_/-][a-z0-9.-]+){2,}\b)/i.test(raw);
+  if (looksCorrupted || exposesModelId) {
+    if (transactionType === "generation_refund") return "Generation refund";
+    if (transactionType === "generation_deduct") {
+      if (/video_generation|video generation/i.test(raw)) return "Video generation";
+      if (/image_generation|image generation/i.test(raw)) return "Image generation";
+      return "AI generation";
+    }
+    return "Credit transaction";
+  }
+  if (raw && !raw.includes("\uFFFD") && !/[�]/.test(raw) && !/(codex-auto-review|video_generation:|image_generation:)/i.test(raw)) return raw;
+  if (transactionType === "generation_refund") return "Generation refund";
+  if (transactionType === "generation_deduct") {
+    if (/video_generation/i.test(raw)) return "Video generation";
+    if (/image_generation/i.test(raw)) return "Image generation";
+    return "AI generation";
+  }
+  return "Credit transaction";
 }
 
 /** Convert camelCase/snake_case param name to readable lowercase */

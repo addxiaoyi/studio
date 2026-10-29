@@ -58,7 +58,8 @@ import type { AgentPersistenceService } from "./persistence/index.js";
 import { adaptDeepAgentStream } from "./stream-adapter.js";
 import { accumulateAgentTokenUsage } from "./message-billing.js";
 import type { SubmitDesktopAgentTaskFn } from "./tools/desktop-agent.js";
-import { createDesktopMcpTools } from "./tools/desktop-mcp.js";
+import { enforceDesktopExecutionContext } from "./tools/desktop-agent.js";
+import { canExposeNativeScreenTool, createDesktopMcpTools } from "./tools/desktop-mcp.js";
 // execute 工具由 deepagents 内置提供（LocalShellBackend 作为 sandbox backend）
 // 不需要自定义代码执行工具
 import type { SubmitImageJobFn } from "./tools/image-generate.js";
@@ -988,7 +989,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                 userId,
                 creditsCost,
                 job.id,
-                `Image generation: ${input.model}`,
+                "Image generation",
               );
               await jobSvc.setCreditsInfo(job.id, creditsCost, txId);
             } catch (deductError) {
@@ -1489,7 +1490,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                 userId,
                 creditsCost,
                 job.id,
-                `Video generation: ${input.model}`,
+                "Video generation",
               );
               await jobSvc.setCreditsInfo(job.id, creditsCost, txId);
             } catch (deductError) {
@@ -1724,7 +1725,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             return {
               taskId: task.id,
               jobId: null,
-              status: task.status,
+              status: "running",
               progress: Number(task.progress ?? 0),
               pending: task.status !== "succeeded",
             };
@@ -1796,6 +1797,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         const desktopAgentHub = options.desktopAgentHub;
         if (desktopAgentHub) {
           submitDesktopAgentTask = async (input) => {
+            const taskInput = enforceDesktopExecutionContext(input, run.desktopExecutionContext);
             const workspaceResult = canvasId
               ? await options.localDb!.query(
                   "select p.workspace_id from canvases c join projects p on p.id=c.project_id join workspace_members wm on wm.workspace_id=p.workspace_id where c.id=$1 and wm.user_id=$2",
@@ -1812,20 +1814,14 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             const task = await desktopAgentHub.createDesktopAgentTask(
               userId,
               workspaceId,
-              { ...input, ...(canvasId ? { canvasId } : {}) },
-            );
-            const outcome = await desktopAgentHub.waitForDesktopAgentTask(
-              userId,
-              workspaceId,
-              task.taskId,
+              { ...taskInput, ...(canvasId ? { canvasId } : {}) },
+              run.sessionId,
             );
             return {
               taskId: task.taskId,
               role: task.role,
-              status: outcome.status,
+              status: "running",
               capabilities: task.capabilities,
-              result: outcome.result,
-              error: outcome.error,
             };
           };
         }
@@ -1930,6 +1926,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           workspaceSkills = await loadLocalWorkspaceSkills(
             options.localDb,
             run.canvasId,
+            run.userId,
           );
           rlog.lap("workspace_skills_loaded", {
             count: workspaceSkills.length,
@@ -1972,10 +1969,17 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               mcpUserId,
               workspaceId,
             );
-            desktopMcpTools = createDesktopMcpTools(descriptors, (input) =>
+            const nativeMode = run.desktopExecutionContext?.browserMode === "windows_ui"
+              || run.desktopExecutionContext?.browserMode === "visual_ocr";
+            const authorizedDescriptors = descriptors.filter((descriptor) =>
+              !descriptor.name.startsWith("screen_")
+              || (nativeMode && canExposeNativeScreenTool(descriptor.name)),
+            );
+            desktopMcpTools = createDesktopMcpTools(authorizedDescriptors, (input) =>
               hub.callDesktopMcpTool({
                 userId: mcpUserId,
                 workspaceId,
+                ...(run.desktopExecutionContext ? { desktopExecutionContext: run.desktopExecutionContext } : {}),
                 ...input,
               }),
             );

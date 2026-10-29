@@ -28,10 +28,15 @@ function DesktopConfirmContent() {
       return;
     }
     if (!loading && !user) {
-      const redirect = `/auth/desktop-confirm/?state=${encodeURIComponent(state)}`;
-      router.replace(`/login/?redirect=${encodeURIComponent(redirect)}`);
+      const confirmationParams = new URLSearchParams({ state });
+      if (requestedCallbackUrl) {
+        confirmationParams.set("callback", requestedCallbackUrl);
+      }
+      const redirect = `/auth/desktop-confirm/?${confirmationParams.toString()}`;
+      const loginParams = new URLSearchParams({ redirect, desktop: "1" });
+      router.replace(`/login/?${loginParams.toString()}`);
     }
-  }, [loading, router, state, user]);
+  }, [loading, requestedCallbackUrl, router, state, user]);
 
   useEffect(() => {
     if (!callbackUrl) return;

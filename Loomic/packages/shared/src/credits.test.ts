@@ -3,19 +3,28 @@ import { describe, expect, it } from "vitest";
 import {
   calculateImageCost,
   calculateVideoCost,
+  calculateAgentTokenCharge,
   getTopupPackage,
+  HELSTERA_AGENT_TOKEN_PRICES_CNY,
   SIGNUP_BONUS_CREDITS,
   TOPUP_PACKAGES,
   calculateTokenCredits,
   getConfiguredBilling,
   getAgentMessagePrice,
 } from "./credits.js";
+import { getConfiguredVideoPriceRates, resolveVideoResolution } from "./upstream-pricing.js";
 
 describe("agent message billing", () => {
   it("charges HY3 at one cent per message", () => {
     expect(getAgentMessagePrice("hy3")).toBe(0.01);
     expect(getAgentMessagePrice("openai:hy3")).toBe(0.01);
     expect(getAgentMessagePrice("minimax-hy3")).toBe(0.01);
+  });
+
+  it("prices HelsteraAgent input and output tokens separately per million", () => {
+    expect(HELSTERA_AGENT_TOKEN_PRICES_CNY).toEqual({ input: 0.1, output: 0.5 });
+    expect(calculateAgentTokenCharge(1_000, 1_000)).toBe(0.0006);
+    expect(calculateAgentTokenCharge(0, 1)).toBe(0.0001);
   });
 });
 
@@ -83,10 +92,26 @@ describe("configured model billing catalog", () => {
 });
 
 describe("calculateVideoCost", () => {
-  it("charges configured per-second video models by duration", () => {
-    expect(calculateVideoCost("minimax-h3", "720p", 1)).toBeCloseTo(0.3456);
-    expect(calculateVideoCost("minimax-h3", "720p", 5)).toBeCloseTo(1.728);
-    expect(calculateVideoCost("minimax-h3", "480p", 15)).toBeCloseTo(5.184);
+  it("aligns default and legacy resolutions with billing and rejects unsupported output sizes", () => {
+    expect(resolveVideoResolution("MiniMax-H3")).toBe("768p");
+    expect(resolveVideoResolution("MiniMax-H3", "720p")).toBe("768p");
+    expect(resolveVideoResolution("MiniMax-H3", "1080p")).toBe("1088p");
+    expect(calculateVideoCost("MiniMax-H3")).toBeCloseTo(1.5);
+    expect(() => calculateVideoCost("MiniMax-H3", "4k", 5)).toThrow("Unsupported resolution");
+  });
+  it("charges MiniMax H3 using the selected output resolution and duration", () => {
+    expect(calculateVideoCost("MiniMax-H3", "480p", 1)).toBeCloseTo(0.22);
+    expect(calculateVideoCost("minimax-h3", "768p", 5)).toBeCloseTo(1.5);
+    expect(calculateVideoCost("minimax-h3", "1088p", 15)).toBeCloseTo(5.1);
+    expect(calculateVideoCost("minimax-h3", "1440p", 5)).toBeCloseTo(1.9);
+  });
+  it("publishes the configured final unit prices for all MiniMax H3 resolutions", () => {
+    expect(getConfiguredVideoPriceRates("MiniMax-H3")).toEqual([
+      { resolution: "480p", priceCnyPerSecond: 0.22 },
+      { resolution: "768p", priceCnyPerSecond: 0.3 },
+      { resolution: "1088p", priceCnyPerSecond: 0.34 },
+      { resolution: "1440p", priceCnyPerSecond: 0.38 },
+    ]);
   });
   it("prices the Seedance 2.5 full version at 50% gross margin on its published floor cost", () => {
     expect(getConfiguredBilling("seedance-2.5-guanfang-anmiao")).toMatchObject({
@@ -97,7 +122,7 @@ describe("calculateVideoCost", () => {
   });
   it("uses the supplied upstream costs for every mapped billing unit", () => {
     expect(getConfiguredBilling("gk-video-3.5")).toEqual({ billingUnit: "per_second", creditCost: 0.454 });
-    expect(getConfiguredBilling("minimax-h3")).toEqual({ billingUnit: "per_second", creditCost: 0.3456 });
+    expect(getConfiguredBilling("MiniMax-H3")).toEqual({ billingUnit: "per_second", creditCost: 0.3 });
     expect(getConfiguredBilling("omni_flash-10s")).toEqual({ billingUnit: "per_generation", creditCost: 2.9376 });
     expect(getConfiguredBilling("seedance-2.5-guanfang")).toEqual({ billingUnit: "per_million_tokens", inputTokenPriceCny: 193.536, outputTokenPriceCny: 193.536 });
   });

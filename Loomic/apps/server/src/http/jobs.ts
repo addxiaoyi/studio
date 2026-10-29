@@ -3,12 +3,13 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool } from "pg";
 
-import type { BackgroundJobStatus, BackgroundJobType, ImageQualityLevel } from "@helstera/shared";
+import type { BackgroundJobStatus, BackgroundJobType, ImageQualityLevel, VideoResolution } from "@helstera/shared";
 import {
   applicationErrorResponseSchema,
   createImageJobRequestSchema,
   createVideoJobRequestSchema,
   getPlanConfig,
+  resolveVideoResolution,
   jobListResponseSchema,
   jobResponseSchema,
   unauthenticatedErrorResponseSchema,
@@ -188,7 +189,7 @@ export async function registerJobRoutes(
             user.id,
             creditsCost,
             job.id,
-            `Image generation: ${model}`,
+            "Image generation",
           );
           await options.jobService.setCreditsInfo(job.id, creditsCost, txId);
         } catch (deductError) {
@@ -257,6 +258,7 @@ export async function registerJobRoutes(
         });
       }
       const model = resolvedModel?.model_id ?? payload.model ?? "wan-video/wan-2.6";
+      payload.resolution = resolveVideoResolution(model, payload.resolution as VideoResolution | undefined);
       const routing = resolvedModel
         ? buildMediaRoute({
             intent: {
@@ -282,7 +284,10 @@ export async function registerJobRoutes(
         creditsCost = await options.tierGuard.calculateCreditCost(
           model,
           "video_generation",
-          payload.duration != null ? { duration: payload.duration } : {},
+          {
+            ...(payload.duration != null ? { duration: payload.duration } : {}),
+            ...(payload.resolution ? { resolution: payload.resolution as VideoResolution } : {}),
+          },
         );
       }
 
@@ -360,7 +365,7 @@ export async function registerJobRoutes(
             user.id,
             creditsCost,
             job.id,
-            `Video generation: ${model}`,
+            "Video generation",
           );
           await options.jobService.setCreditsInfo(job.id, creditsCost, txId);
         } catch (deductError) {
@@ -517,6 +522,9 @@ function sendJobError(
   reply: FastifyReply,
   fallbackCode: JobErrorFallbackCode,
 ) {
+  if (error instanceof Error && "code" in error && error.code === "invalid_input") {
+    return reply.code(422).send({ error: { code: "invalid_input", message: error.message } });
+  }
   if (error instanceof JobServiceError) {
     return reply.code(error.statusCode).send(
       applicationErrorResponseSchema.parse({

@@ -1,7 +1,7 @@
 import { tool } from "langchain";
 import { z } from "zod";
 
-import type { DesktopAgentTaskRequest } from "@helstera/shared";
+import type { DesktopAgentTaskRequest, DesktopCapability, DesktopExecutionContext, DesktopAgentExecutionMode } from "@helstera/shared";
 
 export type SubmitDesktopAgentTaskFn = (input: DesktopAgentTaskRequest) => Promise<{
   taskId: string;
@@ -46,9 +46,29 @@ const desktopAgentSchema = z.object({
   targetUrl: z.string().url().optional(),
   executionMode: z.enum(["automatic", "isolated_browser", "connected_browser_tab", "windows_ui", "visual_ocr"]).default("automatic"),
   plannedActions: z.array(plannedActionSchema).max(8).default([]),
-  maxDurationSeconds: z.number().int().min(10).max(900).default(300),
+  maxDurationSeconds: z.number().int().min(10).max(1_800).default(300),
   pageLimit: z.number().int().min(1).max(10).default(3),
 });
+
+const executionCapabilities: Record<DesktopExecutionContext["browserMode"], DesktopCapability[]> = {
+  isolated_browser: ["browser.read", "browser.navigate", "browser.scroll", "browser.capture", "browser.record", "browser.click", "browser.type"],
+  connected_browser_tab: ["browser.read", "browser.navigate", "browser.scroll", "browser.capture", "browser.record", "browser.click", "browser.type"],
+  windows_ui: ["screen.read", "window.focus", "window.click", "window.type", "window.key", "window.drag", "window.scroll"],
+  visual_ocr: ["screen.read", "window.focus", "window.click", "window.type", "window.key", "window.drag", "window.scroll"],
+};
+
+export function enforceDesktopExecutionContext(
+  input: DesktopAgentTaskRequest,
+  context?: DesktopExecutionContext,
+): DesktopAgentTaskRequest {
+  if (!context) return input;
+  const executionMode: DesktopAgentExecutionMode = context.browserMode;
+  return {
+    ...input,
+    executionMode,
+    capabilities: [...executionCapabilities[context.browserMode]],
+  };
+}
 
 export function createDesktopAgentTool(deps: { submitDesktopAgentTask: SubmitDesktopAgentTaskFn }) {
   return tool(

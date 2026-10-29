@@ -10,9 +10,11 @@ import {
   GalleryHorizontal,
   Grid2X2,
   Home,
+  History,
   Images,
   LogOut,
   Palette,
+  PackageSearch,
   Settings,
   ShoppingCart,
   Sparkles,
@@ -70,12 +72,21 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/team", label: "团队", icon: Users },
       { href: "/skills", label: "技能", icon: Wrench },
+      { href: "/agent-history", label: "Agent 历史", icon: History },
     ],
   },
 ];
 
+const marketplaceGroup: NavGroup = {
+  id: "agent-marketplace",
+  label: "Agent 市场",
+  icon: PackageSearch,
+  items: [{ href: "/marketplace", label: "Skills / MCP / 插件", icon: PackageSearch }],
+};
+
 const adminItem: NavItem = { href: "/admin", label: "管理中心", icon: Settings };
 const settingsItem: NavItem = { href: "/settings", label: "设置", icon: Settings };
+const allNavGroups = [...navGroups, marketplaceGroup];
 
 function isPathActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -162,7 +173,7 @@ function MobileNavigation({ isAdmin, pathname }: { isAdmin: boolean; pathname: s
         {primaryItems.map((item) => <NavLink key={item.href} item={item} active={isPathActive(pathname, item.href)} compact />)}
         <button ref={moreButtonRef} type="button" onClick={() => setMoreOpen((value) => !value)} aria-expanded={moreOpen} aria-controls="workspace-more-navigation" aria-label={"\u66f4\u591a\u5de5\u4f5c\u533a\u5bfc\u822a"} className={cn("flex min-h-14 min-w-[68px] flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1", moreOpen ? "text-foreground" : "text-muted-foreground")}><Wrench className="size-5" /><span>更多</span></button>
       </nav>
-      {moreOpen && <div ref={moreMenuRef} id="workspace-more-navigation" role="region" aria-label="更多工作区导航" className="fixed inset-x-3 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 max-h-[65vh] overflow-y-auto rounded-lg border border-border/50 bg-background p-2 shadow-xl md:hidden"><div className="grid grid-cols-2 gap-1">{navGroups.flatMap((group) => group.items).map((item) => <NavLink key={item.href} item={item} active={isPathActive(pathname, item.href)} />)}{isAdmin && <NavLink item={adminItem} active={isPathActive(pathname, adminItem.href)} />}<NavLink item={settingsItem} active={isPathActive(pathname, settingsItem.href)} /></div></div>}
+      {moreOpen && <div ref={moreMenuRef} id="workspace-more-navigation" role="region" aria-label="更多工作区导航" className="fixed inset-x-3 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 max-h-[65vh] overflow-y-auto rounded-lg border border-border/50 bg-background p-2 shadow-xl md:hidden"><div className="grid grid-cols-2 gap-1">{allNavGroups.flatMap((group) => group.items).map((item) => <NavLink key={item.href} item={item} active={isPathActive(pathname, item.href)} />)}{isAdmin && <NavLink item={adminItem} active={isPathActive(pathname, adminItem.href)} />}<NavLink item={settingsItem} active={isPathActive(pathname, settingsItem.href)} /></div></div>}
     </>
   );
 }
@@ -201,7 +212,7 @@ export function AppSidebar() {
   useEffect(() => {
     setOpenGroups((current) => {
       const next = { ...current };
-      for (const group of navGroups) if (group.items.some((item) => isPathActive(pathname, item.href))) next[group.id] = true;
+      for (const group of allNavGroups) if (group.items.some((item) => isPathActive(pathname, item.href))) next[group.id] = true;
       return next;
     });
   }, [pathname]);
@@ -229,7 +240,7 @@ export function AppSidebar() {
       </Link>
       <div className="space-y-1">{primaryItems.map((item) => <NavLink key={item.href} item={{ ...item, label: item.href === "/home" ? labels.home : item.label }} active={isPathActive(pathname, item.href)} collapsed={labelsHidden} />)}</div>
       <div className="my-3 border-t border-border/40" />
-      <div className="space-y-1">{navGroups.map((group) => <GroupLinks key={group.id} group={group} pathname={pathname} open={Boolean(openGroups[group.id])} collapsed={labelsHidden} onToggle={() => setOpenGroups((current) => ({ ...current, [group.id]: !current[group.id] }))} />)}</div>
+      <div className="space-y-1">{allNavGroups.map((group) => <GroupLinks key={group.id} group={group} pathname={pathname} open={Boolean(openGroups[group.id])} collapsed={labelsHidden} onToggle={() => setOpenGroups((current) => ({ ...current, [group.id]: !current[group.id] }))} />)}</div>
       {isAdmin && <div className="mt-1"><NavLink item={adminItem} active={isPathActive(pathname, adminItem.href)} collapsed={labelsHidden} /></div>}
       <div className="mt-auto space-y-1">{!labelsHidden && <CreditBalance />}<NavLink item={{ ...settingsItem, label: labels.settings }} active={isPathActive(pathname, settingsItem.href)} collapsed={labelsHidden} /><button type="button" onClick={() => void handleSignOut()} title="退出登录" className={cn("flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground", labelsHidden && "w-10 justify-center px-0")}><LogOut className="size-[18px]" strokeWidth={1.8} />{!labelsHidden && <span>退出登录</span>}</button></div>
     </aside>

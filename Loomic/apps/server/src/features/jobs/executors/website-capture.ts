@@ -1,16 +1,27 @@
 import { captureIsolatedWebsite, WebsiteCaptureError } from "../../website-capture/isolated-browser.js";
 import { registerExecutor, type ExecutorContext } from "../job-executor.js";
 
-type CapturePayload = {
-  task_id?: string;
-};
+async function resolveCaptureTaskId(jobId: string, ctx: ExecutorContext): Promise<string> {
+  const job = await ctx.jobService.getJobAdmin(jobId);
+  const payload = job.payload as Record<string, unknown> | null;
+  const taskId = payload?.task_id;
+  if (typeof taskId === "string" && taskId.trim()) return taskId;
 
-registerExecutor("website_capture", async (jobId, rawPayload, ctx: ExecutorContext) => {
+  const linkedTasks = await ctx.localDb!.query<{ id: string }>(
+    "select id from website_capture_tasks where background_job_id=$1 limit 2",
+    [jobId],
+  );
+  if (linkedTasks.rows.length === 1) return linkedTasks.rows[0]!.id;
+  if (linkedTasks.rows.length > 1) {
+    throw Object.assign(new Error("Website capture job is linked to multiple tasks."), { code: "invalid_input" });
+  }
+  throw Object.assign(new Error("Website capture job is missing task_id."), { code: "invalid_input" });
+}
+
+registerExecutor("website_capture", async (jobId, _queueMessage, ctx: ExecutorContext) => {
   if (!ctx.localDb) throw new Error("Website capture requires the local database runtime.");
 
-  const payload = rawPayload as CapturePayload;
-  const taskId = payload.task_id;
-  if (!taskId) throw Object.assign(new Error("Website capture job is missing task_id."), { code: "invalid_input" });
+  const taskId = await resolveCaptureTaskId(jobId, ctx);
 
   const task = (await ctx.localDb.query<{
     id: string;

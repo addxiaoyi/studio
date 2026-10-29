@@ -1,6 +1,6 @@
 "use client";
 
-import { getVideoCreditCost } from "@helstera/shared";
+import { getConfiguredVideoPriceRates, getVideoCreditCost } from "@helstera/shared";
 import { Plus, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -15,8 +15,9 @@ import type { VideoModelInfo } from "../../lib/server-api";
 import { fetchVideoModels, generateVideoDirect, uploadFile } from "../../lib/server-api";
 import { t, useLocale } from "../../lib/i18n";
 import { getModelPricingLabel } from "../../lib/model-pricing";
+import { formatModelDisplayName } from "../chat/utils";
 
-type VideoResolution = "720p" | "1080p" | "4k";
+type VideoResolution = "480p" | "720p" | "768p" | "1080p" | "1088p" | "1440p" | "2160p" | "4k";
 // No longer needs poster frame extraction -- videos use embeddable elements
 
 type VideoGeneratorPanelProps = {
@@ -36,10 +37,24 @@ const VIDEO_RESOLUTIONS = ["720p", "1080p", "4k"] as const;
 function supportedResolutions(
   model?: VideoModelInfo,
 ): readonly VideoResolution[] {
+  const configured = model?.resolutionRates?.length
+    ? model.resolutionRates.map((rate) => rate.resolution)
+    : model
+      ? getConfiguredVideoPriceRates(model.id).map((rate) => rate.resolution)
+      : [];
+  if (configured?.length) return configured;
   const max = model?.limits?.maxResolution;
-  if (max === "2160p") return VIDEO_RESOLUTIONS;
-  if (max === "1080p") return VIDEO_RESOLUTIONS.slice(0, 2);
+  if (max === "2160p" || max === "1440p" || max === "4k") return VIDEO_RESOLUTIONS;
+  if (max === "1080p" || max === "1088p") return VIDEO_RESOLUTIONS.slice(0, 2);
+  if (max === "768p") return ["720p"];
+  if (max === "480p") return ["480p"];
   return VIDEO_RESOLUTIONS.slice(0, 1);
+}
+
+function supportedResolution(model?: VideoModelInfo, current?: string): VideoResolution {
+  const options = supportedResolutions(model);
+  if (options.includes(current as VideoResolution)) return current as VideoResolution;
+  return options.find((option) => option === "768p") ?? options[0] ?? "720p";
 }
 
 export function VideoGeneratorPanel({
@@ -144,6 +159,14 @@ export function VideoGeneratorPanel({
   const currentModel = models.find((m) => m.id === model);
   const durationOptions = currentModel?.limits?.allowedDurations ?? DURATIONS;
   const resolutionOptions = supportedResolutions(currentModel);
+  const configuredRates = currentModel?.resolutionRates?.length
+    ? currentModel.resolutionRates
+    : currentModel
+      ? getConfiguredVideoPriceRates(currentModel.id)
+      : [];
+  const currentConfiguredRate = configuredRates.find(
+    (rate) => rate.resolution === resolution,
+  );
   const currentPriceRate = currentModel?.pricing?.rates.find(
     (rate) => rate.resolution === resolution,
   );
@@ -184,6 +207,13 @@ export function VideoGeneratorPanel({
     [excalidrawApi, elementId],
   );
 
+  useEffect(() => {
+    const nextResolution = supportedResolution(currentModel, resolution);
+    if (nextResolution === resolution) return;
+    setResolution(nextResolution);
+    updateVideoGeneratorElement(excalidrawApi, elementId, { resolution: nextResolution });
+  }, [currentModel, elementId, excalidrawApi, resolution]);
+
   const handleModelChange = useCallback(
     (m: string) => {
       const selected = models.find((candidate) => candidate.id === m);
@@ -192,12 +222,7 @@ export function VideoGeneratorPanel({
       const nextDuration = nextDurations.includes(duration)
         ? duration
         : (nextDurations[0] ?? duration);
-      const nextResolutions = supportedResolutions(selected);
-      const nextResolution = nextResolutions.includes(
-        resolution as VideoResolution,
-      )
-        ? (resolution as VideoResolution)
-        : (nextResolutions[0] ?? "720p");
+      const nextResolution = supportedResolution(selected, resolution);
       setModel(m);
       setDuration(nextDuration);
       setResolution(nextResolution);
@@ -362,7 +387,7 @@ export function VideoGeneratorPanel({
     handleGenerationError,
   ]);
 
-  const resolutionLabel = currentPriceRate?.displayResolution ?? resolution;
+  const resolutionLabel = currentConfiguredRate?.resolution ?? currentPriceRate?.displayResolution ?? resolution;
   const paramsLabel = `${aspectRatio} \u00B7 ${duration}s \u00B7 ${resolutionLabel}`;
 
   return createPortal(
@@ -459,7 +484,11 @@ export function VideoGeneratorPanel({
         </div>
       )}
 
-      {currentPriceRate && (
+      {currentConfiguredRate ? (
+        <div className="mx-4 mb-2 text-[10px] tabular-nums text-muted-foreground">
+          {currentConfiguredRate.resolution} · ¥{currentConfiguredRate.priceCnyPerSecond.toFixed(2)}/秒
+        </div>
+      ) : currentPriceRate ? (
         <div className="mx-4 mb-2 text-[10px] tabular-nums text-muted-foreground">
           {currentPriceRate.displayResolution} ·{" "}
           {currentPriceRate.providerPointsPerSecond}
@@ -467,7 +496,7 @@ export function VideoGeneratorPanel({
           {currentPriceRate.cnyPerSecond.min.toFixed(4)}–¥
           {currentPriceRate.cnyPerSecond.max.toFixed(4)}/秒
         </div>
-      )}
+      ) : null}
 
       {/* Bottom toolbar */}
       <div className="flex items-center justify-between px-2 pb-2">
@@ -540,7 +569,9 @@ export function VideoGeneratorPanel({
                 </div>
                 <div className="flex gap-1.5">
                   {resolutionOptions.map((value) => {
-                    const providerLabel = currentModel?.pricing?.rates.find(
+                    const providerLabel = configuredRates.find(
+                      (rate) => rate.resolution === value,
+                    )?.resolution ?? currentModel?.pricing?.rates.find(
                       (rate) => rate.resolution === value,
                     )?.displayResolution;
                     return (
@@ -581,7 +612,7 @@ export function VideoGeneratorPanel({
                 />
               )}
               <span className="text-foreground">
-                {currentModel?.displayName ?? model.split("/").pop()}
+                {currentModel?.displayName ?? formatModelDisplayName(model)}
               </span>
               <svg
                 className="h-3 w-3 text-muted-foreground"

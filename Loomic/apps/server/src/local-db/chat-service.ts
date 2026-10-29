@@ -23,18 +23,63 @@ export function createLocalChatService(db: Pool): ChatService {
       const result = await db.query("delete from chat_sessions cs where cs.id = $1 and exists (select 1 from canvases c join projects p on p.id = c.project_id join workspace_members wm on wm.workspace_id = p.workspace_id where c.id = cs.canvas_id and wm.user_id = $2)", [sessionId, user.id]);
       if (!result.rowCount) throw new ChatServiceError("session_not_found", "Session not found.", 404);
     },
-    async listMessages(user, sessionId) {
+    async listMessages(
+      user: AuthenticatedUser,
+      sessionId: string,
+      options?: MessageListOptions,
+    ) {
       await assertSessionAccess(db, sessionId, user.id);
-      const { rows } = await db.query("select id, role, content, tool_activities, content_blocks, created_at from chat_messages where session_id = $1 order by created_at", [sessionId]);
-      return rows.map(mapMessage);
+      // Long sessions must not be loaded in full: fetch the newest `limit`
+      // messages (hard-capped) and return them in ascending order so existing
+      // callers keep receiving a chronological list.
+      const limit = resolveMessageLimit(options?.limit);
+      const { rows } = await db.query(
+        `select * from (
+           select ${messageColumns} from chat_messages where session_id = $1 order by created_at desc, id desc limit $2
+         ) recent order by created_at asc, id asc`,
+        [sessionId, limit],
+      );
+      const messages = rows.map(mapMessage);
+      return messages.filter((message, index) =>
+        index === 0 ||
+        message.role !== messages[index - 1]!.role ||
+        message.content !== messages[index - 1]!.content,
+      );
     },
     async createMessage(user, sessionId, input: ChatMessageCreateRequest) {
       await assertSessionAccess(db, sessionId, user.id);
-      const { rows } = await db.query("insert into chat_messages (session_id, role, content, tool_activities, content_blocks) values ($1, $2, $3, $4, $5) returning id, role, content, tool_activities, content_blocks, created_at", [sessionId, input.role, input.content, toJson(input.toolActivities), toJson(input.contentBlocks)]);
+      if (input.clientMessageId) {
+        const existing = await db.query(`select ${messageColumns} from chat_messages where session_id = $1 and client_message_id = $2`, [sessionId, input.clientMessageId]);
+        if (existing.rows[0]) return mapMessage(existing.rows[0]);
+      }
+      const { rows } = await db.query(
+        `insert into chat_messages (session_id, role, content, tool_activities, content_blocks, client_message_id) values ($1, $2, $3, $4, $5, $6) on conflict do nothing returning ${messageColumns}`,
+        [sessionId, input.role, input.content, toJson(input.toolActivities), toJson(input.contentBlocks), input.clientMessageId ?? null],
+      );
+      if (!rows[0] && input.clientMessageId) {
+        const replay = await db.query(`select ${messageColumns} from chat_messages where session_id = $1 and client_message_id = $2`, [sessionId, input.clientMessageId]);
+        if (replay.rows[0]) return mapMessage(replay.rows[0]);
+      }
+      if (!rows[0]) throw new ChatServiceError("chat_error", "Failed to save message.", 500);
       await db.query("update chat_sessions set updated_at = now() where id = $1", [sessionId]);
       return mapMessage(rows[0]);
     },
   };
+}
+
+const messageColumns = "id, role, content, tool_activities, content_blocks, created_at";
+
+/** Optional page window for `listMessages`; callers may omit it entirely. */
+export type MessageListOptions = { limit?: number };
+
+/** Newest-message cap applied when the caller does not ask for a page size. */
+export const DEFAULT_MESSAGE_LIMIT = 300;
+/** Absolute upper bound so a caller cannot request a full long-session load. */
+export const MAX_MESSAGE_LIMIT = 500;
+
+export function resolveMessageLimit(requested?: number): number {
+  if (requested == null || !Number.isFinite(requested)) return DEFAULT_MESSAGE_LIMIT;
+  return Math.min(Math.max(1, Math.trunc(requested)), MAX_MESSAGE_LIMIT);
 }
 
 function toJson(value: unknown): string | null {

@@ -7,8 +7,9 @@ describe("generated asset retention", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("keeps the cloud retention window at three days", async () => {
-    const { ASSET_RETENTION_DAYS } = await import("./asset-retention.js");
+    const { ASSET_RETENTION_DAYS, ASSET_RETENTION_BATCH_SIZE } = await import("./asset-retention.js");
     expect(ASSET_RETENTION_DAYS).toBe(3);
+    expect(ASSET_RETENTION_BATCH_SIZE).toBe(100);
   });
 
   it("permanently removes cloud assets at their retention deadline without starting a second recovery window", async () => {
@@ -25,7 +26,7 @@ describe("generated asset retention", () => {
     expect(clientQuery.mock.calls.some(([sql, params]) => String(sql).includes("asset_purged") && Array.isArray(params) && params.includes("Cloud asset removed"))).toBe(true);
     expect(clientQuery.mock.calls.some(([sql]) => String(sql).includes("retention_state = 'purged'"))).toBe(true);
     expect(query.mock.calls[0]?.[0]).toContain("ga.retention_until <= now()");
-    expect(query.mock.calls[0]?.[1]?.[0]).toBe(3);
+    expect(query.mock.calls[0]?.[1]?.[0]).toBe(100);
   });
 
   it("marks purged state in the same transaction as metadata deletion", async () => {

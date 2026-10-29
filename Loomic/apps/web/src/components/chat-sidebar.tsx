@@ -220,6 +220,15 @@ export function ChatSidebar({
     onSessionChange,
   });
 
+  useEffect(() => {
+    const refreshAgentResult = (event: Event) => {
+      const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId;
+      if (sessionId && sessionId === activeSessionIdRef.current) void reloadMessages(sessionId);
+    };
+    window.addEventListener("helstera:desktop-agent-result", refreshAgentResult);
+    return () => window.removeEventListener("helstera:desktop-agent-result", refreshAgentResult);
+  }, [reloadMessages, activeSessionIdRef]);
+
   // ── Stream event handler (extracted hook, shared between send & reconnect) ──
   const { applyStreamEvent } = useChatStream(updateSessionMessages);
 
@@ -615,6 +624,7 @@ export function ChatSidebar({
         }));
         const abortController = new AbortController();
         directVideoAbortRef.current = abortController;
+        const clientMessageId = crypto.randomUUID();
         const userMessage = {
           id: `user-${Date.now()}`,
           role: "user" as const,
@@ -625,6 +635,7 @@ export function ChatSidebar({
           role: "user",
           content: text,
           contentBlocks: [{ type: "text" as const, text }, ...videoImageBlocks],
+          clientMessageId,
         }).catch((error) => console.warn("[chat] direct video message save failed", error));
 
         setStreaming(true);
@@ -637,6 +648,7 @@ export function ChatSidebar({
               ? { model: currentVideoGenerationPreference.models[0] }
               : {}),
             duration: videoDuration,
+            ...(currentVideoGenerationPreference?.resolution ? { resolution: currentVideoGenerationPreference.resolution } : {}),
             aspectRatio: "16:9",
             enableAudio: false,
             inputImages: videoReferencesForGeneration.map((reference) => reference.url),
@@ -645,7 +657,7 @@ export function ChatSidebar({
             canvasId,
             sessionId,
             threadId: currentSessionId,
-            idempotencyKey: `video:${currentSessionId}:${videoReferencesForGeneration.map((reference) => reference.assetId).join(",")}:${promptFingerprint}:${videoDuration}:${currentVideoGenerationPreference?.models[0] ?? "auto"}`,
+            idempotencyKey: `video:${currentSessionId}:${videoReferencesForGeneration.map((reference) => reference.assetId).join(",")}:${promptFingerprint}:${videoDuration}:${currentVideoGenerationPreference?.models[0] ?? "auto"}:${currentVideoGenerationPreference?.resolution ?? "default"}`,
           });
           if (!onVideoGenerated) {
             throw new Error("画布尚未准备好，请稍后重试。");
@@ -772,6 +784,7 @@ export function ChatSidebar({
           ...mentionBlocks,
           ...imageBlocks,
         ],
+        clientMessageId: requestId,
       }).catch((err) =>
         console.error("[chat] Failed to save user message:", err),
       );
@@ -1228,9 +1241,9 @@ export function ChatSidebar({
       agentModelRef.current = storedAgentModel;
     }
 
+    if (!activeSessionIdRef.current) return;
+    initialPromptSent.current = true;
     const timer = setTimeout(() => {
-      if (!activeSessionIdRef.current) return;
-      initialPromptSent.current = true;
       void handleSend(
         initialPrompt,
         storedAttachments,

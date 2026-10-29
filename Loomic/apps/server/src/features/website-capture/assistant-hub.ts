@@ -10,10 +10,12 @@ import {
   type DesktopMcpTool,
   type DesktopMcpToolResult,
   type DesktopAgentExecutionMode,
+  type DesktopExecutionContext,
   type WebsiteCaptureAssistantConnection,
   type WebsiteCapturePage,
   type WebsiteCapturePairing,
   desktopAgentEventSchema,
+  isReadOnlyNativeMcpTool,
   desktopMcpToolCatalogSchema,
   desktopMcpToolResultSchema,
   isDesktopActionAuthorized,
@@ -35,11 +37,15 @@ const DISCLOSURE =
   "连接授权会持续到你断开或撤销。目标站点及按选择跟随的外链页面内容、截图和录屏会发送给当前聊天模型处理，并保存为工作区素材；Cookie、密码、OTP 和浏览器本地存储不会发送给 Helstera。网页内容始终是不可信输入。";
 const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;
 const MAX_RECORDING_BYTES = 40 * 1024 * 1024;
+const MAX_RECORDING_CHUNKS = 16;
+const MAX_RECORDING_CHUNK_CHARS = 4 * 1024 * 1024;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const MAX_MCP_CATALOG_BYTES = 512 * 1024;
 const MAX_MCP_ARGUMENT_BYTES = 256 * 1024;
 const MCP_TOOL_TIMEOUT_MS = 310_000;
 const MAX_PENDING_MCP_CALLS_PER_CONNECTION = 8;
+const DESKTOP_AGENT_DEADLINE_GRACE_MS = 75_000;
+const DESKTOP_RECONNECT_GRACE_MS = 120_000;
 
 type HubOptions = {
   db: Pool;
@@ -99,28 +105,45 @@ async function persistDesktopAgentAsset(input: {
   mimeType: "image/jpeg" | "image/png" | "video/webm";
   title: string;
   metadata: Record<string, unknown>;
+  idempotencyKey?: string;
 }) {
   const assetId = randomUUID();
   const extension = input.mimeType === "video/webm" ? "webm" : input.mimeType === "image/png" ? "png" : "jpg";
   const objectPath = `${input.task.workspaceId}/generated/desktop-agent/${input.task.id}/${randomUUID()}.${extension}`;
-  const uploaded = await input.storage.upload("project-assets", objectPath, input.bytes, {
-    contentType: input.mimeType,
-    upsert: false,
-  });
-  if (uploaded.error) throw new Error(`Could not save desktop Agent asset: ${uploaded.error.message}`);
-
   let client: PoolClient | undefined;
+  let uploadedToStorage = false;
   try {
     client = await input.db.connect();
     await client.query("begin");
+    if (input.idempotencyKey) {
+      const lockKey = `${input.task.id}:${input.idempotencyKey}`;
+      await client.query("select pg_advisory_xact_lock(hashtextextended($1,0))", [lockKey]);
+      const existing = await client.query<{ id: string }>(
+        `select ao.id from generated_assets ga join asset_objects ao
+           on ao.workspace_id=ga.workspace_id and ao.object_path=ga.object_path
+          where ga.desktop_agent_task_id=$1 and ga.metadata->>'recordingUploadId'=$2
+          limit 1`,
+        [input.task.id, input.idempotencyKey],
+      );
+      if (existing.rows[0]) {
+        await client.query("commit");
+        return { id: existing.rows[0].id, url: `${input.webOrigin}/api/uploads/${existing.rows[0].id}/file` };
+      }
+    }
+    const uploaded = await input.storage.upload("project-assets", objectPath, input.bytes, {
+      contentType: input.mimeType,
+      upsert: false,
+    });
+    if (uploaded.error) throw new Error(`Could not save desktop Agent asset: ${uploaded.error.message}`);
+    uploadedToStorage = true;
     await client.query(
       `insert into asset_objects(id,workspace_id,bucket,object_path,mime_type,byte_size,created_by)
        values($1,$2,'project-assets',$3,$4,$5,$6)`,
       [assetId, input.task.workspaceId, objectPath, input.mimeType, input.bytes.length, input.task.userId],
     );
     await client.query(
-      `insert into generated_assets(workspace_id,project_id,created_by,media_type,object_path,mime_type,title,description,prompt,metadata,desktop_agent_task_id)
-       values($1,(select project_id from canvases where id=$2),$3,$4,$5,$6,$7,$8,'',$9::jsonb,$10)`,
+      `insert into generated_assets(workspace_id,project_id,created_by,media_type,object_path,mime_type,title,description,prompt,metadata,desktop_agent_task_id,retention_until)
+       values($1,(select project_id from canvases where id=$2),$3,$4,$5,$6,$7,$8,'',$9::jsonb,$10,now() + interval '3 days')`,
       [
         input.task.workspaceId,
         input.task.canvasId ?? null,
@@ -138,7 +161,7 @@ async function persistDesktopAgentAsset(input: {
     return { id: assetId, url: `${input.webOrigin}/api/uploads/${assetId}/file` };
   } catch (error) {
     await client?.query("rollback").catch(() => undefined);
-    await input.storage.remove("project-assets", [objectPath]).catch(() => undefined);
+    if (uploadedToStorage) await input.storage.remove("project-assets", [objectPath]).catch(() => undefined);
     throw error;
   } finally {
     client?.release();
@@ -195,7 +218,10 @@ export class WebsiteAssistantHub {
     string,
     ReturnType<typeof setTimeout>
   >();
+  private readonly desktopReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly surfacedInterruptedTasks = new Set<string>();
   private readonly pendingMcpCalls = new Map<string, PendingMcpCall>();
+  private readonly mcpCallTimes = new Map<string, number[]>();
   private readonly lastProgressEventAt = new Map<string, number>();
   private readonly pendingRecordingUploads = new Map<
     string,
@@ -205,8 +231,11 @@ export class WebsiteAssistantHub {
       chunks: Map<number, string>;
       totalChunks: number;
       createdAt: number;
+      processing?: boolean;
+      processingPromise?: Promise<void>;
     }
   >();
+  private readonly completedRecordingUploads = new Map<string, { taskId: string; createdAt: number }>();
   private readonly pendingVisionRequests = new Map<
     string,
     {
@@ -215,6 +244,7 @@ export class WebsiteAssistantHub {
       reject: (error: Error) => void;
       timer: ReturnType<typeof setTimeout>;
       description: string;
+      taskId?: string;
     }
   >();
   private planNextHandler?: HubOptions["onDesktopAgentPlanNext"];
@@ -230,6 +260,9 @@ export class WebsiteAssistantHub {
       const cutoff = Date.now() - 5 * 60 * 1000;
       for (const [uploadId, upload] of this.pendingRecordingUploads) {
         if (upload.createdAt < cutoff) this.pendingRecordingUploads.delete(uploadId);
+      }
+      for (const [uploadId, upload] of this.completedRecordingUploads) {
+        if (upload.createdAt < cutoff) this.completedRecordingUploads.delete(uploadId);
       }
     }, 60 * 1000).unref();
   }
@@ -302,6 +335,7 @@ export class WebsiteAssistantHub {
             : "connected",
       browser: row.browser,
       platform: row.platform,
+      clientKind: this.connections.get(row.id)?.clientKind ?? "unknown",
       connectedAt: new Date(row.connected_at).toISOString(),
       lastSeenAt: new Date(row.last_seen_at).toISOString(),
       paused: row.paused,
@@ -328,6 +362,7 @@ export class WebsiteAssistantHub {
     userId: string;
     workspaceId: string;
     description: string;
+    taskId?: string;
     timeoutMs?: number;
   }): Promise<{ found: boolean; x: number; y: number; confidence: number }> {
     const handler = this.visionAnalyzer ?? this.options.analyzeDesktopScreenshot;
@@ -344,6 +379,20 @@ export class WebsiteAssistantHub {
       );
     if (!live)
       throw new Error("The authorized desktop MCP connection is unavailable or paused.");
+    let relatedTaskId = input.taskId;
+    if (!relatedTaskId) {
+      const running = await this.options.db.query<{ id: string }>(
+        "select id from desktop_agent_tasks where created_by=$1 and workspace_id=$2 and connection_id=$3 and status='running' order by updated_at desc limit 2",
+        [input.userId, input.workspaceId, live.id],
+      );
+      if (running.rows.length === 1) relatedTaskId = running.rows[0]!.id;
+    }
+    if (relatedTaskId) {
+      await this.options.db.query(
+        "insert into desktop_agent_events(task_id,event_type,detail,payload) select id,'visual_grounding','正在按描述定位屏幕元素',$2::jsonb from desktop_agent_tasks where id=$1 and created_by=$3 and workspace_id=$4 and connection_id=$5 and status='running'",
+        [relatedTaskId, JSON.stringify({ phase: "started", description: input.description.slice(0, 300) }), input.userId, input.workspaceId, live.id],
+      );
+    }
     const requestId = randomUUID();
     const timeoutMs = Math.min(30_000, Math.max(3_000, input.timeoutMs ?? 15_000));
     try {
@@ -359,6 +408,7 @@ export class WebsiteAssistantHub {
             reject,
             timer,
             description: input.description.slice(0, 500),
+            ...(relatedTaskId ? { taskId: relatedTaskId } : {}),
           });
           this.send(live, {
             type: "desktop_agent.vision_request",
@@ -367,8 +417,16 @@ export class WebsiteAssistantHub {
           });
         },
       );
+      if (relatedTaskId) await this.options.db.query(
+        "insert into desktop_agent_events(task_id,event_type,detail,payload) select id,'visual_grounding',$2,$3::jsonb from desktop_agent_tasks where id=$1 and created_by=$4 and workspace_id=$5 and connection_id=$6",
+        [relatedTaskId, result.found ? "视觉定位完成" : "视觉定位未找到目标", JSON.stringify({ phase: "completed", found: result.found, confidence: result.confidence }), input.userId, input.workspaceId, live.id],
+      );
       return result;
     } catch (error) {
+      if (relatedTaskId) await this.options.db.query(
+        "insert into desktop_agent_events(task_id,event_type,detail,payload) select id,'visual_grounding','视觉定位失败',$2::jsonb from desktop_agent_tasks where id=$1 and created_by=$3 and workspace_id=$4 and connection_id=$5",
+        [relatedTaskId, JSON.stringify({ phase: "failed", error: error instanceof Error ? error.message.slice(0, 300) : "grounding failed" }), input.userId, input.workspaceId, live.id],
+      );
       throw error instanceof Error ? error : new Error("Visual grounding failed.");
     } finally {
       const pending = this.pendingVisionRequests.get(requestId);
@@ -379,7 +437,7 @@ export class WebsiteAssistantHub {
     }
   }
 
-  private consumeDesktopVisionResult(live: LiveConnection, raw: unknown) {
+  private async consumeDesktopVisionResult(live: LiveConnection, raw: unknown) {
     const message = raw as {
       type?: string;
       requestId?: string;
@@ -394,12 +452,33 @@ export class WebsiteAssistantHub {
     if (!pending || pending.connectionId !== live.id) return;
     clearTimeout(pending.timer);
     this.pendingVisionRequests.delete(message.requestId);
+    let taskId = pending.taskId;
+    if (!taskId) {
+      const running = await this.options.db.query<{ id: string }>(
+        "select id from desktop_agent_tasks where created_by=$1 and workspace_id=$2 and connection_id=$3 and status='running' order by updated_at desc limit 2",
+        [live.userId, live.workspaceId, live.id],
+      );
+      if (running.rows.length === 1) taskId = running.rows[0]!.id;
+      if (taskId) await this.options.db.query(
+        "insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,'visual_grounding','正在按描述定位屏幕元素',$2::jsonb)",
+        [taskId, JSON.stringify({ phase: "started", description: pending.description.slice(0, 300) })],
+      );
+    }
+    const recordGrounding = async (detail: string, payload: Record<string, unknown>) => {
+      if (!taskId || pending.taskId) return;
+      await this.options.db.query(
+        "insert into desktop_agent_events(task_id,event_type,detail,payload) select id,'visual_grounding',$2,$3::jsonb from desktop_agent_tasks where id=$1 and created_by=$4 and workspace_id=$5 and connection_id=$6",
+        [taskId, detail, JSON.stringify(payload), live.userId, live.workspaceId, live.id],
+      );
+    };
     const handler = this.visionAnalyzer ?? this.options.analyzeDesktopScreenshot;
     if (!handler) {
+      await recordGrounding("视觉定位失败", { phase: "failed", error: "Visual grounding is not configured." });
       pending.reject(new Error("Visual grounding is not configured on the server."));
       return;
     }
     if (message.error || !message.screenshotBase64) {
+      await recordGrounding("视觉定位失败", { phase: "failed", error: String(message.error ?? "Screenshot unavailable").slice(0, 300) });
       pending.reject(new Error(message.error ?? "The desktop could not capture a screenshot."));
       return;
     }
@@ -412,10 +491,12 @@ export class WebsiteAssistantHub {
     })
       .then((result) => {
         this.send(live, { type: "desktop_agent.vision_coordinate", requestId: message.requestId, ...result });
+        void recordGrounding(result.found ? "视觉定位完成" : "视觉定位未找到目标", { phase: "completed", found: result.found, confidence: result.confidence }).catch((error: unknown) => console.error("[desktop-agent-vision-event]", error));
         pending.resolve(result);
       })
       .catch((error: unknown) => {
         this.send(live, { type: "desktop_agent.vision_coordinate", requestId: message.requestId, found: false, x: -1, y: -1, confidence: 0, error: error instanceof Error ? error.message.slice(0, 300) : "grounding failed" });
+        void recordGrounding("视觉定位失败", { phase: "failed", error: error instanceof Error ? error.message.slice(0, 300) : "grounding failed" }).catch((recordError: unknown) => console.error("[desktop-agent-vision-event]", recordError));
         pending.reject(error instanceof Error ? error : new Error("Visual grounding failed."));
       });
   }
@@ -426,6 +507,7 @@ export class WebsiteAssistantHub {
     serverId: string;
     toolName: string;
     arguments: Record<string, unknown>;
+    desktopExecutionContext?: DesktopExecutionContext;
   }): Promise<string> {
     const live = [...this.connections.values()]
       .reverse()
@@ -448,6 +530,15 @@ export class WebsiteAssistantHub {
       throw new Error(
         "This MCP tool is no longer available on the connected desktop.",
       );
+    if (input.toolName.startsWith("screen_")) {
+      const nativeMode = input.desktopExecutionContext?.browserMode === "windows_ui"
+        || input.desktopExecutionContext?.browserMode === "visual_ocr";
+      if (!nativeMode)
+        throw new Error("Native screen MCP tools require a selected native desktop mode.");
+      if (!isReadOnlyNativeMcpTool(input.toolName))
+        throw new Error("This native screen action requires approval. Use desktop_control to request it.");
+    }
+    this.assertMcpCallRate(live.id, input.toolName);
     if (
       Buffer.byteLength(JSON.stringify(input.arguments), "utf8") >
       MAX_MCP_ARGUMENT_BYTES
@@ -624,6 +715,7 @@ export class WebsiteAssistantHub {
     userId: string,
     workspaceId: string,
     input: DesktopAgentTaskRequest,
+    chatSessionId?: string,
   ) {
     const { rows: connections } = await this.options.db.query<{ id: string }>(
       `select id from website_capture_connections
@@ -648,9 +740,21 @@ export class WebsiteAssistantHub {
       throw new Error("The desktop action plan requests a capability that was not granted for this task.");
     }
     const task = { ...input, plannedActions, taskId, createdAt: new Date().toISOString() };
-    await this.options.db.query(
-      `insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,target_url,canvas_id,execution_mode,planned_actions)
-       values($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11::jsonb)`,
+    const inserted = await this.options.db.query<{ id: string }>(
+      `with connection_lock as materialized (
+         select pg_advisory_xact_lock(hashtextextended($4::text, 0))
+       ), inserted_task as (
+       insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,target_url,canvas_id,execution_mode,planned_actions,max_duration_seconds,chat_session_id,status)
+         select $1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11::jsonb,$12,$13,'running' from connection_lock
+          where not exists (
+            select 1 from desktop_agent_tasks where connection_id=$4 and status in ('queued','running')
+          )
+         returning id
+       ), started_event as (
+         insert into desktop_agent_events(task_id,event_type,detail)
+         select id,'started',$14 from inserted_task returning task_id
+       )
+       select inserted_task.id from inserted_task join started_event on started_event.task_id=inserted_task.id`,
       [
         taskId,
         workspaceId,
@@ -663,60 +767,20 @@ export class WebsiteAssistantHub {
         input.canvasId ?? null,
         input.executionMode,
         JSON.stringify(plannedActions),
+        input.maxDurationSeconds,
+        chatSessionId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(chatSessionId) ? chatSessionId : null,
+        "Desktop Agent task dispatched to the active connection.",
       ],
     );
-    await this.options.db.query(
-      "update desktop_agent_tasks set status='running',updated_at=now() where id=$1",
-      [taskId],
-    );
-    await this.options.db.query(
-      "insert into desktop_agent_events(task_id,event_type,detail) values($1,'started',$2)",
-      [taskId, "桌面协作任务已发送"],
-    );
-    this.desktopTaskTimers.set(
-      taskId,
-      setTimeout(() => {
-        this.send(live, {
-          type: "desktop_agent.stop",
-          taskId,
-          reason: "桌面协作任务超过时限。",
-        });
-        void this.failDesktopTask(taskId, "桌面协作任务超过时限。");
-      }, input.maxDurationSeconds * 1000),
-    );
+    if (!inserted.rows[0])
+      throw new Error("A desktop task is already running on this connection. Wait for it to finish or cancel it before starting another.");
+    this.armDesktopTaskDeadline(taskId, live, input.maxDurationSeconds * 1000);
     this.send(live, { type: "desktop_agent.task", task });
     return task;
   }
 
-  async waitForDesktopAgentTask(
-    userId: string,
-    workspaceId: string,
-    taskId: string,
-    timeoutMs = 25_000,
-  ): Promise<{ status: string; result: Record<string, unknown> | null; error: string | null }> {
-    const deadline = Date.now() + Math.max(0, Math.min(timeoutMs, 25_000));
-    while (true) {
-      const { rows } = await this.options.db.query<{
-        status: string;
-        result: Record<string, unknown> | null;
-        error_message: string | null;
-      }>(
-        "select status,result,error_message from desktop_agent_tasks where id=$1 and created_by=$2 and workspace_id=$3",
-        [taskId, userId, workspaceId],
-      );
-      const task = rows[0];
-      if (!task) throw new Error("Desktop Agent task disappeared before returning its result.");
-      if (["succeeded", "failed", "canceled"].includes(task.status)) {
-        return { status: task.status, result: task.result, error: task.error_message };
-      }
-      if (Date.now() >= deadline) {
-        return { status: task.status, result: task.result, error: task.error_message };
-      }
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-  }
-
-  async listDesktopAgentTasks(userId: string, workspaceId: string) {
+  async listDesktopAgentTasks(userId: string, workspaceId: string, taskId?: string) {
+    await this.expireDesktopAgentApprovals(userId, workspaceId, taskId);
     const { rows } = await this.options.db.query<{
       id: string;
       goal: string;
@@ -724,6 +788,7 @@ export class WebsiteAssistantHub {
       capabilities: string[];
       target_url: string | null;
       canvas_id: string | null;
+      chat_session_id: string | null;
       execution_mode: DesktopAgentExecutionMode;
       status: string;
       result: Record<string, unknown> | null;
@@ -746,7 +811,7 @@ export class WebsiteAssistantHub {
         expiresAt: string;
       }>;
     }>(
-      `select t.id,t.goal,t.role,t.capabilities,t.target_url,t.canvas_id,t.execution_mode,t.status,t.result,t.error_message,t.created_at,t.updated_at,t.completed_at,
+      `select t.id,t.goal,t.role,t.capabilities,t.target_url,t.canvas_id,t.chat_session_id,t.execution_mode,t.status,t.result,t.error_message,t.created_at,t.updated_at,t.completed_at,
               coalesce((
                 select json_agg(json_build_object(
                   'eventType',event_type,
@@ -757,14 +822,14 @@ export class WebsiteAssistantHub {
                   'action',payload->'action',
                   'result',payload->'result'
                 ) order by created_at desc)
-                  from (select event_type,detail,payload,created_at from desktop_agent_events e where e.task_id=t.id order by created_at desc limit 6) recent
+                  from (select event_type,detail,payload,created_at from desktop_agent_events e where e.task_id=t.id order by created_at desc limit 12) recent
               ),'[]'::json) as events,
               coalesce((
                 select json_agg(json_build_object('approvalId',a.id,'action',a.action,'expiresAt',a.expires_at) order by a.created_at desc)
                   from desktop_agent_approvals a where a.task_id=t.id and a.status='pending' and a.expires_at>now()
               ),'[]'::json) as pending_approvals
-         from desktop_agent_tasks t where t.created_by=$1 and t.workspace_id=$2 order by t.created_at desc limit 30`,
-      [userId, workspaceId],
+         from desktop_agent_tasks t where t.created_by=$1 and t.workspace_id=$2 and ($3::uuid is null or t.id=$3) order by t.created_at desc limit 30`,
+      [userId, workspaceId, taskId ?? null],
     );
     return rows.map((row) => ({
       taskId: row.id,
@@ -773,6 +838,7 @@ export class WebsiteAssistantHub {
       capabilities: row.capabilities,
       ...(row.target_url ? { targetUrl: row.target_url } : {}),
       ...(row.canvas_id ? { canvasId: row.canvas_id } : {}),
+      ...(row.chat_session_id ? { chatSessionId: row.chat_session_id } : {}),
       executionMode: row.execution_mode,
       status: row.status,
       result: row.result,
@@ -795,10 +861,13 @@ export class WebsiteAssistantHub {
     const { rows } = await this.options.db.query<{
       id: string;
       connection_id: string;
+      chat_session_id: string | null;
+      created_by: string;
+      goal: string;
     }>(
       `update desktop_agent_tasks set status='canceled',error_message=null,updated_at=now(),completed_at=now()
         where id=$1 and created_by=$2 and workspace_id=$3 and status in ('queued','running')
-        returning id,connection_id`,
+        returning id,connection_id,chat_session_id,created_by,goal`,
       [taskId, userId, workspaceId],
     );
     const row = rows[0];
@@ -819,6 +888,9 @@ export class WebsiteAssistantHub {
       "insert into desktop_agent_events(task_id,event_type,detail) values($1,'canceled',$2)",
       [taskId, "用户取消了任务"],
     );
+    if (row.chat_session_id) await this.appendDesktopAgentChatMessage({
+      sessionId: row.chat_session_id, userId: row.created_by, taskId, goal: row.goal, status: "canceled",
+    });
     return { taskId, status: "canceled" as const };
   }
 
@@ -1289,6 +1361,7 @@ export class WebsiteAssistantHub {
         "update website_capture_connections set browser=$2,platform=$3 where id=$1",
         [live.id, live.browser, live.platform],
       );
+      if (live.clientKind === "desktop-app" && !live.paused) await this.recoverDesktopAgentTasks(live);
       return;
     }
     if (message?.type === "desktop.mcp.tools") {
@@ -1424,8 +1497,9 @@ export class WebsiteAssistantHub {
       goal: string;
       capabilities: DesktopCapability[];
       canvas_id: string | null;
+      chat_session_id: string | null;
     }>(
-      `select id,status,workspace_id,created_by,target_url,goal,capabilities,canvas_id from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3`,
+      `select id,status,workspace_id,created_by,target_url,goal,capabilities,canvas_id,chat_session_id from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3`,
       [event.taskId, live.userId, live.id],
     );
     const task = result.rows[0];
@@ -1531,7 +1605,8 @@ export class WebsiteAssistantHub {
         bytes: recording,
         mimeType: "video/webm",
         title: `Desktop Agent recording: ${String(event.result.page?.title ?? task.goal).slice(0, 120)}`,
-        metadata: { ...(sourceUrl ? { sourceUrl } : {}), taskId: task.id },
+        metadata: { ...(sourceUrl ? { sourceUrl } : {}), taskId: task.id, ...(event.result.recordingUploadId ? { recordingUploadId: event.result.recordingUploadId } : {}) },
+        ...(event.result.recordingUploadId ? { idempotencyKey: event.result.recordingUploadId } : {}),
       });
       recordingAsset = { assetId: asset.id, url: asset.url };
     }
@@ -1583,16 +1658,17 @@ export class WebsiteAssistantHub {
         }),
       ],
     );
-    const terminal =
-      event.eventType === "completed" || event.eventType === "failed";
-    await this.options.db.query(
-      `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb when $6::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $6::jsonb else result end,error_message=case when $2='failed' then $5 else null end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1`,
+    const terminal = ["completed", "failed", "canceled"].includes(event.eventType);
+    const updated = await this.options.db.query<{ id: string }>(
+      `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb when $6::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $6::jsonb else result end,error_message=case when $2 in ('failed','canceled') then $5 else null end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1 and status in ('queued','running') returning id`,
       [
         event.taskId,
         event.eventType === "failed"
           ? "failed"
           : event.eventType === "completed"
             ? "succeeded"
+            : event.eventType === "canceled"
+              ? "canceled"
             : "running",
         terminal,
         JSON.stringify(safeResult),
@@ -1600,12 +1676,23 @@ export class WebsiteAssistantHub {
         JSON.stringify(safeResult),
       ],
     );
+    if (!updated.rows[0]) return;
     if (terminal) {
       this.clearDesktopTaskTimer(event.taskId);
       await this.options.db.query(
         "update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'",
         [event.taskId],
       );
+      if (task.chat_session_id) {
+        await this.appendDesktopAgentChatMessage({
+          sessionId: task.chat_session_id,
+          userId: task.created_by,
+          taskId: task.id,
+          goal: task.goal,
+          status: event.eventType === "completed" ? "succeeded" : event.eventType,
+          ...(typeof event.result?.summary === "string" ? { summary: event.result.summary.slice(0, 8_000) } : {}),
+        });
+      }
     }
   }
 
@@ -1618,33 +1705,90 @@ export class WebsiteAssistantHub {
     const chunkIndex = Number(message.chunkIndex ?? -1);
     const totalChunks = Number(message.totalChunks ?? 0);
     const data = String(message.data ?? "");
-    if (!taskId || !uploadId || chunkIndex < 0 || totalChunks < 1 || !data) return;
-    const upload = this.pendingRecordingUploads.get(uploadId) ?? {
+    if (
+      !taskId || !/^[0-9a-f-]{36}$/i.test(uploadId) || chunkIndex < 0 ||
+      totalChunks < 1 || totalChunks > MAX_RECORDING_CHUNKS || chunkIndex >= totalChunks ||
+      !data || data.length > MAX_RECORDING_CHUNK_CHARS || !BASE64_PATTERN.test(data)
+    ) return;
+    const completedUpload = this.completedRecordingUploads.get(uploadId);
+    if (completedUpload?.taskId === taskId) {
+      this.send(live, { type: "desktop_agent.recording_received", taskId, uploadId });
+      return;
+    }
+    let upload = this.pendingRecordingUploads.get(uploadId);
+    if (!upload && this.pendingRecordingUploads.size >= 2) {
+      this.send(live, { type: "assistant.error", message: "Too many recording uploads are already in progress." });
+      return;
+    }
+    upload ??= {
       taskId,
       connectionId: live.id,
       chunks: new Map<number, string>(),
       totalChunks,
       createdAt: Date.now(),
     };
-    if (upload.taskId !== taskId || upload.connectionId !== live.id || upload.totalChunks !== totalChunks) return;
+    if (upload.taskId !== taskId || upload.totalChunks !== totalChunks) return;
+    if (upload.connectionId !== live.id) {
+      const currentTask = await this.options.db.query<{ id: string }>(
+        "select id from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3 and status='running'",
+        [taskId, live.userId, live.id],
+      );
+      if (!currentTask.rows[0]) return;
+      upload.connectionId = live.id;
+    }
     upload.chunks.set(chunkIndex, data);
     this.pendingRecordingUploads.set(uploadId, upload);
-    if (upload.chunks.size < totalChunks) return;
-    this.pendingRecordingUploads.delete(uploadId);
+    if (upload.chunks.size < totalChunks || upload.processing) return;
     const encoded = assembleRecordingChunks(upload.chunks, totalChunks);
     if (!encoded) return;
-    await this.handleDesktopAgentEvent(live, {
-      type: "desktop_agent.event",
-      taskId,
-      eventType: "evidence",
-      stepId: "native-recording",
-      detail: "Native screen recording captured (chunked upload).",
-      result: {
-        summary: "Native screen recording captured.",
-        evidence: [{ kind: "recording", title: "Native screen recording" }],
-        recordingBase64: `data:video/webm;base64,${encoded}`,
-      },
-    });
+    const taskState = await this.options.db.query<{ status: string }>(
+      "select status from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3",
+      [taskId, live.userId, live.id],
+    );
+    if (!taskState.rows[0] || !["queued", "running"].includes(taskState.rows[0].status)) {
+      this.send(live, {
+        type: "desktop_agent.recording_rejected",
+        taskId,
+        uploadId,
+        reason: "The Agent task ended before the recording upload could be saved. The local copy is available.",
+      });
+      return;
+    }
+    upload.processing = true;
+    const processing = this.persistCompletedRecording(live, taskId, uploadId, encoded);
+    upload.processingPromise = processing;
+    try {
+      await processing;
+    } catch (error) {
+      upload.processing = false;
+      delete upload.processingPromise;
+      throw error;
+    }
+    upload.processing = false;
+    delete upload.processingPromise;
+    this.pendingRecordingUploads.delete(uploadId);
+    this.completedRecordingUploads.set(uploadId, { taskId, createdAt: Date.now() });
+    this.send(live, { type: "desktop_agent.recording_received", taskId, uploadId });
+  }
+
+  private async persistCompletedRecording(live: LiveConnection, taskId: string, uploadId: string, encoded: string) {
+    try {
+      await this.handleDesktopAgentEvent(live, {
+        type: "desktop_agent.event",
+        taskId,
+        eventType: "evidence",
+        stepId: "native-recording",
+        detail: "Native screen recording captured (chunked upload).",
+        result: {
+          summary: "Native screen recording captured.",
+          evidence: [{ kind: "recording", title: "Native screen recording" }],
+          recordingBase64: `data:video/webm;base64,${encoded}`,
+          recordingUploadId: uploadId,
+        },
+      });
+    } catch (error) {
+      throw error instanceof Error ? error : new Error("Desktop recording persistence failed.");
+    }
   }
 
   private async handleDesktopAgentObserve(    live: LiveConnection,
@@ -1707,10 +1851,14 @@ export class WebsiteAssistantHub {
   }
 
   private async failDesktopTask(taskId: string, message: string) {
-    await this.options.db.query(
-      "update desktop_agent_tasks set status='failed',error_message=$2,updated_at=now(),completed_at=now() where id=$1 and status in ('queued','running')",
+    const failed = await this.options.db.query<{ id: string; chat_session_id: string | null; created_by: string; goal: string }>(
+      "update desktop_agent_tasks set status='failed',error_message=$2,updated_at=now(),completed_at=now() where id=$1 and status in ('queued','running') returning id,chat_session_id,created_by,goal",
       [taskId, message],
     );
+    if (!failed.rows[0]) {
+      this.clearDesktopTaskTimer(taskId);
+      return;
+    }
     await this.options.db.query(
       "update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'",
       [taskId],
@@ -1720,6 +1868,236 @@ export class WebsiteAssistantHub {
       [taskId, message],
     );
     this.clearDesktopTaskTimer(taskId);
+    if (failed.rows[0].chat_session_id) await this.appendDesktopAgentChatMessage({
+      sessionId: failed.rows[0].chat_session_id!, userId: failed.rows[0].created_by, taskId,
+      goal: failed.rows[0].goal, status: "failed", summary: message,
+    });
+  }
+
+  private async appendDesktopAgentChatMessage(input: {
+    sessionId: string;
+    userId: string;
+    taskId: string;
+    goal: string;
+    status: string;
+    summary?: string;
+  }) {
+    const contentBlocks = [{
+      type: "tool",
+      toolCallId: `desktop-agent:${input.taskId}`,
+      toolName: "desktop_control",
+      status: "completed",
+      input: { goal: input.goal },
+      output: { taskId: input.taskId, status: input.status, ...(input.summary ? { summary: input.summary } : {}) },
+      outputSummary: `Desktop Agent task ${input.status}`,
+    }];
+    await this.options.db.query(
+      `insert into chat_messages(session_id,role,content,content_blocks)
+       select cs.id,'assistant','',$2::jsonb from chat_sessions cs where cs.id=$1 and cs.created_by=$3`,
+      [input.sessionId, JSON.stringify(contentBlocks), input.userId],
+    );
+  }
+
+  private armDesktopTaskDeadline(taskId: string, live: LiveConnection, delayMs: number) {
+    this.clearDesktopTaskTimer(taskId);
+    const timer = setTimeout(() => {
+      void this.warnDesktopTaskDeadline(taskId, live).catch((error: unknown) => {
+        console.error("[desktop-agent] deadline warning failed", { taskId, error: error instanceof Error ? error.message : String(error) });
+        void this.failDesktopTask(taskId, "The task reached its time limit; previously collected progress was retained.").catch((failure: unknown) => {
+          console.error("[desktop-agent] deadline failure update failed", { taskId, error: failure instanceof Error ? failure.message : String(failure) });
+        });
+      });
+    }, Math.max(0, delayMs));
+    timer.unref?.();
+    this.desktopTaskTimers.set(taskId, timer);
+  }
+
+  private async recoverDesktopAgentTasks(live: LiveConnection) {
+    const { rows } = await this.options.db.query<{
+      id: string;
+      old_connection_id: string;
+      goal: string;
+      role: DesktopAgentTaskRequest["role"];
+      capabilities: DesktopCapability[];
+      target_url: string | null;
+      canvas_id: string | null;
+      execution_mode: DesktopAgentExecutionMode;
+      planned_actions: DesktopAgentAction[];
+      max_duration_seconds: number;
+      created_at: string | Date;
+    }>(
+      `select t.id,t.connection_id as old_connection_id,t.goal,t.role,t.capabilities,t.target_url,t.canvas_id,
+              t.execution_mode,t.planned_actions,t.max_duration_seconds,t.created_at
+         from desktop_agent_tasks t
+         join website_capture_connections c on c.id=t.connection_id
+        where t.created_by=$1 and t.workspace_id=$2 and t.status='running'
+          and t.execution_mode <> 'connected_browser_tab'
+          and (t.connection_id=$3 or (c.disconnected_at is not null and c.disconnected_at > now() - interval '2 minutes'))
+          and c.revoked_at is null
+        order by t.updated_at asc limit 10`,
+      [live.userId, live.workspaceId, live.id],
+    );
+    const interrupted = await this.options.db.query<{
+      id: string;
+      goal: string;
+      canvas_id: string | null;
+      error_message: string;
+    }>(
+      `select id,goal,canvas_id,error_message from desktop_agent_tasks
+        where created_by=$1 and workspace_id=$2 and status='failed'
+          and error_message like 'Desktop connection was interrupted%'
+          and updated_at > now() - interval '24 hours'
+        order by updated_at desc limit 10`,
+      [live.userId, live.workspaceId],
+    );
+    for (const task of interrupted.rows) {
+      if (this.surfacedInterruptedTasks.has(task.id)) continue;
+      this.surfacedInterruptedTasks.add(task.id);
+      this.send(live, {
+        type: "desktop_agent.task_interrupted",
+        taskId: task.id,
+        goal: task.goal,
+        ...(task.canvas_id ? { canvasId: task.canvas_id } : {}),
+        error: task.error_message,
+      });
+    }
+    if (!rows.length) return;
+
+    const resumed: Array<{ task: Record<string, unknown>; pendingApprovals: Array<{ approvalId: string; action: DesktopAgentAction; expiresAt: string }> }> = [];
+    for (const row of rows) {
+      const activeRecording = [...this.pendingRecordingUploads.values()].find((upload) => upload.taskId === row.id);
+      if (activeRecording?.processingPromise) await activeRecording.processingPromise.catch((error: unknown) => {
+        console.error("[desktop-agent] recording persistence before reconnect failed", { taskId: row.id, error: error instanceof Error ? error.message : String(error) });
+      });
+      const updated = await this.options.db.query<{ id: string }>(
+        "update desktop_agent_tasks set connection_id=$2,updated_at=now() where id=$1 and status='running' returning id",
+        [row.id, live.id],
+      );
+      if (!updated.rows[0]) continue;
+      await this.options.db.query(
+        "update desktop_agent_approvals set connection_id=$2 where task_id=$1 and status='pending' and expires_at>now()",
+        [row.id, live.id],
+      );
+      const priorTimer = this.desktopReconnectTimers.get(row.old_connection_id);
+      if (priorTimer) clearTimeout(priorTimer);
+      this.desktopReconnectTimers.delete(row.old_connection_id);
+
+      const task: Record<string, unknown> = {
+        taskId: row.id,
+        goal: row.goal,
+        role: row.role,
+        capabilities: row.capabilities,
+        executionMode: row.execution_mode,
+        plannedActions: row.planned_actions,
+        createdAt: new Date(row.created_at).toISOString(),
+        maxDurationSeconds: row.max_duration_seconds,
+        pageLimit: 3,
+        ...(row.target_url ? { targetUrl: row.target_url } : {}),
+        ...(row.canvas_id ? { canvasId: row.canvas_id } : {}),
+      };
+      const pendingApprovals = await this.listPendingDesktopApprovals(live.userId, live.workspaceId, row.id);
+      resumed.push({ task, pendingApprovals });
+      const elapsedMs = Date.now() - new Date(row.created_at).getTime();
+      const remainingMs = row.max_duration_seconds * 1000 - elapsedMs;
+      this.armDesktopTaskDeadline(row.id, live, remainingMs > 0 ? remainingMs : 0);
+    }
+    if (resumed.length) this.send(live, { type: "desktop_agent.resume", tasks: resumed });
+  }
+
+  private failDisconnectedDesktopTasks(connectionId: string) {
+    this.desktopReconnectTimers.delete(connectionId);
+    void this.options.db.query<{ id: string; chat_session_id: string | null; created_by: string; goal: string }>(
+      `update desktop_agent_tasks set status='failed',error_message='Desktop connection was interrupted. Collected evidence was retained; review the task before retrying.',updated_at=now(),completed_at=now()
+        where connection_id=$1 and status in ('queued','running') returning id,chat_session_id,created_by,goal`,
+      [connectionId],
+    ).then(async ({ rows }) => {
+      for (const task of rows) {
+        this.clearDesktopTaskTimer(task.id);
+        await this.options.db.query(
+          "update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'",
+          [task.id],
+        );
+        await this.options.db.query(
+          "insert into desktop_agent_events(task_id,event_type,detail) values($1,'failed',$2)",
+          [task.id, "Desktop connection was interrupted. Collected evidence was retained; review the task before retrying."],
+        );
+        if (task.chat_session_id) await this.options.db.query(
+          `insert into chat_messages(session_id,role,content)
+           select cs.id,'assistant',$2 from chat_sessions cs where cs.id=$1 and cs.created_by=$3`,
+          [task.chat_session_id, `Desktop Agent task failed after the desktop disconnected.\nGoal: ${task.goal}\nPreviously collected evidence remains available in task history.`, task.created_by],
+        );
+      }
+    }).catch((error: unknown) => {
+      console.error("[desktop-agent] interrupted task recovery failed", { connectionId, error: error instanceof Error ? error.message : String(error) });
+    });
+  }
+
+  private async warnDesktopTaskDeadline(taskId: string, live: LiveConnection) {
+    const { rows } = await this.options.db.query<{ status: string }>(
+      "select status from desktop_agent_tasks where id=$1 and connection_id=$2",
+      [taskId, live.id],
+    );
+    if (rows[0]?.status !== "running") {
+      this.clearDesktopTaskTimer(taskId);
+      return;
+    }
+    const detail = "The task reached its time limit. Finish the current action and save the latest evidence; no further actions will start.";
+    await this.options.db.query(
+      "insert into desktop_agent_events(task_id,event_type,detail) values($1,'deadline_warning',$2)",
+      [taskId, detail],
+    );
+    this.send(live, { type: "desktop_agent.deadline_warning", taskId, detail });
+    this.desktopTaskTimers.set(taskId, setTimeout(() => {
+      this.send(live, {
+        type: "desktop_agent.stop",
+        taskId,
+        reason: "Task time limit reached before the current action could finish.",
+      });
+      void this.failDesktopTask(taskId, "Task reached its time limit; previously collected progress was retained.").catch((error: unknown) => {
+        console.error("[desktop-agent] deadline failure update failed", { taskId, error: error instanceof Error ? error.message : String(error) });
+      });
+    }, DESKTOP_AGENT_DEADLINE_GRACE_MS));
+  }
+
+  private async expireDesktopAgentApprovals(userId: string, workspaceId: string, taskId?: string) {
+    const { rows } = await this.options.db.query<{
+      id: string;
+      task_id: string;
+      action: DesktopAgentAction;
+      expires_at: string | Date;
+    }>(
+      `update desktop_agent_approvals a set status='expired'
+        from desktop_agent_tasks t
+       where t.id=a.task_id and t.created_by=$1 and t.workspace_id=$2
+         and ($3::uuid is null or t.id=$3) and t.status in ('queued','running')
+         and a.status='pending' and a.expires_at<=now()
+       returning a.id,a.task_id,a.action,a.expires_at`,
+      [userId, workspaceId, taskId ?? null],
+    );
+    for (const approval of rows) {
+      const expired = await this.options.db.query<{ connection_id: string; chat_session_id: string | null; created_by: string; goal: string }>(
+        `update desktop_agent_tasks set status='failed',error_message=$2,updated_at=now(),completed_at=now()
+          where id=$1 and status in ('queued','running') returning connection_id,chat_session_id,created_by,goal`,
+        [approval.task_id, "Approval expired. The requested action was not executed."],
+      );
+      const task = expired.rows[0];
+      if (!task) continue;
+      const detail = "Approval expired. The requested action was not executed.";
+      const expiresAt = new Date(approval.expires_at).toISOString();
+      await this.options.db.query(
+        "insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,'approval_expired',$2,$3::jsonb)",
+        [approval.task_id, detail, JSON.stringify({ approvalId: approval.id, action: approval.action, expiresAt })],
+      );
+      if (task.chat_session_id) await this.appendDesktopAgentChatMessage({
+        sessionId: task.chat_session_id, userId: task.created_by, taskId: approval.task_id,
+        goal: task.goal, status: "approval_expired", summary: detail,
+      });
+      const live = this.connections.get(task.connection_id);
+      this.clearDesktopTaskTimer(approval.task_id);
+      if (!live) continue;
+      this.send(live, { type: "desktop_agent.approval_expired", taskId: approval.task_id, approvalId: approval.id, detail });
+      this.send(live, { type: "desktop_agent.stop", taskId: approval.task_id, reason: detail });
+    }
   }
 
   private clearDesktopTaskTimer(taskId: string) {
@@ -1937,21 +2315,11 @@ export class WebsiteAssistantHub {
       "update website_capture_connections set disconnected_at=now(), last_seen_at=now() where id=$1 and revoked_at is null",
       [live.id],
     );
-    const desktopTasks = await this.options.db.query<{ id: string }>(
-      "update desktop_agent_tasks set status='failed',error_message='本地桌面助手已断开，任务已中止',updated_at=now(),completed_at=now() where connection_id=$1 and status in ('queued','running') returning id",
-      [live.id],
-    );
-    for (const task of desktopTasks.rows) {
-      this.clearDesktopTaskTimer(task.id);
-      await this.options.db.query(
-        "update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'",
-        [task.id],
-      );
-      await this.options.db.query(
-        "insert into desktop_agent_events(task_id,event_type,detail) values($1,'failed',$2)",
-        [task.id, "本地桌面助手已断开，任务已中止"],
-      );
-    }
+    const priorReconnectTimer = this.desktopReconnectTimers.get(live.id);
+    if (priorReconnectTimer) clearTimeout(priorReconnectTimer);
+    const reconnectTimer = setTimeout(() => this.failDisconnectedDesktopTasks(live.id), DESKTOP_RECONNECT_GRACE_MS);
+    reconnectTimer.unref?.();
+    this.desktopReconnectTimers.set(live.id, reconnectTimer);
     const tasks = await this.options.db.query<{ id: string }>(
       "update website_capture_tasks set status='failed', stage='failed', error_message='本地浏览器助手已断开，任务已中止', updated_at=now() where assistant_connection_id=$1 and status in ('queued','running') returning id",
       [live.id],
@@ -1979,6 +2347,7 @@ export class WebsiteAssistantHub {
       [live.id, paused],
     );
     this.send(live, { type: "assistant.state", paused });
+    if (!paused && live.clientKind === "desktop-app") await this.recoverDesktopAgentTasks(live);
   }
 
   private async revokeConnection(live: LiveConnection) {
@@ -2020,6 +2389,20 @@ export class WebsiteAssistantHub {
       this.pendingVisionRequests.delete(requestId);
       pending.reject(new Error(reason));
     }
+    this.mcpCallTimes.delete(connectionId);
+  }
+
+  private assertMcpCallRate(connectionId: string, toolName: string) {
+    const now = Date.now();
+    const windowStart = now - 60_000;
+    const recent = (this.mcpCallTimes.get(connectionId) ?? []).filter((calledAt) => calledAt > windowStart);
+    const limit = toolName === "screen_observe" ? 12 : toolName === "screen_find" ? 8 : 30;
+    if (recent.length >= limit) {
+      this.mcpCallTimes.set(connectionId, recent);
+      throw new Error(`MCP rate limit reached for this desktop connection (${limit} calls per minute).`);
+    }
+    recent.push(now);
+    this.mcpCallTimes.set(connectionId, recent);
   }
 
   private clearTaskTimer(taskId: string) {

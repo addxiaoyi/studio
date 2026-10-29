@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 
 import type { StreamEvent, ToolBlock } from "@helstera/shared";
 import type { Message } from "./use-chat-sessions";
@@ -16,12 +16,34 @@ function hideRawThinkingTags(text: string): string {
 
 export { hideRawThinkingTags };
 
+export function streamEventKey(event: StreamEvent): string {
+  switch (event.type) {
+    case "run.started":
+    case "run.completed":
+    case "run.failed":
+    case "run.canceled":
+      return `${event.runId}:${event.type}`;
+    case "tool.started":
+    case "tool.completed":
+      return `${event.runId}:${event.type}:${event.toolCallId}`;
+    case "message.delta":
+    case "thinking.delta":
+      return `${event.runId}:${event.type}:${event.messageId}:${event.timestamp}:${event.delta}`;
+    case "canvas.sync":
+      return `${event.runId}:${event.type}:${event.timestamp}`;
+    case "billing.error":
+      return `${event.runId}:${event.type}:${event.timestamp}:${event.code}`;
+  }
+}
+
 /**
  * Extracts the stream event handling logic into a reusable hook.
  * Used by both the main send flow and the reconnection resume flow,
  * eliminating the ~70 lines of duplicated event-handling code.
  */
 export function useChatStream(updateSessionMessages: MessageUpdater) {
+  const seenEventsRef = useRef<Set<string>>(new Set());
+
   /**
    * Apply a single StreamEvent to the assistant message identified by assistantId
    * in the given session. This is the single source of truth for how events
@@ -43,6 +65,10 @@ export function useChatStream(updateSessionMessages: MessageUpdater) {
         });
         return;
       }
+
+      const eventKey = streamEventKey(event);
+      if (seenEventsRef.current.has(eventKey)) return;
+      seenEventsRef.current.add(eventKey);
 
       const update = (updater: (prev: Message[]) => Message[]) =>
         updateSessionMessages(sessionId, updater);

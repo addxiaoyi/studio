@@ -117,11 +117,13 @@ create table if not exists chat_messages (
   content text not null default '',
   tool_activities jsonb,
   content_blocks jsonb,
+  client_message_id text,
   created_at timestamptz not null default now()
 );
 
 create index if not exists chat_sessions_canvas_idx on chat_sessions(canvas_id);
 create index if not exists chat_messages_session_idx on chat_messages(session_id, created_at);
+create unique index if not exists chat_messages_session_client_message_idx on chat_messages(session_id, client_message_id);
 
 create table if not exists project_story_assets (
   id uuid primary key default gen_random_uuid(),
@@ -529,6 +531,8 @@ create table if not exists background_jobs (
   job_type text not null,
   status text not null default 'queued',
   payload jsonb not null default '{}'::jsonb,
+  payload_summary jsonb,
+  payload_purged_at timestamptz,
   result jsonb,
   error_code text,
   error_message text,

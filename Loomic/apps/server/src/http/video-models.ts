@@ -1,13 +1,13 @@
+import { calculateConfiguredVideoPricePerSecond, CONFIGURED_PRICE_MULTIPLIER, getConfiguredBilling, getConfiguredVideoPriceRates, getVideoCreditCost } from "@helstera/shared";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
-import { calculateConfiguredVideoPricePerSecond, CONFIGURED_PRICE_MULTIPLIER, getConfiguredBilling, getVideoCreditCost } from "@helstera/shared";
+import type { RequestAuthenticator } from "../auth/types.js";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
 import type { CreditService } from "../features/credits/credit-service.js";
 import { getAvailableVideoModels } from "../generation/providers/registry.js";
-import { listModelAvailability, listHealthyModels, minimumCreditCost, type AvailableProviderModel, type ModelAvailability } from "./model-availability.js";
-import type { RequestAuthenticator } from "../auth/types.js";
-import { getPublicModelPresentation } from "./public-model-catalog.js";
 import { isRemovedModelId } from "../generation/removed-models.js";
+import { type AvailableProviderModel, type ModelAvailability, listHealthyModels, listModelAvailability, minimumCreditCost } from "./model-availability.js";
+import { getPublicModelPresentation } from "./public-model-catalog.js";
 
 export async function registerVideoModelRoutes(app: FastifyInstance, options: {
   auth: RequestAuthenticator; creditService: CreditService; viewerService: ViewerService; localDb?: Pool;
@@ -27,10 +27,14 @@ export async function registerVideoModelRoutes(app: FastifyInstance, options: {
     }
 
     if (options.localDb) {
-      const rows = (await listModelAvailability(options.localDb, "video")).filter(isSellableVideoModel);
+      const rows = dedupePublicModels((await listModelAvailability(options.localDb, "video")).filter(isSellableVideoModel));
       const toPublicModel = (row: ModelAvailability, available: boolean) => {
         const presentation = getPublicModelPresentation(row.model_id, row.display_name, "video");
         if (!presentation) return null;
+        const resolutionRates = getConfiguredVideoPriceRates(row.model_id);
+        const publicPrice = resolutionRates.find((rate) => rate.resolution === "768p")?.priceCnyPerSecond
+          ?? resolutionRates[0]?.priceCnyPerSecond
+          ?? Number(row.price_credits);
         return {
           id: row.model_id,
           displayName: presentation.displayName,
@@ -44,8 +48,8 @@ export async function registerVideoModelRoutes(app: FastifyInstance, options: {
               : null,
           healthStatus: row.health_status,
           billingUnit: row.billing_unit,
-          creditCost: Number(row.price_credits),
-          providerPriceCny: Number(row.price_credits),
+          creditCost: publicPrice,
+          providerPriceCny: publicPrice,
           accessible: available && authenticated && balance >= minimumCreditCost(row),
           minTier: "free",
           capabilities: {
@@ -57,9 +61,10 @@ export async function registerVideoModelRoutes(app: FastifyInstance, options: {
           limits: {
             maxDuration: row.max_duration_seconds ?? 12,
             allowedDurations: durationOptions(row.max_duration_seconds ?? 12),
-            maxResolution: row.max_resolution ?? "1080p",
+            maxResolution: resolutionRates.at(-1)?.resolution ?? row.max_resolution ?? "1080p",
             maxInputImages: row.supports_input_image ? 1 : 0,
           },
+          ...(resolutionRates.length ? { resolutionRates } : {}),
         };
       };
       const selectableRows = (await listHealthyModels(options.localDb, "video", { allowUnverified: true })).filter(isSellableVideoModel);
@@ -76,12 +81,51 @@ export async function registerVideoModelRoutes(app: FastifyInstance, options: {
       models: getAvailableVideoModels().flatMap((model) => {
         const billing = getConfiguredBilling(model.id);
         if (billing?.billingUnit !== "per_second") return [];
-        const creditCost = billing.creditCost ?? getVideoCreditCost(model.id);
-        return [{ ...model, ...billing, accessible: authenticated, creditCost, providerPriceCny: creditCost, minTier: "free" }];
+        const resolutionRates = getConfiguredVideoPriceRates(model.id);
+        const creditCost = resolutionRates.find((rate) => rate.resolution === "768p")?.priceCnyPerSecond
+          ?? resolutionRates[0]?.priceCnyPerSecond
+          ?? billing.creditCost
+          ?? getVideoCreditCost(model.id);
+        return [{
+          ...model,
+          ...billing,
+          accessible: authenticated,
+          creditCost,
+          providerPriceCny: creditCost,
+          minTier: "free",
+          ...(resolutionRates.length ? { resolutionRates } : {}),
+        }];
       }),
       unavailableModels: [],
     });
   });
+}
+
+function dedupePublicModels(rows: ModelAvailability[]): ModelAvailability[] {
+  const unique = new Map<string, ModelAvailability>();
+  for (const row of rows) {
+    const key = row.model_id.trim().toLowerCase();
+    const current = unique.get(key);
+    if (!current || comparePublicModels(row, current) < 0) unique.set(key, row);
+  }
+  return [...unique.values()];
+}
+
+function comparePublicModels(left: ModelAvailability, right: ModelAvailability) {
+  const availabilityRank = (model: ModelAvailability) => model.availability === "available" ? 0 : 1;
+  const healthRank = (model: ModelAvailability) => {
+    if (model.health_status === "healthy") return 0;
+    if (model.health_status === "degraded") return 1;
+    if (model.health_status === "unknown") return 2;
+    return 3;
+  };
+  const modelIdRank = (model: ModelAvailability) => Number(model.model_id !== "minimax-h3");
+  return availabilityRank(left) - availabilityRank(right)
+    || healthRank(left) - healthRank(right)
+    || (left.failure_count ?? 0) - (right.failure_count ?? 0)
+    || (left.priority ?? Number.MAX_SAFE_INTEGER) - (right.priority ?? Number.MAX_SAFE_INTEGER)
+    || modelIdRank(left) - modelIdRank(right)
+    || left.model_id.localeCompare(right.model_id);
 }
 
 export function isSellableVideoModel(model: AvailableProviderModel) {

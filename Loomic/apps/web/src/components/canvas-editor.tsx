@@ -63,6 +63,7 @@ type CanvasEditorProps = {
     files: Record<string, Record<string, unknown>>;
   };
   onApiReady?: (api: any) => void;
+  onReady?: () => void;
   ws?: WebSocketHandle;
   leftPanelOpen?: boolean;
   onSelectionChange?: (elements: CanvasSelectedElement[]) => void;
@@ -143,12 +144,105 @@ export function mergeCanvasSaveWithRemoteContent(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Local recovery copy
+//
+// A failed save (network loss, auth hiccup, server 5xx, oversized keepalive
+// flush on page teardown) would otherwise leave the newest edits only in
+// memory. We persist the last payload locally so a refresh can still restore
+// it and the user is never silently left with a stale server copy.
+// ---------------------------------------------------------------------------
+
+export const CANVAS_RECOVERY_PREFIX = "helstera:canvas-recovery:";
+
+export type CanvasSavePayload = {
+  elements: Record<string, unknown>[];
+  appState: Record<string, unknown>;
+  files: Record<string, Record<string, unknown>>;
+};
+
+export type CanvasRecoveryCopy = {
+  savedAt: number;
+  content: CanvasSavePayload;
+};
+
+export function canvasRecoveryKey(canvasId: string): string {
+  return `${CANVAS_RECOVERY_PREFIX}${canvasId}`;
+}
+
+function resolveStorage(storage?: Storage): Storage | null {
+  if (storage) return storage;
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function writeCanvasRecoveryCopy(
+  canvasId: string,
+  content: CanvasSavePayload,
+  storage?: Storage,
+): boolean {
+  const target = resolveStorage(storage);
+  if (!target) return false;
+  try {
+    target.setItem(
+      canvasRecoveryKey(canvasId),
+      JSON.stringify({ savedAt: Date.now(), content } satisfies CanvasRecoveryCopy),
+    );
+    return true;
+  } catch {
+    // Quota exceeded or storage disabled — the save path itself still runs.
+    return false;
+  }
+}
+
+export function readCanvasRecoveryCopy(
+  canvasId: string,
+  storage?: Storage,
+): CanvasRecoveryCopy | null {
+  const target = resolveStorage(storage);
+  if (!target) return null;
+  try {
+    const raw = target.getItem(canvasRecoveryKey(canvasId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CanvasRecoveryCopy> | null;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !parsed.content ||
+      !Array.isArray(parsed.content.elements)
+    ) {
+      return null;
+    }
+    return {
+      savedAt: typeof parsed.savedAt === "number" ? parsed.savedAt : 0,
+      content: parsed.content,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearCanvasRecoveryCopy(canvasId: string, storage?: Storage): void {
+  const target = resolveStorage(storage);
+  if (!target) return;
+  try {
+    target.removeItem(canvasRecoveryKey(canvasId));
+  } catch {
+    // Nothing to do — a stale copy is harmless, the next save clears it.
+  }
+}
+
 export function CanvasEditor({
   canvasId,
   projectId,
   accessToken,
   initialContent,
   onApiReady,
+  onReady,
   ws,
   leftPanelOpen,
   onSelectionChange,
@@ -167,6 +261,9 @@ export function CanvasEditor({
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [excalidrawApi, setExcalidrawApi] = useState<any>(null);
   const [saveState, setSaveState] = useState<CanvasSaveState>("saved");
+  const [recoveryCopy, setRecoveryCopy] = useState<CanvasRecoveryCopy | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState(false);
   const [resolvedFilesVersion, setResolvedFilesVersion] = useState(0);
   const [isImageDragActive, setIsImageDragActive] = useState(false);
   const [deleteGesture, setDeleteGesture] = useState<{ active: boolean; overTrash: boolean }>({ active: false, overTrash: false });
@@ -177,6 +274,8 @@ export function CanvasEditor({
   const prevSelectedIdsRef = useRef<string>("");
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
   // Tracks whether the one-time normalization pass has already run
   const normalizedRef = useRef(false);
   const thumbnailRefreshCanvasRef = useRef<string | null>(null);
@@ -397,6 +496,7 @@ export function CanvasEditor({
       // during Excalidraw's internal initialization, which would cause a
       // FULL REPLACE with empty content and silently wipe existing data.
       hydratedRef.current = true;
+      onReadyRef.current?.();
     });
     return () => cic(idleHandle);
   }, [excalidrawApi]);
@@ -461,10 +561,17 @@ export function CanvasEditor({
               pendingSaveRef.current = null;
               setSaveState("saved");
             }
+            clearCanvasRecoveryCopy(canvasIdRef.current);
+            setRecoveryCopy(null);
+            setRecoveryError(false);
           })
           .catch((err) => {
             if (pendingSaveRef.current === content) setSaveState("error");
             console.error("[canvas-editor] save failed:", err);
+            // Keep the newest edits on this device so a refresh cannot lose them.
+            if (writeCanvasRecoveryCopy(canvasIdRef.current, content)) {
+              setRecoveryCopy(readCanvasRecoveryCopy(canvasIdRef.current));
+            }
           });
       }, SAVE_DEBOUNCE_MS);
 
@@ -717,11 +824,60 @@ export function CanvasEditor({
           pendingSaveRef.current = null;
           setSaveState("saved");
         }
+        clearCanvasRecoveryCopy(canvasIdRef.current);
+        setRecoveryCopy(null);
+        setRecoveryError(false);
       })
       .catch((error) => {
         if (pendingSaveRef.current === payload) setSaveState("error");
         console.error("[canvas-editor] retry save failed:", error);
+        if (writeCanvasRecoveryCopy(canvasIdRef.current, payload)) {
+          setRecoveryCopy(readCanvasRecoveryCopy(canvasIdRef.current));
+        }
       });
+  }, []);
+
+  // Offer the locally persisted copy after a failed save or an interrupted
+  // debounce window that could not be flushed before the page closed.
+  useEffect(() => {
+    const copy = readCanvasRecoveryCopy(canvasId);
+    if (copy) {
+      setRecoveryCopy(copy);
+      setRecoveryError(false);
+    }
+  }, [canvasId]);
+
+  const restoreRecoveryCopy = useCallback(async () => {
+    const copy = readCanvasRecoveryCopy(canvasIdRef.current);
+    if (!copy) {
+      setRecoveryCopy(null);
+      return;
+    }
+    setRecoveryBusy(true);
+    setRecoveryError(false);
+    try {
+      const { canvas } = await fetchCanvas(accessTokenRef.current, canvasIdRef.current);
+      await saveCanvas(
+        accessTokenRef.current,
+        canvasIdRef.current,
+        mergeCanvasSaveWithRemoteContent(copy.content, canvas.content),
+      );
+      clearCanvasRecoveryCopy(canvasIdRef.current);
+      setRecoveryCopy(null);
+      // Reload so the editor hydrates from the restored server content.
+      window.location.reload();
+    } catch (error) {
+      console.error("[canvas-editor] restore recovery copy failed:", error);
+      setRecoveryError(true);
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }, []);
+
+  const discardRecoveryCopy = useCallback(() => {
+    clearCanvasRecoveryCopy(canvasIdRef.current);
+    setRecoveryCopy(null);
+    setRecoveryError(false);
   }, []);
 
   // Flush pending save on page close (beforeunload) and component unmount
@@ -732,6 +888,10 @@ export function CanvasEditor({
       // Build the real payload since pendingSaveRef may hold a placeholder
       const payload = buildSavePayloadRef.current();
       if (!payload) return;
+
+      // Persist locally first: keepalive bodies over 64 KiB are rejected by
+      // the browser, and a rejected flush must not silently drop the edits.
+      writeCanvasRecoveryCopy(canvasIdRef.current, payload);
 
       // Use fetch with keepalive to ensure the request survives page teardown.
       // keepalive requests are limited to 64 KiB total in-flight per page; for
@@ -913,6 +1073,20 @@ export function CanvasEditor({
             {canvasSaveStateLabel(saveState)}
           </span>
           {saveState === "error" && <button type="button" onClick={retrySave} className="rounded-full px-2 py-0.5 font-medium text-foreground underline decoration-dotted underline-offset-2 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">重试保存</button>}
+          {recoveryCopy && (
+            <span className="flex items-center gap-2 border-l border-border/60 pl-2">
+              <span className="text-amber-700 dark:text-amber-300">
+                本地未保存副本{recoveryCopy.savedAt > 0 ? `（${new Date(recoveryCopy.savedAt).toLocaleTimeString()}）` : ""}
+              </span>
+              <button type="button" onClick={() => void restoreRecoveryCopy()} disabled={recoveryBusy} className="rounded-full px-2 py-0.5 font-medium text-foreground underline decoration-dotted underline-offset-2 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">
+                {recoveryBusy ? "恢复中…" : "恢复"}
+              </button>
+              <button type="button" onClick={discardRecoveryCopy} disabled={recoveryBusy} className="rounded-full px-2 py-0.5 text-muted-foreground underline decoration-dotted underline-offset-2 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">
+                丢弃
+              </button>
+            </span>
+          )}
+          {recoveryError && <span className="text-destructive">恢复失败，请重试</span>}
         </div>
         {excalidrawApi && (
           <MemoizedCanvasToolMenu

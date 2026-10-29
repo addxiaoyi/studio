@@ -36,7 +36,13 @@ export function AuthShell({
 }: AuthShellProps) {
   const copy = t("zh-CN").authShell;
   return (
-    <div className={`auth-shell ${variant === "desktop" ? "auth-shell--desktop" : ""}`}>
+    <div
+      className={`auth-shell ${
+        variant === "desktop"
+          ? "auth-shell--desktop"
+          : "auth-shell--web flex min-h-screen bg-background"
+      }`}
+    >
       {/* Brand panel — dark glass */}
       <aside
         aria-label={copy.brand}

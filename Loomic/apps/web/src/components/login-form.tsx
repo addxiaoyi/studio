@@ -6,9 +6,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 
+import { useAuth } from "@/lib/auth-context";
 import { t, useLocale } from "@/lib/i18n";
 import { getSafeRedirect } from "@/lib/navigation";
 import {
+  PasswordNotSetError,
   requestLocalCode,
   resetLocalPassword,
   signInLocalWithPassword,
@@ -60,6 +62,9 @@ export function LoginForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"code" | "password" | "reset">("code");
+  // The workspace layout keeps the user only while AuthProvider holds a session.
+  // Pushing the fresh session here is what stops the post-login bounce back to /login.
+  const { acceptSession } = useAuth();
   const [loading, setLoading] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState("");
@@ -101,7 +106,7 @@ export function LoginForm({
 
     try {
       if (codeSent) {
-        await verifyLocalCode(trimmed, code);
+        acceptSession(await verifyLocalCode(trimmed, code));
         router.replace(destination);
       } else {
         await requestLocalCode(trimmed);
@@ -120,7 +125,7 @@ export function LoginForm({
     setLoading(true);
     setError(null);
     try {
-      await verifyLocalCode(trimmed, code);
+      acceptSession(await verifyLocalCode(trimmed, code));
       router.replace(destination);
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : copy.codeError);
@@ -137,12 +142,20 @@ export function LoginForm({
     setError(null);
 
     try {
-      await signInLocalWithPassword(trimmed, password);
+      acceptSession(await signInLocalWithPassword(trimmed, password));
       router.replace(destination);
     } catch (authError) {
-      setError(
-        authError instanceof Error ? authError.message : copy.passwordError,
-      );
+      if (authError instanceof PasswordNotSetError) {
+        // This account was created through the email-code flow and has no password.
+        // Retrying the password form can never succeed, so move the user to the code flow.
+        setMode("code");
+        setCodeSent(false);
+        setError(authError.message);
+      } else {
+        setError(
+          authError instanceof Error ? authError.message : copy.passwordError,
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -159,7 +172,7 @@ export function LoginForm({
         await requestLocalCode(trimmed);
         setCodeSent(true);
       } else {
-        await resetLocalPassword(trimmed, code, password);
+        acceptSession(await resetLocalPassword(trimmed, code, password));
         router.replace(destination);
       }
     } catch (authError) {

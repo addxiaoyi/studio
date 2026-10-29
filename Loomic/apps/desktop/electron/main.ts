@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { join } from "path";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, isAbsolute, join, relative, resolve, sep } from "path";
 import {
   type DesktopAgentAction,
   type DesktopAgentTask,
@@ -32,6 +33,7 @@ import {
 } from "./native-automation.js";
 import {
   DesktopLoginCallbackQueue,
+  parseDesktopLoginCallback,
   type DesktopLoginCallback,
 } from "./desktop-login.js";
 import {
@@ -40,15 +42,27 @@ import {
   Tray,
   app,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   safeStorage,
   shell,
 } from "electron";
 import { autoUpdater } from "electron-updater";
-import { LocalWorkspace } from "./local-workspace.js";
-import { McpRegistry, type McpServerInput } from "./mcp-registry.js";
+import WebSocket from "ws";
 import {
+  AGENT_FOCUS_CHANNEL,
+  registerAgentFocusShortcut,
+  releaseAgentFocusShortcuts,
+} from "./global-shortcut.js";
+import { LocalWorkspace } from "./local-workspace.js";
+import { McpRegistry, resolveMarketplaceMcpConfig, type McpServerInput } from "./mcp-registry.js";
+import { RecorderLock } from "./recorder-lock.js";
+import { parseMarketplaceInstallSlug } from "./desktop-marketplace-link.js";
+import { formatDesktopPlanReview } from "./desktop-plan-review.js";
+import { assistantReconnectDelay, shouldReconnectAssistant } from "./assistant-reconnect.js";
+import {
+  decideMainWindowNavigation,
   observeMainWindowLifecycle,
   registerWindowControlHandlers,
 } from "./window-controls.js";
@@ -58,13 +72,36 @@ let mainWindowReady = false;
 let tray: Tray | null = null;
 let embeddedBrowserWindow: BrowserWindow | null = null;
 let recorderWindow: BrowserWindow | null = null;
-let assistantSocket: any = null;
+const recorderLock = new RecorderLock();
+let assistantSocket: WebSocket | null = null;
 let assistantSessionToken = "";
 let assistantConnectionId = "";
+let assistantEndpoint = "";
+let assistantReconnectEnabled = false;
+let assistantReconnectAttempts = 0;
+let assistantReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let assistantSocketGeneration = 0;
 const desktopTaskTabs = new Map<string, BrowserWindow | null>();
+type PendingRecordingUpload = {
+  taskId: string;
+  uploadId: string;
+  payload: string;
+  totalChunks: number;
+  attempts: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  resolve: () => void;
+  reject: (error: Error) => void;
+};
+const pendingRecordingUploads = new Map<string, PendingRecordingUpload>();
 const desktopAgentTasks = new Map<string, DesktopAgentTask>();
 const desktopAgentPlans = new Map<string, DesktopAgentAction[]>();
 const desktopAgentRounds = new Map<string, number>();
+const desktopAgentDeadlineWarnings = new Set<string>();
+const desktopAgentInterruptedTasks = new Set<string>();
+const locallyCachedDesktopEvents = new WeakSet<object>();
+const MAX_ACTIVE_DESKTOP_AGENT_TASKS = 8;
+const desktopLocalAssetPaths = new WeakMap<object, string>();
+const desktopEventTaskContext = new WeakMap<object, { goal: string; executionMode: string; canvasId?: string }>();
 const MAX_NATIVE_AGENT_ROUNDS = 5;
 const nativeTaskRecordings = new Map<string, NativeScreenRecording>();
 const pendingVisionCoordinates = new Map<
@@ -110,6 +147,7 @@ let desktopLoginStatus:
   | "expired" = "failed";
 let desktopCallbackServer: Server | null = null;
 let desktopCallbackUrl = "";
+let pendingMarketplaceInstallSlug: string | null = null;
 let localWorkspace: LocalWorkspace | null = null;
 let localWorkspaceSessionId = "";
 const workspaceRuns = new Map<string, AbortController>();
@@ -125,13 +163,22 @@ registerWindowControlHandlers(ipcMain, {
 
 app.on("open-url", (event, url) => {
   event.preventDefault();
+  const marketplaceSlug = parseMarketplaceInstallSlug(url);
+  if (marketplaceSlug) {
+    void openDesktopMarketplaceInstall(marketplaceSlug);
+    return;
+  }
   void receiveDesktopLoginUrl(url).then(focusMainWindow);
 });
 
 app.on("second-instance", (_event, commandLine) => {
-  const authUrl = commandLine.find((argument) =>
-    argument.startsWith(`${DESKTOP_AUTH_SCHEME}//`),
-  );
+  const marketplaceUrl = commandLine.find((argument) => parseMarketplaceInstallSlug(argument));
+  const marketplaceSlug = marketplaceUrl ? parseMarketplaceInstallSlug(marketplaceUrl) : null;
+  if (marketplaceSlug) {
+    void openDesktopMarketplaceInstall(marketplaceSlug);
+    return;
+  }
+  const authUrl = commandLine.find((argument) => parseDesktopLoginCallback(argument));
   if (authUrl) void receiveDesktopLoginUrl(authUrl).then(focusMainWindow);
   else focusMainWindow();
 });
@@ -287,6 +334,28 @@ async function receiveDesktopLoginUrl(value: string): Promise<boolean> {
   return delivered;
 }
 
+async function openDesktopMarketplaceInstall(slug: string) {
+  pendingMarketplaceInstallSlug = slug;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  let current: URL | null = null;
+  try {
+    current = new URL(mainWindow.webContents.getURL());
+  } catch {
+    current = null;
+  }
+  const expectedOrigin = new URL(desktopWebsiteUrl()).origin;
+  if (!current || current.origin !== expectedOrigin || current.pathname.replace(/\/$/, "") !== "/desktop-app/marketplace") {
+    mainWindow.webContents.send("navigate", "/desktop-app/marketplace/");
+    return;
+  }
+  if (mainWindowReady && !mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.send("desktop:marketplace-install", { slug });
+  }
+}
+
 async function deliverPendingDesktopLoginCallbacks() {
   for (const callback of desktopLoginCallbacks.pending()) {
     const value = `helstera://auth/callback?desktop_token=${encodeURIComponent(callback.token)}&state=${encodeURIComponent(callback.state)}`;
@@ -298,6 +367,27 @@ function focusMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.focus();
+}
+
+/**
+ * #80: Ctrl+Shift+Space brings the main window forward and hands focus to the Agent composer.
+ * The renderer request is replayed once the page finishes loading so a cold start still lands
+ * in the composer instead of being dropped.
+ */
+function focusAgentComposer() {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  const webContents = window.webContents;
+  if (webContents.isLoading()) {
+    webContents.once("did-finish-load", () => {
+      if (!window.isDestroyed()) webContents.send(AGENT_FOCUS_CHANNEL);
+    });
+    return;
+  }
+  webContents.send(AGENT_FOCUS_CHANNEL);
 }
 
 function publishUpdateState(next: UpdateStateInput) {
@@ -338,6 +428,14 @@ async function checkForDesktopUpdate() {
 
 function configureAutoUpdates() {
   if (!app.isPackaged) return;
+  // electron-updater's default logger writes to a parent console pipe that can
+  // close while the desktop app stays open; an EPIPE there must not crash main.
+  autoUpdater.logger = {
+    info: () => undefined,
+    warn: () => undefined,
+    error: () => undefined,
+    debug: () => undefined,
+  };
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowDowngrade = false;
@@ -481,6 +579,47 @@ ipcMain.handle("workspace.select", async (event) => {
   localWorkspaceSessionId = randomUUID();
   publishDesktopMcpTools();
   return { root: localWorkspace.root, entries: await localWorkspace.tree() };
+});
+ipcMain.handle("dialog.select-directory", async (event, title: unknown) => {
+  requireMainWindow(event);
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    title: typeof title === "string" && title.trim() ? title.slice(0, 120) : "Choose an allowed folder",
+    properties: ["openDirectory"],
+  });
+  return result.canceled ? null : result.filePaths[0] ?? null;
+});
+ipcMain.handle("assets.select-folder", async (event) => {
+  requireMainWindow(event);
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    title: "选择素材保存文件夹",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const directory = resolve(result.filePaths[0]);
+  await writeFile(join(app.getPath("userData"), "asset-storage.json"), JSON.stringify({ directory }), "utf8");
+  return { path: directory, name: basename(directory) };
+});
+ipcMain.handle("assets.write-local", async (event, input: unknown) => {
+  requireMainWindow(event);
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("本地素材参数无效。");
+  const value = input as { directory?: unknown; fileName?: unknown; bytes?: unknown };
+  if (typeof value.directory !== "string" || typeof value.fileName !== "string" || !(value.bytes instanceof ArrayBuffer)) throw new Error("本地素材写入参数无效。");
+  let savedDirectory = "";
+  try {
+    const settings = JSON.parse(await readFile(join(app.getPath("userData"), "asset-storage.json"), "utf8")) as { directory?: unknown };
+    if (typeof settings.directory === "string") savedDirectory = resolve(settings.directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const requestedDirectory = resolve(value.directory);
+  if (!savedDirectory || requestedDirectory !== savedDirectory) throw new Error("请先从桌面设置重新选择已授权的本地文件夹。");
+  const safeName = value.fileName.normalize("NFKC").replace(/[<>:\"/\\|?*\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").slice(0, 140) || "helstera-asset";
+  if (basename(safeName) !== safeName || safeName === "." || safeName === "..") throw new Error("素材文件名无效。");
+  const target = resolve(savedDirectory, safeName);
+  const targetRelative = relative(savedDirectory, target);
+  if (isAbsolute(targetRelative) || targetRelative.startsWith(`..${sep}`) || targetRelative === "..") throw new Error("素材保存路径越界。");
+  await writeFile(target, Buffer.from(value.bytes));
+  return { path: target, name: safeName };
 });
 ipcMain.handle("workspace.tree", async (event) =>
   requireLocalWorkspace(event).tree(),
@@ -1214,6 +1353,50 @@ ipcMain.handle("mcp.add", async (event, input: unknown) => {
   publishDesktopMcpTools();
   return saved;
 });
+ipcMain.handle("mcp.install-marketplace", async (event, input: unknown) => {
+  requireMainWindow(event);
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("MCP marketplace install input is required.");
+  const item = input as {
+    name?: unknown;
+    command?: unknown;
+    args?: unknown;
+    requiredConfig?: unknown;
+    config?: unknown;
+  };
+  if (typeof item.name !== "string" || !item.name.trim() || item.name.length > 80) throw new Error("Marketplace MCP name is invalid.");
+  if (item.command !== "npx") throw new Error("Only reviewed npm MCP launchers can be installed from the marketplace.");
+  if (!Array.isArray(item.args) || item.args.length < 2 || item.args.length > 32 || item.args.some((arg) => typeof arg !== "string" || arg.length > 4_096)) throw new Error("Marketplace MCP arguments are invalid.");
+  if (!Array.isArray(item.requiredConfig) || item.requiredConfig.length > 12 || !item.config || typeof item.config !== "object" || Array.isArray(item.config)) throw new Error("Marketplace MCP configuration is invalid.");
+  const requiredConfig = item.requiredConfig as Array<{ envName?: unknown; label?: unknown; kind?: unknown; required?: unknown; sensitive?: unknown }>;
+  for (const field of requiredConfig) {
+    if (typeof field.envName !== "string" || !/^[A-Z_][A-Z0-9_]{0,79}$/.test(field.envName)
+      || typeof field.label !== "string" || field.label.length > 120
+      || !["text", "secret", "directory"].includes(String(field.kind))
+      || typeof field.required !== "boolean" || typeof field.sensitive !== "boolean") {
+      throw new Error("Marketplace MCP configuration schema is invalid.");
+    }
+  }
+  const resolved = resolveMarketplaceMcpConfig(
+    item.args as string[],
+    requiredConfig as Array<{ envName: string; label: string; kind: "text" | "secret" | "directory"; required: boolean; sensitive: boolean }>,
+    item.config as Record<string, unknown>,
+  );
+  const registry = requireMcpRegistry(event);
+  if ((await registry.list()).some((server) => server.name === item.name)) throw new Error("This MCP is already installed on this desktop.");
+  const created = await registry.add({ name: item.name, transport: "stdio", command: "npx", args: resolved.args, env: resolved.env });
+  try {
+    const servers = await registry.connect(created.id);
+    publishDesktopMcpTools();
+    return { id: created.id, servers };
+  } catch (error) {
+    try {
+      await registry.remove(created.id);
+    } catch (cleanupError) {
+      console.error("[mcp-marketplace] failed to remove a server after its first connection failed", cleanupError);
+    }
+    throw error;
+  }
+});
 ipcMain.handle("mcp.connect", (event, id: unknown) => {
   if (typeof id !== "string") throw new Error("An MCP server id is required.");
   return requireMcpRegistry(event)
@@ -1252,6 +1435,17 @@ ipcMain.handle("mcp.call", (event, input: unknown) => {
   )
     throw new Error("MCP tool call fields are invalid.");
   return requireMcpRegistry(event).call(call.id, call.name, call.arguments);
+});
+
+ipcMain.handle("desktop.marketplace-install.pending", (event) => {
+  requireMainWindow(event);
+  return pendingMarketplaceInstallSlug;
+});
+ipcMain.handle("desktop.marketplace-install.acknowledge", (event, value: unknown) => {
+  requireMainWindow(event);
+  if (typeof value !== "string") throw new Error("A marketplace MCP slug is required.");
+  if (pendingMarketplaceInstallSlug === value) pendingMarketplaceInstallSlug = null;
+  return { ok: true };
 });
 
 function isSafeBrowserUrl(value: string): boolean {
@@ -1296,61 +1490,301 @@ async function openEmbeddedBrowser(value: string) {
   return { ok: true };
 }
 
+function forwardDesktopAgentEvent(message: Record<string, unknown>) {
+  const taskId = typeof message.taskId === "string" ? message.taskId : null;
+  const task = taskId ? desktopAgentTasks.get(taskId) : undefined;
+  const context = task
+    ? { goal: task.goal, executionMode: task.executionMode, ...(task.canvasId ? { canvasId: task.canvasId } : {}) }
+    : desktopEventTaskContext.get(message);
+  const localAssetPath = desktopLocalAssetPaths.get(message);
+  const forwarded = {
+    ...message,
+    ...(context ?? {}),
+    ...(localAssetPath ? { localAssetPath } : {}),
+  };
+  mainWindow?.webContents.send("desktop:agent-event", forwarded);
+}
+
 function sendAssistant(message: Record<string, unknown>) {
-  if (message.type === "desktop_agent.event")
-    mainWindow?.webContents.send("desktop:agent-event", message);
-  if (assistantSocket?.readyState === 1)
-    assistantSocket.send(JSON.stringify(message));
+  const taskId = typeof message.taskId === "string" ? message.taskId : null;
+  const task = taskId ? desktopAgentTasks.get(taskId) : undefined;
+  if (task) desktopEventTaskContext.set(message, {
+    goal: task.goal,
+    executionMode: task.executionMode,
+    ...(task.canvasId ? { canvasId: task.canvasId } : {}),
+  });
+  const screenshot = message.type === "desktop_agent.event"
+    ? (message.result as { screenshotBase64?: unknown; screenshotMimeType?: unknown } | undefined)
+    : undefined;
+  if (typeof message.taskId === "string" && typeof screenshot?.screenshotBase64 === "string" && !locallyCachedDesktopEvents.has(message)) {
+    locallyCachedDesktopEvents.add(message);
+    void cacheDesktopScreenshot(message.taskId, screenshot.screenshotBase64, screenshot.screenshotMimeType === "image/png" ? "png" : "jpg")
+      .then((path) => { desktopLocalAssetPaths.set(message, path); sendAssistant(message); })
+      .catch((error: unknown) => {
+        console.error("[desktop-agent] local screenshot cache failed; continuing with cloud upload", error);
+        sendAssistant(message);
+      });
+    return;
+  }
+  if (message.type === "desktop_agent.event") forwardDesktopAgentEvent(message);
+  const socket = assistantSocket;
+  if (socket?.readyState !== WebSocket.OPEN) return;
+  try {
+    socket.send(JSON.stringify(message), (error?: Error) => {
+      if (!error || assistantSocket !== socket) return;
+      console.error("[desktop-assistant] websocket send failed", error.message);
+      socket.close(1011, "Assistant send failed");
+    });
+  } catch (error) {
+    if (assistantSocket !== socket) return;
+    console.error(
+      "[desktop-assistant] websocket send failed",
+      error instanceof Error ? error.message : String(error),
+    );
+    socket.close(1011, "Assistant send failed");
+  }
 }
 
 type NativeScreenRecording = {
   stop: () => Promise<string | null>;
 };
 
-const RECORDING_INLINE_LIMIT = 8 * 1024 * 1024;
 const RECORDING_CHUNK_BYTES = 3 * 1024 * 1024;
 
 async function sendRecordingPayload(taskId: string, base64: string): Promise<void> {
   const payload = base64.startsWith("data:") ? base64.slice(base64.indexOf(",") + 1) : base64;
-  const byteLength = Math.floor((payload.length * 3) / 4);
-  if (byteLength <= RECORDING_INLINE_LIMIT) {
-    sendAssistant({
-      type: "desktop_agent.event",
-      taskId,
-      eventType: "evidence",
-      detail: "Native screen recording captured.",
-      result: {
-        summary: "Native screen recording captured.",
-        evidence: [{ kind: "recording", title: "Native screen recording" }],
-        recordingBase64: `data:video/webm;base64,${payload}`,
-      },
-    });
-    return;
-  }
+  const localCopy = await cacheDesktopRecording(taskId, payload);
+  const localEvent = {
+    type: "desktop_agent.event",
+    taskId,
+    eventType: "asset_created",
+    detail: `Recording cached locally before upload (${basename(localCopy)}).`,
+  };
+  desktopLocalAssetPaths.set(localEvent, localCopy);
+  forwardDesktopAgentEvent(localEvent);
   const uploadId = randomUUID();
   const totalChunks = Math.ceil(payload.length / (RECORDING_CHUNK_BYTES - (RECORDING_CHUNK_BYTES % 4)));
-  const chunkSize = Math.ceil(payload.length / totalChunks / 4) * 4;
-  for (let index = 0; index < totalChunks; index += 1) {
-    const chunk = payload.slice(index * chunkSize, (index + 1) * chunkSize);
-    sendAssistant({
-      type: "desktop_agent.recording_chunk",
-      taskId,
-      uploadId,
-      chunkIndex: index,
-      totalChunks,
-      isLast: index === totalChunks - 1,
-      data: chunk,
-    });
+  await new Promise<void>((resolve, reject) => {
+    const pending: PendingRecordingUpload = { taskId, uploadId, payload, totalChunks, attempts: 0, timer: null, resolve, reject };
+    pendingRecordingUploads.set(taskId, pending);
+    transmitRecordingUpload(pending);
+  });
+}
+
+function transmitRecordingUpload(upload: PendingRecordingUpload) {
+  if (upload.timer) clearTimeout(upload.timer);
+  upload.timer = null;
+  if (assistantSocket?.readyState !== 1) {
+    upload.timer = setTimeout(() => transmitRecordingUpload(upload), 1_000);
+    upload.timer.unref?.();
+    return;
+  }
+  upload.attempts += 1;
+  const encodedChunkSize = Math.floor((RECORDING_CHUNK_BYTES - (RECORDING_CHUNK_BYTES % 4)) / 4) * 4;
+  try {
+    for (let index = 0; index < upload.totalChunks; index += 1) {
+      assistantSocket.send(JSON.stringify({
+        type: "desktop_agent.recording_chunk",
+        taskId: upload.taskId,
+        uploadId: upload.uploadId,
+        chunkIndex: index,
+        totalChunks: upload.totalChunks,
+        isLast: index === upload.totalChunks - 1,
+        data: upload.payload.slice(index * encodedChunkSize, (index + 1) * encodedChunkSize),
+      }));
+    }
+  } catch (error) {
+    console.warn("[desktop-agent] recording upload interrupted; it will retry", error);
+    scheduleRecordingRetry(upload);
+    return;
+  }
+  scheduleRecordingRetry(upload);
+}
+
+function scheduleRecordingRetry(upload: PendingRecordingUpload) {
+  if (upload.timer) clearTimeout(upload.timer);
+  if (upload.attempts >= 8) {
+    abandonPendingRecordingUpload(upload, "Recording upload could not be confirmed after retries. A local recovery copy was saved.");
+    return;
+  }
+  const delay = upload.attempts >= 4 ? 45_000 : [1_500, 3_000, 6_000, 10_000][upload.attempts - 1] ?? 10_000;
+  upload.timer = setTimeout(() => transmitRecordingUpload(upload), delay);
+  upload.timer.unref?.();
+}
+
+function abandonPendingRecordingUpload(upload: PendingRecordingUpload, message: string) {
+  if (upload.timer) clearTimeout(upload.timer);
+  upload.timer = null;
+  if (pendingRecordingUploads.get(upload.taskId) === upload) pendingRecordingUploads.delete(upload.taskId);
+  forwardDesktopAgentEvent({ type: "desktop_agent.event", taskId: upload.taskId, eventType: "failed", detail: message });
+  upload.reject(new Error(message));
+}
+
+function cancelPendingRecordingUploads(reason: string) {
+  for (const upload of pendingRecordingUploads.values()) abandonPendingRecordingUpload(upload, reason);
+}
+
+function retryPendingRecordingUploads() {
+  for (const upload of pendingRecordingUploads.values()) transmitRecordingUpload(upload);
+}
+
+async function cacheDesktopRecording(taskId: string, payload: string) {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(payload)) {
+    throw new Error("The desktop recording could not be cached because its encoding is invalid.");
+  }
+  if (Buffer.byteLength(payload, "base64") > 40 * 1024 * 1024) throw new Error("The desktop recording exceeds the 40 MB local cache limit.");
+  const backupDir = join(app.getPath("userData"), "desktop-agent-recordings");
+  let destinationDir = backupDir;
+  let selectedFolder = false;
+  try {
+    const settings = JSON.parse(await readFile(join(app.getPath("userData"), "asset-storage.json"), "utf8")) as { directory?: unknown };
+    if (typeof settings.directory === "string" && isAbsolute(settings.directory)) {
+      destinationDir = resolve(settings.directory);
+      selectedFolder = true;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  try {
+    await mkdir(destinationDir, { recursive: true });
+    const safeTaskId = taskId.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 80) || "task";
+    const fileName = `helstera-recording-${safeTaskId}-${Date.now()}.webm`;
+    const target = join(destinationDir, fileName);
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    await writeFile(temporary, Buffer.from(payload, "base64"), { flag: "wx" });
+    await rename(temporary, target);
+    if (!selectedFolder) await pruneDesktopRecordingCache(backupDir);
+    return target;
+  } catch (error) {
+    if (selectedFolder) {
+      await mkdir(backupDir, { recursive: true });
+      const fileName = `helstera-recording-${taskId}-${Date.now()}.webm`;
+      const target = join(backupDir, fileName);
+      const temporary = `${target}.${randomUUID()}.tmp`;
+      await writeFile(temporary, Buffer.from(payload, "base64"), { flag: "wx" });
+      await rename(temporary, target);
+      await pruneDesktopRecordingCache(backupDir);
+      return target;
+    }
+    throw new Error("The desktop recording could not be saved to local recovery storage.", { cause: error });
   }
 }
 
-async function startNativeScreenRecording(options: { withAudio?: boolean } = {}): Promise<NativeScreenRecording> {
-  const { desktopCapturer } = await import("electron");
+async function cacheDesktopScreenshot(taskId: string, payload: string, extension: "jpg" | "png") {
+  const dataUrl = payload.match(/^data:image\/(?:jpeg|png);base64,([\s\S]*)$/i);
+  const encoded = dataUrl?.[1] ?? payload;
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+    throw new Error("The desktop screenshot encoding is invalid.");
+  }
+  const screenshot = Buffer.from(encoded, "base64");
+  if (!screenshot.length || screenshot.length > 8 * 1024 * 1024) throw new Error("The desktop screenshot exceeds the local cache limit.");
+  const safeTaskId = taskId.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 80) || "task";
+  const fileName = `helstera-screenshot-${safeTaskId}-${Date.now()}.${extension}`;
+  return cacheDesktopAssetBytes(fileName, screenshot);
+}
+
+async function cacheDesktopAssetBytes(fileName: string, bytes: Buffer) {
+  const backupDir = join(app.getPath("userData"), "desktop-agent-assets");
+  let destinationDir = backupDir;
+  let selectedFolder = false;
+  try {
+    const settings = JSON.parse(await readFile(join(app.getPath("userData"), "asset-storage.json"), "utf8")) as { directory?: unknown };
+    if (typeof settings.directory === "string" && isAbsolute(settings.directory)) {
+      destinationDir = resolve(settings.directory);
+      selectedFolder = true;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  try {
+    await mkdir(destinationDir, { recursive: true });
+    const target = join(destinationDir, fileName);
+    await writeAtomicAsset(target, bytes);
+    if (!selectedFolder) await pruneDesktopAssetCache(backupDir);
+    return target;
+  } catch (error) {
+    if (!selectedFolder) throw error;
+    await mkdir(backupDir, { recursive: true });
+    const target = join(backupDir, fileName);
+    await writeAtomicAsset(target, bytes);
+    await pruneDesktopAssetCache(backupDir);
+    return target;
+  }
+}
+
+async function writeAtomicAsset(target: string, bytes: Buffer) {
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  await writeFile(temporary, bytes, { flag: "wx" });
+  await rename(temporary, target);
+}
+
+async function pruneDesktopAssetCache(directory: string) {
+  const retentionMs = 3 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - retentionMs;
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.startsWith("helstera-") || !/\.(?:webm|jpg|png)$/i.test(entry.name)) continue;
+    const path = join(directory, entry.name);
+    const info = await stat(path);
+    if (info.mtimeMs < cutoff) await rm(path);
+  }
+}
+
+async function pruneDesktopRecordingCache(directory: string) {
+  const retentionMs = 3 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - retentionMs;
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.startsWith("helstera-recording-") || !entry.name.endsWith(".webm")) continue;
+    const path = join(directory, entry.name);
+    const info = await stat(path);
+    if (info.mtimeMs < cutoff) await rm(path);
+  }
+}
+
+async function startNativeScreenRecording(taskId: string, options: { withAudio?: boolean } = {}): Promise<NativeScreenRecording> {
+  const release = recorderLock.acquire(taskId);
+  try {
+    const active = await startNativeScreenRecordingUnlocked(options);
+    return {
+      stop: async () => {
+        try {
+          return await active.stop();
+        } finally {
+          release();
+        }
+      },
+    };
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
+
+async function startNativeScreenRecordingUnlocked(options: { withAudio?: boolean } = {}): Promise<NativeScreenRecording> {
+  const { desktopCapturer, screen } = await import("electron");
   const sources = await desktopCapturer.getSources({
     types: ["screen"],
     thumbnailSize: { width: 1, height: 1 },
   });
-  const source = sources[0];
+  if (sources.length === 0) throw new Error("No screen source is available for native recording.");
+  // Prefer the display that hosts the active window; fall back to the primary display.
+  let targetDisplay = screen.getPrimaryDisplay();
+  try {
+    const { getActiveWindow } = await import("@nut-tree/nut-js");
+    const region = await (await getActiveWindow()).region;
+    const centerX = region.left + region.width / 2;
+    const centerY = region.top + region.height / 2;
+    targetDisplay =
+      screen.getAllDisplays().find((display) => {
+        const { x, y, width, height } = display.bounds;
+        return centerX >= x && centerX < x + width && centerY >= y && centerY < y + height;
+      }) ?? targetDisplay;
+  } catch {
+    /* fall back to the primary display */
+  }
+  const source =
+    sources.find((candidate) => candidate.display_id === String(targetDisplay.id)) ?? sources[0];
   if (!source) throw new Error("No screen source is available for native recording.");
   const recorder = await ensureRecorderWindow();
   const withAudio = options.withAudio !== false;
@@ -1427,36 +1861,46 @@ async function ensureRecorderWindow() {
   return recorderWindow;
 }
 
-async function startDesktopRecording(browser: BrowserWindow) {
-  const recorder = await ensureRecorderWindow();
-  recorder.webContents.send("recorder.start");
-  let busy = false;
-  const timer = setInterval(() => {
-    if (busy || recorder.isDestroyed() || browser.isDestroyed()) return;
-    busy = true;
-    void browser.webContents
-      .capturePage()
-      .then((image) => {
-        if (!recorder.isDestroyed())
-          recorder.webContents.send(
-            "recorder.frame",
-            image.toJPEG(70).toString("base64"),
-          );
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        busy = false;
-      });
-  }, 200);
-  return { recorder, timer };
+async function startDesktopRecording(browser: BrowserWindow, taskId: string) {
+  const release = recorderLock.acquire(taskId);
+  try {
+    const recorder = await ensureRecorderWindow();
+    recorder.webContents.send("recorder.start");
+    let busy = false;
+    const timer = setInterval(() => {
+      if (busy || recorder.isDestroyed() || browser.isDestroyed()) return;
+      busy = true;
+      void browser.webContents
+        .capturePage()
+        .then((image) => {
+          if (!recorder.isDestroyed())
+            recorder.webContents.send(
+              "recorder.frame",
+              image.toJPEG(70).toString("base64"),
+            );
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          busy = false;
+        });
+    }, 200);
+    return { recorder, timer, release };
+  } catch (error) {
+    release();
+    throw error;
+  }
 }
 
 async function stopDesktopRecording(active: {
   recorder: BrowserWindow;
   timer: ReturnType<typeof setInterval>;
+  release: () => void;
 }) {
   clearInterval(active.timer);
-  if (active.recorder.isDestroyed()) return null;
+  if (active.recorder.isDestroyed()) {
+    active.release();
+    return null;
+  }
   return new Promise<string | null>((resolve) => {
     let settled = false;
     let timeout: ReturnType<typeof setTimeout>;
@@ -1475,7 +1919,7 @@ async function stopDesktopRecording(active: {
     }, 8_000);
     ipcMain.once("recorder.complete", onComplete);
     active.recorder.webContents.send("recorder.stop");
-  });
+  }).finally(active.release);
 }
 
 async function captureEmbeddedPage(task: any) {
@@ -1484,7 +1928,7 @@ async function captureEmbeddedPage(task: any) {
     throw new Error("桌面内嵌浏览器未打开。");
   desktopTaskTabs.set(String(task.taskId), browser);
   const recording = task.recordVideo
-    ? await startDesktopRecording(browser)
+    ? await startDesktopRecording(browser, String(task.taskId))
     : null;
   let recordingBase64: string | null = null;
   const startUrl = new URL(String(task.startUrl));
@@ -1629,6 +2073,8 @@ function finishDesktopAgentTask(taskId: string) {
   desktopAgentTasks.delete(taskId);
   desktopTaskTabs.delete(taskId);
   desktopAgentRounds.delete(taskId);
+  desktopAgentDeadlineWarnings.delete(taskId);
+  desktopAgentInterruptedTasks.delete(taskId);
   const recording = nativeTaskRecordings.get(taskId);
   if (recording) {
     nativeTaskRecordings.delete(taskId);
@@ -1639,6 +2085,8 @@ function finishDesktopAgentTask(taskId: string) {
 async function completeDesktopAgentTask(taskId: string) {
   const task = desktopAgentTasks.get(taskId);
   if (!task) return;
+  const stoppedAtDeadline = desktopAgentDeadlineWarnings.has(taskId);
+  const recoveredAfterInterruption = desktopAgentInterruptedTasks.has(taskId);
   try {
     let recordingBase64: string | null = null;
     const recording = nativeTaskRecordings.get(taskId);
@@ -1653,14 +2101,22 @@ async function completeDesktopAgentTask(taskId: string) {
         sessionType: process.env.XDG_SESSION_TYPE,
         preferVision: task.executionMode === "visual_ocr",
       });
-      const summary = [`Active window: ${evidence.windowTitle}`, evidence.ocrText].filter(Boolean).join("\n\n").slice(0, 8_000);
+      const summary = [
+        stoppedAtDeadline ? "Time limit reached. The current action finished; remaining actions were skipped." : null,
+        `Active window: ${evidence.windowTitle}`,
+        evidence.ocrText,
+      ].filter(Boolean).join("\n\n").slice(0, 8_000);
       if (recordingBase64) await sendRecordingPayload(taskId, recordingBase64);
       sendAssistant({
         type: "desktop_agent.event",
         taskId,
-        eventType: "completed",
+        eventType: stoppedAtDeadline || recoveredAfterInterruption ? "failed" : "completed",
         progress: 100,
-        detail: "Native window task completed.",
+        detail: stoppedAtDeadline
+          ? "Time limit reached after the current action. Latest screen evidence was saved; remaining actions were skipped."
+          : recoveredAfterInterruption
+            ? "The desktop session was interrupted. Latest screen evidence was saved; review it before retrying unfinished actions."
+          : "Native window task completed.",
         result: {
           summary,
           evidence: [{ kind: "window", title: evidence.windowTitle, excerpt: evidence.controls.map((control) => control.title).join("; ").slice(0, 8_000) }, ...(evidence.ocrText ? [{ kind: "ocr", title: evidence.windowTitle, excerpt: evidence.ocrText }] : [])],
@@ -1673,14 +2129,23 @@ async function completeDesktopAgentTask(taskId: string) {
       if (!browser || browser.isDestroyed()) throw new Error("The task browser was closed before the plan finished.");
       const page = task.capabilities.includes("browser.read") ? await readEmbeddedPage(browser) : undefined;
       const screenshotBase64 = task.capabilities.includes("browser.capture") ? (await browser.webContents.capturePage()).toJPEG(76).toString("base64") : undefined;
-      const summary = [page?.title, page?.description, ...(page?.headings ?? []).slice(0, 5)].filter(Boolean).join("\n").slice(0, 8_000);
+      const summary = [
+        stoppedAtDeadline ? "Time limit reached. The current action finished; remaining actions were skipped." : null,
+        page?.title,
+        page?.description,
+        ...(page?.headings ?? []).slice(0, 5),
+      ].filter(Boolean).join("\n").slice(0, 8_000);
       if (recordingBase64) await sendRecordingPayload(taskId, recordingBase64);
       sendAssistant({
         type: "desktop_agent.event",
         taskId,
-        eventType: "completed",
+        eventType: stoppedAtDeadline || recoveredAfterInterruption ? "failed" : "completed",
         progress: 100,
-        detail: "Desktop browser task completed.",
+        detail: stoppedAtDeadline
+          ? "Time limit reached after the current action. Latest page evidence was saved; remaining actions were skipped."
+          : recoveredAfterInterruption
+            ? "The desktop session was interrupted. Latest page evidence was saved; review it before retrying unfinished actions."
+          : "Desktop browser task completed.",
         result: {
           summary,
           ...(page ? { page, evidence: [{ kind: "page", sourceUrl: page.url, title: page.title, excerpt: summary }] } : {}),
@@ -1698,6 +2163,10 @@ async function completeDesktopAgentTask(taskId: string) {
 async function continueDesktopAgentPlan(taskId: string) {
   const task = desktopAgentTasks.get(taskId);
   if (!task) return;
+  if (desktopAgentDeadlineWarnings.has(taskId)) {
+    await completeDesktopAgentTask(taskId);
+    return;
+  }
   const plan = desktopAgentPlans.get(taskId) ?? [];
   const action = plan[0];
   if (!action) {
@@ -1754,10 +2223,31 @@ async function runDesktopAgentTask(rawTask: unknown) {
     return;
   }
   const task = parsed.data;
+  if (!desktopAgentTasks.has(task.taskId) && desktopAgentTasks.size >= MAX_ACTIVE_DESKTOP_AGENT_TASKS) {
+    sendAssistant({
+      type: "desktop_agent.event",
+      taskId: task.taskId,
+      eventType: "failed",
+      detail: "The desktop Agent is handling the maximum number of active tasks. Retry after one finishes.",
+    });
+    return;
+  }
+  desktopAgentTasks.set(task.taskId, task);
   try {
+    const planAccepted = await confirmDesktopAgentPlan(task, task.plannedActions);
+    if (!planAccepted) {
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId: task.taskId,
+        eventType: "canceled",
+        detail: "User canceled the task before execution.",
+      });
+      finishDesktopAgentTask(task.taskId);
+      return;
+    }
     if (task.capabilities.includes("browser.record")) {
       try {
-        nativeTaskRecordings.set(task.taskId, await startNativeScreenRecording());
+        nativeTaskRecordings.set(task.taskId, await startNativeScreenRecording(task.taskId));
       } catch (error) {
         sendAssistant({
           type: "desktop_agent.event",
@@ -1866,6 +2356,105 @@ async function runDesktopAgentTask(rawTask: unknown) {
   }
 }
 
+async function confirmDesktopAgentPlan(task: DesktopAgentTask, actions: DesktopAgentAction[]) {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error("The desktop window is unavailable for plan review.");
+  const english = !app.getLocale().toLowerCase().startsWith("zh");
+  const response = await dialog.showMessageBox(mainWindow, {
+    type: "question",
+    title: english ? "Review Agent plan" : "确认 Agent 计划",
+    message: english ? "Review the task before the Agent starts." : "Agent 开始前，请确认这份任务计划。",
+    detail: formatDesktopPlanReview({ goal: task.goal, executionMode: task.executionMode, actions, english }),
+    buttons: english ? ["Start task", "Cancel task"] : ["开始任务", "取消任务"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  return response.response === 0;
+}
+
+async function resumeDesktopAgentTasks(rawTasks: unknown) {
+  if (!Array.isArray(rawTasks)) return;
+  for (const entry of rawTasks) {
+    if (!entry || typeof entry !== "object") continue;
+    const resume = entry as { task?: unknown; pendingApprovals?: unknown };
+    const parsed = desktopAgentTaskSchema.safeParse(resume.task);
+    if (!parsed.success) continue;
+    const task = parsed.data;
+    if (!desktopAgentTasks.has(task.taskId) && desktopAgentTasks.size >= MAX_ACTIVE_DESKTOP_AGENT_TASKS) {
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId: task.taskId,
+        eventType: "failed",
+        detail: "The desktop Agent reached its active task limit while reconnecting. Review task history before retrying.",
+      });
+      continue;
+    }
+    const pendingApprovals = Array.isArray(resume.pendingApprovals) ? resume.pendingApprovals as Array<{
+      approvalId: string;
+      action: DesktopAgentAction;
+      expiresAt: string;
+    }> : [];
+
+    desktopAgentTasks.set(task.taskId, task);
+    if (isNativeDesktopTask(task)) {
+      desktopTaskTabs.set(task.taskId, null);
+    } else {
+      const browser = embeddedBrowserWindow && !embeddedBrowserWindow.isDestroyed()
+        ? embeddedBrowserWindow
+        : task.targetUrl ? await openEmbeddedBrowser(task.targetUrl).then(() => embeddedBrowserWindow) : null;
+      if (!browser || browser.isDestroyed()) {
+        sendAssistant({
+          type: "desktop_agent.event",
+          taskId: task.taskId,
+          eventType: "failed",
+          detail: "The desktop session restarted and its isolated browser could not be restored. Review saved evidence before retrying.",
+        });
+        finishDesktopAgentTask(task.taskId);
+        continue;
+      }
+      desktopTaskTabs.set(task.taskId, browser);
+    }
+
+    const approvalActions = pendingApprovals.map((approval) => ({ ...approval.action, approvalId: approval.approvalId }));
+    if (approvalActions.length) {
+      desktopAgentPlans.set(task.taskId, approvalActions);
+      for (const approval of pendingApprovals) forwardDesktopAgentEvent({
+        type: "desktop_agent.event",
+        taskId: task.taskId,
+        canvasId: task.canvasId,
+        eventType: "approval_required",
+        approvalId: approval.approvalId,
+        expiresAt: approval.expiresAt,
+        action: approval.action,
+        detail: "A pending action was restored after reconnecting.",
+      });
+      continue;
+    }
+
+    desktopAgentInterruptedTasks.add(task.taskId);
+    if (isNativeDesktopTask(task)) {
+      desktopAgentPlans.set(task.taskId, []);
+      desktopAgentRounds.set(task.taskId, 0);
+      forwardDesktopAgentEvent({
+        type: "desktop_agent.event",
+        taskId: task.taskId,
+        eventType: "progress",
+        progress: 5,
+        detail: "Connection restored. Re-observing the active window before choosing the next action.",
+      });
+      await continueDesktopAgentPlan(task.taskId);
+      continue;
+    }
+
+    const safeActions: DesktopAgentAction[] = [];
+    if (task.capabilities.includes("browser.read")) safeActions.push({ taskId: task.taskId, requestId: `${task.taskId}:recovery:read`, kind: "read_page" });
+    if (task.capabilities.includes("browser.capture")) safeActions.push({ taskId: task.taskId, requestId: `${task.taskId}:recovery:capture`, kind: "capture_screen" });
+    desktopAgentPlans.set(task.taskId, safeActions);
+    if (safeActions.length) await continueDesktopAgentPlan(task.taskId);
+    else await completeDesktopAgentTask(task.taskId);
+  }
+}
+
 async function executeDesktopAgentAction(rawAction: unknown) {
   const parsed = desktopAgentActionSchema.safeParse(rawAction);
   if (!parsed.success) return;
@@ -1942,7 +2531,7 @@ async function executeDesktopAgentAction(rawAction: unknown) {
         if (!result.found) throw new Error(`wait_for_text timed out after ${Math.round(result.elapsedMs / 1000)}s: the text never appeared.`);
       } else if (action.kind === "start_recording") {
         if (nativeTaskRecordings.has(action.taskId)) throw new Error("A native recording is already active for this task.");
-        nativeTaskRecordings.set(action.taskId, await startNativeScreenRecording());
+        nativeTaskRecordings.set(action.taskId, await startNativeScreenRecording(action.taskId));
       } else if (action.kind === "stop_recording") {
         const active = nativeTaskRecordings.get(action.taskId);
         if (!active) throw new Error("No native recording is active for this task.");
@@ -2053,6 +2642,10 @@ async function executeDesktopAgentAction(rawAction: unknown) {
     if (pending?.[0]?.requestId === action.requestId) pending.shift();
     await continueDesktopAgentPlan(action.taskId);
   } catch (error) {
+    if (desktopAgentDeadlineWarnings.has(action.taskId)) {
+      await completeDesktopAgentTask(action.taskId);
+      return;
+    }
     sendAssistant({
       type: "desktop_agent.event",
       taskId: action.taskId,
@@ -2217,8 +2810,8 @@ async function executeDesktopAction(message: any) {
     });
 }
 
-function connectEmbeddedAssistant(wssUrl: string, code: string) {
-  if (assistantSocket?.readyState === 1)
+function connectEmbeddedAssistant(wssUrl: string, code: string, retrying = false) {
+  if (assistantSocket && [0, 1].includes(assistantSocket.readyState))
     return { ok: true, message: "已经连接" };
   const endpoint = new URL(wssUrl);
   const localDevelopment =
@@ -2233,24 +2826,47 @@ function connectEmbeddedAssistant(wssUrl: string, code: string) {
     throw new Error("只允许连接 Helstera 的 WSS 助手地址。");
   endpoint.search = "";
   endpoint.hash = "";
-  const Socket = (globalThis as typeof globalThis & { WebSocket?: any })
-    .WebSocket;
-  if (!Socket) throw new Error("当前 Electron 运行时不支持 WebSocket。");
+  if (retrying) {
+    if (!assistantReconnectEnabled || assistantEndpoint !== endpoint.toString()) return { ok: false, message: "Desktop connection retry was canceled." };
+  } else {
+    assistantEndpoint = endpoint.toString();
+    assistantReconnectEnabled = true;
+    assistantReconnectAttempts = 0;
+    if (assistantReconnectTimer) clearTimeout(assistantReconnectTimer);
+    assistantReconnectTimer = null;
+  }
+  const Socket = WebSocket;
   const credential = assistantSessionToken
     ? `session_token=${encodeURIComponent(assistantSessionToken)}`
     : `code=${encodeURIComponent(code)}`;
+  if (!assistantSessionToken && !code) throw new Error("Desktop session has no reusable reconnect token. Pair the desktop assistant again.");
   const separator = endpoint.toString().includes("?") ? "&" : "?";
-  assistantSocket = new Socket(
+  const generation = ++assistantSocketGeneration;
+  const socket = new Socket(
     `${endpoint.toString()}${separator}${credential}`,
   );
-  assistantSocket.onopen = () =>
+  assistantSocket = socket;
+  socket.onerror = (error: { message?: string }) => {
+    if (generation !== assistantSocketGeneration) return;
+    console.error("[desktop-assistant] websocket connection failed", error?.message ?? error);
+    forwardDesktopAgentEvent({
+      type: "desktop_agent.event",
+      eventType: "failed",
+      detail: "Desktop assistant connection failed. Check the pairing code and try again.",
+    });
+  };
+  socket.onopen = () => {
+    if (generation !== assistantSocketGeneration) return;
+    assistantReconnectAttempts = 0;
     sendAssistant({
       type: "assistant.ready",
       browser: "Electron Chrome",
       platform: process.platform,
       clientKind: "desktop-app",
     });
-  assistantSocket.onmessage = (event: any) => {
+  };
+  socket.onmessage = (event: any) => {
+    if (generation !== assistantSocketGeneration) return;
     let message: any;
     try {
       message = JSON.parse(String(event.data));
@@ -2262,6 +2878,81 @@ function connectEmbeddedAssistant(wssUrl: string, code: string) {
         assistantSessionToken = String(message.sessionToken);
       assistantConnectionId = String(message.connectionId ?? "");
       publishDesktopMcpTools();
+      retryPendingRecordingUploads();
+      return;
+    }
+    if (message.type === "desktop_agent.recording_received") {
+      const taskId = String(message.taskId ?? "");
+      const upload = pendingRecordingUploads.get(taskId);
+      if (upload && upload.uploadId === message.uploadId) {
+        if (upload.timer) clearTimeout(upload.timer);
+        pendingRecordingUploads.delete(taskId);
+        upload.resolve();
+        forwardDesktopAgentEvent({
+          type: "desktop_agent.event",
+          taskId,
+          eventType: "asset_created",
+          detail: "Recording upload was saved to the project asset library.",
+        });
+      }
+      return;
+    }
+    if (message.type === "desktop_agent.recording_rejected") {
+      const taskId = String(message.taskId ?? "");
+      const upload = pendingRecordingUploads.get(taskId);
+      if (upload && upload.uploadId === message.uploadId) {
+        if (upload.timer) clearTimeout(upload.timer);
+        pendingRecordingUploads.delete(taskId);
+        upload.reject(new Error(String(message.reason ?? "Recording upload was rejected; local copy is available.")));
+      }
+      return;
+    }
+    if (message.type === "desktop_agent.approval_pending") {
+      forwardDesktopAgentEvent({
+        ...message,
+        type: "desktop_agent.event",
+        eventType: "approval_required",
+      });
+      return;
+    }
+    if (message.type === "desktop_agent.task_interrupted") {
+      const taskId = String(message.taskId ?? "");
+      forwardDesktopAgentEvent({
+        ...message,
+        type: "desktop_agent.event",
+        eventType: "failed",
+        detail: String(message.error ?? "Desktop connection was interrupted. Review saved evidence before retrying."),
+      });
+      finishDesktopAgentTask(taskId);
+      return;
+    }
+    if (message.type === "desktop_agent.approval_expired") {
+      forwardDesktopAgentEvent({
+        ...message,
+        type: "desktop_agent.event",
+        eventType: "approval_expired",
+      });
+      return;
+    }
+    if (message.type === "desktop_agent.deadline_warning") {
+      const taskId = String(message.taskId ?? "");
+      if (desktopAgentTasks.has(taskId)) desktopAgentDeadlineWarnings.add(taskId);
+      forwardDesktopAgentEvent({
+        ...message,
+        type: "desktop_agent.event",
+        eventType: "deadline_warning",
+      });
+      return;
+    }
+    if (message.type === "desktop_agent.action_denied") {
+      const taskId = String(message.taskId ?? "");
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId,
+        eventType: "failed",
+        detail: String(message.reason ?? "The approved action was denied."),
+      });
+      finishDesktopAgentTask(taskId);
       return;
     }
     if (message.type === "desktop.mcp.call") void runDesktopMcpCall(message);
@@ -2280,6 +2971,8 @@ function connectEmbeddedAssistant(wssUrl: string, code: string) {
       );
     if (message.type === "website_capture.action_execute")
       void executeDesktopAction(message);
+    if (message.type === "desktop_agent.resume")
+      void resumeDesktopAgentTasks(message.tasks);
     if (message.type === "desktop_agent.task")
       void runDesktopAgentTask(message.task);
     if (message.type === "desktop_agent.plan_next") {
@@ -2290,6 +2983,19 @@ function connectEmbeddedAssistant(wssUrl: string, code: string) {
         if (desktopAgentTasks.has(taskId) && parsedActions.success && parsedActions.data.length > 0) {
           if (round > MAX_NATIVE_AGENT_ROUNDS) {
             await completeDesktopAgentTask(taskId);
+            return;
+          }
+          const task = desktopAgentTasks.get(taskId);
+          if (!task) return;
+          const planAccepted = await confirmDesktopAgentPlan(task, parsedActions.data);
+          if (!planAccepted) {
+            sendAssistant({
+              type: "desktop_agent.event",
+              taskId,
+              eventType: "canceled",
+              detail: "User canceled the next action batch before execution.",
+            });
+            finishDesktopAgentTask(taskId);
             return;
           }
           desktopAgentRounds.set(taskId, round);
@@ -2340,14 +3046,14 @@ function connectEmbeddedAssistant(wssUrl: string, code: string) {
     if (message.type === "desktop_agent.action")
       void executeDesktopAgentAction(message.action);
     if (message.type === "desktop_agent.stop") {
-      desktopAgentTasks.delete(String(message.taskId ?? ""));
-      desktopTaskTabs.delete(String(message.taskId ?? ""));
+      const taskId = String(message.taskId ?? "");
       sendAssistant({
         type: "desktop_agent.event",
-        taskId: message.taskId,
+        taskId,
         eventType: "failed",
         detail: String(message.reason ?? "桌面协作任务已停止"),
       });
+      finishDesktopAgentTask(taskId);
     }
     if (message.type === "website_capture.stop")
       sendAssistant({
@@ -2356,15 +3062,40 @@ function connectEmbeddedAssistant(wssUrl: string, code: string) {
         message: "用户停止了桌面浏览任务",
       });
   };
-  assistantSocket.onclose = () => {
+  socket.onclose = (event: { code?: number }) => {
+    if (generation !== assistantSocketGeneration) return;
     for (const controller of desktopMcpCalls.values()) controller.abort();
     desktopMcpCalls.clear();
     assistantSocket = null;
-    assistantSessionToken = "";
     assistantConnectionId = "";
-    desktopTaskTabs.clear();
+    if (!shouldReconnectAssistant(Number(event?.code ?? 1006))) {
+      assistantReconnectEnabled = false;
+      assistantSessionToken = "";
+      cancelPendingRecordingUploads("Desktop connection authentication failed. A local recording recovery copy was saved.");
+      return;
+    }
+    scheduleAssistantReconnect();
   };
   return { ok: true, message: "正在连接" };
+}
+
+function scheduleAssistantReconnect() {
+  if (!assistantReconnectEnabled || !assistantEndpoint || assistantReconnectTimer) return;
+  if (!assistantSessionToken) {
+    console.error("[desktop-assistant] reconnect paused because no reusable session token is available");
+    return;
+  }
+  const delayMs = assistantReconnectDelay(assistantReconnectAttempts++);
+  assistantReconnectTimer = setTimeout(() => {
+    assistantReconnectTimer = null;
+    try {
+      connectEmbeddedAssistant(assistantEndpoint, "", true);
+    } catch (error) {
+      console.error("[desktop-assistant] reconnect attempt failed", error);
+      scheduleAssistantReconnect();
+    }
+  }, delayMs);
+  assistantReconnectTimer.unref?.();
 }
 
 ipcMain.handle("assistant.open-embedded", (_event, url: string) =>
@@ -2376,6 +3107,13 @@ ipcMain.handle(
     connectEmbeddedAssistant(input.wssUrl, input.code),
 );
 ipcMain.handle("assistant.disconnect-embedded", () => {
+  assistantReconnectEnabled = false;
+  assistantEndpoint = "";
+  assistantReconnectAttempts = 0;
+  assistantSocketGeneration += 1;
+  if (assistantReconnectTimer) clearTimeout(assistantReconnectTimer);
+  assistantReconnectTimer = null;
+  cancelPendingRecordingUploads("Desktop assistant connection was disconnected. A local recording recovery copy was saved.");
   sendAssistant({ type: "assistant.disconnect" });
   assistantSocket?.close();
   assistantSocket = null;
@@ -2434,6 +3172,16 @@ function createWindow() {
     if (target.protocol === "https:" || target.protocol === "http:")
       void shell.openExternal(target.toString());
     return { action: "deny" };
+  });
+  // 站内锚点/整页跳转：外部网站一律交给系统浏览器，绝不在应用窗口内打开。
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const decision = decideMainWindowNavigation(
+      url,
+      new URL(desktopWebsiteUrl()).origin,
+    );
+    if (decision === "allow") return;
+    event.preventDefault();
+    if (decision === "external") void shell.openExternal(url);
   });
 
   // Build application menu
@@ -2535,7 +3283,7 @@ function createWindow() {
     }
   });
 
-  const desktopHome = new URL("/desktop-app/", desktopWebsiteUrl());
+  const desktopHome = new URL(pendingMarketplaceInstallSlug ? "/desktop-app/marketplace/" : "/desktop-app/", desktopWebsiteUrl());
   void window.loadURL(desktopHome.toString());
   if (!app.isPackaged && process.env.HELSTERA_DESKTOP_URL)
     window.webContents.openDevTools();
@@ -2573,9 +3321,16 @@ app.whenReady().then(() => {
   );
   app.setAsDefaultProtocolClient("helstera");
   configureAutoUpdates();
+  const startupMarketplaceUrl = process.argv.find((argument) => parseMarketplaceInstallSlug(argument));
+  if (startupMarketplaceUrl) pendingMarketplaceInstallSlug = parseMarketplaceInstallSlug(startupMarketplaceUrl);
   createWindow();
+  registerAgentFocusShortcut(globalShortcut, {
+    onTrigger: focusAgentComposer,
+    log: (message, error) =>
+      console.warn(message, error instanceof Error ? error.message : (error ?? "")),
+  });
   const startupAuthUrl = process.argv.find((argument) =>
-    argument.startsWith(`${DESKTOP_AUTH_SCHEME}//`),
+    parseDesktopLoginCallback(argument),
   );
   if (startupAuthUrl) receiveDesktopLoginUrl(startupAuthUrl);
   if (process.platform !== "linux") {
@@ -2595,6 +3350,13 @@ app.on("activate", () => {
   } else {
     mainWindow.show();
   }
+});
+
+app.on("will-quit", () => {
+  releaseAgentFocusShortcuts(globalShortcut, {
+    log: (message, error) =>
+      console.warn(message, error instanceof Error ? error.message : (error ?? "")),
+  });
 });
 
 app.on("before-quit", () => {

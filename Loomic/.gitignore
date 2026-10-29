@@ -78,3 +78,12 @@ __pycache__/
 **/__pycache__/
 canvasId
 sessionId
+
+# Desktop build output (0.2.x installers are published, never committed)
+apps/desktop/release/
+
+# Release candidate builds (local only)
+release-candidates/
+
+# Legacy desktop build directories
+apps/desktop/release-*/

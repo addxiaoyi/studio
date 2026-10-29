@@ -142,7 +142,7 @@ registerExecutor("video_generation", async (jobId, _rawPayload, ctx: ExecutorCon
     prompt: payload.prompt,
     model,
     ...(payload.duration != null ? { duration: payload.duration } : {}),
-    ...(payload.resolution ? { resolution: payload.resolution as "480p" | "720p" | "1080p" } : {}),
+    ...(payload.resolution ? { resolution: payload.resolution as "480p" | "720p" | "768p" | "1080p" | "1088p" | "1440p" | "2160p" | "4k" } : {}),
     ...(payload.aspect_ratio ? { aspectRatio: payload.aspect_ratio } : {}),
     ...(normalizedImages.length ? { inputImages: normalizedImages } : {}),
     ...(payload.input_video ? { inputVideo: payload.input_video } : {}),

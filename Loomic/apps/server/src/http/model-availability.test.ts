@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   listModelAvailability,
+  minimumCreditCost,
   resolveConfiguredModel,
   type AvailableProviderModel,
 } from "./model-availability.js";
@@ -27,6 +28,15 @@ function dbWith(models: AvailableProviderModel[]) {
 }
 
 describe("resolveConfiguredModel", () => {
+  it("uses the configured minimum resolution price for multi-resolution video models", () => {
+    expect(minimumCreditCost({
+      ...baseModel,
+      model_id: "minimax-h3",
+      billing_unit: "per_second",
+      price_credits: 0.432,
+    })).toBeCloseTo(0.22);
+  });
+
   it("allows an explicitly requested degraded model while the provider remains healthy", async () => {
     const model = await resolveConfiguredModel(dbWith([{
       ...baseModel,

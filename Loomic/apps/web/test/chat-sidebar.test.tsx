@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -218,5 +218,46 @@ describe("ChatSidebar", () => {
     const trigger = await screen.findByRole("button", { name: "打开 AI 对话面板" });
     expect(trigger).toHaveFocus();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("passes a non-empty clientMessageId when persisting the user message", async () => {
+    const user = userEvent.setup();
+    saveMessageMock.mockResolvedValue({
+      message: {
+        id: "message-1",
+        role: "user",
+        content: "你好",
+        contentBlocks: [],
+        createdAt: "2026-03-24T00:00:00.000Z",
+      },
+    });
+
+    render(
+      <ToastProvider>
+        <TierLimitToastProvider>
+          <ChatSidebar
+            accessToken={mockToken}
+            canvasId="canvas-1"
+            open
+            onToggle={() => {}}
+            ws={mockWs}
+          />
+        </TierLimitToastProvider>
+      </ToastProvider>,
+    );
+
+    const input = await screen.findByPlaceholderText(/输入需求|start with an idea/i);
+    await user.type(input, "你好");
+
+    // The composer only submits after the session list has loaded.
+    const sendButton = await screen.findByRole("button", { name: "发送消息" });
+    await waitFor(() => expect(sendButton).toBeEnabled());
+    await user.click(sendButton);
+
+    await waitFor(() => expect(saveMessageMock).toHaveBeenCalledTimes(1));
+    const [, sessionId, payload] = saveMessageMock.mock.calls[0]!;
+    expect(sessionId).toBe("session-real");
+    expect(typeof payload.clientMessageId).toBe("string");
+    expect(payload.clientMessageId.length).toBeGreaterThan(0);
   });
 });

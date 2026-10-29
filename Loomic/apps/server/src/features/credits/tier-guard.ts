@@ -12,6 +12,7 @@ import {
   CONFIGURED_PRICE_MULTIPLIER,
   calculateConfiguredVideoPricePerSecond,
   getConfiguredBilling,
+  getConfiguredVideoPriceRates,
   TOKEN_BILLING_RESERVE_CREDITS,
 } from "@helstera/shared";
 
@@ -138,7 +139,12 @@ export function createLocalCostGuard(db: Pool): CostGuard {
       const row = rows[0];
       if (!row) return 1;
       if (row.billing_unit === "per_million_tokens") return TOKEN_BILLING_RESERVE_CREDITS;
-      if (row.billing_unit === "per_second") return Number(row.price_credits) * (params?.duration ?? 1);
+      if (row.billing_unit === "per_second") {
+        if (getConfiguredVideoPriceRates(modelId).length) {
+          return calculateVideoCost(modelId, params?.resolution, params?.duration);
+        }
+        return Number(row.price_credits) * (params?.duration ?? 1);
+      }
       return Number(row.price_credits) * CONFIGURED_PRICE_MULTIPLIER;
     },
   };

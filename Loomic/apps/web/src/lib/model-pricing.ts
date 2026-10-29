@@ -1,9 +1,13 @@
+import { getConfiguredVideoPriceRates } from "@helstera/shared";
+
 type ModelPricing = {
+  id?: string;
   billingUnit?: "per_generation" | "per_second" | "per_million_tokens";
   creditCost?: number;
   providerPriceCny?: number;
   providerInputTokenPriceCny?: number;
   providerOutputTokenPriceCny?: number;
+  resolutionRates?: Array<{ resolution: string; priceCnyPerSecond: number }>;
 };
 
 export type RuntimePriceModel = {
@@ -50,6 +54,15 @@ function yuan(value: number) {
 }
 
 export function getModelPricingLabel(model: ModelPricing, mediaType: "image" | "video") {
+  const rates = model.resolutionRates?.length
+    ? model.resolutionRates
+    : model.billingUnit === "per_second" && model.id
+      ? getConfiguredVideoPriceRates(model.id)
+      : undefined;
+  if (model.billingUnit === "per_second" && rates && rates.length > 1) {
+    const prices = rates.map((rate) => rate.priceCnyPerSecond);
+    return `${yuan(Math.min(...prices))}\u2013${yuan(Math.max(...prices))} / \u79d2 \u00b7 \u6309\u5206\u8fa8\u7387`;
+  }
   if (model.billingUnit === "per_million_tokens") {
     const input = model.providerInputTokenPriceCny;
     const output = model.providerOutputTokenPriceCny;

@@ -221,6 +221,14 @@ function CanvasPageContent() {
     };
   }, [desktopMode]);
 
+  useEffect(() => {
+    if (!searchParams.has("prompt")) return;
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("prompt");
+    const query = next.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
   const handleApiReady = useCallback((api: any) => {
     excalidrawApiRef.current = api;
     setExcalidrawApi(api);
@@ -577,6 +585,7 @@ function CanvasPageContent() {
 function desktopCanvasHrefWithParams(canvasId: string, current: { toString(): string }) {
   const next = new URLSearchParams(current.toString());
   next.set("id", canvasId);
+  next.delete("prompt");
   return `/desktop-app/canvas/?${next.toString()}`;
 }
 

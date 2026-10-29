@@ -105,6 +105,19 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     }
   });
 
+  app.get<{ Params: { taskId: string } }>("/api/website-capture/assistant/desktop-tasks/:taskId", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      const [task] = await options.assistantHub.listDesktopAgentTasks(user.id, viewer.workspace.id, request.params.taskId);
+      if (!task) return reply.code(404).send({ ok: false, error: { code: "desktop_agent_task_not_found", message: "Desktop Agent task not found." } });
+      return reply.send({ ok: true, data: task });
+    } catch (error) {
+      return sendWebsiteCaptureError(error, reply);
+    }
+  });
+
   app.post<{ Params: { taskId: string } }>("/api/website-capture/assistant/desktop-tasks/:taskId/cancel", async (request, reply) => {
     const user = await options.auth.authenticate(request);
     if (!user) return unauthorized(reply);
@@ -433,7 +446,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         payload: parameters,
       });
       if (options.creditService && estimatedCredits > 0) {
-        const transactionId = await options.creditService.deductCredits(viewer.workspace.id, user.id, estimatedCredits, job.id, `Website promo video: ${modelRow.model_id}`);
+        const transactionId = await options.creditService.deductCredits(viewer.workspace.id, user.id, estimatedCredits, job.id, "Website promo video");
         await options.jobService.setCreditsInfo(job.id, estimatedCredits, transactionId);
       }
       await options.db.query("update website_capture_tasks set promo_status='queued', promo_job_id=$2, promo_error=null, updated_at=now() where id=$1", [task.id, job.id]);

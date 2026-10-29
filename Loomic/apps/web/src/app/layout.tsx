@@ -132,9 +132,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <meta name="format-detection" content="telephone=no" />
       </head>
       <body className="min-h-screen bg-background font-sans antialiased">
-        <DesktopTitlebar />
-        <Providers>{children}</Providers>
-        <PWAInstallPrompt />
+        <Providers>
+          <DesktopTitlebar />
+          {children}
+          <PWAInstallPrompt />
+        </Providers>
 
         {/* Organization structured data — boosts search engine understanding */}
         <Script

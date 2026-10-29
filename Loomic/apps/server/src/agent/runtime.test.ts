@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import { buildUserMessage, findCanvasReferenceImage } from "./runtime.js";
 
 describe("buildUserMessage video preferences", () => {
+  it("preserves the selected output resolution in model context", () => {
+    const message = buildUserMessage("生成视频", [], undefined, [], {
+      mode: "manual", models: ["MiniMax-H3"], duration: 5, resolution: "1440p",
+    });
+    expect(message.text).toContain('resolution="1440p"');
+  });
   it("keeps automatic routing duration as structured context", () => {
     const message = buildUserMessage("生成信息流视频", [], undefined, [], {
       mode: "auto",

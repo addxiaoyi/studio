@@ -18,7 +18,7 @@ export const creditTransactionTypeSchema = {
 // ── Quality / resolution types ──────────────────────────────
 
 export type ImageQualityLevel = "standard" | "hd" | "ultra";
-export type VideoResolution = "720p" | "1080p" | "4k";
+export type VideoResolution = "480p" | "720p" | "768p" | "1080p" | "1088p" | "1440p" | "2160p" | "4k";
 
 // ── Model cost table ───────────────────────────────────────
 //
@@ -159,6 +159,20 @@ export function calculateConfiguredVideoPricePerSecond(providerCostCny: number):
 /** Final user-facing price for one agent message, in CNY/credits. */
 export const DEFAULT_AGENT_MESSAGE_PRICE_CNY = 0.01;
 
+export const HELSTERA_AGENT_TOKEN_PRICES_CNY = {
+  input: 0.1,
+  output: 0.5,
+} as const;
+
+export function calculateAgentTokenCharge(inputTokens: number, outputTokens: number): number {
+  if (!Number.isSafeInteger(inputTokens) || inputTokens < 0 || !Number.isSafeInteger(outputTokens) || outputTokens < 0) {
+    throw new Error("Agent token usage must be non-negative safe integers");
+  }
+  const raw = (inputTokens * HELSTERA_AGENT_TOKEN_PRICES_CNY.input
+    + outputTokens * HELSTERA_AGENT_TOKEN_PRICES_CNY.output) / 1_000_000;
+  return Number((Math.ceil(raw * 10_000) / 10_000).toFixed(4));
+}
+
 export const CONFIGURED_AGENT_MESSAGE_PRICES_CNY: Readonly<Record<string, number>> = {
   hy3: 0.01,
   "minimax-hy3": 0.01,
@@ -262,6 +276,7 @@ const CONFIGURED_VIDEO_PRICE_OVERRIDES_CNY_PER_SECOND: Readonly<Record<string, n
 };
 
 export const CONFIGURED_TOKEN_PRICES_CNY: Readonly<Record<string, { input: number; output: number }>> = {
+  helsteragent: HELSTERA_AGENT_TOKEN_PRICES_CNY,
   "agnes-3.0-flash": { input: 0.1, output: 0.1 },
   // Kuaipao NewAPI channel: ¥0.80/M final price after the platform 2x markup.
 
@@ -352,7 +367,7 @@ export function calculateVideoCost(
   const upstream = getUpstreamCost(modelId);
   if (upstream) {
     if (upstream.unit === "per_million_tokens") return TOKEN_BILLING_RESERVE_CREDITS;
-    return getUpstreamSellPrice(modelId)! * durationSeconds;
+    return getUpstreamSellPrice(modelId, resolution)! * durationSeconds;
   }
   if (CONFIGURED_TOKEN_PRICES_CNY[modelId]) {
     return TOKEN_BILLING_RESERVE_CREDITS;

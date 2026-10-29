@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Calendar,
@@ -11,10 +10,10 @@ import {
   UserPen,
   Users,
 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 
-import type { SkillDetail, SkillFileEntry, SkillSource } from "@helstera/shared";
+import type { SkillCategory, SkillDetail, SkillFileEntry, SkillSource, SkillUpdateRequest } from "@helstera/shared";
 
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,6 +23,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { StyledSelect } from "@/components/ui/styled-select";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Source badge config (mirrors skill-card)
@@ -41,6 +45,15 @@ const SOURCE_CONFIG: Record<
 // ---------------------------------------------------------------------------
 // FileTreeItem — expandable file row within the detail dialog
 // ---------------------------------------------------------------------------
+
+const CATEGORY_OPTIONS: Array<{ value: SkillCategory; label: string }> = [
+  { value: "design", label: "设计" },
+  { value: "generation", label: "生成" },
+  { value: "code", label: "代码" },
+  { value: "data", label: "数据" },
+  { value: "writing", label: "写作" },
+  { value: "custom", label: "自定义" },
+];
 
 function FileTreeItem({ file }: { file: SkillFileEntry }) {
   const [expanded, setExpanded] = useState(false);
@@ -80,6 +93,7 @@ interface SkillDetailDialogProps {
   onInstall: (skillId: string) => Promise<void>;
   onUninstall: (skillId: string) => Promise<void>;
   onDelete?: (skillId: string) => Promise<void>;
+  onUpdate?: (skillId: string, data: SkillUpdateRequest) => Promise<void>;
   versions?: Array<{ id: string; version: string; createdAt: string; securityAudit: { risk: "low" | "medium" | "high"; findings: string[] } }>;
   onLockVersion?: (version: string | null) => Promise<void>;
   onRollbackVersion?: (versionId: string) => Promise<void>;
@@ -92,12 +106,29 @@ export function SkillDetailDialog({
   onInstall,
   onUninstall,
   onDelete,
+  onUpdate,
   versions,
   onLockVersion,
   onRollbackVersion,
 }: SkillDetailDialogProps) {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategory, setEditCategory] = useState<SkillCategory>("custom");
+  const [editContent, setEditContent] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !skill) return;
+    setEditing(false);
+    setEditError(null);
+    setEditName(skill.name);
+    setEditDescription(skill.description);
+    setEditCategory(skill.category);
+    setEditContent(skill.skillContent);
+  }, [open, skill]);
 
   const handleAction = useCallback(
     async (action: () => Promise<void>, label: string) => {
@@ -113,7 +144,11 @@ export function SkillDetailDialog({
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
-      if (!next) setConfirmDelete(false);
+      if (!next) {
+        setConfirmDelete(false);
+        setEditing(false);
+        setEditError(null);
+      }
       onOpenChange(next);
     },
     [onOpenChange],
@@ -129,6 +164,27 @@ export function SkillDetailDialog({
   const { label: sourceLabel, icon: SourceIcon } = sourceEntry;
   const isUserSkill = skill.source === "user";
   const isInstalled = skill.installed ?? false;
+
+  const saveEdits = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!onUpdate || !editName.trim() || !editDescription.trim() || !editContent.trim()) return;
+
+    setActionLoading("save");
+    setEditError(null);
+    try {
+      await onUpdate(skill.id, {
+        name: editName.trim(),
+        description: editDescription.trim(),
+        category: editCategory,
+        skillContent: editContent,
+      });
+      setEditing(false);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "保存失败，请稍后重试。");
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const createdDate = new Date(skill.createdAt).toLocaleDateString("zh-CN", {
     year: "numeric",
@@ -147,15 +203,36 @@ export function SkillDetailDialog({
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {skill.name}
+            {editing ? "编辑自定义技能" : skill.name}
             <span className="inline-flex items-center gap-1 rounded-full glass-soft border border-border/30 px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
               <SourceIcon className="size-3" />
               {sourceLabel}
             </span>
           </DialogTitle>
-          <DialogDescription>{skill.description}</DialogDescription>
+          <DialogDescription>{editing ? "修改技能说明和 Agent 使用的 SKILL.md 内容。" : skill.description}</DialogDescription>
         </DialogHeader>
 
+        {editing ? (
+          <form id="edit-skill-form" onSubmit={saveEdits} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-skill-name">名称</Label>
+              <Input id="edit-skill-name" value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={200} required />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-skill-category">分类</Label>
+              <StyledSelect value={editCategory} onChange={(value) => setEditCategory(value as SkillCategory)} aria-label="技能分类" options={CATEGORY_OPTIONS} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-skill-description">描述</Label>
+              <Textarea id="edit-skill-description" value={editDescription} onChange={(event) => setEditDescription(event.target.value)} maxLength={2000} required />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-skill-content">SKILL.md 内容</Label>
+              <Textarea id="edit-skill-content" value={editContent} onChange={(event) => setEditContent(event.target.value)} className="min-h-56 resize-y font-mono text-xs" required />
+            </div>
+            {editError && <p role="alert" className="text-sm text-destructive">{editError}</p>}
+          </form>
+        ) : <>
         {/* Meta grid */}
         <div className="grid grid-cols-2 gap-3 text-xs">
           <div className="space-y-0.5">
@@ -215,8 +292,17 @@ export function SkillDetailDialog({
           {versions.map((version) => <div key={version.id} className="flex items-center justify-between gap-2"><span>v{version.version}</span><div className="flex gap-2"><Button size="xs" variant="outline" disabled={actionLoading === `lock-${version.version}`} onClick={() => handleAction(() => onLockVersion(version.version), `lock-${version.version}`)}>{skill.lockedVersion === version.version ? "Locked" : "Lock"}</Button><Button size="xs" variant="ghost" disabled={actionLoading === `rollback-${version.id}`} onClick={() => handleAction(() => onRollbackVersion(version.id), `rollback-${version.id}`)}>Rollback</Button></div></div>)}
           <Button size="xs" variant="ghost" onClick={() => handleAction(() => onLockVersion(null), "unlock")}>Use latest</Button>
         </div> : null}
+        </>}
         {/* Footer actions */}
         <DialogFooter>
+          {editing ? (
+            <>
+              <Button type="button" variant="ghost" size="sm" disabled={actionLoading === "save"} onClick={() => { setEditing(false); setEditError(null); }}>取消</Button>
+              <Button type="submit" form="edit-skill-form" size="sm" disabled={actionLoading === "save" || !editName.trim() || !editDescription.trim() || !editContent.trim()}>
+                {actionLoading === "save" ? "保存中…" : "保存修改"}
+              </Button>
+            </>
+          ) : <>
           {/* Delete (user skills only) */}
           {isUserSkill && onDelete && (
             <>
@@ -262,9 +348,8 @@ export function SkillDetailDialog({
             </>
           )}
 
-          {/* Edit (user skills only — placeholder) */}
-          {isUserSkill && (
-            <Button variant="outline" size="sm" disabled>
+          {isUserSkill && onUpdate && (
+            <Button variant="outline" size="sm" onClick={() => { setEditing(true); setEditError(null); }}>
               <Pen className="size-3.5" />
               编辑
             </Button>
@@ -299,6 +384,7 @@ export function SkillDetailDialog({
               {actionLoading === "install" ? "安装中..." : "安装"}
             </Button>
           )}
+          </>}
         </DialogFooter>
 
         {/* Created date small note */}

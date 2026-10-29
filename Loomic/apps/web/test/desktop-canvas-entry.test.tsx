@@ -74,6 +74,7 @@ function setDesktopShell(enabled: boolean) {
 
 beforeEach(() => {
   setDesktopShell(true);
+  document.documentElement.lang = "zh-CN";
   mocks.createProject.mockResolvedValue({
     project: { primaryCanvas: { id: "canvas-1" } },
   });
@@ -101,6 +102,7 @@ describe("Desktop Agent entry", () => {
       status: "connected",
       browser: "edge",
       platform: "windows",
+      clientKind: "browser-extension",
       connectedAt: "2030-01-01T00:00:00.000Z",
       lastSeenAt: "2030-01-01T00:00:00.000Z",
       paused: false,
@@ -113,7 +115,7 @@ describe("Desktop Agent entry", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "任务目标" }), {
       target: { value: "介绍 https://example.com" },
     });
-    fireEvent.click(screen.getByRole("radio", { name: "授权的 Edge / Chrome 标签页" }));
+    fireEvent.click(screen.getByRole("radio", { name: "授权 Edge / Chrome 标签页" }));
     fireEvent.click(screen.getByRole("button", { name: "开始任务" }));
 
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledOnce());
@@ -133,7 +135,7 @@ describe("Desktop Agent entry", () => {
   it("creates a one-time pair and opens it in the system browser", async () => {
     render(<DesktopAppPage mode="home" />);
 
-    fireEvent.click(screen.getByRole("radio", { name: "授权的 Edge / Chrome 标签页" }));
+    fireEvent.click(screen.getByRole("radio", { name: "授权 Edge / Chrome 标签页" }));
     fireEvent.click(await screen.findByRole("button", { name: "一键连接浏览器" }));
 
     await waitFor(() => expect(mocks.openBrowserPairing).toHaveBeenCalledWith(
@@ -142,16 +144,43 @@ describe("Desktop Agent entry", () => {
     expect(mocks.createWebsiteCapturePairing).toHaveBeenCalledWith("token");
   });
 
+  it("offers local desktop tasks and selects the native executor from the template", async () => {
+    render(<DesktopAppPage mode="home" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "整理本机文件窗口" }));
+
+    expect(screen.getByRole("radio", { name: "本机应用（控件树）" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("textbox", { name: "任务目标" })).toHaveValue("查看当前文件管理器窗口并按我的目标整理文件。先列出拟执行的移动或重命名，再等我确认；不要删除文件。");
+  });
+
   it("does not create a browser task before the paired browser is connected", async () => {
     render(<DesktopAppPage mode="home" />);
 
     fireEvent.change(screen.getByRole("textbox", { name: "任务目标" }), {
       target: { value: "介绍 https://example.com" },
     });
-    fireEvent.click(screen.getByRole("radio", { name: "授权的 Edge / Chrome 标签页" }));
+    fireEvent.click(screen.getByRole("radio", { name: "授权 Edge / Chrome 标签页" }));
     fireEvent.click(screen.getByRole("button", { name: "开始任务" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("浏览器尚未连接");
+    expect(mocks.createProject).not.toHaveBeenCalled();
+  });
+
+  it("blocks native desktop modes when only the browser extension is connected", async () => {
+    mocks.fetchWebsiteAssistantConnection.mockResolvedValue({
+      id: "connection-1", status: "connected", browser: "edge", platform: "windows",
+      clientKind: "browser-extension", connectedAt: "2030-01-01T00:00:00.000Z",
+      lastSeenAt: "2030-01-01T00:00:00.000Z", paused: false,
+    });
+    render(<DesktopAppPage mode="home" />);
+
+    fireEvent.change(document.getElementById("desktop-agent-prompt")!, {
+      target: { value: "Open Notepad" },
+    });
+    fireEvent.click(screen.getAllByRole("radio")[2]!);
+    fireEvent.submit(screen.getByRole("region", { name: "任务目标" }).querySelector("form")!);
+
+    expect(await screen.findByText(/本机桌面 Agent 尚未连接/)).toBeInTheDocument();
     expect(mocks.createProject).not.toHaveBeenCalled();
   });
 

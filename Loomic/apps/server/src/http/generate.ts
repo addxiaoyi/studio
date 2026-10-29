@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import {
   applicationErrorResponseSchema,
+  resolveVideoResolution,
   unauthenticatedErrorResponseSchema,
   type ImageQualityLevel,
   type VideoResolution,
@@ -46,7 +47,7 @@ const generateVideoRequestSchema = z.object({
   prompt: z.string().min(1),
   model: z.string().optional(),
   duration: z.number().int().min(3).max(30).optional(),
-  resolution: z.enum(["720p", "1080p", "4k"]).optional(),
+  resolution: z.enum(["480p", "720p", "768p", "1080p", "1088p", "1440p", "2160p", "4k"]).optional(),
   aspectRatio: z.enum(["1:1", "16:9", "9:16", "4:3", "3:4"]).optional(),
   inputImages: z.array(z.string()).max(3).optional(),
   enableAudio: z.boolean().optional(),
@@ -152,7 +153,7 @@ export async function registerGenerateRoutes(
       if (options.creditService && creditsCost > 0) {
         await options.creditService.deductCredits(
           viewer.workspace.id, user.id, creditsCost, undefined,
-          `Direct image generation: ${model}`,
+          "Image generation",
         );
         directImageDebit = { workspaceId: viewer.workspace.id, userId: user.id, amount: creditsCost };
       }
@@ -333,6 +334,7 @@ export async function registerGenerateRoutes(
       // ── Tier guard + credit checks ──
       const viewer = await options.viewerService.ensureViewer(user);
       const workspaceId = viewer.workspace.id;
+      payload.resolution = resolveVideoResolution(model, payload.resolution as VideoResolution | undefined);
       let creditsCost = 0;
       if (options.creditService && options.tierGuard) {
         // Top-up credit system: no plan-based restrictions.
@@ -415,7 +417,7 @@ export async function registerGenerateRoutes(
             user.id,
             creditsCost,
             job.id,
-            `Direct video generation: ${model}`,
+            "Video generation",
           );
           await options.jobService.setCreditsInfo(job.id, creditsCost, txId);
         } catch (deductError) {

@@ -3,22 +3,24 @@
 import {
   ChevronLeft,
   ChevronRight,
-  Clapperboard,
   Blocks,
   Code2,
   Copy,
-  FilePlus2,
-  Film,
   FolderKanban,
   Home,
   Images,
   type LucideIcon,
   Minus,
   PanelsTopLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Puzzle,
   Search,
   Settings,
   Square,
   X,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import Link from "next/link";
 import type { MouseEvent } from "react";
@@ -26,14 +28,25 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { HelsteraBrandMark } from "@/components/helstera-brand-mark";
+import { useAuth } from "@/lib/auth-context";
+import { desktopCanvasHref, getLastDesktopCanvasId } from "@/lib/desktop-canvas";
+import { useDesktopCopy, type DesktopCopy } from "@/lib/desktop-copy";
 
 type NavigationState = { canGoBack: boolean; canGoForward: boolean };
 type DesktopWindowApi = {
+  onNavigate: (callback: (path: string) => void) => () => void;
   getWindowState: () => Promise<{ isMaximized: boolean }>;
   getNavigationState: () => Promise<NavigationState>;
   navigateHistory: (direction: "back" | "forward") => Promise<NavigationState>;
   minimizeWindow: () => Promise<void>;
   maximizeWindow: () => Promise<{ isMaximized: boolean }>;
+  /** Optional: desktop builds older than 0.2.19 do not expose fullscreen yet, and the
+   *  web shell must keep working on them instead of throwing. */
+  windowFullscreen?: () => Promise<{ isFullScreen: boolean }>;
+  getFullscreenState?: () => Promise<{ isFullScreen: boolean }>;
+  onFullscreenState?: (
+    callback: (state: { isFullScreen: boolean }) => void,
+  ) => () => void;
   closeWindow: () => Promise<void>;
   onWindowState: (
     callback: (state: { isMaximized: boolean }) => void,
@@ -45,29 +58,100 @@ type DesktopRoute = {
   label: string;
   group: string;
   icon: LucideIcon;
+  primary?: boolean | undefined;
 };
 
-const routes: DesktopRoute[] = [
-  { href: "/desktop-app/", label: "Agent", group: "任务", icon: Home },
-  { href: "/desktop-app/canvas/", label: "画布", group: "任务", icon: PanelsTopLeft },
-  { href: "/desktop-app/projects/", label: "项目", group: "资源", icon: FolderKanban },
-  { href: "/desktop-app/assets/", label: "素材库", group: "资源", icon: Images },
-  { href: "/desktop-app/mcp/", label: "高级能力", group: "设置", icon: Blocks },
-  { href: "/gallery/", label: "作品集", group: "资源", icon: Images },
-  { href: "/brand-kit/", label: "品牌资产", group: "资源", icon: Settings },
-  { href: "/settings/", label: "设置", group: "管理", icon: Settings },
-  { href: "/storyboard/", label: "分镜工作台", group: "创作", icon: Clapperboard },
-  { href: "/feed/", label: "内容增长 Feed", group: "创作", icon: Film },
-  {
-    href: "/desktop-app/development/",
-    label: "本地开发与 MCP",
-    group: "辅助",
-    icon: Code2,
-  },
+type RouteCopy = DesktopCopy["chrome"]["titlebar"]["routes"];
+type RouteGroupCopy = DesktopCopy["chrome"]["titlebar"]["groups"];
+
+/** 路由表只存结构，标签与分组名一律走 desktop-copy：英文壳里不能出现中文导航。 */
+const ROUTE_DEFS: ReadonlyArray<{
+  href: string;
+  route: keyof RouteCopy;
+  group: keyof RouteGroupCopy;
+  icon: LucideIcon;
+  primary?: boolean;
+}> = [
+  { href: "/desktop-app/", route: "agent", group: "tasks", icon: Home, primary: true },
+  { href: "/desktop-app/canvas/", route: "canvas", group: "tasks", icon: PanelsTopLeft, primary: true },
+  { href: "/desktop-app/projects/", route: "projects", group: "resources", icon: FolderKanban, primary: true },
+  { href: "/desktop-app/assets/", route: "assets", group: "resources", icon: Images, primary: true },
+  { href: "/desktop-app/marketplace/", route: "marketplace", group: "extensions", icon: Puzzle, primary: true },
+  { href: "/desktop-app/settings/", route: "settings", group: "app", icon: Settings, primary: true },
+  { href: "/desktop-app/mcp/", route: "mcp", group: "settings", icon: Blocks, primary: true },
+  { href: "/desktop-app/development/", route: "development", group: "advanced", icon: Code2 },
 ];
 
 function getDesktopApi() {
   return (window as Window & { electronAPI?: DesktopWindowApi }).electronAPI;
+}
+
+const SIDEBAR_STORAGE_KEY = "helstera.desktop.sidebar";
+const SIDEBAR_COLLAPSED_WIDTH = 74;
+const SIDEBAR_DEFAULT_EXPANDED_WIDTH = 216;
+const SIDEBAR_MIN_EXPANDED_WIDTH = 168;
+const SIDEBAR_MAX_EXPANDED_WIDTH = 320;
+
+type SidebarPreferences = { collapsed: boolean; expandedWidth: number };
+
+/** 默认折叠：与改造前 74px 窄轨的渲染结果保持一致，避免首次进入桌面端就跳版。 */
+const DEFAULT_SIDEBAR_PREFERENCES: SidebarPreferences = {
+  collapsed: true,
+  expandedWidth: SIDEBAR_DEFAULT_EXPANDED_WIDTH,
+};
+
+function clampExpandedWidth(value: unknown): number {
+  const width = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(width)) return SIDEBAR_DEFAULT_EXPANDED_WIDTH;
+  return Math.min(
+    Math.max(Math.round(width), SIDEBAR_MIN_EXPANDED_WIDTH),
+    SIDEBAR_MAX_EXPANDED_WIDTH,
+  );
+}
+
+/** 读取折叠状态与展开宽度；存储不可用或数据损坏时回落到默认折叠态。 */
+function readSidebarPreferences(): SidebarPreferences {
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    if (!raw) return DEFAULT_SIDEBAR_PREFERENCES;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return DEFAULT_SIDEBAR_PREFERENCES;
+    const record = parsed as Partial<SidebarPreferences>;
+    return {
+      collapsed:
+        typeof record.collapsed === "boolean"
+          ? record.collapsed
+          : DEFAULT_SIDEBAR_PREFERENCES.collapsed,
+      expandedWidth: clampExpandedWidth(record.expandedWidth),
+    };
+  } catch {
+    return DEFAULT_SIDEBAR_PREFERENCES;
+  }
+}
+
+function persistSidebarPreferences(preferences: SidebarPreferences): void {
+  try {
+    window.localStorage.setItem(
+      SIDEBAR_STORAGE_KEY,
+      JSON.stringify(preferences),
+    );
+  } catch {
+    // 隐私模式或配额耗尽时保持在当前会话内生效，不影响折叠本身。
+  }
+}
+
+/** 折叠状态落到根元素 data 属性，展开宽度落到 CSS 变量，样式侧统一在 globals.css 消费。 */
+function applySidebarPreferences(preferences: SidebarPreferences): void {
+  const root = document.documentElement;
+  root.dataset.sidebarCollapsed = preferences.collapsed ? "true" : "false";
+  root.style.setProperty(
+    "--desktop-sidebar-expanded-width",
+    `${preferences.expandedWidth}px`,
+  );
+  root.style.setProperty(
+    "--desktop-sidebar-collapsed-width",
+    `${SIDEBAR_COLLAPSED_WIDTH}px`,
+  );
 }
 
 function matchesRoute(route: DesktopRoute, pathname: string | null, search: string) {
@@ -77,15 +161,33 @@ function matchesRoute(route: DesktopRoute, pathname: string | null, search: stri
   const matchesPath = normalizedPath === "/desktop-app"
     ? pathname === normalizedPath
     : pathname === normalizedPath || pathname.startsWith(`${normalizedPath}/`);
-  return matchesPath && (!routeSearch || routeSearch === search);
+  const matchesAdvanced = normalizedPath === "/desktop-app/mcp" && pathname.startsWith("/desktop-app/development");
+  return (matchesPath || matchesAdvanced) && (!routeSearch || routeSearch === search);
 }
 
 export function DesktopTitlebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { user } = useAuth();
+  const { copy } = useDesktopCopy();
+  const chrome = copy.chrome.titlebar;
+  const routes = useMemo<DesktopRoute[]>(
+    () =>
+      ROUTE_DEFS.map((def) => ({
+        href: def.href,
+        label: chrome.routes[def.route],
+        group: chrome.groups[def.group],
+        icon: def.icon,
+        primary: def.primary,
+      })),
+    [chrome],
+  );
+  const userId = user?.id;
   const [routeSearch, setRouteSearch] = useState("");
+  const [lastCanvasId, setLastCanvasId] = useState<string | null>(null);
   const [api, setApi] = useState<DesktopWindowApi | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
   const [history, setHistory] = useState<NavigationState>({
     canGoBack: false,
     canGoForward: false,
@@ -93,8 +195,22 @@ export function DesktopTitlebar() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [chromeError, setChromeError] = useState<string | null>(null);
+  const [sidebar, setSidebar] = useState<SidebarPreferences>(
+    DEFAULT_SIDEBAR_PREFERENCES,
+  );
+  const [pendingWindowCommand, setPendingWindowCommand] = useState<
+    "minimize" | "maximize" | "fullscreen" | "close" | null
+  >(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const quickOpenTriggerRef = useRef<HTMLButtonElement>(null);
+  // 记录「是谁打开的 quick-open」，关闭时把焦点还回去，避免焦点掉回 body。
+  const quickOpenReturnFocusRef = useRef<HTMLElement | null>(null);
+  // The window-bridge wiring must run once per user. Depending on the `router` object
+  // made it re-run on every render, and each re-run re-read the window state — which
+  // silently reverted maximize/fullscreen the user had just toggled.
+  const routerRef = useRef(router);
+  routerRef.current = router;
 
   useEffect(() => {
     const bridge = getDesktopApi();
@@ -104,6 +220,15 @@ export function DesktopTitlebar() {
     window.addEventListener("popstate", syncRouteSearch);
     window.addEventListener("desktop:route-changed", syncRouteSearch);
     setApi(bridge);
+    const stopNavigate = bridge.onNavigate((path) => {
+      const desktopPath = path.startsWith("/desktop-app/")
+        ? path
+        : "/desktop-app" + (path.startsWith("/") ? path : "/" + path);
+      const destination = desktopCanvasHref(desktopPath, getLastDesktopCanvasId(userId));
+      routerRef.current.replace(destination);
+      setRouteSearch(destination.split("?")[1] ?? "");
+      window.dispatchEvent(new Event("desktop:route-changed"));
+    });
     void bridge
       .getWindowState()
       .then((state) => setIsMaximized(state.isMaximized))
@@ -115,14 +240,38 @@ export function DesktopTitlebar() {
     const stopWindowUpdates = bridge.onWindowState((state) =>
       setIsMaximized(state.isMaximized),
     );
+    const stopFullscreenUpdates = bridge.onFullscreenState?.((state) =>
+      setIsFullScreen(state.isFullScreen),
+    );
+    void bridge
+      .getFullscreenState?.()
+      .then((state) => setIsFullScreen(state.isFullScreen))
+      .catch(() => {});
     const stopHistoryUpdates = bridge.onNavigationState(setHistory);
     return () => {
       window.removeEventListener("popstate", syncRouteSearch);
       window.removeEventListener("desktop:route-changed", syncRouteSearch);
+      stopNavigate();
       stopWindowUpdates();
+      stopFullscreenUpdates?.();
       stopHistoryUpdates();
     };
-  }, []);
+  }, [userId]);
+
+  useEffect(() => {
+    const syncCanvas = () => setLastCanvasId(getLastDesktopCanvasId(userId));
+    syncCanvas();
+    window.addEventListener("desktop:canvas-changed", syncCanvas);
+    return () => window.removeEventListener("desktop:canvas-changed", syncCanvas);
+  }, [userId]);
+
+  // 刷新后恢复上次的折叠状态与展开宽度：先读存储，再同时写进状态与根元素。
+  useEffect(() => {
+    if (!api) return;
+    const preferences = readSidebarPreferences();
+    setSidebar(preferences);
+    applySidebarPreferences(preferences);
+  }, [api]);
 
   useEffect(() => {
     if (!quickOpen) return;
@@ -131,23 +280,30 @@ export function DesktopTitlebar() {
     if (typeof dialog.showModal === "function") dialog.showModal();
     else dialog.setAttribute("open", "");
     searchRef.current?.focus();
+    // 浏览器原生 Escape 会先触发 dialog 的 close 事件（走 onClose → setQuickOpen(false)），
+    // 因此焦点归还必须放在这个 effect 的清理函数里，才能覆盖 Escape、点选结果、编程关闭三条路径。
+    const returnTarget =
+      quickOpenReturnFocusRef.current ?? quickOpenTriggerRef.current;
     return () => {
-      if (!dialog.open) return;
-      if (typeof dialog.close === "function") dialog.close();
-      else dialog.removeAttribute("open");
+      if (dialog.open) {
+        if (typeof dialog.close === "function") dialog.close();
+        else dialog.removeAttribute("open");
+      }
+      quickOpenReturnFocusRef.current = null;
+      if (returnTarget?.isConnected) returnTarget.focus();
     };
   }, [quickOpen]);
 
   useEffect(() => {
-    function openQuickSwitcher(event: KeyboardEvent) {
+    // 与下面的 openQuickSwitcher 不同名：同名会在闭包里递归调到监听器自身。
+    function handleQuickSwitcherHotkey(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setQuery("");
-        setQuickOpen(true);
+        openQuickSwitcher();
       }
     }
-    window.addEventListener("keydown", openQuickSwitcher);
-    return () => window.removeEventListener("keydown", openQuickSwitcher);
+    window.addEventListener("keydown", handleQuickSwitcherHotkey);
+    return () => window.removeEventListener("keydown", handleQuickSwitcherHotkey);
   }, []);
 
   const filteredRoutes = useMemo(() => {
@@ -156,13 +312,14 @@ export function DesktopTitlebar() {
     return routes.filter((route) =>
       `${route.label} ${route.group}`.toLocaleLowerCase().includes(normalized),
     );
-  }, [query]);
+  }, [query, routes]);
 
   if (!api || pathname?.startsWith("/auth/")) return null;
 
   function navigateTo(href: string) {
-    router.replace(href);
-    setRouteSearch(href.split("?")[1] ?? "");
+    const destination = desktopCanvasHref(href, getLastDesktopCanvasId(userId) ?? lastCanvasId);
+    router.replace(destination);
+    setRouteSearch(destination.split("?")[1] ?? "");
     window.dispatchEvent(new Event("desktop:route-changed"));
     setQuickOpen(false);
   }
@@ -180,6 +337,21 @@ export function DesktopTitlebar() {
     setQuickOpen(false);
   }
 
+  /** 打开 quick-open 前记住焦点来源：显式传入的触发按钮优先，其次当前焦点元素。 */
+  function rememberQuickOpenReturnFocus(origin?: HTMLElement | null) {
+    const active = document.activeElement;
+    const focused =
+      active instanceof HTMLElement && active !== document.body ? active : null;
+    quickOpenReturnFocusRef.current =
+      origin ?? focused ?? quickOpenTriggerRef.current;
+  }
+
+  function openQuickSwitcher(origin?: HTMLElement | null) {
+    rememberQuickOpenReturnFocus(origin);
+    setQuery("");
+    setQuickOpen(true);
+  }
+
   function navigateHistory(direction: "back" | "forward") {
     setChromeError(null);
     void api
@@ -188,47 +360,85 @@ export function DesktopTitlebar() {
       .catch(() => setChromeError("页面导航失败，请重试。"));
   }
 
-  function toggleMaximize() {
-    setChromeError(null);
-    void api
-      ?.maximizeWindow()
-      .then((state) => setIsMaximized(state.isMaximized))
-      .catch(() => setChromeError("窗口大小调整失败。"));
+  function toggleSidebar() {
+    const next: SidebarPreferences = {
+      collapsed: !sidebar.collapsed,
+      expandedWidth: sidebar.expandedWidth,
+    };
+    setSidebar(next);
+    applySidebarPreferences(next);
+    persistSidebarPreferences(next);
   }
 
-  function runWindowCommand(command: "minimize" | "close") {
+  function runWindowCommand(command: "minimize" | "maximize" | "fullscreen" | "close") {
+    // 一条命令在途时锁住整组窗口按钮：既防连点重复关窗，也让 :disabled 态真实可见。
+    if (pendingWindowCommand) return;
     setChromeError(null);
+    setPendingWindowCommand(command);
+    const failureMessage =
+      command === "minimize"
+        ? "窗口最小化失败。"
+        : command === "maximize"
+          ? "窗口大小调整失败。"
+          : command === "fullscreen"
+            ? "切换全屏失败。"
+            : "窗口关闭失败。";
     const action =
-      command === "minimize" ? api?.minimizeWindow() : api?.closeWindow();
-    void action?.catch(() =>
-      setChromeError(
-        command === "minimize" ? "窗口最小化失败。" : "窗口关闭失败。",
-      ),
-    );
+      command === "minimize"
+        ? api?.minimizeWindow()
+        : command === "close"
+          ? api?.closeWindow()
+          : command === "fullscreen"
+            ? api
+                ?.windowFullscreen?.()
+                .then((state) => setIsFullScreen(state.isFullScreen))
+            : api?.maximizeWindow().then((state) => setIsMaximized(state.isMaximized));
+
+    if (!action) {
+      setPendingWindowCommand(null);
+      return;
+    }
+    void action
+      .catch(() => setChromeError(failureMessage))
+      .finally(() => setPendingWindowCommand(null));
   }
 
   return (
     <>
       <header
         className="helstera-desktop-titlebar"
-        aria-label="Helstera 桌面导航"
+        aria-label={chrome.navLabel}
       >
         <div className="helstera-desktop-titlebar__start">
           <Link
             href="/desktop-app/"
             className="helstera-desktop-titlebar__brand"
-            aria-label="Helstera Desktop Agent"
+            aria-label={chrome.brand}
           >
             <HelsteraBrandMark size="sm" />
           </Link>
+          <button
+            type="button"
+            className="helstera-desktop-titlebar__sidebar-toggle"
+            aria-label={sidebar.collapsed ? chrome.expandSidebar : chrome.collapseSidebar}
+            aria-expanded={!sidebar.collapsed}
+            title={sidebar.collapsed ? chrome.expandSidebar : chrome.collapseSidebar}
+            onClick={toggleSidebar}
+          >
+            {sidebar.collapsed ? (
+              <PanelLeftOpen aria-hidden="true" />
+            ) : (
+              <PanelLeftClose aria-hidden="true" />
+            )}
+          </button>
           <div
             className="helstera-desktop-titlebar__history"
-            aria-label="页面历史"
+            aria-label={chrome.history}
           >
             <button
               type="button"
-              aria-label="后退"
-              title="后退"
+              aria-label={chrome.back}
+              title={chrome.back}
               disabled={!history.canGoBack}
               onClick={() => navigateHistory("back")}
             >
@@ -236,8 +446,8 @@ export function DesktopTitlebar() {
             </button>
             <button
               type="button"
-              aria-label="前进"
-              title="前进"
+              aria-label={chrome.forward}
+              title={chrome.forward}
               disabled={!history.canGoForward}
               onClick={() => navigateHistory("forward")}
             >
@@ -246,9 +456,9 @@ export function DesktopTitlebar() {
           </div>
           <nav
             className="helstera-desktop-titlebar__nav"
-            aria-label="常用工作区"
+            aria-label={chrome.primaryNav}
           >
-            {routes.slice(0, 5).map((route) => {
+            {routes.filter((route) => route.primary).map((route) => {
               const Icon = route.icon;
               return (
                 <Link
@@ -268,34 +478,34 @@ export function DesktopTitlebar() {
           </nav>
         </div>
         <button
+          ref={quickOpenTriggerRef}
           type="button"
           className="helstera-desktop-titlebar__quick-open"
-          onClick={() => {
-            setQuery("");
-            setQuickOpen(true);
-          }}
+          onClick={() => openQuickSwitcher(quickOpenTriggerRef.current)}
         >
           <Search aria-hidden="true" />
-          <span>跳转到工作区或功能</span>
+          <span>{chrome.quickOpen}</span>
           <kbd>Ctrl K</kbd>
         </button>
         <div
           className="helstera-desktop-titlebar__controls"
-          aria-label="窗口控制"
+          aria-label={chrome.windowControls}
         >
           <button
             type="button"
-            aria-label="最小化"
-            title="最小化"
+            aria-label={chrome.minimize}
+            title={chrome.minimize}
+            disabled={pendingWindowCommand !== null}
             onClick={() => runWindowCommand("minimize")}
           >
             <Minus aria-hidden="true" />
           </button>
           <button
             type="button"
-            aria-label={isMaximized ? "还原" : "最大化"}
-            title={isMaximized ? "还原" : "最大化"}
-            onClick={toggleMaximize}
+            aria-label={isMaximized ? chrome.restore : chrome.maximize}
+            title={isMaximized ? chrome.restore : chrome.maximize}
+            disabled={pendingWindowCommand !== null || isFullScreen}
+            onClick={() => runWindowCommand("maximize")}
           >
             {isMaximized ? (
               <Copy aria-hidden="true" />
@@ -303,11 +513,28 @@ export function DesktopTitlebar() {
               <Square aria-hidden="true" />
             )}
           </button>
+          {typeof api?.windowFullscreen === "function" ? (
+            <button
+              type="button"
+              aria-label={isFullScreen ? chrome.exitFullscreen : chrome.enterFullscreen}
+              aria-pressed={isFullScreen}
+              title={isFullScreen ? chrome.exitFullscreen : chrome.enterFullscreen}
+              disabled={pendingWindowCommand !== null}
+              onClick={() => runWindowCommand("fullscreen")}
+            >
+              {isFullScreen ? (
+                <Minimize2 aria-hidden="true" />
+              ) : (
+                <Maximize2 aria-hidden="true" />
+              )}
+            </button>
+          ) : null}
           <button
             type="button"
             className="helstera-desktop-titlebar__close"
-            aria-label="关闭"
-            title="关闭"
+            aria-label={chrome.close}
+            title={chrome.close}
+            disabled={pendingWindowCommand !== null}
             onClick={() => runWindowCommand("close")}
           >
             <X aria-hidden="true" />
@@ -323,7 +550,7 @@ export function DesktopTitlebar() {
       <dialog
         ref={dialogRef}
         className="helstera-desktop-switcher"
-        aria-label="快速跳转"
+        aria-label={chrome.quickSwitcher}
         onClose={closeQuickSwitcher}
       >
         <div className="helstera-desktop-switcher__search">
@@ -332,14 +559,14 @@ export function DesktopTitlebar() {
             ref={searchRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索页面和工作区"
-            aria-label="搜索页面和工作区"
+            placeholder={chrome.searchPlaceholder}
+            aria-label={chrome.searchPlaceholder}
           />
           <kbd>ESC</kbd>
         </div>
         <ul
           className="helstera-desktop-switcher__results"
-          aria-label="匹配的工作区"
+          aria-label={chrome.matches}
         >
           {filteredRoutes.length ? (
             filteredRoutes.map((route) => {
@@ -361,7 +588,7 @@ export function DesktopTitlebar() {
               );
             })
           ) : (
-            <p className="helstera-desktop-switcher__empty">没有匹配的功能</p>
+            <p className="helstera-desktop-switcher__empty">{chrome.noMatches}</p>
           )}
         </ul>
       </dialog>

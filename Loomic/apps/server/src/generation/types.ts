@@ -54,7 +54,7 @@ export interface ImageProvider {
 export interface VideoGenerateParams {
   prompt: string;
   model: string;
-  resolution?: "480p" | "720p" | "1080p";
+  resolution?: "480p" | "720p" | "768p" | "1080p" | "1088p" | "1440p" | "2160p" | "4k";
   duration?: number;
   aspectRatio?: string;
   inputImages?: string[];
@@ -109,7 +109,7 @@ export interface VideoModelInfo extends ModelInfo {
   limits: {
     maxDuration: number;
     allowedDurations?: number[];
-    maxResolution: "480p" | "720p" | "1080p" | "2160p";
+    maxResolution: "480p" | "720p" | "768p" | "1080p" | "1088p" | "1440p" | "2160p";
     maxInputImages: number;
   };
   /** Verified provider pricing, separate from Helstera's own credit balance. */

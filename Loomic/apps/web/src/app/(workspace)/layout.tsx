@@ -29,6 +29,8 @@ const routeTitles: Record<string, string> = {
   "/brand-kit": "品牌套件",
   "/team": "团队",
   "/skills": "技能",
+  "/marketplace": "Agent 市场",
+  "/agent-history": "Agent 任务历史",
   "/settings": "设置",
 };
 

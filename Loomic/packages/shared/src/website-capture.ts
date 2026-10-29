@@ -23,6 +23,7 @@ export const websiteCaptureAssistantConnectionSchema = z.object({
   status: z.enum(["connected", "paused", "disconnected", "revoked"]),
   browser: z.enum(["chrome", "edge", "unknown"]),
   platform: z.enum(["windows", "macos", "linux", "unknown"]),
+  clientKind: z.enum(["browser-extension", "desktop-app", "unknown"]).optional(),
   connectedAt: z.string(),
   lastSeenAt: z.string(),
   paused: z.boolean(),

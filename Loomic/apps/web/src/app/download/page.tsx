@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowLeft, Download, Laptop, Puzzle, ShieldCheck, Sparkles } from "lucide-react";
 
 import { DesktopDownloadList } from "@/components/desktop-download-list";
+import { DesktopToastProvider } from "@/components/desktop-toast";
 
 export const metadata = {
   title: "Helstera Desktop 下载",
@@ -11,6 +12,7 @@ export const metadata = {
 
 export default function DownloadPage() {
   return (
+    <DesktopToastProvider>
     <main className="min-h-screen bg-background px-5 py-7 text-foreground sm:px-8 sm:py-10">
       <div className="mx-auto max-w-4xl">
         <Link href="/" className="inline-flex min-h-9 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -74,5 +76,6 @@ export default function DownloadPage() {
         </section>
       </div>
     </main>
+    </DesktopToastProvider>
   );
 }

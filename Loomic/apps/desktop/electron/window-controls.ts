@@ -3,6 +3,8 @@ type SenderEvent = { sender: unknown };
 type DesktopWindow = {
   isDestroyed(): boolean;
   isMaximized(): boolean;
+  isFullScreen(): boolean;
+  setFullScreen(fullScreen: boolean): void;
   minimize(): void;
   maximize(): void;
   unmaximize(): void;
@@ -35,6 +37,12 @@ type WindowControlOptions = {
 };
 
 type NavigationState = { canGoBack: boolean; canGoForward: boolean };
+
+type FullScreenState = { isFullScreen: boolean };
+
+function fullScreenState(window: DesktopWindow): FullScreenState {
+  return { isFullScreen: window.isFullScreen() };
+}
 
 function requireMainWindow(
   event: SenderEvent,
@@ -71,6 +79,15 @@ export function registerWindowControlHandlers(
     else window.maximize();
     return { isMaximized: window.isMaximized() };
   });
+  ipc.handle("window-fullscreen", (event) => {
+    const window = requireMainWindow(event, options);
+    if (window.isFullScreen()) window.setFullScreen(false);
+    else window.setFullScreen(true);
+    return fullScreenState(window);
+  });
+  ipc.handle("desktop.fullscreen-state", (event) =>
+    fullScreenState(requireMainWindow(event, options)),
+  );
   ipc.handle("window-close", (event) => {
     const window = requireMainWindow(event, options);
     if (options.platform === "darwin") window.hide();
@@ -111,7 +128,16 @@ export function observeWindowState(window: DesktopWindow): () => void {
       );
     }
   };
+  const publishFullScreenState = () => {
+    if (!window.isDestroyed()) {
+      window.webContents.send(
+        "desktop:fullscreen-changed",
+        fullScreenState(window),
+      );
+    }
+  };
   const windowEvents = ["maximize", "unmaximize", "restore"];
+  const fullScreenEvents = ["enter-full-screen", "leave-full-screen"];
   const navigationEvents = [
     "did-navigate",
     "did-navigate-in-page",
@@ -119,15 +145,40 @@ export function observeWindowState(window: DesktopWindow): () => void {
   ];
 
   for (const event of windowEvents) window.on(event, publishWindowState);
+  for (const event of fullScreenEvents) window.on(event, publishFullScreenState);
   for (const event of navigationEvents)
     window.webContents.on(event, publishNavigationState);
 
   return () => {
     for (const event of windowEvents) window.off(event, publishWindowState);
+    for (const event of fullScreenEvents)
+      window.off(event, publishFullScreenState);
     for (const event of navigationEvents)
       window.webContents.off(event, publishNavigationState);
   };
 }
+
+/**
+ * 主窗口内发生整页跳转（will-navigate）时的处置：
+ * 同源页面留在应用内，外部 http(s) 一律交给系统浏览器，其余协议直接拦截。
+ */
+export function decideMainWindowNavigation(
+  rawUrl: string,
+  appOrigin: string,
+): NavigationDecision {
+  let target: URL;
+  try {
+    target = new URL(rawUrl);
+  } catch {
+    return "deny";
+  }
+  if (target.origin === appOrigin) return "allow";
+  return target.protocol === "https:" || target.protocol === "http:"
+    ? "external"
+    : "deny";
+}
+
+type NavigationDecision = "allow" | "external" | "deny";
 
 export function observeMainWindowLifecycle(
   window: DesktopWindow,

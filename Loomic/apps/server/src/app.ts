@@ -131,6 +131,7 @@ import { registerUploadRoutes } from "./http/uploads.js";
 import { registerSkillRoutes } from "./http/skills.js";
 import { registerLocalSkillRoutes } from "./http/local-skills.js";
 import { registerMarketplaceRoutes } from "./http/skills-marketplace.js";
+import { registerAgentMarketplaceRoutes } from "./http/agent-marketplace.js";
 import { registerViewerRoutes } from "./http/viewer.js";
 import { registerDouyinMcpRoutes } from "./http/douyin-mcp.js";
 import { registerDouyinWebhookRoutes } from "./http/douyin-webhook.js";
@@ -147,6 +148,7 @@ import {
   type StorageProvider,
 } from "./storage/index.js";
 import { cleanExpiredGeneratedAssets } from "./features/assets/asset-retention.js";
+import { purgeExpiredJobPayloads } from "./features/jobs/job-retention.js";
 import type { RequestAuthenticator } from "./auth/types.js";
 
 export type BuildAppOptions = {
@@ -270,6 +272,20 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         isAssetRetentionRunning = false;
       }
     };
+    let isJobRetentionRunning = false;
+    const runJobRetention = async () => {
+      if (isJobRetentionRunning) return;
+      isJobRetentionRunning = true;
+      try {
+        await purgeExpiredJobPayloads({ db: localDb });
+      } catch (error) {
+        console.error("[job-retention] cleanup failed:", error);
+      } finally {
+        isJobRetentionRunning = false;
+      }
+    };
+    void runJobRetention();
+    setInterval(() => void runJobRetention(), 6 * 60 * 60 * 1000);
     void runAssetRetention();
     setInterval(() => void runAssetRetention(), 60 * 60 * 1000);
   }
@@ -556,6 +572,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     viewerService,
     localDb,
   });
+  void registerAgentMarketplaceRoutes(app, { auth, db: localDb, viewerService });
 
   // Contact sales — public endpoint, no auth required
   void registerLocalContactSalesRoutes(app, { db: localDb });

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { type ZodTypeAny, z } from "zod";
 
-import type { DesktopMcpTool } from "@helstera/shared";
+import { isReadOnlyNativeMcpTool, type DesktopExecutionContext, type DesktopMcpTool } from "@helstera/shared";
 
 const MAX_SCHEMA_DEPTH = 8;
 const MAX_SCHEMA_PROPERTIES = 64;
@@ -24,7 +24,12 @@ type CallDesktopMcpTool = (input: {
   serverId: string;
   toolName: string;
   arguments: Record<string, unknown>;
+  desktopExecutionContext?: DesktopExecutionContext;
 }) => Promise<string>;
+
+export function canExposeNativeScreenTool(name: string) {
+  return isReadOnlyNativeMcpTool(name);
+}
 
 function boundedInteger(value: unknown, fallback: number, max: number) {
   if (typeof value !== "number" || !Number.isInteger(value)) return fallback;

@@ -47,7 +47,7 @@ export function registerGenerationApprovalRoutes(
         payload: approval.parameters,
       });
       if (options.creditService && approval.estimatedCredits > 0) {
-        const txId = await options.creditService.deductCredits(viewer.workspace.id, user.id, approval.estimatedCredits, job.id, `${approval.jobType}: ${approval.model}`);
+        const txId = await options.creditService.deductCredits(viewer.workspace.id, user.id, approval.estimatedCredits, job.id, `${approval.jobType === "video_generation" ? "Video" : "Image"} generation`);
         await options.jobService.setCreditsInfo(job.id, approval.estimatedCredits, txId);
       }
       await approvals.attachJob(approvalId, job.id);
@@ -223,7 +223,7 @@ export function registerGenerationApprovalRoutes(
       });
       if (options.creditService && approval.estimatedCredits > 0) {
         try {
-          const txId = await options.creditService.deductCredits(viewer.workspace.id, user.id, approval.estimatedCredits, job.id, `${approval.jobType}: ${approval.model}`);
+          const txId = await options.creditService.deductCredits(viewer.workspace.id, user.id, approval.estimatedCredits, job.id, `${approval.jobType === "video_generation" ? "Video" : "Image"} generation`);
           await options.jobService.setCreditsInfo(job.id, approval.estimatedCredits, txId);
         } catch (error) {
           await options.jobService.cancelJob(user, job.id).catch(() => undefined);

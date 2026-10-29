@@ -9,6 +9,7 @@ import type {
   RunCreateRequest,
 } from "@helstera/shared";
 import { getServerBaseUrl } from "../lib/env";
+import { publishRealtimeStatus } from "../lib/realtime-status";
 
 type EventCallback = (event: StreamEvent) => void;
 type RPCHandler = (
@@ -89,6 +90,7 @@ export function useWebSocket(
     ws.onopen = () => {
       console.log("[ws] connected, connectionId:", connectionIdRef.current);
       setConnected(true);
+      publishRealtimeStatus("connected");
       reconnectAttempt.current = 0;
     };
 
@@ -140,6 +142,7 @@ export function useWebSocket(
       if (wsRef.current !== ws) return;
 
       setConnected(false);
+      publishRealtimeStatus("disconnected");
       wsRef.current = null;
 
       if (event.code === 4001) {

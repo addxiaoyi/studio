@@ -77,3 +77,20 @@ it("exposes retry for a failed retryable workflow step", async () => {
   await userEvent.click(screen.getByRole("button", { name: "重试步骤" }));
   expect(api.retryAgentWorkflow).toHaveBeenCalledWith("test", "workflow-1");
 });
+
+// Batch-1 audit items 17/18: the workflow card is rendered inside the dark chat
+// drawer, so its status surfaces must use shared design tokens. Hardcoded
+// palette classes plus `dark:` overrides diverge from the token theme; this test
+// pins the token contract (not a specific hue) for the card.
+it("uses shared theme tokens instead of hardcoded palette colors", async () => {
+  api.fetchAgentWorkflow.mockResolvedValue(paused);
+
+  const { container } = render(<AgentWorkflowCard workflowId="workflow-1" />);
+  expect(await screen.findByRole("button", { name: "确认并继续" })).toBeInTheDocument();
+
+  const html = container.innerHTML;
+  expect(html).not.toMatch(/\bdark:/);
+  expect(html).not.toMatch(/-(amber|emerald|sky|red|green|blue)-\d{3}/);
+  expect(html).toContain("bg-warning/10");
+  expect(html).toContain("border-info/30");
+});

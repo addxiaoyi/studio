@@ -123,11 +123,29 @@ export async function signOutLocal(): Promise<void> {
   });
 }
 
+/**
+ * The account exists but was created through the email-code flow and has no password yet.
+ * Callers must offer the code-based path instead of repeating a doomed password attempt.
+ */
+export class PasswordNotSetError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PasswordNotSetError";
+  }
+}
+
 export async function signInLocalWithPassword(email: string, password: string) {
   const response = await localAuthFetch("/api/local-auth/password", {
     method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }),
   });
-  if (!response.ok) throw new Error("邮箱或密码不正确");
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+    const code = body?.error?.code;
+    if (code === "password_not_set" || code === "no_password") {
+      throw new PasswordNotSetError(body?.error?.message ?? "该账号还没有设置密码，请先用邮箱验证码登录");
+    }
+    throw new Error("邮箱或密码不正确");
+  }
   return (await response.json()) as { access_token: string; user: { id: string; email: string } };
 }
 

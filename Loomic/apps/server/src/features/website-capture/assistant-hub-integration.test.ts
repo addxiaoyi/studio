@@ -21,7 +21,7 @@ function createHub(options: {
     description: string;
   }) => Promise<{ found: boolean; x: number; y: number; confidence: number }>;
 } = {}) {
-  const query = vi.fn(async () => ({ rows: [] }));
+  const query = vi.fn(async (_sql?: string) => ({ rows: [] }));
   const hub = new WebsiteAssistantHub({
     db: { query } as never,
     storage: {} as never,
@@ -51,7 +51,11 @@ function activeConnection(sent: Array<Record<string, unknown>>) {
 
 describe("desktop recording chunk upload", () => {
   it("assembles ordered chunks into an evidence event and audits the recording", async () => {
-    const { hub, internals } = createHub();
+    const { hub, query, internals } = createHub();
+    query.mockImplementation(async (sql?: string) => {
+      if (sql?.includes("select status from desktop_agent_tasks")) return { rows: [{ status: "running" }] } as never;
+      return { rows: [] } as never;
+    });
     const sent: Array<Record<string, unknown>> = [];
     const live = activeConnection(sent);
     internals.connections.set(live.id, live);
@@ -64,7 +68,7 @@ describe("desktop recording chunk upload", () => {
     await internals.consumeDesktopRecordingChunk(live_, {
       type: "desktop_agent.recording_chunk",
       taskId: "00000000-0000-0000-0000-0000000000aa",
-      uploadId: "upload-1",
+      uploadId: "00000000-0000-4000-8000-000000000001",
       chunkIndex: 0,
       totalChunks: 2,
       data: "AAAA",
@@ -74,7 +78,7 @@ describe("desktop recording chunk upload", () => {
     await internals.consumeDesktopRecordingChunk(live_, {
       type: "desktop_agent.recording_chunk",
       taskId: "00000000-0000-0000-0000-0000000000aa",
-      uploadId: "upload-1",
+      uploadId: "00000000-0000-4000-8000-000000000001",
       chunkIndex: 1,
       totalChunks: 2,
       isLast: true,
@@ -105,18 +109,18 @@ describe("desktop recording chunk upload", () => {
     await internals.consumeDesktopRecordingChunk(live_, {
       type: "desktop_agent.recording_chunk",
       taskId: "00000000-0000-0000-0000-0000000000aa",
-      uploadId: "upload-2",
+      uploadId: "00000000-0000-4000-8000-000000000002",
       chunkIndex: 0,
       totalChunks: 2,
       data: "AAAA",
     });
 
     // A different connection id arrives via a cloned live object with a different id.
-    const otherLive = { ...live_, id: "00000000-0000-0000-0000-0000000000ff" };
+    const otherLive = { ...(live_ as Record<string, unknown>), id: "00000000-0000-0000-0000-0000000000ff" };
     await internals.consumeDesktopRecordingChunk(otherLive, {
       type: "desktop_agent.recording_chunk",
       taskId: "00000000-0000-0000-0000-0000000000aa",
-      uploadId: "upload-2",
+      uploadId: "00000000-0000-4000-8000-000000000002",
       chunkIndex: 1,
       totalChunks: 2,
       isLast: true,
@@ -140,7 +144,7 @@ describe("desktop recording chunk upload", () => {
     await internals.consumeDesktopRecordingChunk(live_, {
       type: "desktop_agent.recording_chunk",
       taskId: "00000000-0000-0000-0000-0000000000aa",
-      uploadId: "upload-3",
+      uploadId: "00000000-0000-4000-8000-000000000003",
       chunkIndex: -1,
       totalChunks: 2,
       data: "AAAA",

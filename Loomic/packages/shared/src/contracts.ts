@@ -267,6 +267,12 @@ export const chatMessageSchema = z.object({
 
 export const chatMessageCreateRequestSchema = z.object({
   role: z.enum(["user", "assistant"]),
+  /**
+   * Client-generated idempotency key for this message.
+   * Retries, route reloads, and reconnect re-sends reuse the same value so the
+   * server inserts each logical message once (unique on session_id + client_message_id).
+   */
+  clientMessageId: z.string().trim().min(1).max(128).optional(),
   content: z.string(),
   toolActivities: z.array(chatToolActivitySchema).nullable().optional(),
   contentBlocks: z.array(contentBlockSchema).nullable().optional(),

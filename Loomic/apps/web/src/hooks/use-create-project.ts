@@ -26,7 +26,7 @@ export function useCreateProject() {
   const router = useRouter();
   const { error: toastError } = useToast();
   const [creating, setCreating] = useState(false);
-  const pendingRef = useRef<Promise<void> | null>(null);
+  const pendingRef = useRef<Promise<boolean> | null>(null);
 
   const signOutRef = useRef(signOut);
   signOutRef.current = signOut;
@@ -41,9 +41,10 @@ export function useCreateProject() {
       videoGenerationPreference?: VideoGenerationPreference;
       model?: string;
       destination?: "canvas" | "storyboard";
+      desktopMode?: boolean;
     }) => {
       const token = session?.access_token;
-      if (!token || pendingRef.current) return pendingRef.current ?? undefined;
+      if (!token || pendingRef.current) return pendingRef.current ?? false;
 
       // Persist attachments in sessionStorage BEFORE window.open so the
       // new tab's cloned sessionStorage already contains them.
@@ -100,7 +101,11 @@ export function useCreateProject() {
       // Open the new tab synchronously within the user gesture so the
       // browser popup-blocker doesn't intervene. We'll set the real URL
       // once the API call returns.
-      const newTab = window.open("/loading-preview", "_blank");
+      const desktopMode = opts?.desktopMode ?? (
+        document.documentElement.dataset.helsteraDesktop === "true" &&
+        window.location.pathname.startsWith("/desktop-app/")
+      );
+      const newTab = desktopMode ? null : window.open("/loading-preview", "_blank");
 
       const requestKey = crypto.randomUUID();
       setCreating(true);
@@ -113,12 +118,13 @@ export function useCreateProject() {
           );
           const canvasId = result.project.primaryCanvas.id;
 
+          const canvasRoute = desktopMode ? "/desktop-app/canvas" : "/canvas";
           const url =
             opts?.destination === "storyboard"
               ? `/storyboard?projectId=${encodeURIComponent(result.project.id)}`
               : opts?.prompt
-                ? `/canvas?id=${canvasId}&prompt=${encodeURIComponent(opts.prompt)}`
-                : `/canvas?id=${canvasId}`;
+                ? `${canvasRoute}?id=${canvasId}&prompt=${encodeURIComponent(opts.prompt)}`
+                : `${canvasRoute}?id=${canvasId}`;
 
           if (newTab) {
             newTab.location.href = url;
@@ -126,15 +132,17 @@ export function useCreateProject() {
             // Popup was blocked despite sync open — fallback to in-page navigation
             routerRef.current.push(url);
           }
+          return true;
         } catch (err) {
           // Close the blank tab on failure
           newTab?.close();
           if (err instanceof ApiAuthError) {
             await signOutRef.current();
             routerRef.current.replace("/login");
-            return;
+            return false;
           }
           toastError("项目创建失败");
+          return false;
         }
       })().finally(() => {
         pendingRef.current = null;

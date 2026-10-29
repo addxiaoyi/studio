@@ -229,7 +229,7 @@ export function AgentSection({
               disabled={mediaModelsLoading}
               options={[
                 { value: "auto", label: "智能路由", note: "自动选择可用且兼容的模型" },
-                ...imageModels.map((model) => ({ value: model.id, label: model.displayName, note: `${model.id} · ${getModelPricingLabel(model, "image")}` })),
+                ...imageModels.map((model) => ({ value: model.id, label: model.displayName, note: getModelPricingLabel(model, "image") })),
               ]}
             />
           </div>
@@ -246,7 +246,7 @@ export function AgentSection({
               disabled={mediaModelsLoading}
               options={[
                 { value: "auto", label: "智能路由", note: "根据首帧、时长、分辨率和健康状态选择" },
-                ...videoModels.map((model) => ({ value: model.id, label: model.displayName, note: `${model.id} · ${model.limits?.maxResolution ?? "分辨率待配置"} · ${getModelPricingLabel(model, "video")}` })),
+                ...videoModels.map((model) => ({ value: model.id, label: model.displayName, note: `${model.limits?.maxResolution ?? "分辨率待配置"} · ${getModelPricingLabel(model, "video")}` })),
               ]}
             />
             <div className="mt-3 flex flex-wrap gap-1.5">

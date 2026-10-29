@@ -66,10 +66,16 @@ importers:
       tesseract.js:
         specifier: ^7.0.0
         version: 7.0.0(encoding@0.1.13)
+      ws:
+        specifier: ^8.22.0
+        version: 8.22.0
     devDependencies:
       '@helstera/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       '@vitejs/plugin-react':
         specifier: ^4.7.0
         version: 4.7.0(supports-color@7.2.0)(vite@5.4.21(@types/node@26.6.3)(lightningcss@1.32.0)(sass@1.51.0))
@@ -142,6 +148,9 @@ importers:
       fastify:
         specifier: ^5.12.5
         version: 5.12.5
+      global-agent:
+        specifier: ^4.1.3
+        version: 4.1.3
       google-auth-library:
         specifier: ^10.6.2
         version: 10.6.2(supports-color@7.2.0)

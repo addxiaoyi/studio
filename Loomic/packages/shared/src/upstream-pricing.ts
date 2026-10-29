@@ -1,8 +1,16 @@
+import type { VideoResolution } from "./credits.js";
+
 export type UpstreamBillingUnit = "per_second" | "per_generation" | "per_million_tokens";
 
 export type UpstreamCost = {
   unit: UpstreamBillingUnit;
   costCny: number;
+  resolutionCostsCny?: Partial<Record<VideoResolution, number>>;
+};
+
+export type ConfiguredVideoPriceRate = {
+  resolution: VideoResolution;
+  priceCnyPerSecond: number;
 };
 
 // Upstream public price snapshot. Values are already expressed in CNY per
@@ -38,7 +46,11 @@ export const UPSTREAM_COSTS: Readonly<Record<string, UpstreamCost>> = {
   "kwvideo-v2": {"unit":"per_million_tokens","costCny":29.304},
   "kwvideo-v2-quannengcankao": {"unit":"per_million_tokens","costCny":31.68},
   "kwvideo-v2-ref": {"unit":"per_million_tokens","costCny":29.304},
-  "minimax-h3": {"unit":"per_second","costCny":0.0864},
+  "minimax-h3": {
+    "unit":"per_second",
+    "costCny":0.095,
+    "resolutionCostsCny":{"480p":0.055,"768p":0.075,"1088p":0.085,"1440p":0.095},
+  },
   "minimax-h3-max": {"unit":"per_second","costCny":0.4752},
   "omni_flash-10s": {"unit":"per_generation","costCny":0.7344},
   "omni_flash-10s-fl": {"unit":"per_generation","costCny":0.7344},
@@ -82,12 +94,36 @@ export const UPSTREAM_COSTS: Readonly<Record<string, UpstreamCost>> = {
   "wan3.0-video-quannengcankao": {"unit":"per_second","costCny":0.432},
   "wan3.0-video-shouweizhen": {"unit":"per_second","costCny":0.432},
 }
-
 export function getUpstreamCost(modelId: string): UpstreamCost | null {
-  return UPSTREAM_COSTS[modelId] ?? null;
+  return UPSTREAM_COSTS[modelId.trim().toLowerCase()] ?? null;
 }
 
-export function getUpstreamSellPrice(modelId: string): number | null {
+export function getUpstreamSellPrice(modelId: string, resolution?: VideoResolution): number | null {
   const cost = getUpstreamCost(modelId);
-  return cost ? Number((cost.costCny / 0.25).toFixed(4)) : null;
+  if (!cost) return null;
+  const selected = resolveVideoResolution(modelId, resolution);
+  const resolutionCost = selected ? cost.resolutionCostsCny?.[selected] : undefined;
+  return Number(((resolutionCost ?? cost.costCny) / 0.25).toFixed(4));
+}
+
+export function resolveVideoResolution(modelId: string, requested?: VideoResolution): VideoResolution | undefined {
+  const rates = getUpstreamCost(modelId)?.resolutionCostsCny;
+  if (!rates) return requested;
+  const resolution = requested === "720p" ? "768p" : requested === "1080p" ? "1088p" : requested ?? "768p";
+  if (rates[resolution] === undefined) {
+    throw Object.assign(new Error(`Unsupported resolution for ${modelId}: ${resolution}`), { code: "invalid_input", statusCode: 422 });
+  }
+  return resolution;
+}
+
+export function getConfiguredVideoPriceRates(modelId: string): ConfiguredVideoPriceRate[] {
+  const rates = getUpstreamCost(modelId)?.resolutionCostsCny;
+  if (!rates) return [];
+  return Object.entries(rates).flatMap(([resolution, costCny]) => {
+    if (costCny == null || !Number.isFinite(costCny) || costCny <= 0) return [];
+    return [{
+      resolution: resolution as VideoResolution,
+      priceCnyPerSecond: Number((costCny / 0.25).toFixed(4)),
+    }];
+  });
 }

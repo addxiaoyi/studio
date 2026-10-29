@@ -1,6 +1,6 @@
 {
   "name": "@helstera/desktop",
-  "version": "0.2.14",
+  "version": "0.2.19",
   "private": true,
   "description": "Helstera Desktop — AI Design Studio",
   "author": "Helstera",
@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.electron.json && vite build && electron-builder",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.electron.json --noEmit",
-    "test": "vitest run --config vitest.config.ts electron/local-workspace.test.ts electron/mcp-registry.test.ts electron/window-controls.test.ts electron/browser-pairing.test.ts electron/desktop-login.test.ts electron/native-automation.test.ts",
+    "test": "vitest run --config vitest.config.ts electron/local-workspace.test.ts electron/mcp-registry.test.ts electron/window-controls.test.ts electron/global-shortcut.test.ts electron/browser-pairing.test.ts electron/desktop-login.test.ts electron/desktop-marketplace-link.test.ts electron/native-automation.test.ts electron/recorder-lock.test.ts electron/desktop-plan-review.test.ts electron/assistant-reconnect.test.ts src/AgentProgressCards.test.ts src/agent-history-store.test.ts",
     "smoke": "node scripts/smoke-desktop-agent.mjs"
   },
   "dependencies": {
@@ -19,6 +19,7 @@
     "electron-updater": "^6.3.9",
     "react": "19.0.0",
     "react-dom": "19.0.0",
+    "ws": "^8.22.0",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
@@ -30,6 +31,7 @@
     "vite": "^5.4.11",
     "vite-plugin-electron": "^0.28.8",
     "vite-plugin-electron-renderer": "^0.14.6",
+    "@types/ws": "^8.18.1",
     "vitest": "^3.2.4"
   },
   "build": {

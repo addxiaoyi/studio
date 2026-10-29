@@ -37,6 +37,9 @@ const GITHUB_API_BASE = "https://api.github.com";
 const SKILLS_SH_DISCOVERY_QUERIES = ["ai", "image", "video", "design", "code"];
 
 const FEATURED_SKILLS: MarketplaceSkill[] = [
+  { packageName: "https://github.com/anthropics/skills/tree/main/skills/frontend-design", name: "Frontend Design", description: "Anthropic 官方前端设计技能，适合构建和改造真实产品界面。", author: "Anthropic", version: "main", downloads: 0, keywords: ["frontend", "design", "ui"], homepage: "https://github.com/anthropics/skills/tree/main/skills/frontend-design", repository: "https://github.com/anthropics/skills", license: "Apache-2.0" },
+  { packageName: "https://github.com/anthropics/skills/tree/main/skills/webapp-testing", name: "Web App Testing", description: "Anthropic 官方 Web 应用测试技能，覆盖浏览器验收和回归检查。", author: "Anthropic", version: "main", downloads: 0, keywords: ["testing", "browser", "playwright"], homepage: "https://github.com/anthropics/skills/tree/main/skills/webapp-testing", repository: "https://github.com/anthropics/skills", license: "Apache-2.0" },
+  { packageName: "https://github.com/modelcontextprotocol/ext-skills/tree/main/skills/mcp-server-dev", name: "MCP Server Development", description: "MCP 官方 Skills 扩展工作组的服务开发技能。", author: "Model Context Protocol", version: "main", downloads: 0, keywords: ["mcp", "server", "tools"], homepage: "https://github.com/modelcontextprotocol/ext-skills", repository: "https://github.com/modelcontextprotocol/ext-skills", license: "Apache-2.0" },
   { packageName: "https://github.com/YouMind-OpenLab/awesome-gpt-image-2-prompts", name: "awesome-gpt-image-2-prompts", description: "GPT Image 电商、海报、产品摄影与 UI 提示词库", author: "YouMind-OpenLab", version: "main", downloads: 8500, keywords: ["image", "prompt", "ecommerce"], homepage: "https://github.com/YouMind-OpenLab/awesome-gpt-image-2-prompts", repository: "https://github.com/YouMind-OpenLab/awesome-gpt-image-2-prompts", license: "CC-BY-4.0" },
   { packageName: "https://github.com/YouMind-OpenLab/awesome-seedance-2-prompts", name: "awesome-seedance-2-prompts", description: "Seedance、Kling、Sora、Veo 视频提示词与镜头运动模板", author: "YouMind-OpenLab", version: "main", downloads: 2000, keywords: ["video", "seedance", "sora"], homepage: "https://github.com/YouMind-OpenLab/awesome-seedance-2-prompts", repository: "https://github.com/YouMind-OpenLab/awesome-seedance-2-prompts" },
   { packageName: "https://github.com/AITOOLS101/ai-image-prompt-cookbook", name: "ai-image-prompt-cookbook", description: "中文电商图片提示词模板，支持变量化复用", author: "AITOOLS101", version: "main", downloads: 1000, keywords: ["image", "ecommerce", "中文"], homepage: "https://github.com/AITOOLS101/ai-image-prompt-cookbook", repository: "https://github.com/AITOOLS101/ai-image-prompt-cookbook" },
@@ -151,7 +154,14 @@ export async function searchMarketplace(
   const safePage = Math.max(1, Math.min(page, 100));
   const safeLimit = Math.max(1, Math.min(limit, MAX_PAGE_SIZE));
   const search = query.trim();
-  if (!search) return searchSkillsSh(safeLimit);
+  if (!search) {
+    const remote = await searchSkillsSh(Math.max(0, safeLimit - FEATURED_SKILLS.length));
+    const seen = new Set(FEATURED_SKILLS.map((skill) => skill.packageName));
+    return {
+      skills: [...FEATURED_SKILLS, ...remote.skills.filter((skill) => !seen.has(skill.packageName))].slice(0, safeLimit),
+      total: FEATURED_SKILLS.length + remote.total,
+    };
+  }
   const params = new URLSearchParams({ q: `${search} SKILL.md in:readme,description`, sort: "stars", order: "desc", page: String(safePage), per_page: String(Math.min(safeLimit * 3, 100)) });
   const response = await fetch(`${GITHUB_API_BASE}/search/repositories?${params}`, { headers: { Accept: "application/vnd.github+json", "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!response.ok) {

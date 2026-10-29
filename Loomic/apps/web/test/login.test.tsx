@@ -51,7 +51,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import LoginPage from "../src/app/login/page";
-import { AuthProvider } from "../src/lib/auth-context";
+import { AuthProvider, useAuth } from "../src/lib/auth-context";
 
 describe("Login page", () => {
   beforeEach(() => {
@@ -145,6 +145,46 @@ describe("Login page", () => {
         mockPassword,
       );
       expect(mockReplace).toHaveBeenCalledWith("/home");
+    });
+  });
+
+  it("hands the signed-in session to AuthProvider so the workspace guard cannot bounce", async () => {
+    // Regression: password sign-in used to navigate without calling acceptSession, so the
+    // workspace layout still saw `user === null` and redirected straight back to /login.
+    mockSignInLocalWithPassword.mockResolvedValueOnce({
+      access_token: "session-token",
+      user: { id: "u1", email: "user@example.com" },
+    });
+
+    function SessionProbe() {
+      const { user } = useAuth();
+      return <span data-testid="session-probe">{user?.email ?? "anonymous"}</span>;
+    }
+
+    render(
+      <AuthProvider>
+        <SessionProbe />
+        <LoginPage />
+      </AuthProvider>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /use password instead|使用密码登录/i,
+      }),
+    );
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: "user@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: "MOCK_PASSWORD" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^(sign in|登录)$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("session-probe").textContent).toBe(
+        "user@example.com",
+      );
     });
   });
 

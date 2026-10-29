@@ -309,7 +309,7 @@ async function createJob(
   if (job.reused) return job;
   if (context.creditService && creditsCost > 0) {
     try {
-      const transactionId = await context.creditService.deductCredits(context.workspaceId, context.user.id, creditsCost, job.id, `Agent workflow ${jobType}: ${route.selectedModel}`);
+      const transactionId = await context.creditService.deductCredits(context.workspaceId, context.user.id, creditsCost, job.id, `Agent workflow ${jobType === "video_generation" ? "video" : "image"} generation`);
       await context.jobService!.setCreditsInfo(job.id, creditsCost, transactionId);
     } catch (error) {
       await context.jobService!.cancelJob(context.user, job.id).catch(() => undefined);

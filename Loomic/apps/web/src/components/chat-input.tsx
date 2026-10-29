@@ -128,6 +128,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     setValue(selected);
   }, []);
 
+  // #80: the desktop global shortcut (Ctrl+Shift+Space) hands focus to this composer.
+  useEffect(() => {
+    const desktop = (window as Window & {
+      electronAPI?: { onFocusAgentInput?: (callback: () => void) => () => void };
+    }).electronAPI;
+    if (!desktop?.onFocusAgentInput) return;
+    return desktop.onFocusAgentInput(() => {
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    });
+  }, []);
+
   useEffect(() => {
     const openModels = () => setModelPopoverOpen(true);
     const retryGeneration = (event: Event) => {

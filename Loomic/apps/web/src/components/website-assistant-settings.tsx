@@ -1,8 +1,44 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { DesktopAgentRole, DesktopCapability, WebsiteCaptureAssistantConnection, WebsiteCapturePairing } from "@helstera/shared";
+import type { DesktopAgentExecutionMode, DesktopAgentRole, DesktopCapability, WebsiteCaptureAssistantConnection, WebsiteCapturePairing } from "@helstera/shared";
 import { cancelDesktopAgentTask, createDesktopAgentTask, createWebsiteCapturePairing, fetchDesktopAgentTasks, fetchWebsiteAssistantConnection, resolveDesktopAgentApproval, revokeWebsiteAssistant, setWebsiteAssistantPaused, type DesktopAgentTaskResponse } from "@/lib/server-api";
+
+const MODE_CAPABILITIES: Record<DesktopAgentExecutionMode, DesktopCapability[]> = {
+  automatic: ["browser.read", "browser.navigate", "browser.scroll", "browser.capture"],
+  isolated_browser: ["browser.read", "browser.navigate", "browser.scroll", "browser.capture"],
+  connected_browser_tab: ["browser.read", "browser.navigate", "browser.scroll", "browser.capture"],
+  windows_ui: ["screen.read", "window.focus", "window.click", "window.type", "window.key", "window.drag", "window.scroll"],
+  visual_ocr: ["screen.read", "window.focus", "window.click", "window.type", "window.key", "window.drag", "window.scroll"],
+};
+const REQUIRED_MODE_CAPABILITIES: Partial<Record<DesktopAgentExecutionMode, DesktopCapability[]>> = {
+  windows_ui: ["screen.read"],
+  visual_ocr: ["screen.read"],
+};
+
+const MODE_LABELS: Record<DesktopAgentExecutionMode, string> = {
+  automatic: "自动选择", isolated_browser: "隔离浏览器", connected_browser_tab: "授权浏览器标签",
+  windows_ui: "本机控件树 / Windows UI", visual_ocr: "本机视觉 / OCR",
+};
+const EXECUTION_MODES: DesktopAgentExecutionMode[] = ["automatic", "isolated_browser", "connected_browser_tab", "windows_ui", "visual_ocr"];
+
+const MODE_DESCRIPTIONS: Record<DesktopAgentExecutionMode, string> = {
+  automatic: "Agent 根据任务选择可用的浏览器或桌面执行器。",
+  isolated_browser: "在隔离浏览器读取网页，不复用 Edge / Chrome 登录态。",
+  connected_browser_tab: "使用已配对扩展访问授权的浏览器活动标签。",
+  windows_ui: "通过桌面控件树和 Windows UI Automation 操作本机窗口。",
+  visual_ocr: "通过截图和 OCR 定位本机应用界面。",
+};
+
+function desktopAgentEventTypeLabel(eventType: string, detail?: string | null) {
+  const labels: Record<string, string> = {
+    started: "任务启动", plan: "执行计划", step: "执行步骤", evidence: "收集证据", asset_created: "素材已保存",
+    progress: "执行进度", page: "网页证据", approval_required: "等待审批",
+    completed: "已完成", failed: "失败", canceled: "已取消", reobserve: "重新观察并规划",
+    visual_grounding: detail?.includes("失败") ? "视觉定位失败" : detail?.includes("完成") ? "视觉定位完成" : "视觉定位中",
+  };
+  return labels[eventType] ?? eventType;
+}
 
 type DesktopUpdateState = {
   status: "idle" | "checking" | "available" | "downloading" | "downloaded" | "not-available" | "error";
@@ -30,6 +66,7 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
   const [desktopTasks, setDesktopTasks] = useState<DesktopAgentTaskResponse[]>([]);
   const [desktopGoal, setDesktopGoal] = useState("");
   const [desktopRole, setDesktopRole] = useState<DesktopAgentRole>("researcher");
+  const [executionMode, setExecutionMode] = useState<DesktopAgentExecutionMode>("automatic");
   const [desktopCapabilities, setDesktopCapabilities] = useState<DesktopCapability[]>(["browser.read", "browser.capture"]);
   const [taskBusy, setTaskBusy] = useState(false);
   const [cancelingTaskId, setCancelingTaskId] = useState<string | null>(null);
@@ -84,15 +121,27 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
   };
 
   const toggleCapability = (capability: DesktopCapability) => {
+    if (REQUIRED_MODE_CAPABILITIES[executionMode]?.includes(capability)) return;
     setDesktopCapabilities((current) => current.includes(capability) ? current.filter((item) => item !== capability) : [...current, capability]);
   };
+
+  const changeExecutionMode = (mode: DesktopAgentExecutionMode) => {
+    setExecutionMode(mode);
+    setDesktopCapabilities(MODE_CAPABILITIES[mode]);
+  };
+
+  const targetClient = executionMode === "connected_browser_tab" ? "browser-extension" : "desktop-app";
+  const executionClientReady = connection?.status === "connected" && connection.clientKind === targetClient;
+  const connectionHint = executionClientReady
+    ? targetClient === "desktop-app" ? "Helstera Desktop 已连接" : "Edge / Chrome 扩展已连接"
+    : targetClient === "desktop-app" ? "请启动 Helstera Desktop 并确认本机助手已连接" : "请先配对 Edge / Chrome 扩展";
 
   const submitDesktopTask = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!desktopGoal.trim() || desktopCapabilities.length === 0 || taskBusy) return;
     setTaskBusy(true); setError(null);
     try {
-      await createDesktopAgentTask(accessToken, { goal: desktopGoal.trim(), role: desktopRole, capabilities: desktopCapabilities, executionMode: "automatic", plannedActions: [], ...(embeddedUrl.trim() ? { targetUrl: embeddedUrl.trim() } : {}), maxDurationSeconds: 300, pageLimit: 3 });
+      await createDesktopAgentTask(accessToken, { goal: desktopGoal.trim(), role: desktopRole, capabilities: desktopCapabilities, executionMode, plannedActions: [], ...(embeddedUrl.trim() ? { targetUrl: embeddedUrl.trim() } : {}), maxDurationSeconds: 300, pageLimit: 3 });
       setDesktopGoal("");
       await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "桌面协作任务提交失败"); } finally { setTaskBusy(false); }
@@ -159,11 +208,20 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
         <form className="mt-3 space-y-2" onSubmit={(event) => void submitDesktopTask(event)}>
           <label className="block text-[11px] font-medium" htmlFor="desktop-agent-goal">任务目标</label>
           <textarea id="desktop-agent-goal" value={desktopGoal} onChange={(event) => setDesktopGoal(event.target.value)} placeholder="例如：读取当前页面标题、导航和主要功能" className="min-h-16 w-full resize-y rounded-md border border-border/60 bg-background px-2 py-2 text-sm" />
+          <label className="block text-[11px] font-medium" htmlFor="desktop-agent-mode">执行模式</label>
+          <select id="desktop-agent-mode" value={executionMode} onChange={(event) => changeExecutionMode(event.target.value as DesktopAgentExecutionMode)} className="h-9 rounded-md border border-border/60 bg-background px-2 text-xs">
+            {EXECUTION_MODES.map((mode) => <option key={mode} value={mode}>{MODE_LABELS[mode]}</option>)}
+          </select>
+          <p className="text-[11px] leading-5 text-muted-foreground">{MODE_DESCRIPTIONS[executionMode]}</p>
+          <p className={executionClientReady ? "text-[11px] text-emerald-700" : "text-[11px] text-amber-700"} role="status">{connectionHint}</p>
           <div className="flex flex-wrap gap-2">
             <label className="flex items-center gap-1.5 text-[11px]"><span>角色</span><select value={desktopRole} onChange={(event) => setDesktopRole(event.target.value as DesktopAgentRole)} className="h-8 rounded-md border border-border/60 bg-background px-2 text-xs"><option value="researcher">研究员</option><option value="planner">规划员</option><option value="operator">操作员</option><option value="reviewer">审阅员</option></select></label>
-            {(["browser.read", "browser.navigate", "browser.scroll", "browser.capture"] as const).map((capability) => <label key={capability} className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border/60 px-2 text-[11px]"><input type="checkbox" checked={desktopCapabilities.includes(capability)} onChange={() => toggleCapability(capability)} />{capability}</label>)}
+            {MODE_CAPABILITIES[executionMode].map((capability) => {
+              const required = REQUIRED_MODE_CAPABILITIES[executionMode]?.includes(capability) ?? false;
+              return <label key={capability} className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border/60 px-2 text-[11px]"><input type="checkbox" checked={desktopCapabilities.includes(capability)} onChange={() => toggleCapability(capability)} disabled={required} />{capability}{required ? <span className="text-muted-foreground">必需</span> : null}</label>;
+            })}
           </div>
-          <button type="submit" disabled={taskBusy || !desktopGoal.trim() || desktopCapabilities.length === 0 || connection?.status !== "connected"} className="min-h-9 rounded-md bg-foreground px-3 text-xs font-medium text-background disabled:opacity-50">{taskBusy ? "正在提交…" : "开始桌面任务"}</button>
+          <button type="submit" disabled={taskBusy || !desktopGoal.trim() || desktopCapabilities.length === 0 || !executionClientReady} className="min-h-9 rounded-md bg-foreground px-3 text-xs font-medium text-background disabled:opacity-50">{taskBusy ? "正在提交…" : "开始桌面任务"}</button>
         </form>
         {desktopTasks.length > 0 ? <div className="mt-3 space-y-2" aria-label="桌面 Agent 任务列表">{desktopTasks.slice(0, 5).map((task) => {
           const page = task.result?.page as { url?: string; title?: string; description?: string; headings?: string[]; navigation?: string[] } | undefined;
@@ -174,7 +232,7 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
               const eventResult = event.result;
               const eventPage = eventResult?.page as { title?: string; url?: string } | undefined;
               const eventScreenshot = eventResult?.screenshotAsset as { url?: string } | undefined;
-              return <li key={`${event.createdAt}-${index}`} className="text-[11px] leading-4 text-muted-foreground"><span className="font-medium text-foreground">{eventTypeLabel(event.eventType)}</span>{event.detail ? ` · ${event.detail}` : ""}{eventPage?.title ? <p className="mt-0.5 text-foreground">{eventPage.title}{eventPage.url ? ` · ${eventPage.url}` : ""}</p> : null}{eventScreenshot?.url ? <a href={eventScreenshot.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-2 underline underline-offset-2"><img src={eventScreenshot.url} alt={`桌面截图${eventPage?.title ? `：${eventPage.title}` : ""}`} className="h-16 w-28 rounded border border-border/60 object-cover" />查看截图</a> : null}</li>;
+              return <li key={`${event.createdAt}-${index}`} className="text-[11px] leading-4 text-muted-foreground"><span className="font-medium text-foreground">{desktopAgentEventTypeLabel(event.eventType, event.detail)}</span>{event.detail ? ` · ${event.detail}` : ""}{eventPage?.title ? <p className="mt-0.5 text-foreground">{eventPage.title}{eventPage.url ? ` · ${eventPage.url}` : ""}</p> : null}{eventScreenshot?.url ? <a href={eventScreenshot.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-2 underline underline-offset-2"><img src={eventScreenshot.url} alt={`桌面截图${eventPage?.title ? `：${eventPage.title}` : ""}`} className="h-16 w-28 rounded border border-border/60 object-cover" />查看截图</a> : null}</li>;
             })}</ol> : null}
             {task.pendingApprovals.map((approval) => <div key={approval.approvalId} className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5"><p className="text-[11px] font-semibold text-foreground">动作审批待处理</p><p className="mt-1 break-words text-[11px] text-foreground">{desktopActionLabel(approval.action)}</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">仅批准你看到的这一项操作。审批十分钟后失效。</p><div className="mt-2 flex gap-2"><button type="button" onClick={() => void resolveApproval(approval.approvalId, "approve")} disabled={resolvingApprovalId !== null} className="min-h-8 rounded-md bg-foreground px-2.5 text-[11px] text-background disabled:opacity-50">{resolvingApprovalId === approval.approvalId ? "处理中…" : "批准此动作"}</button><button type="button" onClick={() => void resolveApproval(approval.approvalId, "reject")} disabled={resolvingApprovalId !== null} className="min-h-8 rounded-md border border-border/70 px-2.5 text-[11px] text-foreground disabled:opacity-50">拒绝</button></div></div>)}
             {page ? <div className="mt-2 border-t border-border/50 pt-2"><p className="text-xs font-medium">{page.title || "已读取页面"}</p>{page.url ? <a href={page.url} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[11px] text-muted-foreground underline underline-offset-2">{page.url}</a> : null}{page.description ? <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{page.description}</p> : null}{page.headings?.length ? <p className="mt-1 text-[11px] leading-4 text-muted-foreground">标题：{page.headings.slice(0, 5).join(" · ")}</p> : null}{finalScreenshot?.url ? <a href={finalScreenshot.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-2 text-[11px] underline underline-offset-2"><img src={finalScreenshot.url} alt={`桌面截图：${page.title || "页面"}`} className="h-16 w-28 rounded border border-border/60 object-cover" />查看素材库截图</a> : null}</div> : null}

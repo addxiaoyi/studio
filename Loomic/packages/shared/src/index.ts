@@ -2,6 +2,7 @@
 export * from "./contracts.js";
 export * from "./credits.js";
 export * from "./model-pricing.js";
+export * from "./upstream-pricing.js";
 export * from "./errors.js";
 export * from "./events.js";
 export * from "./http.js";

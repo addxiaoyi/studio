@@ -20,9 +20,16 @@ import type { ConnectionManager } from "./connection-manager.js";
 import type { CanvasEventBuffer } from "./event-buffer.js";
 import type { ChatService } from "../features/chat/chat-service.js";
 import type { CreditService } from "../features/credits/credit-service.js";
-import { chargeAgentMessage, refundAgentMessage, type AgentMessageCharge } from "../agent/message-billing.js";
+import { chargeAgentMessage, refundAgentMessage, settleAgentMessage, usesHelsteraTokenBilling, type AgentMessageCharge } from "../agent/message-billing.js";
 import type { ContentBlock, ToolBlock } from "@helstera/shared";
+import type { RunCreateResponse } from "@helstera/shared";
 import { createPipelineLogger } from "./logger.js";
+import {
+  describeError,
+  persistFailureEvent,
+  persistWithRetry,
+  spoolFailedPersistence,
+} from "./persistence-retry.js";
 
 type RegisterWsOptions = {
   agentRuns: AgentRunService;
@@ -321,11 +328,23 @@ async function handleRunCommand(
   log.lap("resolve", { threadId: !!threadId, model: resolvedModel });
 
   let charge: AgentMessageCharge | undefined;
-  let response;
+  let response: RunCreateResponse;
   try {
     response = agentRuns.createRun(payload, {
       accessToken: authenticatedUser.accessToken,
       userId: authenticatedUser.id,
+      ...(usesHelsteraTokenBilling(resolvedModel)
+        ? { deferBillingUntilUsage: true }
+        : {}),
+      ...(services.creditService && services.viewerService && usesHelsteraTokenBilling(resolvedModel)
+        ? { onModelUsage: async (usage) => {
+            if (!charge) {
+              charge = await chargeAgentMessage({ user: authenticatedUser, modelId: resolvedModel, viewerService: services.viewerService!, creditService: services.creditService!, runId: response.runId, billOnUsage: true });
+            }
+            charge = await settleAgentMessage({ user: authenticatedUser, charge, creditService: services.creditService!, ...usage });
+          } }
+        : {}),
+      ...(services.creditService ? { onModelUsageError: (_usageRunId: string, error: unknown) => log.error("token_usage_charge_failed", { error: error instanceof Error ? error.message : String(error) }) } : {}),
       ...(resolvedModel ? { model: resolvedModel } : {}),
       ...(chatConfig.baseUrl ? { modelApiBase: chatConfig.baseUrl } : {}),
       ...(chatConfig.apiKey ? { modelApiKey: chatConfig.apiKey } : {}),
@@ -344,7 +363,9 @@ async function handleRunCommand(
 
   if (services.creditService && services.viewerService) {
     try {
-      charge = await chargeAgentMessage({
+      const modelId = (resolvedModel ?? "auto").replace(/^openai:/, "").trim().toLowerCase();
+      const usesTokenBilling = usesHelsteraTokenBilling(resolvedModel);
+      if (!usesTokenBilling) charge = await chargeAgentMessage({
         user: authenticatedUser,
         modelId: resolvedModel,
         viewerService: services.viewerService,
@@ -465,27 +486,79 @@ async function handleRunCommand(
     }
     log.lap("stream_done", { runId });
 
+    if (charge && services.creditService) {
+      const usage = agentRuns.getModelUsage(runId);
+      if (usage && charge.provisional && charge.amount > 0) {
+        charge = await settleAgentMessage({ user: authenticatedUser, charge, creditService: services.creditService, ...usage });
+      }
+    }
+
     // ── Server-side assistant message persistence ──
     if (
       services.chatService &&
       (assistantText.length > 0 || assistantBlocks.length > 0)
     ) {
-      try {
-        await services.chatService.createMessage(
-          authenticatedUser,
-          payload.sessionId,
-          {
+      const chatService = services.chatService;
+      const assistantContent = assistantText.join("");
+      const outcome = await persistWithRetry(
+        () =>
+          chatService.createMessage(authenticatedUser, payload.sessionId, {
             role: "assistant",
-            content: assistantText.join(""),
+            content: assistantContent,
             contentBlocks: assistantBlocks,
-          },
-        );
-        log.lap("assistant_message_persisted", { runId });
-      } catch (err) {
-        log.warn("assistant_message_persist_failed", {
+          }),
+        {
+          onAttemptFailed: (attempt, err) =>
+            log.warn("assistant_message_persist_retry", {
+              runId,
+              attempt,
+              error: describeError(err),
+            }),
+        },
+      );
+      if (outcome.ok) {
+        log.lap("assistant_message_persisted", {
           runId,
-          error: err instanceof Error ? err.message : String(err),
+          attempts: outcome.attempts,
         });
+      } else {
+        // Retries exhausted: keep the reply recoverable instead of dropping it.
+        const error = describeError(outcome.error);
+        const spooled = spoolFailedPersistence({
+          kind: "assistant_message_persist_failed",
+          recordedAt: new Date().toISOString(),
+          runId,
+          sessionId: payload.sessionId,
+          userId: authenticatedUser.id,
+          canvasId,
+          role: "assistant",
+          content: assistantContent,
+          contentBlocks: assistantBlocks,
+          attempts: outcome.attempts,
+          error,
+        });
+        log.error("assistant_message_persist_failed", {
+          runId,
+          attempts: outcome.attempts,
+          spooled: spooled ?? "unavailable",
+          error,
+        });
+        try {
+          await services.agentRunMetadataService?.updateRun({
+            runId,
+            status: "completed",
+            errorCode: "assistant_message_persist_failed",
+            errorMessage: error.slice(0, 240),
+          });
+        } catch (metadataError) {
+          log.warn("assistant_message_persist_marker_failed", {
+            runId,
+            error: describeError(metadataError),
+          });
+        }
+        const failureEvent = persistFailureEvent(runId);
+        services.eventBuffer?.push(canvasId, failureEvent);
+        connectionManager.pushToCanvas(canvasId, failureEvent);
       }
     }
   } catch (error) {

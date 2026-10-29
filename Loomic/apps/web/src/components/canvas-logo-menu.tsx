@@ -38,6 +38,7 @@ interface CanvasLogoMenuProps {
   accessToken: string;
   projectId: string;
   canvasId: string;
+  desktopMode?: boolean;
   // biome-ignore lint/suspicious/noExplicitAny: Excalidraw API has no public type definition
   excalidrawApi: any | null;
 }
@@ -71,6 +72,7 @@ export function CanvasLogoMenu({
   accessToken,
   projectId,
   canvasId,
+  desktopMode = false,
   excalidrawApi,
 }: CanvasLogoMenuProps) {
   const router = useRouter();
@@ -111,7 +113,7 @@ export function CanvasLogoMenu({
     setDeleting(true);
     try {
       await deleteProject(accessToken, projectId);
-      router.push("/projects");
+      router.push(desktopMode ? "/desktop-app/projects/" : "/projects");
     } catch (err) {
       console.warn("Failed to delete project:", err);
       toastError("项目删除失败");
@@ -119,7 +121,7 @@ export function CanvasLogoMenu({
       setDeleting(false);
       setConfirmingDelete(false);
     }
-  }, [accessToken, projectId, router, toastError]);
+  }, [accessToken, desktopMode, projectId, router, toastError]);
 
   const handleFileImport = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -186,11 +188,11 @@ export function CanvasLogoMenu({
         <DropdownMenuContent align="start" sideOffset={6} className="w-56 glass shadow-soft border-border/60 rounded-2xl p-1.5">
           {/* Group 1 — Navigation */}
           <DropdownMenuGroup>
-            <DropdownMenuItem onClick={() => router.push("/home")}>
+            <DropdownMenuItem onClick={() => router.push(desktopMode ? "/desktop-app/" : "/home")}>
               <Home className="size-4" />
               主页
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push("/projects")}>
+            <DropdownMenuItem onClick={() => router.push(desktopMode ? "/desktop-app/projects/" : "/projects")}>
               <FolderOpen className="size-4" />
               项目库
             </DropdownMenuItem>
@@ -200,7 +202,7 @@ export function CanvasLogoMenu({
 
           {/* Group 2 — Project actions */}
           <DropdownMenuGroup>
-            <DropdownMenuItem onClick={() => createNewProject()}>
+            <DropdownMenuItem onClick={() => void createNewProject(desktopMode ? { desktopMode: true } : undefined)}>
               <Plus className="size-4" />
               新建项目
             </DropdownMenuItem>

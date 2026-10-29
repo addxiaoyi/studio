@@ -74,6 +74,28 @@ function synthesizeLegacyBlocks(
   return blocks.length > 0 ? blocks : null;
 }
 
+const messageColumns =
+  "id, role, content, tool_activities, content_blocks, created_at";
+
+function toChatMessage(row: any): ChatMessage {
+  const contentBlocks =
+    Array.isArray(row.content_blocks) && row.content_blocks.length > 0
+      ? (row.content_blocks as ContentBlock[])
+      : synthesizeLegacyBlocks(
+          row.content,
+          row.tool_activities as unknown[] | null,
+        );
+
+  return {
+    id: row.id,
+    role: row.role as "user" | "assistant",
+    content: row.content,
+    toolActivities: row.tool_activities as ChatMessage["toolActivities"],
+    contentBlocks,
+    createdAt: row.created_at,
+  };
+}
+
 export function createChatService(options: {
   createUserClient: (accessToken: string) => DataClient;
   threadService: Pick<ThreadService, "createThreadId">;
@@ -150,7 +172,7 @@ export function createChatService(options: {
       const client = options.createUserClient(user.accessToken);
       const { data, error } = await client
         .from("chat_messages")
-        .select("id, role, content, tool_activities, content_blocks, created_at")
+        .select(messageColumns)
         .eq("session_id", sessionId)
         .order("created_at", { ascending: true });
 
@@ -158,24 +180,7 @@ export function createChatService(options: {
         throw new ChatServiceError("chat_error", "Failed to list messages.", 500);
       }
 
-      const rows = (data ?? []).map((row) => {
-        const contentBlocks =
-          Array.isArray(row.content_blocks) && row.content_blocks.length > 0
-            ? (row.content_blocks as ContentBlock[])
-            : synthesizeLegacyBlocks(
-                row.content,
-                row.tool_activities as unknown[] | null,
-              );
-
-        return {
-          id: row.id,
-          role: row.role as "user" | "assistant",
-          content: row.content,
-          toolActivities: row.tool_activities as ChatMessage["toolActivities"],
-          contentBlocks,
-          createdAt: row.created_at,
-        };
-      });
+      const rows = (data ?? []).map(toChatMessage);
 
       // Deduplicate consecutive messages with same role + content
       // (caused by dual client+server save in earlier versions)
@@ -201,11 +206,31 @@ export function createChatService(options: {
           ...(input.contentBlocks
             ? { content_blocks: input.contentBlocks as unknown as Json }
             : {}),
+          ...(input.clientMessageId
+            ? { client_message_id: input.clientMessageId }
+            : {}),
         })
-        .select("id, role, content, tool_activities, content_blocks, created_at")
+        .select(messageColumns)
         .single();
 
       if (error || !data) {
+        const isDuplicateKey =
+          Boolean(input.clientMessageId) &&
+          (error?.code === "23505" ||
+            /duplicate key|already exists/i.test(error?.message ?? ""));
+
+        if (isDuplicateKey && input.clientMessageId) {
+          const existing = await client
+            .from("chat_messages")
+            .select(messageColumns)
+            .eq("session_id", sessionId)
+            .eq("client_message_id", input.clientMessageId)
+            .maybeSingle();
+
+          // Concurrent duplicate insert: the winning row is already persisted.
+          if (existing.data) return toChatMessage(existing.data);
+        }
+
         throw new ChatServiceError("chat_error", "Failed to save message.", 500);
       }
 
@@ -215,22 +240,7 @@ export function createChatService(options: {
         .update({ updated_at: new Date().toISOString() })
         .eq("id", sessionId);
 
-      const contentBlocks =
-        Array.isArray(data.content_blocks) && data.content_blocks.length > 0
-          ? (data.content_blocks as ContentBlock[])
-          : synthesizeLegacyBlocks(
-              data.content,
-              data.tool_activities as unknown[] | null,
-            );
-
-      return {
-        id: data.id,
-        role: data.role as "user" | "assistant",
-        content: data.content,
-        toolActivities: data.tool_activities as ChatMessage["toolActivities"],
-        contentBlocks,
-        createdAt: data.created_at,
-      };
+      return toChatMessage(data);
     },
   };
 }

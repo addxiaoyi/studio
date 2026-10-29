@@ -78,17 +78,18 @@ it('announces an unknown status without enabling retry after polling failures', 
   expect(screen.queryByRole('button', { name: '重新提交任务' })).not.toBeInTheDocument();
 });
 
-it('shows the actual routed model on the successful image instead of the requested model', async () => {
+it('hides upstream model identifiers on successful image results', async () => {
   fetchJob.mockResolvedValue({ job: { ...job, status: 'succeeded',
     payload: { ...job.payload, routing: { selectedModel: 'gpt-image-2-4k', preferredModel: 'gpt-image-2', fallback: true } },
     result: { signed_url: '/api/uploads/image/file' },
   } });
   render(<ToolBlockView block={{ ...block, input: { model: 'gpt-image-2' } }} />);
   await screen.findByRole('img', { name: '原图海报' });
-  expect(screen.getAllByText('Gpt Image 2 4k')).toHaveLength(2);
+  expect(screen.getAllByText('Helstera AI').length).toBeGreaterThan(0);
+  expect(screen.queryByText('Gpt Image 2 4k')).not.toBeInTheDocument();
 });
 
-it('restores routing from the persisted result after refresh', async () => {
+it('restores routing metadata without exposing upstream model identifiers after refresh', async () => {
   fetchJob.mockResolvedValue({ job: { ...job, status: 'succeeded',
     payload: { ...job.payload, model: 'gpt-image-2' },
     result: {
@@ -99,8 +100,8 @@ it('restores routing from the persisted result after refresh', async () => {
   } });
   render(<ToolBlockView block={{ ...block, input: { model: 'gpt-image-2' } }} />);
   await screen.findByRole('img', { name: '原图海报' });
-  expect(screen.getAllByText('Gpt Image 2 4k')).toHaveLength(2);
-  expect(screen.getByText('自动切换：Gpt Image 2 → Gpt Image 2 4k')).toBeInTheDocument();
+  expect(screen.getAllByText('Helstera AI').length).toBeGreaterThan(0);
+  expect(screen.queryByText('Gpt Image 2 4k')).not.toBeInTheDocument();
 });
 
 it('shows a non-retryable input error without failover or resubmit controls', async () => {

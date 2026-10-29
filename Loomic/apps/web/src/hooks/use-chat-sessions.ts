@@ -75,7 +75,19 @@ function createLRUMessageCache(): LRUMessageCache {
 export function mapServerMessages(
   serverMessages: ChatMessageData[],
 ): Message[] {
-  return serverMessages.map((m) => {
+  const mapped: Message[] = [];
+  let previousServerMessage: ChatMessageData | undefined;
+
+  for (const m of serverMessages) {
+    if (
+      m.content.length > 0 &&
+      previousServerMessage?.role === m.role &&
+      previousServerMessage.content === m.content
+    ) {
+      previousServerMessage = m;
+      continue;
+    }
+
     let blocks: ContentBlock[];
     if (m.contentBlocks && m.contentBlocks.length > 0) {
       blocks = m.contentBlocks.map((block) =>
@@ -101,8 +113,11 @@ export function mapServerMessages(
         }
       }
     }
-    return { id: m.id, role: m.role, contentBlocks: blocks };
-  });
+    mapped.push({ id: m.id, role: m.role, contentBlocks: blocks });
+    previousServerMessage = m;
+  }
+
+  return mapped;
 }
 
 // ── Hook ─────────────────────────────────────────────────────

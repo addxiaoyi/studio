@@ -43,14 +43,17 @@ function AuthCallbackPageContent() {
       void exchangeDesktopLoginToken(desktopToken)
         .then(async (session) => {
           acceptSession(session);
-          await (
-            window as Window & {
-              electronAPI?: {
-                finishBrowserLogin: (success: boolean) => Promise<unknown>;
-              };
-            }
-          ).electronAPI?.finishBrowserLogin(true);
-          router.replace(desktopState ? "/desktop-app/" : "/home/");
+          const electronAPI = (window as Window & {
+            electronAPI?: {
+              finishBrowserLogin: (success: boolean) => Promise<unknown>;
+              getPendingMarketplaceInstall?: () => Promise<string | null>;
+            };
+          }).electronAPI;
+          await electronAPI?.finishBrowserLogin(true);
+          const pendingMarketplaceSlug = await Promise.resolve(
+            electronAPI?.getPendingMarketplaceInstall?.(),
+          ).catch(() => null);
+          router.replace(pendingMarketplaceSlug ? "/desktop-app/marketplace/" : desktopState ? "/desktop-app/" : "/home/");
         })
         .catch(() => {
           void (

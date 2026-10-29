@@ -105,6 +105,14 @@ export default function HomePage() {
     useState<HomeExampleSelection | null>(null);
 
   const promptRef = useRef<HomePromptHandle>(null);
+  const [createError, setCreateError] = useState(false);
+  const lastPromptSubmitRef = useRef<{
+    prompt: string;
+    attachments?: ReadyAttachment[];
+    imageGenerationPreference?: ImageGenerationPreference;
+    videoGenerationPreference?: VideoGenerationPreference;
+    model?: string;
+  } | null>(null);
 
   // Ref pattern: avoid token changes cascading through dep arrays
   const accessTokenRef = useRef(session?.access_token);
@@ -240,8 +248,8 @@ export default function HomePage() {
       model?: string,
     ) => {
       setSelectedExample(null);
-      clearAttachments();
-      createNewProject({
+      setCreateError(false);
+      const submitArgs = {
         prompt,
         ...(attachments && attachments.length > 0 ? { attachments } : {}),
         ...(imageGenerationPreference
@@ -251,10 +259,36 @@ export default function HomePage() {
           ? { videoGenerationPreference }
           : {}),
         ...(model ? { model } : {}),
-      });
+      };
+      lastPromptSubmitRef.current = submitArgs;
+      void (async () => {
+        const created = await createNewProject(submitArgs);
+        if (created) {
+          // The project exists now — clear the home-side attachment tray.
+          clearAttachments();
+          lastPromptSubmitRef.current = null;
+          return;
+        }
+        // Creation failed (network/API/auth): put the prompt back so the
+        // user never has to retype what they already wrote.
+        setCreateError(true);
+        if (prompt) promptRef.current?.fill(prompt);
+      })();
     },
     [createNewProject, clearAttachments],
   );
+
+  const retryCreateProject = useCallback(() => {
+    const args = lastPromptSubmitRef.current;
+    if (!args) return;
+    handlePromptSubmit(
+      args.prompt,
+      args.attachments,
+      args.imageGenerationPreference,
+      args.videoGenerationPreference,
+      args.model,
+    );
+  }, [handlePromptSubmit]);
 
   const handleExampleSelect = useCallback((selection: HomeExampleSelection) => {
     setSelectedExample(selection);
@@ -347,6 +381,7 @@ export default function HomePage() {
             ref={promptRef}
             onSubmit={handlePromptSubmit}
             disabled={creating}
+            submitting={creating}
             attachments={imageAttachments}
             onAddFiles={addFiles}
             onRemoveAttachment={removeAttachment}
@@ -355,6 +390,22 @@ export default function HomePage() {
             selectedSeed={selectedExample}
             onClearSelectedSeed={handleExampleClear}
           />
+          {createError && (
+            <div
+              role="alert"
+              className="mt-3 flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-2 text-xs text-destructive"
+            >
+              <span>项目创建失败，提示词已保留。请重试。</span>
+              <button
+                type="button"
+                onClick={retryCreateProject}
+                disabled={creating}
+                className="min-h-8 rounded-md border border-destructive/30 px-2.5 py-1 font-medium hover:bg-destructive/10 disabled:opacity-60"
+              >
+                重试
+              </button>
+            </div>
+          )}
         </motion.div>
 
         <motion.div

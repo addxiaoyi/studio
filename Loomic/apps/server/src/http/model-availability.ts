@@ -1,5 +1,5 @@
+import { CONFIGURED_PRICE_MULTIPLIER, calculateConfiguredVideoPricePerSecond, getConfiguredVideoPriceRates, isWithinPublicUnitPriceLimit } from "@helstera/shared";
 import type { Pool } from "pg";
-import { calculateConfiguredVideoPricePerSecond, CONFIGURED_PRICE_MULTIPLIER, isWithinPublicUnitPriceLimit } from "@helstera/shared";
 import { isRemovedImageModelId, isRemovedModelId } from "../generation/removed-models.js";
 
 export type BillingUnit = "per_generation" | "per_second" | "per_million_tokens";
@@ -41,6 +41,10 @@ export function hasValidBilling(row: AvailableProviderModel) {
 
 export function minimumCreditCost(row: AvailableProviderModel) {
   if (row.billing_unit === "per_million_tokens") return 1;
+  const configuredRates = row.billing_unit === "per_second" ? getConfiguredVideoPriceRates(row.model_id) : [];
+  if (configuredRates.length > 0) {
+    return Math.min(...configuredRates.map((rate) => rate.priceCnyPerSecond));
+  }
   return row.billing_unit === "per_second" ? Number(row.price_credits) : Number(row.price_credits) * CONFIGURED_PRICE_MULTIPLIER;
 }
 

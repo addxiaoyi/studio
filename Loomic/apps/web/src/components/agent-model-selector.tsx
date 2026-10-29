@@ -5,15 +5,16 @@ import { createPortal } from "react-dom";
 import { useAgentModel } from "@/hooks/use-agent-model";
 import { useAuth } from "@/lib/auth-context";
 import { fetchModels, fetchWorkspaceSettings } from "@/lib/server-api";
-import { getAgentMessagePrice } from "@helstera/shared";
+import { HELSTERA_AGENT_TOKEN_PRICES_CNY } from "@helstera/shared";
 
 type ModelOption = { id: string; name: string; provider: string };
 const ALLOWED_MODEL_IDS = new Set(["hy4-preview-f", "hy3-x", "deepseek-v4-pro", "auto", "openai:hy4-preview-f", "openai:hy3-x", "openai:deepseek-v4-pro", "openai:auto"]);
 const DEFAULT_AGENT_MODEL = "openai:auto";
 const PUBLIC_AGENT_NAME = "HelsterAgent";
 
-function messagePriceLabel(modelId: string) {
-  return `¥${getAgentMessagePrice(modelId).toFixed(2)}/条消息`;
+function agentTokenPriceLabel() {
+  const { input, output } = HELSTERA_AGENT_TOKEN_PRICES_CNY;
+  return `输入 ¥${input.toFixed(2)}/M · 输出 ¥${output.toFixed(2)}/M`;
 }
 
 // Sparkle icon SVG path from design spec
@@ -96,10 +97,10 @@ export function AgentModelSelector({ compact }: { compact?: boolean } = {}) {
   const isActive = model !== null;
   const selectedModel = models.find((m) => m.id === model);
   const displayLabel = selectedModel
-    ? `${PUBLIC_AGENT_NAME} · ${messagePriceLabel(selectedModel.id)}`
+    ? `${PUBLIC_AGENT_NAME} · ${agentTokenPriceLabel()}`
     : workspaceModel
-      ? `${PUBLIC_AGENT_NAME} · ${messagePriceLabel(workspaceModel)}`
-      : `${PUBLIC_AGENT_NAME} · ${messagePriceLabel(DEFAULT_AGENT_MODEL)}`;
+      ? `${PUBLIC_AGENT_NAME} · ${agentTokenPriceLabel()}`
+      : `${PUBLIC_AGENT_NAME} · ${agentTokenPriceLabel()}`;
 
   // Auto-positioning popover (above or below based on available space)
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
@@ -181,7 +182,7 @@ export function AgentModelSelector({ compact }: { compact?: boolean } = {}) {
               }`}
             >
               <span className="flex-1 text-left">{PUBLIC_AGENT_NAME}</span>
-              <span className="text-[10px] text-muted-foreground">💬 {messagePriceLabel(DEFAULT_AGENT_MODEL)}</span>
+              <span className="text-[10px] text-muted-foreground">{agentTokenPriceLabel()}</span>
               {!isActive && (
                 <svg
                   className="h-3 w-3 text-accent-foreground"
@@ -221,7 +222,7 @@ export function AgentModelSelector({ compact }: { compact?: boolean } = {}) {
                       <span className="min-w-0 flex-1 text-left">
                         <span className="block truncate">{PUBLIC_AGENT_NAME}</span>
                       </span>
-                      <span className="shrink-0 text-[10px] text-muted-foreground">💬 {messagePriceLabel(m.id)}</span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">{agentTokenPriceLabel()}</span>
                       {model === m.id && (
                         <svg
                           className="h-3 w-3 text-accent-foreground"

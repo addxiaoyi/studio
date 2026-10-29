@@ -45,8 +45,8 @@ export async function cleanExpiredGeneratedAssets({
        -- Keep implementation screenshots out of this lifecycle task.
        and ao.object_path not like '%/gen-canvas-screenshot-%'
      order by ao.created_at asc
-     limit $2`,
-    [ASSET_RETENTION_DAYS, Math.max(1, Math.min(batchSize, ASSET_RETENTION_BATCH_SIZE))],
+     limit $1`,
+    [Math.max(1, Math.min(batchSize, ASSET_RETENTION_BATCH_SIZE))],
   );
 
   let purged = 0;

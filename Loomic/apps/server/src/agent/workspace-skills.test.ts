@@ -3,6 +3,19 @@ import type { Pool } from "pg";
 import { loadLocalWorkspaceSkills } from "./workspace-skills.js";
 
 describe("local workspace skill loading", () => {
+  it("loads only declarative plugins installed by this user in the workspace", async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ slug: "brand-voice", name: "Brand Voice", description: "Brand copy guidance", instructions: "Use the workspace brand voice." }] });
+
+    const entries = await loadLocalWorkspaceSkills({ query } as unknown as Pool, "canvas-1", "user-1");
+
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[1]?.[0]).toContain("a.user_id=$2");
+    expect(query.mock.calls[1]?.[1]).toEqual(["canvas-1", "user-1"]);
+    expect(entries).toEqual([expect.objectContaining({ name: "plugin-brand-voice", content: expect.stringContaining("cannot grant additional tools") })]);
+  });
+
   it("loads the locked snapshot and current files for unlocked skills", async () => {
     const query = vi.fn()
       .mockResolvedValueOnce({ rows: [

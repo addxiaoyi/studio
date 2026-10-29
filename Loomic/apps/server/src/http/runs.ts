@@ -20,7 +20,7 @@ import {
 } from "../features/chat/thread-service.js";
 import type { SettingsService } from "../features/settings/settings-service.js";
 import type { CreditService } from "../features/credits/credit-service.js";
-import { chargeAgentMessage, refundAgentMessage } from "../agent/message-billing.js";
+import { chargeAgentMessage, refundAgentMessage, settleAgentMessage, usesHelsteraTokenBilling, type AgentMessageCharge } from "../agent/message-billing.js";
 import type { RequestAuthenticator } from "../auth/types.js";
 
 export async function registerRunRoutes(
@@ -87,9 +87,21 @@ export async function registerRunRoutes(
         }
       }
 
+      let charge: AgentMessageCharge | undefined;
+      const modelId = (model ?? "auto").replace(/^openai:/, "").trim().toLowerCase();
+      const usesTokenBilling = usesHelsteraTokenBilling(model);
       const response = runCreateResponseSchema.parse(
         agentRuns.createRun(payload, {
           ...(authenticatedUser ? { accessToken: authenticatedUser.accessToken, userId: authenticatedUser.id } : {}),
+          ...(usesTokenBilling ? { deferBillingUntilUsage: true } : {}),
+          ...(authenticatedUser && options.creditService && options.viewerService && usesTokenBilling ? {
+            onModelUsage: async (usage) => {
+              if (!charge) {
+                charge = await chargeAgentMessage({ user: authenticatedUser, modelId: model, viewerService: options.viewerService!, creditService: options.creditService!, runId: response.runId, billOnUsage: true });
+              }
+              charge = await settleAgentMessage({ user: authenticatedUser, charge, creditService: options.creditService!, ...usage });
+            },
+          } : {}),
           ...(model ? { model } : {}),
           ...(modelApiBase ? { modelApiBase } : {}),
           ...(modelApiKey ? { modelApiKey } : {}),
@@ -97,10 +109,9 @@ export async function registerRunRoutes(
         }),
       );
 
-      let charge;
       if (authenticatedUser && options.creditService && options.viewerService) {
         try {
-          charge = await chargeAgentMessage({
+          if (!usesTokenBilling) charge = await chargeAgentMessage({
             user: authenticatedUser,
             modelId: model,
             viewerService: options.viewerService,

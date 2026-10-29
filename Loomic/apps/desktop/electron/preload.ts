@@ -10,12 +10,26 @@ else
     once: true,
   });
 
+let navigateCallback: ((path: string) => void) | null = null;
+let queuedNavigation: string | null = null;
+ipcRenderer.on("navigate", (_event, path: unknown) => {
+  if (typeof path !== "string") return;
+  if (navigateCallback) navigateCallback(path);
+  else queuedNavigation = path;
+});
+
 // Expose protected methods that allow the renderer process to use
 // ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld("electronAPI", {
   // Navigation
   onNavigate: (callback: (path: string) => void) => {
-    ipcRenderer.on("navigate", (_, path) => callback(path));
+    navigateCallback = callback;
+    const queued = queuedNavigation;
+    queuedNavigation = null;
+    if (queued) callback(queued);
+    return () => {
+      if (navigateCallback === callback) navigateCallback = null;
+    };
   },
 
   // New project
@@ -31,6 +45,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Window controls
   minimizeWindow: () => ipcRenderer.invoke("window-minimize"),
   maximizeWindow: () => ipcRenderer.invoke("window-maximize"),
+  /** Toggle main-window fullscreen; resolves with the resulting state. */
+  windowFullscreen: () => ipcRenderer.invoke("window-fullscreen"),
+  getFullscreenState: () => ipcRenderer.invoke("desktop.fullscreen-state"),
+  onFullscreenState: (callback: (state: { isFullScreen: boolean }) => void) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      state: { isFullScreen: boolean },
+    ) => callback(state);
+    ipcRenderer.on("desktop:fullscreen-changed", listener);
+    return () =>
+      ipcRenderer.removeListener("desktop:fullscreen-changed", listener);
+  },
   closeWindow: () => ipcRenderer.invoke("window-close"),
   isBrowserLoginAvailable: () =>
     ipcRenderer.invoke("desktop.browser-login-available"),
@@ -98,6 +124,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("assistant.disconnect-embedded"),
   closeEmbeddedBrowser: () => ipcRenderer.invoke("assistant.close-embedded"),
   selectWorkspace: () => ipcRenderer.invoke("workspace.select"),
+  selectDirectory: (title?: string) => ipcRenderer.invoke("dialog.select-directory", title),
+  selectAssetFolder: () => ipcRenderer.invoke("assets.select-folder"),
+  writeAssetToLocal: (input: { directory: string; fileName: string; bytes: ArrayBuffer }) =>
+    ipcRenderer.invoke("assets.write-local", input),
   getWorkspaceTree: () => ipcRenderer.invoke("workspace.tree"),
   readWorkspaceFile: (path: string) => ipcRenderer.invoke("workspace.read", path),
   writeWorkspaceFile: (input: { path: string; content: string }) => ipcRenderer.invoke("workspace.write", input),
@@ -108,6 +138,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
   runWorkspaceScript: (name: string) => ipcRenderer.invoke("workspace.run-script", name),
   cancelWorkspaceScript: (runId: string) => ipcRenderer.invoke("workspace.cancel-script", runId),
   getMcpServers: () => ipcRenderer.invoke("mcp.list"),
+  getPendingMarketplaceInstall: () => ipcRenderer.invoke("desktop.marketplace-install.pending"),
+  acknowledgeMarketplaceInstall: (slug: string) => ipcRenderer.invoke("desktop.marketplace-install.acknowledge", slug),
+  onMarketplaceInstallRequested: (callback: (slug: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, request: { slug: string }) => callback(request.slug);
+    ipcRenderer.on("desktop:marketplace-install", listener);
+    return () => ipcRenderer.removeListener("desktop:marketplace-install", listener);
+  },
+  installMarketplaceMcp: (input: MarketplaceMcpInstall) => ipcRenderer.invoke("mcp.install-marketplace", input),
+  onFocusAgentInput: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("desktop:focus-agent-input", listener);
+    return () => ipcRenderer.removeListener("desktop:focus-agent-input", listener);
+  },
   addMcpServer: (input: McpServerInput) => ipcRenderer.invoke("mcp.add", input),
   connectMcpServer: (id: string) => ipcRenderer.invoke("mcp.connect", id),
   disconnectMcpServer: (id: string) => ipcRenderer.invoke("mcp.disconnect", id),
@@ -159,6 +202,13 @@ type McpServerInput = {
   name: string; transport: "stdio" | "http"; command?: string; args?: string[];
   cwd?: string; env?: Record<string, string>; url?: string; token?: string;
 };
+type MarketplaceMcpInstall = {
+  name: string;
+  command: string;
+  args: string[];
+  requiredConfig?: Array<{ envName: string; label: string; kind: "text" | "secret" | "directory"; required: boolean; sensitive: boolean }>;
+  config: Record<string, string>;
+};
 type McpTool = { name: string; description?: string; inputSchema: { type: "object"; properties?: Record<string, object>; required?: string[] }; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } };
 type McpServer = { id: string; name: string; transport: "stdio" | "http"; command?: string; args?: string[]; cwd?: string; url?: string; connected: boolean; tools: McpTool[] };
 
@@ -166,7 +216,7 @@ type McpServer = { id: string; name: string; transport: "stdio" | "http"; comman
 declare global {
   interface Window {
     electronAPI?: {
-      onNavigate: (callback: (path: string) => void) => void;
+      onNavigate: (callback: (path: string) => void) => () => void;
       onNewProject: (callback: () => void) => void;
       onExportCanvas: (callback: () => void) => void;
       minimizeWindow: () => Promise<void>;
@@ -214,6 +264,7 @@ declare global {
       disconnectEmbeddedAssistant: () => Promise<{ ok: boolean }>;
       closeEmbeddedBrowser: () => Promise<{ ok: boolean }>;
       selectWorkspace: () => Promise<{ root: string; entries: WorkspaceEntry[] } | null>;
+      selectDirectory: (title?: string) => Promise<string | null>;
       getWorkspaceTree: () => Promise<WorkspaceEntry[]>;
       readWorkspaceFile: (path: string) => Promise<{ path: string; content: string; size: number }>;
       writeWorkspaceFile: (input: { path: string; content: string }) => Promise<{ path: string; snapshotId: string; bytes: number }>;
@@ -224,6 +275,10 @@ declare global {
       runWorkspaceScript: (name: string) => Promise<{ runId: string }>;
       cancelWorkspaceScript: (runId: string) => Promise<{ canceled: boolean }>;
       getMcpServers: () => Promise<McpServer[]>;
+      getPendingMarketplaceInstall: () => Promise<string | null>;
+      acknowledgeMarketplaceInstall: (slug: string) => Promise<{ ok: boolean }>;
+      onMarketplaceInstallRequested: (callback: (slug: string) => void) => () => void;
+      installMarketplaceMcp: (input: MarketplaceMcpInstall) => Promise<{ id: string; servers: McpServer[] }>;
       addMcpServer: (input: McpServerInput) => Promise<{ id: string }>;
       connectMcpServer: (id: string) => Promise<McpServer[]>;
       disconnectMcpServer: (id: string) => Promise<McpServer[]>;

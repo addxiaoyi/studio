@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, Check, Clock3, ExternalLink, Image, LogIn, RefreshCw, Search, Video, WalletCards } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Clock3, ExternalLink, Image, LogIn, RefreshCw, Search, Sparkles, Video, WalletCards } from "lucide-react";
 import type { OfficialModelPrice, OfficialModelPriceCatalog, OfficialPriceMediaType, WorkspaceModelPrice } from "@helstera/shared";
-import { USD_CNY_RATE } from "@helstera/shared";
+import { getConfiguredVideoPriceRates, USD_CNY_RATE, type ConfiguredVideoPriceRate } from "@helstera/shared";
 import { PricingNav } from "@/app/pricing/components/pricing-nav";
 import { fetchImageModels, fetchVideoModels } from "@/lib/server-api";
 import { fetchOfficialModelPrices, fetchWorkspaceModelPrices } from "@/lib/model-pricing-api";
@@ -20,6 +20,7 @@ type ListedModel = {
   priceCny?: number;
   inputPriceCny?: number;
   outputPriceCny?: number;
+  resolutionRates?: ConfiguredVideoPriceRate[];
   status: string;
 };
 
@@ -118,6 +119,10 @@ export default function ModelPricingPage() {
     () => mergeListedModels(models, workspaceModels),
     [models, workspaceModels],
   );
+  const featuredModel = comparisonModels?.find((model) => model.id.trim().toLowerCase() === "minimax-h3");
+  const featuredRates = featuredModel?.resolutionRates?.length
+    ? featuredModel.resolutionRates
+    : getConfiguredVideoPriceRates("minimax-h3");
   const comparisonRows = useMemo(
     () => buildComparisonRows(comparisonModels, catalog?.prices ?? [], media, query),
     [comparisonModels, catalog?.prices, media, query],
@@ -154,6 +159,13 @@ export default function ModelPricingPage() {
             <span className="inline-flex items-center gap-2"><Clock3 className="size-4" />每日自动核验</span>
           </div>
         </header>
+
+        {media !== "image" && (
+          <FeaturedVideoModel
+            rates={featuredRates}
+            status={featuredModel?.status ?? (modelCatalogError ? "暂不可查询" : models === null ? "读取中" : "等待启用")}
+          />
+        )}
 
         <section className="mt-6 grid gap-3 border-b border-border/70 pb-6 text-sm sm:grid-cols-3">
           <SourceSummary label="官方价格记录" value={`${catalog?.prices.length ?? 0} 条`} />
@@ -344,6 +356,7 @@ function toListedModel(
   status: string,
 ): ListedModel {
   const accessStatus = model.accessible === false ? "登录或余额受限" : status;
+  const resolutionRates = mediaType === 'video' ? (model as VideoModelInfo).resolutionRates : undefined;
   return {
     id: model.id,
     displayName: model.displayName,
@@ -355,6 +368,7 @@ function toListedModel(
       : {}),
     ...(typeof model.providerInputTokenPriceCny === "number" ? { inputPriceCny: model.providerInputTokenPriceCny } : {}),
     ...(typeof model.providerOutputTokenPriceCny === "number" ? { outputPriceCny: model.providerOutputTokenPriceCny } : {}),
+    ...(resolutionRates?.length ? { resolutionRates } : {}),
     status: accessStatus,
   };
 }
@@ -398,6 +412,10 @@ function mergeListedModels(
     if (model.billingUnit === "per_million_tokens") continue;
     const key = modelKey(model.mediaType, model.id);
     if (!merged.has(key)) merged.set(key, model);
+    else if (model.resolutionRates?.length) {
+      const existing = merged.get(key)!;
+      if (!existing.resolutionRates?.length) merged.set(key, { ...existing, resolutionRates: model.resolutionRates });
+    }
   }
   return [...merged.values()].sort((left, right) => {
     const mediaOrder = left.mediaType.localeCompare(right.mediaType);
@@ -406,7 +424,67 @@ function mergeListedModels(
   });
 }
 
+function FeaturedVideoModel({ rates, status }: { rates: ConfiguredVideoPriceRate[]; status: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [resolution, setResolution] = useState("768p");
+  const selectedRate = rates.find((rate) => rate.resolution === resolution) ?? rates[0];
+  if (!selectedRate) return null;
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-foreground/20 bg-card" aria-label="旗舰首推视频模型">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls="featured-video-prices"
+        onClick={() => setExpanded((current) => !current)}
+        className="flex min-h-20 w-full items-center justify-between gap-4 px-4 py-4 text-left hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-5"
+      >
+        <span className="flex min-w-0 items-center gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-md bg-foreground text-background"><Sparkles className="size-4" aria-hidden="true" /></span>
+          <span className="min-w-0">
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-[11px] font-semibold text-primary">旗舰首推</span>
+              <span className="text-sm font-semibold">MiniMax H3</span>
+            </span>
+            <span className="mt-1 block truncate text-xs text-muted-foreground">{status} · {resolution} · {formatCny(selectedRate.priceCnyPerSecond)} / 秒</span>
+          </span>
+        </span>
+        <ChevronDown className={`size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} aria-hidden="true" />
+      </button>
+      {expanded && (
+        <div id="featured-video-prices" className="grid gap-4 border-t border-border/70 bg-muted/15 p-4 sm:grid-cols-[1fr_auto] sm:items-end sm:px-5">
+          <fieldset>
+            <legend className="mb-2 text-xs font-medium text-muted-foreground">输出分辨率</legend>
+            <div role="radiogroup" aria-label="MiniMax H3 输出分辨率" className="flex flex-wrap gap-2">
+              {rates.map((rate) => (
+                <button
+                  key={rate.resolution}
+                  type="button"
+                  role="radio"
+                  aria-checked={resolution === rate.resolution}
+                  onClick={() => setResolution(rate.resolution)}
+                  className={`min-h-9 rounded-md border px-3 text-sm tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${resolution === rate.resolution ? "border-foreground bg-foreground text-background" : "border-border bg-background hover:bg-muted"}`}
+                >
+                  {rate.resolution}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <div className="flex items-end gap-8 tabular-nums sm:justify-end">
+            <div><p className="text-[11px] text-muted-foreground">每秒</p><p className="mt-1 text-lg font-semibold">{formatCny(selectedRate.priceCnyPerSecond)}</p></div>
+            <div><p className="text-[11px] text-muted-foreground">5 秒参考</p><p className="mt-1 text-sm font-medium">{formatCny(selectedRate.priceCnyPerSecond * 5)}</p></div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function formatListedModelPrice(model: ListedModel) {
+  if (model.billingUnit === "per_second" && model.resolutionRates && model.resolutionRates.length > 1) {
+    const prices = model.resolutionRates.map((rate) => rate.priceCnyPerSecond);
+    return `${formatCny(Math.min(...prices))}–${formatCny(Math.max(...prices))} / \u79d2`;
+  }
   if (model.billingUnit === "per_million_tokens") {
     const input = model.inputPriceCny == null ? "—" : formatCny(model.inputPriceCny);
     const output = model.outputPriceCny == null ? "—" : formatCny(model.outputPriceCny);

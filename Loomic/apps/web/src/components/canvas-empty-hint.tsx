@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ArrowRight, Sparkles } from "lucide-react";
 
 type CanvasEmptyHintProps = {
   excalidrawApi: any;
+  ready: boolean;
+  desktopMode?: boolean;
   onOpenChat: () => void;
 };
 
@@ -14,6 +17,8 @@ type CanvasEmptyHintProps = {
  */
 export function CanvasEmptyHint({
   excalidrawApi,
+  ready,
+  desktopMode = false,
   onOpenChat,
 }: CanvasEmptyHintProps) {
   const [hasElements, setHasElements] = useState(false);
@@ -24,7 +29,7 @@ export function CanvasEmptyHint({
   // any non-deleted elements.
   useEffect(() => {
     function check() {
-      if (!excalidrawApi) {
+      if (!ready || !excalidrawApi) {
         setHasElements(false);
         return;
       }
@@ -35,11 +40,11 @@ export function CanvasEmptyHint({
     check();
     const id = setInterval(check, 500);
     return () => clearInterval(id);
-  }, [excalidrawApi]);
+  }, [excalidrawApi, ready]);
 
   // Global keydown listener for the `C` shortcut.
   useEffect(() => {
-    if (hasElements) return;
+    if (!ready || hasElements) return;
 
     function handleKeyDown(e: KeyboardEvent) {
       // Ignore when the user is typing in an input or textarea.
@@ -76,9 +81,31 @@ export function CanvasEmptyHint({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [hasElements]);
+  }, [hasElements, ready]);
 
-  if (hasElements) return null;
+  if (!ready || !excalidrawApi || hasElements) return null;
+
+  if (desktopMode) {
+    return (
+      <div className="desktop-canvas-empty-layer pointer-events-none absolute inset-0 z-20 grid place-items-center">
+        <div className="desktop-canvas-empty-hint text-center">
+          <p className="desktop-canvas-empty-hint__eyebrow">空白画布</p>
+          <h2>从一句话开始创作</h2>
+          <p>描述你的目标，Agent 会在这张画布上协助完成。</p>
+          <button
+            type="button"
+            onClick={() => onOpenChatRef.current()}
+            className="desktop-canvas-empty-hint__action pointer-events-auto"
+          >
+            <Sparkles aria-hidden="true" />
+            打开 AI 创作
+            <ArrowRight aria-hidden="true" />
+          </button>
+          <p className="desktop-canvas-empty-hint__shortcut"><kbd>C</kbd><span>快速打开对话</span></p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">

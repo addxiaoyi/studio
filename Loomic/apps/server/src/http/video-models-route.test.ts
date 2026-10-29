@@ -39,7 +39,7 @@ describe("video model route retirement filter", () => {
   afterEach(() => vi.clearAllMocks());
 
   it("filters retired configured models from available and unavailable response lists", async () => {
-    const rows = [row("minimax-h3"), row("gk-video-3"), row("grok-imagine-video-1.5-preview"), row("high_aes_general_v30l_zt2i")];
+    const rows = [row("minimax-h3"), row("MiniMax-H3"), row("gk-video-3"), row("grok-imagine-video-1.5-preview"), row("high_aes_general_v30l_zt2i")];
     healthyRows.mockResolvedValue(rows);
     availabilityRows.mockResolvedValue(rows);
     const app = Fastify();
@@ -52,10 +52,21 @@ describe("video model route retirement filter", () => {
     await app.ready();
 
     const response = await app.inject({ method: "GET", url: "/api/video-models" });
-    const body = response.json() as { models: Array<{ id: string }>; unavailableModels: Array<{ id: string }> };
+    const body = response.json() as { models: Array<{ id: string; creditCost: number; providerPriceCny: number; resolutionRates?: Array<{ resolution: string; priceCnyPerSecond: number }> }>; unavailableModels: Array<{ id: string }> };
     const returnedIds = [...body.models, ...body.unavailableModels].map((model) => model.id);
     expect(response.statusCode).toBe(200);
     expect(returnedIds).toContain("minimax-h3");
+    expect(returnedIds).not.toContain("MiniMax-H3");
+    expect(body.models.find((model) => model.id === "minimax-h3")).toMatchObject({
+      creditCost: 0.3,
+      providerPriceCny: 0.3,
+      resolutionRates: [
+      { resolution: "480p", priceCnyPerSecond: 0.22 },
+      { resolution: "768p", priceCnyPerSecond: 0.3 },
+      { resolution: "1088p", priceCnyPerSecond: 0.34 },
+      { resolution: "1440p", priceCnyPerSecond: 0.38 },
+      ],
+    });
     expect(returnedIds).not.toContain("gk-video-3");
     expect(returnedIds).not.toContain("grok-imagine-video-1.5-preview");
     expect(returnedIds).not.toContain("high_aes_general_v30l_zt2i");

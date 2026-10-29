@@ -29,6 +29,17 @@ export const desktopCapabilitySchema = z.enum([
   "window.drag",
   "window.scroll",
 ]);
+const readOnlyNativeMcpTools = new Set([
+  "screen_observe",
+  "screen_list_windows",
+  "screen_wait_for_text",
+  "screen_find",
+]);
+
+export function isReadOnlyNativeMcpTool(toolName: string) {
+  return readOnlyNativeMcpTools.has(toolName);
+}
+
 export const desktopActionKindSchema = z.enum([
   "focus_window",
   "read_page",
@@ -76,7 +87,7 @@ export const desktopAgentTaskRequestSchema = z.object({
   canvasId: z.string().uuid().optional(),
   plannedActions: z.array(desktopAgentPlannedActionSchema).max(8).default([]),
   targetUrl: z.string().url().refine(isCredentialFreeHttpUrl, "Target URL must be HTTP(S) and contain no credentials.").optional(),
-  maxDurationSeconds: z.number().int().min(10).max(900).default(300),
+  maxDurationSeconds: z.number().int().min(10).max(1_800).default(300),
   pageLimit: z.number().int().min(1).max(10).default(3),
 });
 
@@ -110,7 +121,7 @@ export const desktopAgentTaskSchema = desktopAgentTaskRequestSchema.extend({
 
 export const desktopAgentEventSchema = z.object({
   taskId: z.string().uuid(),
-  eventType: z.enum(["started", "plan", "step", "evidence", "asset_created", "progress", "page", "approval_required", "completed", "failed"]),
+  eventType: z.enum(["started", "plan", "step", "evidence", "asset_created", "progress", "page", "approval_required", "approval_expired", "deadline_warning", "completed", "failed", "canceled"]),
   approvalId: z.string().uuid().optional(),
   stepId: z.string().max(120).optional(),
   detail: z.string().max(2_000).optional(),
@@ -135,6 +146,7 @@ export const desktopAgentEventSchema = z.object({
     screenshotBase64: z.string().max(11_200_000).optional(),
     screenshotMimeType: z.enum(["image/jpeg", "image/png"]).optional(),
     recordingBase64: z.string().max(56_000_000).optional(),
+    recordingUploadId: z.string().uuid().optional(),
   }).strict().optional(),
 });
 

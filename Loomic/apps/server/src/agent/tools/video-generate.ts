@@ -85,7 +85,7 @@ function buildVideoGenerateSchema(models: AvailableVideoModel[], allowDynamicMod
         "REQUIRED. Exact video duration in seconds. Always copy the duration explicitly requested by the user; never omit it and never replace it with a default. If the selected model does not support this exact duration, return an error instead of changing the duration.",
       ),
     resolution: z
-      .enum(["480p", "720p", "1080p", "4k"])
+      .enum(["480p", "720p", "768p", "1080p", "1088p", "1440p", "4k"])
       .optional()
       .default("720p")
       .describe(
@@ -374,7 +374,7 @@ export async function runVideoGenerate(
       duration: input.duration,
       aspectRatio: input.aspectRatio,
       ...(input.resolution
-        ? { resolution: input.resolution as "480p" | "720p" | "1080p" }
+        ? { resolution: input.resolution as "480p" | "720p" | "768p" | "1080p" | "1088p" | "1440p" | "4k" }
         : {}),
       ...(input.inputImages ? { inputImages: input.inputImages } : {}),
       ...(input.inputVideo ? { inputVideo: input.inputVideo } : {}),
@@ -472,7 +472,10 @@ function validateCapabilities(
   const resolutionRank = {
     "480p": 0,
     "720p": 1,
+    "768p": 1,
     "1080p": 2,
+    "1088p": 2,
+    "1440p": 3,
     "2160p": 3,
   } as const;
   if (

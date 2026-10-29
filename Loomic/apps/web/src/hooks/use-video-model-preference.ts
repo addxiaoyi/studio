@@ -1,7 +1,7 @@
 "use client";
 
+import { videoGenerationPreferenceSchema, type VideoGenerationPreference } from "@helstera/shared";
 import { useCallback, useSyncExternalStore } from "react";
-import type { VideoGenerationPreference } from "@helstera/shared";
 
 const STORAGE_KEY = "helstera:video-model-preference";
 const DEFAULT_MODEL = "minimax-h3";
@@ -10,6 +10,10 @@ const REMOVED_MODEL_PREFIXES = ["gk-video-", "grok-"];
 function isRemovedModel(model: string) {
   const id = model.trim().toLowerCase().replace(/^openai:/, "").split(/[/:]/).pop() ?? "";
   return REMOVED_MODEL_PREFIXES.some((prefix) => id.startsWith(prefix));
+}
+
+function normalizeModelId(model: string) {
+  return model.trim().toLowerCase();
 }
 
 export type VideoModelPreference = VideoGenerationPreference;
@@ -71,6 +75,8 @@ function normalizePreference(
     mode: preference.mode === "manual" && hasValidModels ? "manual" : "auto",
     models: hasValidModels ? models : defaultPreference.models,
     duration: typeof preference.duration === "number" ? preference.duration : defaultPreference.duration,
+    ...(videoGenerationPreferenceSchema.shape.resolution.safeParse(preference.resolution).success
+      && preference.resolution ? { resolution: preference.resolution } : {}),
   };
 }
 
@@ -91,27 +97,32 @@ export function useVideoModelPreference() {
 
   const toggleModel = useCallback(
     (model: string) => {
-      const isSelected = preference.models.includes(model);
+      const isSelected = preference.models.some((item) => normalizeModelId(item) === normalizeModelId(model));
 
       if (isSelected && preference.models.length === 1) {
         return;
       }
 
       const models = isSelected
-        ? preference.models.filter((item) => item !== model)
+        ? preference.models.filter((item) => normalizeModelId(item) !== normalizeModelId(model))
         : [...preference.models, model];
 
       setPreference({
+        ...preference,
         duration: preference.duration,
         mode: "manual",
         models,
       });
     },
-    [preference.models, setPreference],
+    [preference, setPreference],
   );
 
   const setDuration = useCallback((duration: number) => {
     setPreference({ ...preference, duration });
+  }, [preference, setPreference]);
+
+  const selectResolution = useCallback((model: string, resolution: NonNullable<VideoModelPreference["resolution"]>) => {
+    setPreference({ ...preference, mode: "manual", models: [model], resolution });
   }, [preference, setPreference]);
 
   // Duration is a user choice even in automatic routing mode. Dropping the
@@ -124,6 +135,7 @@ export function useVideoModelPreference() {
     setMode,
     toggleModel,
     setDuration,
+    selectResolution,
     activeVideoGenerationPreference,
   };
 }

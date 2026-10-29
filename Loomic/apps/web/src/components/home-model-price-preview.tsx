@@ -183,7 +183,7 @@ function PricePreviewRow({ row }: { row: ModelPriceRow }) {
         <div className="min-w-0">
           <p className="font-medium leading-5">{row.model.displayName}</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">{row.model.description || "可用于当前创作工作流"}</p>
-          <p className="mt-1 truncate text-[11px] text-muted-foreground">{row.model.id} · {row.model.mediaType === "image" ? "图片" : "视频"} · 按{unit}计费</p>
+          <p className="mt-1 truncate text-[11px] text-muted-foreground">{row.model.mediaType === "image" ? "图片" : "视频"} · 按{unit}计费</p>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:block">

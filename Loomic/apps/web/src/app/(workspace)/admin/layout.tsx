@@ -56,6 +56,7 @@ const sections: AdminSection[] = [
       { href: "/admin/providers", label: "Provider 与模型", hint: "密钥、模型、价格与验证", icon: Network },
       { href: "/admin/model-probe", label: "模型调用探针", hint: "无扣费检查请求与响应契约", icon: Network },
       { href: "/admin/douyin-mcp", label: "抖音 MCP", hint: "工具目录与服务连接状态", icon: Network },
+      { href: "/admin/agent-marketplace", label: "Agent 市场", hint: "Skill、MCP 和插件上架审核", icon: Boxes },
     ],
   },
   {

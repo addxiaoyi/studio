@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ListFilter, Plus, Search, ShieldCheck } from "lucide-react";
 
-import type { SkillCategory, SkillDetail, SkillListItem } from "@helstera/shared";
+import type { SkillCategory, SkillDetail, SkillListItem, SkillUpdateRequest } from "@helstera/shared";
 
 import { SkillCard } from "@/components/skills/skill-card";
 import { CreateSkillDialog } from "@/components/skills/create-skill-dialog";
@@ -33,6 +33,7 @@ import {
   installSkill,
   toggleSkill,
   uninstallSkill,
+  updateSkill,
 } from "@/lib/server-api";
 import { cn } from "@/lib/utils";
 
@@ -344,6 +345,14 @@ export default function SkillsPage() {
     [getToken, loadSkills],
   );
 
+  const handleUpdateSkill = useCallback(async (skillId: string, data: SkillUpdateRequest) => {
+    const token = getToken();
+    if (!token) throw new Error("登录状态已失效，请刷新页面后重试。");
+    const response = await updateSkill(token, skillId, data);
+    setDetailSkill(response.skill);
+    await loadSkills();
+  }, [getToken, loadSkills]);
+
   // ---------------------------------------------------------------------------
   // Tab-related callbacks for child panels
   // ---------------------------------------------------------------------------
@@ -600,6 +609,7 @@ export default function SkillsPage() {
         onInstall={handleInstall}
         onUninstall={handleUninstall}
         onDelete={handleDelete}
+        onUpdate={handleUpdateSkill}
          versions={skillVersions}
          onLockVersion={handleLockVersion}
          onRollbackVersion={handleRollbackVersion}

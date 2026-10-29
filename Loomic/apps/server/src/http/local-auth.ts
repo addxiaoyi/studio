@@ -112,7 +112,12 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
     if (!email || !password || !emailPattern.test(email)) return reply.code(400).send({ error: { code: "invalid_credentials", message: "邮箱或密码不正确" } });
     const { rows } = await options.db.query("select id, email, password_hash from app_users where email = $1", [email]);
     const user = rows[0];
-    if (!user?.password_hash || !(await verifyPassword(password, user.password_hash))) return reply.code(401).send({ error: { code: "invalid_credentials", message: "邮箱或密码不正确" } });
+    if (!user) return reply.code(401).send({ error: { code: "invalid_credentials", message: "邮箱或密码不正确" } });
+    // Accounts created through the email-code flow are inserted without a password_hash,
+    // so password sign-in can never succeed for them. Reporting that as "wrong password"
+    // traps the user in a retry loop; return an actionable error instead.
+    if (!user.password_hash) return reply.code(403).send({ error: { code: "password_not_set", message: "该账号还没有设置密码，请先用邮箱验证码登录，登录后在设置里设置密码" } });
+    if (!(await verifyPassword(password, user.password_hash))) return reply.code(401).send({ error: { code: "invalid_credentials", message: "邮箱或密码不正确" } });
     const sessionToken = randomBytes(32).toString("base64url");
     await options.db.query("insert into sessions (user_id, token_hash, expires_at) values ($1, $2, $3)", [user.id, hashToken(sessionToken), new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)]);
     reply.header("set-cookie", sessionCookie(sessionToken, options.env.webOrigin));

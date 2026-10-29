@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyDesktopAction, desktopAgentActionSchema, desktopAgentEventSchema, desktopAgentTaskRequestSchema, isDesktopActionAuthorized } from "./desktop-control.js";
+import { classifyDesktopAction, desktopAgentActionSchema, desktopAgentEventSchema, desktopAgentTaskRequestSchema, isDesktopActionAuthorized, isReadOnlyNativeMcpTool } from "./desktop-control.js";
 
 describe("desktop control policy", () => {
   it("limits tasks to declared roles and capabilities", () => {
@@ -11,6 +11,12 @@ describe("desktop control policy", () => {
     });
     expect(task.role).toBe("researcher");
     expect(task.maxDurationSeconds).toBe(300);
+  });
+
+  it("allows long tasks up to 30 minutes and rejects longer deadlines", () => {
+    const base = { goal: "Wait for the installer", role: "operator", capabilities: ["screen.read"] };
+    expect(desktopAgentTaskRequestSchema.parse({ ...base, maxDurationSeconds: 1_800 }).maxDurationSeconds).toBe(1_800);
+    expect(desktopAgentTaskRequestSchema.safeParse({ ...base, maxDurationSeconds: 1_801 }).success).toBe(false);
   });
 
   it("denies credentials and requires a token for side effects", () => {
@@ -70,6 +76,13 @@ describe("desktop control policy", () => {
     expect(isDesktopActionAuthorized(drag, ["window.drag"])).toBe(true);
     const dbl = desktopAgentActionSchema.parse({ requestId: "k3", taskId: "00000000-0000-0000-0000-000000000001", kind: "native_double_click", x: 1, y: 2 });
     expect(isDesktopActionAuthorized(dbl, ["window.click"])).toBe(true);
+  });
+
+  it("only treats observation and visual search MCP tools as read-only", () => {
+    expect(isReadOnlyNativeMcpTool("screen_observe")).toBe(true);
+    expect(isReadOnlyNativeMcpTool("screen_find")).toBe(true);
+    expect(isReadOnlyNativeMcpTool("screen_click")).toBe(false);
+    expect(isReadOnlyNativeMcpTool("screen_clipboard_read")).toBe(false);
   });
 
   it("parses planned actions with coordinates, keys, and waits", () => {

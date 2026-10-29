@@ -2,7 +2,7 @@
 
 import { Check, Download, FolderOpen, Images, RefreshCw, Save, Search, Share2, Trash2, Undo2, Video, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "@/lib/auth-context";
 import { GradualBlur } from "@/components/gradual-blur";
@@ -92,6 +92,7 @@ async function loadPreviewEntries(
 }
 
 export default function AssetsPage() {
+  const pathname = usePathname();
   const { session } = useAuth();
   const router = useRouter();
   const [assets, setAssets] = useState<GeneratedAsset[]>([]);
@@ -208,7 +209,8 @@ export default function AssetsPage() {
         { name: assetDisplayName(asset) },
         { idempotencyKey: `asset-editor:${asset.id}` },
       );
-      router.push(`/canvas?id=${project.primaryCanvas.id}&assetId=${encodeURIComponent(asset.id)}&mediaType=${asset.mediaType}`);
+      const canvasRoute = pathname.startsWith("/desktop-app/") ? "/desktop-app/canvas" : "/canvas";
+      router.push(`${canvasRoute}?id=${project.primaryCanvas.id}&assetId=${encodeURIComponent(asset.id)}&mediaType=${asset.mediaType}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "无法打开图片编辑器");
       setErrorAction({ type: "editor", assetId: asset.id });

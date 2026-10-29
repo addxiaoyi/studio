@@ -1582,9 +1582,13 @@ export type VideoModelInfo = {
   limits?: {
     maxDuration: number;
     allowedDurations?: number[];
-    maxResolution: "480p" | "720p" | "1080p" | "2160p";
+    maxResolution: "480p" | "720p" | "768p" | "1080p" | "1088p" | "1440p" | "2160p" | "4k";
     maxInputImages: number;
   };
+  resolutionRates?: Array<{
+    resolution: "480p" | "720p" | "768p" | "1080p" | "1088p" | "1440p" | "2160p" | "4k";
+    priceCnyPerSecond: number;
+  }>;
   pricing?: {
     currency: "CNY";
     billingUnit: "generated_second";
@@ -2165,6 +2169,7 @@ export type DesktopAgentTaskResponse = {
   capabilities: string[];
   targetUrl?: string;
   canvasId?: string;
+  chatSessionId?: string;
   executionMode?: "automatic" | "isolated_browser" | "connected_browser_tab" | "windows_ui" | "visual_ocr";
   status: "queued" | "running" | "succeeded" | "failed" | "canceled";
   result: Record<string, unknown> | null;
@@ -2190,6 +2195,12 @@ export async function fetchDesktopAgentTasks(accessToken: string): Promise<Deskt
   const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/assistant/desktop-tasks`, { headers: authHeaders(accessToken) });
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json() as { ok: true; data: DesktopAgentTaskResponse[] }).data;
+}
+
+export async function fetchDesktopAgentTask(accessToken: string, taskId: string): Promise<DesktopAgentTaskResponse> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/assistant/desktop-tasks/${encodeURIComponent(taskId)}`, { headers: authHeaders(accessToken) });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: DesktopAgentTaskResponse }).data;
 }
 
 export async function cancelDesktopAgentTask(accessToken: string, taskId: string): Promise<{ taskId: string; status: "canceled" }> {
@@ -2402,6 +2413,44 @@ export async function installMarketplaceSkill(
   );
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json()) as SkillDetailResponse;
+}
+
+export type AgentMarketplaceInstall = {
+  item_id: string;
+  target: "workspace" | "desktop";
+  installed_version: string;
+  status: "installed" | "removed";
+  metadata: Record<string, unknown>;
+  kind: "skill" | "mcp" | "plugin";
+  name: string;
+  slug: string;
+};
+
+export async function fetchAgentMarketplaceInstalls(accessToken: string): Promise<AgentMarketplaceInstall[]> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent-marketplace/installs`, { headers: authHeaders(accessToken) });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: AgentMarketplaceInstall[] }).data;
+}
+
+export async function syncAgentMarketplaceInstall(
+  accessToken: string,
+  itemId: string,
+  input: { target: "workspace" | "desktop"; skillId?: string; localInstalled?: boolean; localServerName?: string },
+): Promise<void> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent-marketplace/${encodeURIComponent(itemId)}/install`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+}
+
+export async function removeAgentMarketplaceInstall(accessToken: string, itemId: string): Promise<void> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent-marketplace/${encodeURIComponent(itemId)}/install`, {
+    method: "DELETE",
+    headers: authHeaders(accessToken),
+  });
+  if (!response.ok) return handleErrorResponse(response);
 }
 
 export async function fetchSkillVersions(accessToken: string, skillId: string) {

@@ -160,7 +160,7 @@ export function buildReplicateVideoModelInput(
     throw new GenerationError("replicate", "invalid_input", `${model.displayName} supports aspect ratios: ${allowedRatios.join(", ")}`);
   }
   const resolution = params.resolution;
-  const resolutionRank = { "480p": 0, "720p": 1, "1080p": 2, "2160p": 3 } as const;
+  const resolutionRank = { "480p": 0, "720p": 1, "768p": 1, "1080p": 2, "1088p": 2, "1440p": 3, "2160p": 3, "4k": 3 } as const;
   if (resolution && resolutionRank[resolution] > resolutionRank[model.limits.maxResolution]) {
     throw new GenerationError("replicate", "invalid_input", `${model.displayName} supports up to ${model.limits.maxResolution}`);
   }

@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import {
+  decideMainWindowNavigation,
   observeMainWindowLifecycle,
   observeWindowState,
   registerWindowControlHandlers,
@@ -11,6 +12,7 @@ function makeWindow() {
   const webEvents = new EventEmitter();
   const windowListeners = new Map<string, Map<Function, Function>>();
   let maximized = false;
+  let fullScreen = false;
   let destroyed = false;
   const closeEvent = { preventDefault: vi.fn() };
   let canGoBack = true;
@@ -18,6 +20,8 @@ function makeWindow() {
   const window = {
     isDestroyed: vi.fn(() => destroyed),
     isMaximized: vi.fn(() => maximized),
+    isFullScreen: vi.fn(() => fullScreen),
+    setFullScreen: vi.fn((value: boolean) => { fullScreen = value; }),
     minimize: vi.fn(),
     maximize: vi.fn(() => { maximized = true; }),
     unmaximize: vi.fn(() => { maximized = false; }),
@@ -73,6 +77,8 @@ describe("desktop window controls", () => {
       "window-state",
       "window-minimize",
       "window-maximize",
+      "window-fullscreen",
+      "desktop.fullscreen-state",
       "window-close",
       "desktop.navigation-state",
       "desktop.navigate-history",
@@ -139,6 +145,49 @@ describe("desktop window controls", () => {
     expect(window.webContents.send).toHaveBeenCalledTimes(2);
   });
 
+  it("toggles fullscreen for the main window and rejects other renderers", () => {
+    const { handlers, invoke, window } = makeIpc();
+
+    expect(invoke("desktop.fullscreen-state")).toEqual({ isFullScreen: false });
+    expect(invoke("window-fullscreen")).toEqual({ isFullScreen: true });
+    expect(invoke("window-fullscreen")).toEqual({ isFullScreen: false });
+    expect(window.setFullScreen).toHaveBeenNthCalledWith(1, true);
+    expect(window.setFullScreen).toHaveBeenNthCalledWith(2, false);
+
+    const call = handlers.get("window-fullscreen");
+    expect(() => call?.({ sender: {} })).toThrow(
+      "This action is only available in the Helstera main window.",
+    );
+    expect(window.setFullScreen).toHaveBeenCalledTimes(2);
+  });
+
+  it("broadcasts fullscreen transitions and stays silent after destruction", () => {
+    const { invoke, window } = makeIpc();
+    const detach = observeWindowState(window);
+
+    invoke("window-fullscreen");
+    window.events.windowEvents.emit("enter-full-screen");
+    expect(window.webContents.send).toHaveBeenNthCalledWith(
+      1,
+      "desktop:fullscreen-changed",
+      { isFullScreen: true },
+    );
+
+    invoke("window-fullscreen");
+    window.events.windowEvents.emit("leave-full-screen");
+    expect(window.webContents.send).toHaveBeenNthCalledWith(
+      2,
+      "desktop:fullscreen-changed",
+      { isFullScreen: false },
+    );
+
+    window.destroy();
+    window.events.windowEvents.emit("enter-full-screen");
+    expect(window.webContents.send).toHaveBeenCalledTimes(2);
+
+    detach();
+  });
+
   it("detaches during close and ignores delayed events after destruction", () => {
     const { window } = makeIpc();
     const onClosed = vi.fn();
@@ -164,5 +213,44 @@ describe("desktop window controls", () => {
     expect(window.events.closeEvent.preventDefault).toHaveBeenCalledOnce();
     expect(window.hide).toHaveBeenCalledOnce();
     expect(window.webContents.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("decideMainWindowNavigation", () => {
+  const origin = "https://app.helstera.test";
+
+  it("keeps same-origin navigation inside the window", () => {
+    expect(decideMainWindowNavigation(`${origin}/desktop-app/`, origin)).toBe(
+      "allow",
+    );
+    expect(decideMainWindowNavigation(`${origin}/settings/?tab=1`, origin)).toBe(
+      "allow",
+    );
+  });
+
+  it("hands external websites to the system browser instead of the app window", () => {
+    expect(decideMainWindowNavigation("https://github.com/microsoft/playwright-mcp", origin)).toBe(
+      "external",
+    );
+    expect(decideMainWindowNavigation("http://example.com/", origin)).toBe(
+      "external",
+    );
+    expect(decideMainWindowNavigation("https://app.helstera.test.evil.com/", origin)).toBe(
+      "external",
+    );
+    expect(decideMainWindowNavigation("https://app.helstera.test@evil.com/", origin)).toBe(
+      "external",
+    );
+  });
+
+  it("denies non-http protocols and unparsable targets", () => {
+    expect(decideMainWindowNavigation("file:///C:/Windows/System32/", origin)).toBe(
+      "deny",
+    );
+    expect(decideMainWindowNavigation("javascript:alert(1)", origin)).toBe("deny");
+    expect(decideMainWindowNavigation("helstera://auth/callback", origin)).toBe(
+      "deny",
+    );
+    expect(decideMainWindowNavigation("not a url", origin)).toBe("deny");
   });
 });

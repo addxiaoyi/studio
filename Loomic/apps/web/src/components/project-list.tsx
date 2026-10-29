@@ -3,6 +3,7 @@
 import type { ProjectSummary } from "@helstera/shared";
 import { Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { DeleteProjectDialog } from "./delete-project-dialog";
 import { ProjectThumbnail } from "./project-thumbnail";
@@ -23,6 +24,8 @@ export function ProjectList({
   onCreateClick,
   onDeleted,
 }: ProjectListProps) {
+  const pathname = usePathname();
+  const desktopMode = pathname.startsWith("/desktop-app/");
   const copy = t(useLocale()).projects;
   const { pendingId, deleting, requestDelete, confirmDelete, cancelDelete } =
     useDeleteProject(onDeleted ? { onDeleted } : undefined);
@@ -51,7 +54,7 @@ export function ProjectList({
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-semibold text-foreground">{copy.title}</h1>
-            <Link href="/projects/archived" className="text-xs text-muted-foreground underline underline-offset-4">回收站</Link>
+            {desktopMode ? null : <Link href="/projects/archived" className="text-xs text-muted-foreground underline underline-offset-4">回收站</Link>}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">共 {projects.length} 个项目，当前显示 {filtered.length} 个</p>
         </div>
@@ -113,7 +116,7 @@ export function ProjectList({
             </button>
 
             {/* Thumbnail */}
-            <Link href={`/canvas?id=${project.primaryCanvas.id}`} aria-label={`打开项目 ${project.name}`} className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <Link href={`${desktopMode ? "/desktop-app/canvas" : "/canvas"}?id=${project.primaryCanvas.id}`} aria-label={`打开项目 ${project.name}`} className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <ProjectThumbnail
               src={project.thumbnailUrl ?? null}
               alt={`${project.name} 预览`}

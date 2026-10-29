@@ -207,7 +207,13 @@ export async function clickNativeCoordinates(x: number, y: number, button: "left
   await mouse.setPosition(new nut.Point(Math.round(x), Math.round(y)));
   const targetButton = button === "right" ? nut.Button.RIGHT : nut.Button.LEFT;
   if (double) {
-    await mouse.doubleClick(targetButton);
+    const previousDelay = mouse.config.autoDelayMs;
+    mouse.config.autoDelayMs = 50;
+    try {
+      await mouse.doubleClick(targetButton);
+    } finally {
+      mouse.config.autoDelayMs = previousDelay;
+    }
   } else if (button === "right") {
     await mouse.rightClick();
   } else {

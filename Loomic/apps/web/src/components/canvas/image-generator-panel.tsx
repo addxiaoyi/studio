@@ -8,6 +8,7 @@ import type { ImageModelInfo } from "../../lib/server-api";
 import { fetchImageModels, generateImageDirect, uploadFile } from "../../lib/server-api";
 import { t, useLocale } from "../../lib/i18n";
 import { getModelPricingLabel } from "../../lib/model-pricing";
+import { formatModelDisplayName } from "../chat/utils";
 import { useGenerationErrorHandler } from "../../hooks/use-generation-error-handler";
 import {
   updateImageGeneratorElement,
@@ -307,7 +308,7 @@ export function ImageGeneratorPanel({
                 />
               )}
               <span className="text-foreground">
-                {currentModel?.displayName ?? model.split("/").pop()}
+                {currentModel?.displayName ?? formatModelDisplayName(model)}
               </span>
               <svg
                 className="h-3 w-3 text-muted-foreground"

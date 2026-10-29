@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime
 import hashlib
 import json
@@ -24,7 +25,7 @@ import paramiko
 import yaml
 
 
-DOWNLOAD_ROOT = pathlib.Path("/www/helstera/apps/web/out/downloads")
+DOWNLOAD_ROOT = pathlib.PurePosixPath("/www/helstera/apps/web/out/downloads")
 TARGET_HOST = os.environ.get("HELT_DEPLOY_HOST", "23.251.32.222")
 TARGET_USER = os.environ.get("HELT_DEPLOY_USER", "root")
 JUMP_HOST = os.environ.get("HELT_DEPLOY_JUMP_HOST", "103.40.14.25")
@@ -46,11 +47,62 @@ def resolve_stage_path(root: pathlib.Path, value: pathlib.Path | None) -> pathli
     return (root / value).resolve() if not value.is_absolute() else value.resolve()
 
 
+def file_digest(path: pathlib.Path, algorithm: str) -> bytes:
+    digest = hashlib.new(algorithm)
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.digest()
+
+
+def validate_updater_manifest(manifest_path: pathlib.Path, release: pathlib.Path) -> set[str]:
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise RuntimeError(f"Updater manifest is invalid: {manifest_path}")
+    entries = manifest.get("files", [])
+    if not isinstance(entries, list):
+        raise RuntimeError(f"Updater manifest has invalid files: {manifest_path}")
+
+    referenced: set[str] = set()
+    metadata_by_name: dict[str, dict[str, object]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"Updater manifest has an invalid file entry: {manifest_path}")
+        name = entry.get("url")
+        if not isinstance(name, str) or pathlib.PurePosixPath(name).name != name:
+            raise RuntimeError(f"Updater manifest has an invalid package path: {name!r}")
+        referenced.add(name)
+        metadata_by_name[name] = entry
+    path_name = manifest.get("path")
+    if path_name is not None:
+        if not isinstance(path_name, str) or pathlib.PurePosixPath(path_name).name != path_name:
+            raise RuntimeError(f"Updater manifest has an invalid package path: {path_name!r}")
+        referenced.add(path_name)
+    if not referenced:
+        raise RuntimeError(f"Updater manifest has no package paths: {manifest_path}")
+
+    for name in referenced:
+        package = release / name
+        if not package.is_file():
+            raise RuntimeError(f"Updater package referenced by {manifest_path} is missing: {name}")
+        metadata = metadata_by_name.get(name, {})
+        expected_size = metadata.get("size")
+        if expected_size is not None and package.stat().st_size != int(expected_size):
+            raise RuntimeError(f"Updater package size does not match {manifest_path}: {name}")
+        expected_sha512 = metadata.get("sha512")
+        if expected_sha512:
+            actual_sha512 = base64.b64encode(file_digest(package, "sha512")).decode("ascii")
+            if actual_sha512 != str(expected_sha512):
+                raise RuntimeError(f"Updater package SHA-512 does not match {manifest_path}: {name}")
+    return referenced
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", required=True, choices=sorted(PLATFORMS))
     parser.add_argument("--skip-build", action="store_true", help="Publish existing files from apps/desktop/release")
     parser.add_argument("--direct", action="store_true", help="Connect directly to the target server")
+    parser.add_argument("--repair-current", action="store_true", help="Repair missing assets for the same published version when its portable package hash matches")
     return parser.parse_args()
 
 
@@ -189,15 +241,7 @@ def files_for_release(root: pathlib.Path, target: str, version: str, stage: path
     manifest = release / manifest_names[target]
     if not manifest.is_file():
         raise RuntimeError(f"Missing updater manifest: {manifest}")
-    parsed_manifest = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-    referenced_files = {entry.get("url") for entry in parsed_manifest.get("files", []) if isinstance(entry, dict)}
-    if parsed_manifest.get("path"):
-        referenced_files.add(parsed_manifest["path"])
-    if not referenced_files:
-        raise RuntimeError(f"Updater manifest has no package paths: {manifest}")
-    for name in referenced_files:
-        if not isinstance(name, str) or pathlib.PurePosixPath(name).name != name or not (release / name).is_file():
-            raise RuntimeError(f"Updater package referenced by {manifest} is missing: {name}")
+    referenced_files = validate_updater_manifest(manifest, release)
 
     shutil.copy2(manifest, feed / manifest.name)
     package_files = [release / name for name in sorted(referenced_files)]
@@ -206,7 +250,7 @@ def files_for_release(root: pathlib.Path, target: str, version: str, stage: path
     for blockmap in release.glob("*.blockmap"):
         shutil.copy2(blockmap, feed / blockmap.name)
 
-    checksum = hashlib.sha256(public_installer.read_bytes()).hexdigest()
+    checksum = file_digest(public_installer, "sha256").hex()
     (downloads / f"SHA256SUMS-{target}.txt").write_text(f"{checksum}  {public_installer.name}\n", encoding="utf-8")
     release_manifest = downloads / f"desktop-release-{target}.json"
     release_manifest.write_text(json.dumps({
@@ -216,7 +260,7 @@ def files_for_release(root: pathlib.Path, target: str, version: str, stage: path
         "sha256": checksum,
         **({
             "portableFileName": portable_installer.name,
-            "portableSha256": hashlib.sha256(portable_installer.read_bytes()).hexdigest(),
+            "portableSha256": file_digest(portable_installer, "sha256").hex(),
         } if portable_installer else {}),
         "publishedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
@@ -258,13 +302,25 @@ def ensure_remote_dir(sftp: paramiko.SFTPClient, path: str) -> None:
             sftp.mkdir(str(current))
 
 
-def publish_files(sftp: paramiko.SFTPClient, stage: pathlib.Path, remote_stage: str, target: str, files: list[pathlib.Path], updater_manifest: pathlib.Path, release_manifest: pathlib.Path) -> None:
+def publish_files(
+    sftp: paramiko.SFTPClient,
+    stage: pathlib.Path,
+    remote_stage: str,
+    target: str,
+    files: list[pathlib.Path],
+    updater_manifest: pathlib.Path,
+    release_manifest: pathlib.Path,
+    *,
+    publish_release_manifest: bool = True,
+) -> None:
     remote_downloads = str(DOWNLOAD_ROOT)
     remote_feed = f"{remote_downloads}/updates/{target}"
     ensure_remote_dir(sftp, f"{remote_stage}/downloads")
     ensure_remote_dir(sftp, f"{remote_stage}/updates/{target}")
     for source in files:
         relative = source.relative_to(stage).as_posix()
+        if not publish_release_manifest and relative == release_manifest.relative_to(stage).as_posix():
+            continue
         remote = f"{remote_stage}/{relative}"
         sftp.put(str(source), remote)
         if relative.startswith("downloads/"):
@@ -278,8 +334,9 @@ def publish_files(sftp: paramiko.SFTPClient, stage: pathlib.Path, remote_stage: 
 
     updater_path = updater_manifest.relative_to(stage).as_posix()
     sftp.posix_rename(f"{remote_stage}/{updater_path}", f"{remote_feed}/{updater_manifest.name}")
-    release_path = release_manifest.relative_to(stage).as_posix()
-    sftp.posix_rename(f"{remote_stage}/{release_path}", f"{remote_downloads}/{release_manifest.name}")
+    if publish_release_manifest:
+        release_path = release_manifest.relative_to(stage).as_posix()
+        sftp.posix_rename(f"{remote_stage}/{release_path}", f"{remote_downloads}/{release_manifest.name}")
 
 
 def clean_remote_stage(sftp: paramiko.SFTPClient, stage: pathlib.Path, remote_stage: str, target: str, files: list[pathlib.Path]) -> None:
@@ -297,14 +354,18 @@ def clean_remote_stage(sftp: paramiko.SFTPClient, stage: pathlib.Path, remote_st
 
 def verify_public_installer(files: list[pathlib.Path], stage: pathlib.Path) -> None:
     for source in files:
-        relative = source.relative_to(stage).as_posix()
-        if not relative.startswith("downloads/") or source.suffix == ".txt":
+        if source.suffix == ".txt":
             continue
-        request = urllib.request.Request(f"https://studio.0st.top/downloads/{source.name}", method="HEAD")
+        url = public_artifact_url(source, stage)
+        if not url:
+            continue
+        request = urllib.request.Request(url, headers={"Cache-Control": "no-cache"}, method="HEAD")
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 if response.status >= 400:
                     raise RuntimeError(f"Public download check failed: {source.name} returned {response.status}")
+                if response.headers.get_content_type() == "text/html":
+                    raise RuntimeError(f"Public download returned an HTML page instead of a file: {url}")
                 expected_size = source.stat().st_size
                 actual_size = response.headers.get("Content-Length")
                 if actual_size is not None and int(actual_size) != expected_size:
@@ -313,13 +374,41 @@ def verify_public_installer(files: list[pathlib.Path], stage: pathlib.Path) -> N
             raise RuntimeError(f"Public download check failed for {source.name}: {error}") from error
 
 
+def public_artifact_url(source: pathlib.Path, stage: pathlib.Path) -> str | None:
+    relative = source.relative_to(stage).as_posix()
+    if relative.startswith("downloads/"):
+        relative = relative.removeprefix("downloads/")
+    elif not relative.startswith("updates/"):
+        return None
+    return f"https://studio.0st.top/downloads/{relative}"
+
+
+def is_public_artifact_current(source: pathlib.Path, stage: pathlib.Path) -> bool:
+    url = public_artifact_url(source, stage)
+    if not url:
+        return True
+    request = urllib.request.Request(url, headers={"Cache-Control": "no-cache"}, method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            if response.status >= 400 or response.headers.get_content_type() == "text/html":
+                return False
+            actual_size = response.headers.get("Content-Length")
+            return actual_size is not None and int(actual_size) == source.stat().st_size
+    except (urllib.error.HTTPError, urllib.error.URLError):
+        return False
+
+
+def missing_public_artifacts(files: list[pathlib.Path], stage: pathlib.Path) -> list[pathlib.Path]:
+    return [source for source in files if source.suffix != ".txt" and not is_public_artifact_current(source, stage)]
+
+
 def version_compare(left: str, right: str) -> int:
     left_parts = tuple(int(part) for part in left.split("-", 1)[0].split("."))
     right_parts = tuple(int(part) for part in right.split("-", 1)[0].split("."))
     return (left_parts > right_parts) - (left_parts < right_parts)
 
 
-def public_release_version(url: str, manifest_format: str) -> str | None:
+def public_release_document(url: str, manifest_format: str) -> dict[str, object] | None:
     request = urllib.request.Request(url, headers={"Cache-Control": "no-cache"})
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
@@ -342,10 +431,23 @@ def public_release_version(url: str, manifest_format: str) -> str | None:
 
     if not isinstance(current, dict) or not isinstance(current.get("version"), str):
         raise RuntimeError(f"The public desktop version manifest has no valid version: {url}")
-    return current["version"]
+    return current
 
 
-def verify_version_is_newer(target: str, version: str) -> None:
+def public_release_version(url: str, manifest_format: str) -> str | None:
+    current = public_release_document(url, manifest_format)
+    return str(current["version"]) if current else None
+
+
+def verify_version_is_newer(
+    target: str,
+    version: str,
+    *,
+    repair_current: bool = False,
+    release_manifest: pathlib.Path | None = None,
+    staged_files: list[pathlib.Path] | None = None,
+    stage: pathlib.Path | None = None,
+) -> bool:
     updater_manifests = {
         "windows-x64": "latest.yml",
         "macos-x64": "latest-mac.yml",
@@ -357,8 +459,39 @@ def verify_version_is_newer(target: str, version: str) -> None:
     if current_version is None:
         updater_url = f"https://studio.0st.top/downloads/updates/{target}/{updater_manifests[target]}"
         current_version = public_release_version(updater_url, "yaml")
-    if current_version and version_compare(version, current_version) <= 0:
+    if not current_version:
+        return False
+    comparison = version_compare(version, current_version)
+    if comparison > 0:
+        return False
+    if comparison < 0 or not repair_current:
         raise RuntimeError(f"Version {version} is not newer than the published {target} version {current_version}; bump apps/desktop/package.json first")
+    if release_manifest is None or staged_files is None or stage is None:
+        raise RuntimeError("Same-version repair requires the staged release manifest and files.")
+
+    current_manifest = public_release_document(manifest_url, "json")
+    expected_manifest = json.loads(release_manifest.read_text(encoding="utf-8"))
+    filename_key, digest_key = (
+        ("portableFileName", "portableSha256")
+        if expected_manifest.get("portableFileName")
+        else ("fileName", "sha256")
+    )
+    public_digest = str(current_manifest.get(digest_key, "")).casefold() if current_manifest else ""
+    local_digest = str(expected_manifest.get(digest_key, "")).casefold()
+    is_matching_release = bool(
+        current_manifest
+        and current_manifest.get("version") == version
+        and current_manifest.get(filename_key) == expected_manifest.get(filename_key)
+        and public_digest
+        and public_digest == local_digest
+    )
+    if not is_matching_release:
+        raise RuntimeError("Same-version repair refused because the published package does not match the local release.")
+    missing = missing_public_artifacts(staged_files, stage)
+    if not missing:
+        raise RuntimeError("The current release already has every staged download; no repair is needed.")
+    print(f"Repairing {len(missing)} missing or invalid public files for {target} {version}.", flush=True)
+    return True
 
 
 def release(args: argparse.Namespace) -> None:
@@ -382,7 +515,15 @@ def release(args: argparse.Namespace) -> None:
             return
 
         print(f"Checking published version for {args.platform}...", flush=True)
-        verify_version_is_newer(args.platform, version)
+        repair_check_files = [file for file in files if file != release_manifest]
+        repairing_current = verify_version_is_newer(
+            args.platform,
+            version,
+            repair_current=args.repair_current,
+            release_manifest=release_manifest,
+            staged_files=repair_check_files,
+            stage=stage,
+        )
 
         password = os.environ.get("HELT_DEPLOY_PASSWORD")
         if not password:
@@ -394,9 +535,19 @@ def release(args: argparse.Namespace) -> None:
         try:
             ensure_remote_dir(sftp, remote_stage)
             print(f"Uploading {len(files)} release files for {args.platform}...", flush=True)
-            publish_files(sftp, stage, remote_stage, args.platform, files, updater_manifest, release_manifest)
+            publish_files(
+                sftp,
+                stage,
+                remote_stage,
+                args.platform,
+                files,
+                updater_manifest,
+                release_manifest,
+                publish_release_manifest=not repairing_current,
+            )
             print(f"Verifying public downloads for {args.platform}...", flush=True)
-            verify_public_installer(files, stage)
+            verified_files = [file for file in files if not repairing_current or file != release_manifest]
+            verify_public_installer(verified_files, stage)
         finally:
             clean_remote_stage(sftp, stage, remote_stage, args.platform, files)
             sftp.close()
@@ -415,6 +566,7 @@ def main() -> int:
     parser.add_argument("--skip-build", action="store_true", help="Use existing apps/desktop/release files")
     parser.add_argument("--output-dir", type=pathlib.Path, help="Write build artifacts to an isolated directory; relative paths are based on apps/desktop")
     parser.add_argument("--direct", action="store_true", help="Connect to the target server without the SSH jump host")
+    parser.add_argument("--repair-current", action="store_true", help="Repair missing assets for the same published version when its portable package hash matches")
     parser.add_argument("--dry-run", action="store_true", help="Build and list release files without uploading")
     parser.add_argument("--stage-dir", type=pathlib.Path, help="Keep staged downloads and update feed here; relative paths are based on the repository root")
     args = parser.parse_args()

@@ -7,6 +7,7 @@ import { Loader2, Zap } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { fetchCreditTransactions, type CreditTransaction } from "@/lib/credits-api";
 import { LoadingState } from "@/components/loading-state";
+import { formatPublicTransactionDescription } from "@/components/chat/utils";
 
 // ── Transaction type labels ──────────────────────────────────
 
@@ -19,6 +20,14 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 type FilterMode = "all" | "deducted" | "granted";
+
+const PUBLIC_TYPE_LABELS: Record<string, string> = {
+  topup: "Top up",
+  generation_deduct: "Generation charge",
+  generation_refund: "Generation refund",
+  admin_adjustment: "Admin adjustment",
+  bonus: "Bonus",
+};
 
 const FILTER_OPTIONS: Array<{ value: FilterMode; label: string }> = [
   { value: "all", label: "All" },
@@ -238,10 +247,10 @@ export function CreditUsageHistory() {
                     }`}
                   >
                     <td className="px-4 py-2.5 text-foreground">
-                      {t.description ?? TYPE_LABELS[t.transaction_type] ?? t.transaction_type}
+                      {formatPublicTransactionDescription(t.description, t.transaction_type)}
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground">
-                      {TYPE_LABELS[t.transaction_type] ?? t.transaction_type}
+                      {PUBLIC_TYPE_LABELS[t.transaction_type] ?? "Credit transaction"}
                     </td>
                     <td className="px-4 py-2.5 tabular-nums text-muted-foreground">
                       {formatDate(t.created_at)}

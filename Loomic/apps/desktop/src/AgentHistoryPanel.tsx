@@ -1,4 +1,5 @@
 import React from "react";
+import { readLocalAgentHistory } from "./agent-history-store.js";
 
 type DesktopTaskEvent = {
   eventType: string;
@@ -70,11 +71,15 @@ export function DesktopAgentHistoryPanel({ open, onClose }: { open: boolean; onC
     try {
       const base = typeof window !== "undefined" ? window.location.origin : "";
       const response = await fetch(`${base}/api/website-capture/assistant/desktop-tasks`, { credentials: "include" });
-      if (!response.ok) return;
+      if (!response.ok) {
+        setTasks(readLocalAgentHistory(window.localStorage));
+        return;
+      }
       const body = (await response.json()) as { ok: boolean; data: DesktopTask[] };
       if (body.ok) setTasks(body.data);
-    } catch {
-      /* network errors leave the previous list intact */
+    } catch (error) {
+      console.error("[desktop-agent-history] remote history unavailable; using local history", error);
+      setTasks(readLocalAgentHistory(window.localStorage));
     } finally {
       setLoading(false);
     }
