@@ -91,3 +91,22 @@ packages/ui/.next/
 pnpm-lock.yaml
 !Loomic/pnpm-lock.yaml
 bun.lock
+
+# Agent scratch scripts and deploy bundles from earlier sessions
+.codex-*.py
+add-*.py
+web-*.zip
+.codegraph/
+.playwright-mcp/
+
+# One-off scripts, patches and screenshots at repo root (historical sessions)
+/*.py
+/*.patch
+/*.png
+/*.jpg
+/*.txt
+*-temp/
+/*.gif
+/*.html
+/*.svg
+/*.json
