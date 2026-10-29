@@ -364,7 +364,7 @@ html[data-helstera-desktop="true"] .workspace-shell > main > .absolute { display
 .desktop-toast__icon svg { width: 16px; height: 16px; }
 .desktop-toast--success .desktop-toast__icon { color: var(--success); }
 .desktop-toast--error .desktop-toast__icon { color: var(--destructive); }
-.desktop-toast--info .desktop-toast__icon { color: var(--info); }
+.desktop-toast--info .desktop-toast__icon { color: var(--info-ink); }
 .desktop-toast__message { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .desktop-toast__dismiss { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 26px; height: 26px; min-width: 24px; min-height: 24px; border: 0; border-radius: 4px; padding: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
 .desktop-toast__dismiss:hover { background: color-mix(in srgb, var(--foreground) 8%, transparent); color: var(--foreground); }
@@ -537,7 +537,7 @@ html[data-helstera-desktop="true"] .workspace-shell > main > .absolute { display
 .desktop-agent-task-card > header > span, .desktop-agent-task-card__meta { color: var(--muted-foreground); font-size: 10px; }
 .desktop-agent-task-card__meta { display: grid; gap: 3px; border-bottom: 1px solid var(--border); padding-bottom: 8px; overflow-wrap: anywhere; }
 .desktop-agent-task-card__canvas-link { width: fit-content; color: var(--foreground); font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
-.desktop-agent-task-card__approval-expired { border-left: 2px solid #c98c33; padding: 5px 8px; color: var(--muted-foreground); }
+.desktop-agent-task-card__approval-expired { border-left: 2px solid var(--warning-ink); padding: 5px 8px; color: var(--muted-foreground); }
 .desktop-agent-task-card__timeline { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .desktop-agent-task-card__timeline li { border-left: 2px solid var(--border); padding-left: 9px; color: var(--muted-foreground); }
 .desktop-agent-task-card__timeline li > div { display: flex; justify-content: space-between; gap: 8px; }
@@ -550,7 +550,7 @@ html[data-helstera-desktop="true"] .workspace-shell > main > .absolute { display
 .desktop-agent-task-card__page > * { display: block; margin-top: 4px; }
 .desktop-agent-task-card__page a { color: var(--muted-foreground); text-decoration: underline; }
 .desktop-agent-task-card__assets { display: flex; gap: 14px; }
-.desktop-agent-task-card__approval { display: grid; gap: 8px; border: 1px solid color-mix(in srgb,#c98c33 55%,transparent); padding: 9px; }
+.desktop-agent-task-card__approval { display: grid; gap: 8px; border: 1px solid color-mix(in srgb,var(--warning-ink) 55%,transparent); padding: 9px; }
 .desktop-agent-task-card__approval > div { display: flex; gap: 8px; }
 .desktop-agent-task-card__approval button, .desktop-agent-task-card__cancel { min-height: 30px; border: 1px solid var(--border); padding: 0 10px; }
 .desktop-agent-task-card__error { color: var(--destructive); }
@@ -686,7 +686,7 @@ html[data-helstera-desktop="true"][data-sidebar-collapsed="false"] {
 .auth-shell--desktop .auth-shell__main > div > h1 { margin: 0; font-size: 26px; letter-spacing: -.02em; }
 .auth-shell--desktop .auth-shell__main > div > p { margin-top: 10px; color: var(--muted-foreground); font-size: 13px; line-height: 1.7; }
 .auth-shell--desktop .auth-shell__main > div > ul { display: none; }
-.auth-shell--desktop .auth-shell__main .desktop-auth-card__success { display: flex; align-items: center; gap: 8px; color: #16803c; font-size: 13px; }
+.auth-shell--desktop .auth-shell__main .desktop-auth-card__success { display: flex; align-items: center; gap: 8px; color: var(--success); font-size: 13px; }
 @media (max-width: 640px) {
   .auth-shell--desktop { padding: 20px; }
   .auth-shell--desktop .auth-shell__main::before { top: 20px; left: 20px; }
@@ -866,13 +866,13 @@ html[data-helstera-desktop="true"][data-sidebar-collapsed="false"] {
 }
 
 .helstera-desktop-titlebar__controls .helstera-desktop-titlebar__close:hover:not(:disabled) {
-    background: #c42b35;
-    color: #fff;
+    background: var(--destructive);
+    color: var(--destructive-foreground);
 }
 
 .helstera-desktop-titlebar__controls .helstera-desktop-titlebar__close:active:not(:disabled) {
-    background: color-mix(in srgb, #c42b35 82%, #000);
-    color: #fff;
+    background: color-mix(in srgb, var(--destructive) 82%, #000);
+    color: var(--destructive-foreground);
 }
 
 .helstera-desktop-titlebar__controls button:focus-visible,
@@ -1169,6 +1169,8 @@ html[data-helstera-desktop="true"][data-sidebar-collapsed="false"] {
     --success-foreground: oklch(0.99 0 0);
     --warning: oklch(0.78 0.13 85);
     --warning-foreground: oklch(0.22 0.04 85);
+    --warning-ink: oklch(0.55 0.13 85);
+    --info-ink: oklch(0.55 0.10 245);
     /* --warning is a *surface* token: as body text it only reaches 1.93:1.
        --warning-strong is the same amber hue pulled down until it is legible
        AS text: 5.32:1 on --background, 5.55:1 on --card. */
@@ -1233,6 +1235,8 @@ html[data-helstera-desktop="true"][data-sidebar-collapsed="false"] {
     --success-foreground: oklch(0.14 0.04 260);
     --warning: oklch(0.78 0.13 85);
     --warning-foreground: oklch(0.14 0.04 260);
+    --warning-ink: oklch(0.78 0.13 85);
+    --info-ink: oklch(0.70 0.10 245);
     /* Dark mode --warning is already legible as text (9.87:1 on --background),
        so --warning-strong simply reuses it instead of drifting from it. */
     --warning-strong: var(--warning);

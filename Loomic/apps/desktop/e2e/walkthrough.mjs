@@ -365,6 +365,19 @@ async function main() {
     );
 
 
+    // 深色模式：上面覆盖的是浅色默认；这里翻转主题再拍一次，
+    // 避免对比度回归藏在“只跑浅色”的空档里。
+    await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
+    for (const [route, name] of [["/desktop-app/", "walk-dark-home"], ["/desktop-app/settings/", "walk-dark-settings"]]) {
+      await cdp.send("Page.navigate", { url: ORIGIN + route });
+      await new Promise((r) => setTimeout(r, 3000));
+      await cdp.send("Runtime.evaluate", { expression: 'document.documentElement.classList.add("dark")' });
+      await new Promise((r) => setTimeout(r, 800));
+      const dark = await cdp.send("Page.captureScreenshot", { format: "png" });
+      const darkPath = join(SHOTS, name + ".png");
+      writeFileSync(darkPath, Buffer.from(dark.data, "base64"));
+      console.log("    dark screenshot: " + darkPath);
+    }
     const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
     const shotPath = join(SHOTS, "walk2-probe.png");
     writeFileSync(shotPath, Buffer.from(shot.data, "base64"));
