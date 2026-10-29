@@ -82,11 +82,14 @@ create table if not exists projects (
   name text not null,
   slug text not null,
   description text,
+  source text not null default 'manual' check (source in ('home', 'manual', 'import')),
   archived_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (workspace_id, slug)
 );
+
+alter table projects add column if not exists source text not null default 'manual';
 
 create table if not exists canvases (
   id uuid primary key default gen_random_uuid(),

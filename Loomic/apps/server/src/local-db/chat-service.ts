@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type { ChatMessage, ChatMessageCreateRequest, ChatSessionSummary, ContentBlock } from "@helstera/shared";
 import type { AuthenticatedUser } from "../auth/types.js";
-import { ChatServiceError, type ChatService } from "../features/chat/chat-service.js";
+import { ChatServiceError, toIsoTimestamp, type ChatService } from "../features/chat/chat-service.js";
 
 export function createLocalChatService(db: Pool): ChatService {
   return {
@@ -98,5 +98,5 @@ async function assertSessionAccess(db: Pool, sessionId: string, userId: string) 
 
 function mapMessage(row: any): ChatMessage {
   const blocks = Array.isArray(row.content_blocks) ? row.content_blocks as ContentBlock[] : null;
-  return { id: row.id, role: row.role, content: row.content, toolActivities: row.tool_activities as ChatMessage["toolActivities"], contentBlocks: blocks, createdAt: row.created_at.toISOString() };
+  return { id: row.id, role: row.role, content: row.content, toolActivities: row.tool_activities as ChatMessage["toolActivities"], contentBlocks: blocks, createdAt: toIsoTimestamp(row.created_at) };
 }

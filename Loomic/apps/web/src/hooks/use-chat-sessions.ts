@@ -21,6 +21,12 @@ export type Message = {
   id: string;
   role: "user" | "assistant";
   contentBlocks: ContentBlock[];
+  /**
+   * ISO 8601 send time. Always present for messages read back from the server
+   * (`chat_messages.created_at` is `not null`); optimistic messages created in
+   * the UI are stamped with the local clock at send time.
+   */
+  createdAt: string;
 };
 
 // ── LRU message cache ────────────────────────────────────────
@@ -113,7 +119,7 @@ export function mapServerMessages(
         }
       }
     }
-    mapped.push({ id: m.id, role: m.role, contentBlocks: blocks });
+    mapped.push({ id: m.id, role: m.role, contentBlocks: blocks, createdAt: m.createdAt });
     previousServerMessage = m;
   }
 

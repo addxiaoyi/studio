@@ -7,6 +7,7 @@ import {
   chatMessageSchema,
   chatSessionSummarySchema,
   modelInfoSchema,
+  projectSourceSchema,
   projectSummarySchema,
   runIdSchema,
   viewerProfileSchema,
@@ -53,6 +54,11 @@ export const projectListResponseSchema = z.object({
 export const projectCreateRequestSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
+  /**
+   * Creation entry point. Omitted by the legacy "new project" callers, which
+   * the service treats as `manual` (same value as the database default).
+   */
+  source: projectSourceSchema.optional(),
 });
 
 export const projectCreateResponseSchema = z.object({

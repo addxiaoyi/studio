@@ -1,6 +1,16 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Square } from "lucide-react";
 
@@ -13,8 +23,35 @@ import { AgentModelSelector } from "./agent-model-selector";
 import { ImageAttachmentBar } from "./image-attachment-bar";
 import { ImageModelPreferencePopover } from "./image-model-preference";
 
+/** #27 输入框字数上限，集中定义，textarea 的 maxLength 与剩余字数提示共用同一常量 */
+export const MAX_INPUT_LENGTH = 8000;
+
+/** #27 已用字数达到上限的这个比例时开始提示「剩余 N 字」（9000 => 8000 的 90%） */
+export const REMAINING_LENGTH_PROMPT_RATIO = 0.9;
+
+/** 提交前的草稿快照：失败回填时用它在原位恢复文本、选区与焦点（#8） */
+type DraftSnapshot = { text: string; selectionStart: number; selectionEnd: number };
+
+/**
+ * 从输入文本推导 @ 提及查询词。
+ * 与旧 handleChange 内联逻辑等价，抽成纯函数以便把派生计算移出按键同步路径（#4）。
+ */
+export function deriveMentionQuery(text: string): string | null {
+  const lastAtIdx = text.lastIndexOf("@");
+  if (lastAtIdx === -1) return null;
+
+  const charBefore = lastAtIdx > 0 ? text[lastAtIdx - 1] : " ";
+  if (charBefore !== " " && charBefore !== "\n" && lastAtIdx !== 0) return null;
+
+  const query = text.slice(lastAtIdx + 1);
+  if (query.includes(" ") || query.includes("\n")) return null;
+
+  return query;
+}
+
 type ChatInputProps = {
-  onSend: (message: string, videoModel?: string) => void;
+  /** 返回值/抛错用于判断发送是否成功：#8 成功才清空，失败回填草稿并重新聚焦 */
+  onSend: (message: string, videoModel?: string) => void | Promise<unknown>;
   disabled?: boolean;
   attachments?: ImageAttachmentState[];
   onAddFiles?: (files: File[]) => void;
@@ -62,6 +99,84 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     text: string;
     attachmentIds: string[];
   } | null>(null);
+  // 最新值的镜像：异步发送成功时只在草稿没被改写的情况下清空，避免抹掉等待期间的新输入
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  // 失败回填时待恢复的选区：等文本落到 DOM（value 更新）后再聚焦，避免光标定位到旧内容上
+  const restoreCaretRef = useRef<DraftSnapshot | null>(null);
+
+  const focusDraft = useCallback((snapshot: DraftSnapshot) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    const end = snapshot.text.length;
+    try {
+      textarea.setSelectionRange(
+        Math.min(snapshot.selectionStart, end),
+        Math.min(snapshot.selectionEnd, end),
+      );
+    } catch {
+      // 不支持选区恢复的环境里，聚焦已经足够让用户可以继续编辑
+    }
+  }, []);
+
+  /** #8 失败回填：恢复文本与光标位置，并让输入框重新获得焦点 */
+  const restoreDraft = useCallback(
+    (snapshot: DraftSnapshot) => {
+      if (valueRef.current === snapshot.text) {
+        // 文本从未被清空（异步失败路径），只需把焦点与光标还回去
+        focusDraft(snapshot);
+        return;
+      }
+      restoreCaretRef.current = snapshot;
+      setValue(snapshot.text);
+    },
+    [focusDraft],
+  );
+
+  useEffect(() => {
+    const pending = restoreCaretRef.current;
+    if (!pending || pending.text !== value) return;
+    restoreCaretRef.current = null;
+    focusDraft(pending);
+  }, [value, focusDraft]);
+
+  /**
+   * #8 提交前先快照草稿，再按 onSend 的结果决定去留：
+   * - 同步抛错 / 返回的 Promise 被 reject：回填草稿、恢复光标、重新聚焦
+   * - 返回 Promise：只有 resolve（成功）才清空
+   * - 返回 void：没有失败信号，保持旧行为（立即清空）
+   */
+  const dispatchSend = useCallback(
+    (text: string) => {
+      const textarea = textareaRef.current;
+      const snapshot: DraftSnapshot = {
+        text: value,
+        selectionStart: textarea?.selectionStart ?? value.length,
+        selectionEnd: textarea?.selectionEnd ?? value.length,
+      };
+      const clearDraft = () => {
+        // 等待期间用户改过草稿时不清空，否则会抹掉新输入
+        if (valueRef.current !== snapshot.text) return;
+        setValue("");
+        if (textareaRef.current) textareaRef.current.style.height = "auto";
+      };
+
+      let result: void | Promise<unknown>;
+      try {
+        result = onSend(text);
+      } catch {
+        restoreDraft(snapshot);
+        return;
+      }
+      if (result && typeof (result as Promise<unknown>).then === "function") {
+        void (result as Promise<unknown>).then(clearDraft, () => restoreDraft(snapshot));
+        return;
+      }
+      clearDraft();
+    },
+    [value, onSend, restoreDraft],
+  );
 
   useImperativeHandle(ref, () => ({
     clearAtQuery() {
@@ -89,12 +204,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       router.push("/prompts?pick=1");
       return;
     }
-    onSend(trimmed);
-    setValue("");
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
-  }, [value, disabled, isUploading, onSend, attachments, router]);
+    dispatchSend(trimmed);
+  }, [value, disabled, isUploading, attachments, router, dispatchSend]);
 
   useEffect(() => {
     const pending = pendingSendRef.current;
@@ -116,10 +227,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }
 
     pendingSendRef.current = null;
-    onSend(pending.text);
-    setValue("");
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [attachments, disabled, isUploading, onSend]);
+    dispatchSend(pending.text);
+  }, [attachments, disabled, isUploading, dispatchSend]);
 
   useEffect(() => {
     const selected = sessionStorage.getItem("helstera_selected_prompt");
@@ -181,39 +290,25 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     textarea.style.overflowY = textarea.scrollHeight > maxH ? "auto" : "hidden";
   }, [value]);
 
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const newValue = e.target.value;
-      setValue(newValue);
+  // #4 按键路径只做一次 setValue：@ 查询的派生与向父级通知放进延迟值 + effect，
+  // 这样粘贴长文本时受控更新本身不等价于「每次全量重算 + 全量重渲染」。
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setValue(e.target.value);
+  }, []);
 
-      if (!onAtQuery) return;
-
-      // Find last @ in text to detect mention mode
-      const lastAtIdx = newValue.lastIndexOf("@");
-      if (lastAtIdx === -1) {
-        onAtQuery(null); // close picker
-        return;
-      }
-
-      // Only trigger if @ is at start or preceded by whitespace
-      const charBefore = lastAtIdx > 0 ? newValue[lastAtIdx - 1] : " ";
-      if (charBefore !== " " && charBefore !== "\n" && lastAtIdx !== 0) {
-        onAtQuery(null);
-        return;
-      }
-
-      // Extract query after @
-      const query = newValue.slice(lastAtIdx + 1);
-      // Close if user typed a space after query (finished mentioning)
-      if (query.includes(" ") || query.includes("\n")) {
-        onAtQuery(null);
-        return;
-      }
-
-      onAtQuery(query);
-    },
-    [onAtQuery],
+  const deferredValue = useDeferredValue(value);
+  const mentionQuery = useMemo(
+    () => (onAtQuery ? deriveMentionQuery(deferredValue) : null),
+    [deferredValue, onAtQuery],
   );
+  // 只在查询词真正变化时通知父级：避免每次按键都把父级聊天树拉进同一个提交
+  const notifiedMentionQueryRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!onAtQuery) return;
+    if (notifiedMentionQueryRef.current === mentionQuery) return;
+    notifiedMentionQueryRef.current = mentionQuery;
+    onAtQuery(mentionQuery);
+  }, [mentionQuery, onAtQuery]);
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -283,6 +378,28 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   );
 
   const hasContent = value.trim().length > 0 || (attachments && attachments.length > 0);
+  const hasFailedAttachment = Boolean(attachments?.some((attachment) => attachment.error));
+
+  // #27 字数上限与剩余量：maxLength 用原生行为（超限依然能粘贴/输入到上限，不做额外 slice 造成跳变）
+  const remainingLength = MAX_INPUT_LENGTH - value.length;
+  const showRemainingLength = value.length >= MAX_INPUT_LENGTH * REMAINING_LENGTH_PROMPT_RATIO;
+
+  // #26 禁用要有原因：按真实状态区分，供按钮 title 与 aria-describedby 引用同一句可见原因
+  const disabledReasonId = useId();
+  const isStopMode = Boolean(disabled && onCancel);
+  const sendDisabled =
+    Boolean(isUploading) || (Boolean(disabled) && !isStopMode) || (!disabled && !hasContent) || hasFailedAttachment;
+  const disabledReason = isUploading
+    ? "正在上传附件，请稍候"
+    : hasFailedAttachment
+      ? "请先重试或移除上传失败的附件"
+      : isStopMode
+        ? "生成中，可先停止"
+        : disabled
+          ? "生成中，请稍候"
+          : !hasContent
+            ? "请输入内容"
+            : null;
 
   // Memoize canvas selection summary -- selectedCanvasElements changes on every
   // canvas interaction, but the counts only change when the selection actually differs
@@ -380,6 +497,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
+          maxLength={MAX_INPUT_LENGTH}
           placeholder='输入需求，或使用 @ 引用模型、素材和技能'
           aria-label="输入消息"
           rows={1}
@@ -445,14 +563,35 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               />
             </div>
           </div>
+          {(showRemainingLength || disabledReason) && (
+            <div className="flex min-w-0 flex-1 items-center justify-end gap-2 px-1">
+              {showRemainingLength && (
+                <span
+                  data-remaining-length={remainingLength}
+                  className={`text-[11px] tabular-nums ${
+                    remainingLength <= 0 ? "text-destructive" : "text-muted-foreground"
+                  }`}
+                >
+                  剩余 {remainingLength} 字
+                </span>
+              )}
+              {disabledReason && (
+                <p id={disabledReasonId} className="truncate text-[11px] text-muted-foreground" role="status">
+                  {disabledReason}
+                </p>
+              )}
+            </div>
+          )}
           <button
             type="button"
-            onClick={disabled && onCancel ? onCancel : handleSubmit}
-            disabled={isUploading || (!disabled && !hasContent)}
-            aria-label={disabled && onCancel ? "停止生成" : "发送消息"}
+            onClick={isStopMode ? onCancel : handleSubmit}
+            disabled={sendDisabled}
+            aria-label={isStopMode ? "停止生成" : "发送消息"}
+            title={disabledReason ?? (isStopMode ? "停止生成" : "发送消息")}
+            {...(disabledReason ? { "aria-describedby": disabledReasonId } : {})}
             className="flex h-8 min-w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-all duration-300 hover:bg-primary/80 active:bg-primary/90 disabled:opacity-20 disabled:cursor-not-allowed"
           >
-            {disabled && onCancel ? <Square className="size-3.5 fill-current" /> : <svg className="h-[14px] w-[14px]" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><path d="M7 11.5V2.5" /><path d="M3 6.5L7 2.5L11 6.5" /></svg>}
+            {isStopMode ? <Square className="size-3.5 fill-current" /> : <svg className="h-[14px] w-[14px]" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><path d="M7 11.5V2.5" /><path d="M3 6.5L7 2.5L11 6.5" /></svg>}
           </button>
         </div>
       </div>

@@ -77,6 +77,26 @@ function synthesizeLegacyBlocks(
 const messageColumns =
   "id, role, content, tool_activities, content_blocks, created_at";
 
+/**
+ * Normalize a stored message timestamp to an ISO 8601 string.
+ *
+ * `chat_messages.created_at` is `not null`, so every persisted row has a value.
+ * Postgres (local adapter) hands back a `Date` while PostgREST (remote adapter)
+ * hands back a string, so both are accepted. Anything unusable is a real bug and
+ * fails loudly here instead of surfacing `Invalid Date` in the message list.
+ */
+export function toIsoTimestamp(value: unknown, field = "created_at"): string {
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    throw new ChatServiceError(
+      "chat_error",
+      `Message row is missing ${field}.`,
+      500,
+    );
+  }
+  return date.toISOString();
+}
+
 function toChatMessage(row: any): ChatMessage {
   const contentBlocks =
     Array.isArray(row.content_blocks) && row.content_blocks.length > 0
@@ -92,7 +112,7 @@ function toChatMessage(row: any): ChatMessage {
     content: row.content,
     toolActivities: row.tool_activities as ChatMessage["toolActivities"],
     contentBlocks,
-    createdAt: row.created_at,
+    createdAt: toIsoTimestamp(row.created_at),
   };
 }
 

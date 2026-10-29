@@ -279,6 +279,74 @@ describe("@helstera/shared contracts", () => {
     expect(createdProject.project.primaryCanvas.isPrimary).toBe(true);
   });
 
+  it("only accepts the three project source literals", () => {
+    const projectSourceSchema = getExportedSchema("projectSourceSchema");
+
+    expect(projectSourceSchema.parse("home")).toBe("home");
+    expect(projectSourceSchema.parse("manual")).toBe("manual");
+    expect(projectSourceSchema.parse("import")).toBe("import");
+
+    // Anything else must not sneak through: a free-form string would let the
+    // web layer render an unknown enum, and "home" must stay an exact match.
+    expect(projectSourceSchema.safeParse("Home").success).toBe(false);
+    expect(projectSourceSchema.safeParse("auto").success).toBe(false);
+    expect(projectSourceSchema.safeParse("").success).toBe(false);
+  });
+
+  it("carries project source through the summary while staying optional on the wire", () => {
+    const projectSummarySchema = getExportedSchema("projectSummarySchema");
+    const base = {
+      id: "project_123",
+      name: "Home Project",
+      slug: "home-project",
+      description: null,
+      workspace: {
+        id: "workspace_123",
+        name: "Helstera Maker",
+        type: "personal",
+        ownerUserId: "user_123",
+      },
+      primaryCanvas: { id: "canvas_123", name: "Main Canvas", isPrimary: true },
+      createdAt: "2026-03-23T12:00:00.000Z",
+      updatedAt: "2026-03-23T12:00:00.000Z",
+    };
+
+    expect(projectSummarySchema.parse({ ...base, source: "home" })).toMatchObject({
+      source: "home",
+    });
+    expect(projectSummarySchema.parse({ ...base, source: "import" })).toMatchObject({
+      source: "import",
+    });
+
+    // Payloads produced before the column existed must still parse; the web
+    // layer falls back to the `manual` default.
+    const legacy = projectSummarySchema.parse(base);
+    expect(legacy).not.toHaveProperty("source", "home");
+    expect(legacy.source).toBeUndefined();
+
+    expect(() => projectSummarySchema.parse({ ...base, source: "other" })).toThrow();
+  });
+
+  it("requires an ISO send time on every chat message", () => {
+    const chatMessageSchema = getExportedSchema("chatMessageSchema");
+    const message = {
+      id: "message_123",
+      role: "user",
+      content: "hello",
+      createdAt: "2026-03-23T12:00:00.000Z",
+    };
+
+    expect(chatMessageSchema.parse(message).createdAt).toBe(
+      "2026-03-23T12:00:00.000Z",
+    );
+    // A message without a timestamp would render an empty bubble stamp, so the
+    // contract refuses it outright instead of defaulting to "now".
+    expect(chatMessageSchema.safeParse({ id: "m", role: "user", content: "x" }).success).toBe(false);
+    expect(
+      chatMessageSchema.safeParse({ ...message, createdAt: "not-a-timestamp" }).success,
+    ).toBe(false);
+  });
+
   it("shares stable unauthenticated and application error payloads", () => {
     const unauthenticatedErrorResponseSchema = getExportedSchema(
       "unauthenticatedErrorResponseSchema",

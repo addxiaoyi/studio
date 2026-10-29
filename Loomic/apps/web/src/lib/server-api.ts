@@ -998,17 +998,60 @@ export async function updateProject(
 }
 
 // --- Canvas API ---
+//
+// 画布保存的并发控制走 HTTP 前置条件头（`ETag` / `If-Match`），不改 @helstera/shared
+// 里的画布契约：契约包由其它分支占用，而版本本来就是「HTTP 状态」而不是业务数据。
+
+/** 画布版本号 → `If-Match` / `ETag` 的弱校验格式。与服务端 http/canvases.ts 的 formatCanvasEtag 一致。 */
+export function formatCanvasVersionETag(version: number): string {
+  return `W/"${version}"`;
+}
+
+/** 解析 `W/"12"` / `"12"`；解析不出来就当没有版本（老服务端，不做并发控制）。 */
+export function parseCanvasVersionETag(etag: string | null | undefined): number | null {
+  if (!etag) return null;
+  const match = /^(?:W\/)?"(\d+)"$/u.exec(etag.trim());
+  if (!match) return null;
+  const version = Number(match[1]);
+  return Number.isInteger(version) && version >= 1 ? version : null;
+}
+
+/**
+ * 保存时服务端说「你手上的版本已经旧了」。
+ * `currentVersion` 是服务端此刻的版本号 —— 覆盖保存要用它重发。
+ */
+export class CanvasVersionConflictError extends ApiApplicationError {
+  readonly currentVersion: number;
+  constructor(currentVersion: number, message = "画布已在其它窗口被修改。") {
+    super("canvas_version_conflict", message, { version: currentVersion });
+    this.name = "CanvasVersionConflictError";
+    this.currentVersion = currentVersion;
+  }
+}
+
+export function isCanvasVersionConflictError(
+  error: unknown,
+): error is CanvasVersionConflictError {
+  return error instanceof CanvasVersionConflictError;
+}
 
 export async function fetchCanvas(
   accessToken: string,
   canvasId: string,
-): Promise<{ canvas: CanvasDetail }> {
+): Promise<{ canvas: CanvasDetail; version: number | null }> {
   const response = await apiFetch(
     `${getServerBaseUrl()}/api/canvases/${canvasId}`,
     { headers: authHeaders(accessToken) },
   );
   if (!response.ok) return handleErrorResponse(response);
-  return (await response.json()) as { canvas: CanvasDetail };
+  const body = (await response.json()) as { canvas: CanvasDetail; version?: number };
+  return {
+    canvas: body.canvas,
+    version:
+      typeof body.version === "number"
+        ? body.version
+        : parseCanvasVersionETag(response.headers.get("etag")),
+  };
 }
 
 export async function saveCanvas(
@@ -1019,16 +1062,34 @@ export async function saveCanvas(
     appState: Record<string, unknown>;
     files: Record<string, Record<string, unknown>>;
   },
-): Promise<void> {
+  options?: { baseVersion?: number | null },
+): Promise<{ version: number | null }> {
+  const baseVersion = options?.baseVersion ?? null;
+  const headers: Record<string, string> = authJsonHeaders(accessToken);
+  if (baseVersion !== null) {
+    headers["If-Match"] = formatCanvasVersionETag(baseVersion);
+  }
   const response = await apiFetch(
     `${getServerBaseUrl()}/api/canvases/${canvasId}`,
     {
       method: "PUT",
-      headers: authJsonHeaders(accessToken),
+      headers,
       body: JSON.stringify({ content }),
     },
   );
+  if (response.status === 409) {
+    const body = (await response.json().catch(() => null)) as { version?: unknown } | null;
+    const currentVersion =
+      typeof body?.version === "number"
+        ? body.version
+        : parseCanvasVersionETag(response.headers.get("etag")) ?? baseVersion ?? 0;
+    throw new CanvasVersionConflictError(currentVersion);
+  }
   if (!response.ok) return handleErrorResponse(response);
+  const body = (await response.json().catch(() => null)) as { version?: unknown } | null;
+  return {
+    version: typeof body?.version === "number" ? body.version : null,
+  };
 }
 
 export async function uploadThumbnail(

@@ -19,6 +19,7 @@ import {
 } from "./backends/index.js";
 import { conversationCompactionMiddleware } from "./conversation-compaction.js";
 import { imageInputMiddleware } from "./image-input-middleware.js";
+import { promptRedactionMiddleware } from "./redaction.js";
 import { HELSTERA_SYSTEM_PROMPT } from "./prompts/helstera-main.js";
 import type { SubmitDesktopAgentTaskFn } from "./tools/desktop-agent.js";
 import type {
@@ -145,7 +146,11 @@ export function createHelsteraDeepAgent(options: {
   }
 
   return createDeepAgent({
-    middleware: [conversationCompactionMiddleware, imageInputMiddleware],
+    middleware: [
+      promptRedactionMiddleware,
+      conversationCompactionMiddleware,
+      imageInputMiddleware,
+    ],
     backend: backendResult.factory,
     ...(options.checkpointer ? { checkpointer: options.checkpointer } : {}),
     model: resolvedModel,

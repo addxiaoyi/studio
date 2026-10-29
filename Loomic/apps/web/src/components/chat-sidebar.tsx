@@ -53,6 +53,46 @@ import { SessionSelector } from "./session-selector";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 
+// ── Send-time stamps ─────────────────────────────────────────
+// Every message bubble carries the moment it was sent. Server history always
+// has `created_at`; optimistic messages are stamped with the local clock.
+
+/** ISO timestamp for a message the UI is about to add locally. */
+export function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+/**
+ * Localized send time for a bubble:
+ * - same calendar day  -> `HH:mm`
+ * - other day, same y. -> `MM-DD HH:mm`
+ * - other year         -> `YYYY-MM-DD HH:mm`
+ *
+ * Returns `""` for a missing or unparseable value so a bad row degrades to "no
+ * timestamp" instead of rendering `Invalid Date`.
+ */
+export function formatMessageTime(
+  createdAt: string | null | undefined,
+  now: Date = new Date(),
+): string {
+  if (!createdAt) return "";
+  const at = new Date(createdAt);
+  if (Number.isNaN(at.getTime())) return "";
+  const time = `${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
+  const sameDay =
+    at.getFullYear() === now.getFullYear() &&
+    at.getMonth() === now.getMonth() &&
+    at.getDate() === now.getDate();
+  if (sameDay) return time;
+  const monthDay = `${pad2(at.getMonth() + 1)}-${pad2(at.getDate())}`;
+  if (at.getFullYear() === now.getFullYear()) return `${monthDay} ${time}`;
+  return `${at.getFullYear()}-${monthDay} ${time}`;
+}
+
 type ChatSidebarProps = {
   accessToken: string;
   canvasId: string;
@@ -559,6 +599,7 @@ export function ChatSidebar({
             id: `assistant-approval-${Date.now()}`,
             role: "assistant" as const,
             contentBlocks: [{ type: "text" as const, text: confirmed.data.jobId ? "已确认扣费，图片任务已开始处理。" : "已确认扣费，图片任务正在启动。" }],
+            createdAt: nowIso(),
           }]);
           return;
         } catch {
@@ -629,6 +670,7 @@ export function ChatSidebar({
           id: `user-${Date.now()}`,
           role: "user" as const,
           contentBlocks: [{ type: "text" as const, text }, ...videoImageBlocks],
+          createdAt: nowIso(),
         };
         updateSessionMessages(sessionId, (prev) => [...prev, userMessage]);
         void saveMessage(accessTokenRef.current, sessionId, {
@@ -680,6 +722,7 @@ export function ChatSidebar({
                 type: "text" as const,
                 text: `视频已生成（${video.durationSeconds}秒）并已添加到画布。`,
               }],
+              createdAt: nowIso(),
             },
           ]);
         } catch (error) {
@@ -701,12 +744,14 @@ export function ChatSidebar({
                 output: { status: "confirmation_required", ...appError.details },
                 outputSummary: "Confirmation required before credits are charged.",
               }],
+              createdAt: nowIso(),
             }]);
           } else {
             updateSessionMessages(sessionId, (prev) => [...prev, {
               id: `assistant-video-error-${Date.now()}`,
               role: "assistant" as const,
               contentBlocks: [{ type: "text" as const, text: `Video generation failed: ${message}` }],
+              createdAt: nowIso(),
             }]);
           }
         } finally {
@@ -772,6 +817,7 @@ export function ChatSidebar({
           ...mentionBlocks,
           ...imageBlocks,
         ],
+        createdAt: nowIso(),
       };
       updateSessionMessages(currentSessionId, (prev) => [...prev, userMsg]);
 
@@ -796,7 +842,7 @@ export function ChatSidebar({
       const assistantId = `assistant-${Date.now()}`;
       updateSessionMessages(currentSessionId, (prev) => [
         ...prev,
-        { id: assistantId, role: "assistant" as const, contentBlocks: [] },
+        { id: assistantId, role: "assistant" as const, contentBlocks: [], createdAt: nowIso() },
       ]);
       setStreaming(true);
       setStreamPhase("connecting");
@@ -1303,6 +1349,7 @@ export function ChatSidebar({
                 id: assistantId,
                 role: "assistant" as const,
                 contentBlocks: [],
+                createdAt: nowIso(),
               },
             ];
           });
@@ -1583,22 +1630,38 @@ export function ChatSidebar({
           ) : messages.length === 0 ? (
             <ChatSkills onSend={handleSend} />
           ) : (
-            messages.map((msg) => (
-              <ChatMessage
-                key={msg.id}
-                role={msg.role}
-                contentBlocks={msg.contentBlocks}
-                isStreaming={
-                  streaming &&
-                  msg.role === "assistant" &&
-                  msg === messages[messages.length - 1]
-                }
-                isRetrying={retryingAssistantId === msg.id}
-                onRetry={msg.role === "assistant" ? () => retryAssistantMessage(msg.id) : undefined}
-                hiddenApprovalToolCallIds={approvalCards.hiddenToolCallIds}
-                hiddenJobToolCallIds={approvalCards.hiddenJobToolCallIds}
-              />
-            ))
+            messages.map((msg) => {
+              const sentAt = formatMessageTime(msg.createdAt);
+              return (
+                <div
+                  key={msg.id}
+                  className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}
+                >
+                  <ChatMessage
+                    role={msg.role}
+                    contentBlocks={msg.contentBlocks}
+                    isStreaming={
+                      streaming &&
+                      msg.role === "assistant" &&
+                      msg === messages[messages.length - 1]
+                    }
+                    isRetrying={retryingAssistantId === msg.id}
+                    onRetry={msg.role === "assistant" ? () => retryAssistantMessage(msg.id) : undefined}
+                    hiddenApprovalToolCallIds={approvalCards.hiddenToolCallIds}
+                    hiddenJobToolCallIds={approvalCards.hiddenJobToolCallIds}
+                  />
+                  {sentAt ? (
+                    <time
+                      dateTime={msg.createdAt}
+                      title={msg.createdAt}
+                      className="px-1 text-[11px] leading-none text-muted-foreground/70"
+                    >
+                      {sentAt}
+                    </time>
+                  ) : null}
+                </div>
+              );
+            })
           )}
           {streaming && streamPhase && (
             <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground" role="status" aria-live="polite" aria-atomic="true">

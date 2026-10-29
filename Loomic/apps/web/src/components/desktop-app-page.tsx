@@ -347,6 +347,9 @@ function DesktopAgentHome({ email, accessToken, locale }: { email: string; acces
       }
       const project = await createProject(accessToken, {
         name: goal.length > 48 ? `${goal.slice(0, 45)}…` : goal,
+        // Home entry point: the goal text *is* the project name and the user
+        // never saw a "new project" form, so tag it as auto-created.
+        source: "home",
       }, { idempotencyKey: crypto.randomUUID() });
       const query = new URLSearchParams({
         id: project.project.primaryCanvas.id,

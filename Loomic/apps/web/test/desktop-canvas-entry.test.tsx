@@ -127,7 +127,9 @@ describe("Desktop Agent entry", () => {
     expect(mocks.fetchWebsiteAssistantConnection).toHaveBeenCalledWith("token");
     expect(mocks.createProject).toHaveBeenCalledWith(
       "token",
-      { name: "介绍 https://example.com" },
+      // The desktop home entry point is the auto-create path, so it must be
+      // tagged as such — project cards distinguish home vs manual projects.
+      { name: "介绍 https://example.com", source: "home" },
       expect.objectContaining({ idempotencyKey: expect.any(String) }),
     );
   });

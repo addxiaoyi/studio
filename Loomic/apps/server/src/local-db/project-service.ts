@@ -1,7 +1,7 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool } from "pg";
-import type { ProjectCreateRequest, ProjectSummary, ProjectUpdateRequest } from "@helstera/shared";
+import type { ProjectCreateRequest, ProjectSource, ProjectSummary, ProjectUpdateRequest } from "@helstera/shared";
 import { ProjectServiceError, type ProjectService } from "../features/projects/project-service.js";
 
 const PROJECT_ASSETS_BUCKET = "project-assets";
@@ -14,7 +14,7 @@ export function createLocalProjectService(db: Pool, uploadRoot = "/www/helstera/
       const workspace = await personalWorkspace(db, user.id);
       const { rows } = await db.query(
         `select p.id, p.name, p.slug, p.description, p.created_at, p.updated_at,
-                p.thumbnail_path,
+                p.thumbnail_path, p.source,
                 c.id as canvas_id, c.name as canvas_name, c.is_primary
          from projects p join canvases c on c.project_id = p.id and c.is_primary
          where p.workspace_id = $1 and p.archived_at is null order by p.updated_at desc`,
@@ -73,7 +73,7 @@ export function createLocalProjectService(db: Pool, uploadRoot = "/www/helstera/
     async listArchivedProjects(user) {
       const workspace = await personalWorkspace(db, user.id);
       const { rows } = await db.query(
-        `select p.id, p.name, p.slug, p.description, p.created_at, p.updated_at, p.thumbnail_path,
+        `select p.id, p.name, p.slug, p.description, p.created_at, p.updated_at, p.thumbnail_path, p.source,
                 c.id as canvas_id, c.name as canvas_name, c.is_primary
          from projects p join canvases c on c.project_id = p.id and c.is_primary
          where p.workspace_id = $1 and p.archived_at is not null order by p.updated_at desc`,
@@ -149,10 +149,10 @@ async function createProjectOnce(db: Pool, uploadRoot: string, user: any, input:
         await client.query("begin");
         await client.query("select pg_advisory_xact_lock(hashtext($1))", [user.id]);
         const project = await client.query(
-          `insert into projects (workspace_id, created_by, name, slug, description, brand_kit_id)
-           values ($1, $2, $3, $4, $5, (select id from brand_kits where user_id = $2 and is_default limit 1))
-           returning id, name, slug, description, brand_kit_id, created_at, updated_at`,
-          [workspace.id, user.id, name, slug, input.description?.trim() || null],
+          `insert into projects (workspace_id, created_by, name, slug, description, source, brand_kit_id)
+           values ($1, $2, $3, $4, $5, $6, (select id from brand_kits where user_id = $2 and is_default limit 1))
+           returning id, name, slug, description, source, brand_kit_id, created_at, updated_at`,
+          [workspace.id, user.id, name, slug, input.description?.trim() || null, resolveProjectSource(input.source)],
         );
         const canvas = await client.query(
           `insert into canvases (project_id, created_by, name, is_primary)
@@ -211,7 +211,17 @@ function mapSummary(
   workspace: { id: string; name: string; ownerUserId: string; type: "personal" },
   thumbnailUrl: string | null = null,
 ): ProjectSummary {
-  return { id: row.id, name: row.name, slug: row.slug, description: row.description, createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(), workspace, primaryCanvas: { id: row.canvas_id, name: row.canvas_name, isPrimary: row.is_primary }, thumbnailUrl };
+  return { id: row.id, name: row.name, slug: row.slug, description: row.description, createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(), workspace, primaryCanvas: { id: row.canvas_id, name: row.canvas_name, isPrimary: row.is_primary }, thumbnailUrl, source: resolveProjectSource(row.source) };
+}
+
+/**
+ * Collapse whatever the write path asked for into one of the three stored
+ * values. Anything unknown (a legacy caller that omits `source`, or a row read
+ * back from a database that predates the column) means `manual`, matching the
+ * column default so a missing value can never masquerade as `home`.
+ */
+export function resolveProjectSource(value: unknown): ProjectSource {
+  return value === "home" || value === "import" ? value : "manual";
 }
 
 async function findThumbnailPath(

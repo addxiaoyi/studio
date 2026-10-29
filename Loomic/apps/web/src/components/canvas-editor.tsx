@@ -9,7 +9,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 
 import type { WebSocketHandle } from "../hooks/use-websocket";
 import { getServerBaseUrl } from "../lib/env";
-import { fetchCanvas, saveCanvas, uploadThumbnail } from "../lib/server-api";
+import {
+  CanvasVersionConflictError,
+  fetchCanvas,
+  formatCanvasVersionETag,
+  isCanvasVersionConflictError,
+  saveCanvas,
+  uploadThumbnail,
+} from "../lib/server-api";
 import { VideoCanvasElement } from "./canvas/video-canvas-element";
 import { createExcalidrawImageElement, isVideoUrl, scaleToFit, viewportPointToScene } from "../lib/canvas-elements";
 import { CanvasToolMenu } from "./canvas-tool-menu";
@@ -236,6 +243,113 @@ export function clearCanvasRecoveryCopy(canvasId: string, storage?: Storage): vo
   }
 }
 
+// ---------------------------------------------------------------------------
+// Versioned save (optimistic concurrency)
+//
+// The server treats a canvas save as a compare-and-swap: it only writes when the
+// `If-Match` version equals the stored one. A mismatch means another window
+// changed the canvas after we loaded it, and the save MUST NOT silently win.
+// ---------------------------------------------------------------------------
+
+/** Headers for a canvas PUT. Known version → `If-Match`, so the server can CAS. */
+export function buildCanvasSaveHeaders(
+  accessToken: string | null | undefined,
+  baseVersion: number | null | undefined,
+): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  if (typeof baseVersion === "number" && Number.isFinite(baseVersion)) {
+    headers["If-Match"] = formatCanvasVersionETag(baseVersion);
+  }
+  return headers;
+}
+
+export type CanvasSaveAttemptResult =
+  | { status: "saved"; version: number | null }
+  | { status: "conflict"; version: number };
+
+export type CanvasVersionedSaveInput = {
+  accessToken: string;
+  canvasId: string;
+  content: CanvasSavePayload;
+  /** 本地已知版本（打开画布时 / 上次保存成功后拿到的版本）。 */
+  baseVersion: number | null;
+  deps?: {
+    fetchCanvas?: typeof fetchCanvas;
+    saveCanvas?: typeof saveCanvas;
+  };
+};
+
+/**
+ * 拉一次远端做元素级合并，再用**本地已知版本**保存。
+ *
+ * 关键：baseVersion 绝不能换成刚刚 GET 到的版本 —— 那正是「两个标签页各自
+ * 拉最新版本再覆盖」的老 bug。远端已被推进时返回 `conflict`，由用户决定
+ * 「重新加载」还是「覆盖保存」。
+ */
+export async function saveCanvasWithVersion(
+  input: CanvasVersionedSaveInput,
+): Promise<CanvasSaveAttemptResult> {
+  const fetchRemote = input.deps?.fetchCanvas ?? fetchCanvas;
+  const saveRemote = input.deps?.saveCanvas ?? saveCanvas;
+  const remote = await fetchRemote(input.accessToken, input.canvasId);
+  const merged = mergeCanvasSaveWithRemoteContent(input.content, remote.canvas.content);
+  try {
+    const result = await saveRemote(input.accessToken, input.canvasId, merged, {
+      baseVersion: input.baseVersion,
+    });
+    return { status: "saved", version: result.version };
+  } catch (error) {
+    if (isCanvasVersionConflictError(error)) {
+      return { status: "conflict", version: error.currentVersion };
+    }
+    throw error;
+  }
+}
+
+/**
+ * 冲突提示：明确给出两个动作，绝不自动覆盖。
+ * 「重新加载」= 放弃本地改动，按服务端最新内容刷新（本地副本已进 localStorage 恢复副本）；
+ * 「覆盖保存」= 用 409 带回的服务端版本重发一次。
+ */
+export function CanvasSaveConflictNotice({
+  busy,
+  onReload,
+  onOverwrite,
+}: {
+  busy?: boolean;
+  onReload: () => void;
+  onOverwrite: () => void;
+}) {
+  const disabled = busy ?? false;
+  return (
+    <div
+      role="alert"
+      className="pointer-events-auto absolute left-1/2 top-12 z-[126] flex max-w-[92vw] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-2xl border border-amber-500/60 bg-background/95 px-3 py-2 text-[11px] text-foreground shadow-lg backdrop-blur"
+    >
+      <span className="font-medium text-amber-700 dark:text-amber-300">
+        画布已在其它窗口被修改，本地改动尚未保存
+      </span>
+      <button
+        type="button"
+        onClick={onReload}
+        disabled={disabled}
+        className="rounded-full px-2 py-0.5 font-medium text-foreground underline decoration-dotted underline-offset-2 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+      >
+        重新加载
+      </button>
+      <button
+        type="button"
+        onClick={onOverwrite}
+        disabled={disabled}
+        className="rounded-full border border-destructive/60 px-2 py-0.5 font-medium text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+      >
+        {disabled ? "覆盖中…" : "覆盖保存"}
+      </button>
+    </div>
+  );
+}
+
 export function CanvasEditor({
   canvasId,
   projectId,
@@ -259,11 +373,17 @@ export function CanvasEditor({
   const canvasIdRef = useRef(canvasId);
   canvasIdRef.current = canvasId;
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // 本窗口「已知的服务端版本」：打开画布时读到，每次保存成功后更新。
+  // 保存时用它做 If-Match —— 绝不能换成保存前刚 GET 到的版本，否则又回到后写覆盖。
+  const knownVersionRef = useRef<number | null>(null);
   const [excalidrawApi, setExcalidrawApi] = useState<any>(null);
   const [saveState, setSaveState] = useState<CanvasSaveState>("saved");
   const [recoveryCopy, setRecoveryCopy] = useState<CanvasRecoveryCopy | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [recoveryError, setRecoveryError] = useState(false);
+  // 服务端版本冲突：本地改动没有被写库，等用户选「重新加载」还是「覆盖保存」。
+  const [conflict, setConflict] = useState<{ version: number; content: CanvasSavePayload } | null>(null);
+  const [conflictBusy, setConflictBusy] = useState(false);
   const [resolvedFilesVersion, setResolvedFilesVersion] = useState(0);
   const [isImageDragActive, setIsImageDragActive] = useState(false);
   const [deleteGesture, setDeleteGesture] = useState<{ active: boolean; overTrash: boolean }>({ active: false, overTrash: false });
@@ -279,6 +399,26 @@ export function CanvasEditor({
   // Tracks whether the one-time normalization pass has already run
   const normalizedRef = useRef(false);
   const thumbnailRefreshCanvasRef = useRef<string | null>(null);
+  const conflictRef = useRef<{ version: number; content: CanvasSavePayload } | null>(null);
+  conflictRef.current = conflict;
+
+  // 打开画布时记下服务端版本（保存时的 If-Match 基线）。
+  // 拿不到就保持 null：保存会退回「无版本」的老行为，而不是假装自己是最新的。
+  useEffect(() => {
+    let cancelled = false;
+    knownVersionRef.current = null;
+    fetchCanvas(accessTokenRef.current, canvasId)
+      .then(({ version }) => {
+        if (cancelled || typeof version !== "number") return;
+        knownVersionRef.current = version;
+      })
+      .catch((error) => {
+        console.warn("[canvas-editor] initial canvas version lookup failed:", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canvasId]);
 
   const cancelDeleteGesture = useCallback(() => {
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
@@ -476,16 +616,27 @@ export function CanvasEditor({
             };
           }
           const appState = excalidrawApi.getAppState();
-          saveCanvas(accessTokenRef.current, canvasIdRef.current, {
-            elements: mutableElements.filter((el: any) => !el.isDeleted),
-            appState: {
-              viewBackgroundColor: appState.viewBackgroundColor,
-              gridModeEnabled: appState.gridModeEnabled,
+          saveCanvas(
+            accessTokenRef.current,
+            canvasIdRef.current,
+            {
+              elements: mutableElements.filter((el: any) => !el.isDeleted),
+              appState: {
+                viewBackgroundColor: appState.viewBackgroundColor,
+                gridModeEnabled: appState.gridModeEnabled,
+              },
+              files,
             },
-            files,
-          }).catch((err: Error) =>
-            console.warn("[canvas-editor] normalization save failed:", err),
-          );
+            { baseVersion: knownVersionRef.current },
+          )
+            .then((result) => {
+              if (typeof result.version === "number") {
+                knownVersionRef.current = result.version;
+              }
+            })
+            .catch((err: Error) =>
+              console.warn("[canvas-editor] normalization save failed:", err),
+            );
         }
       } catch (err) {
         console.warn("[canvas-editor] normalization failed:", err);
@@ -548,9 +699,26 @@ export function CanvasEditor({
         setSaveState("saving");
 
         const save = async () => {
-          const { canvas } = await fetchCanvas(accessTokenRef.current, canvasIdRef.current);
-          const merged = mergeCanvasSaveWithRemoteContent(content, canvas.content);
-          await saveCanvas(accessTokenRef.current, canvasIdRef.current, merged);
+          const outcome = await saveCanvasWithVersion({
+            accessToken: accessTokenRef.current,
+            canvasId: canvasIdRef.current,
+            content,
+            baseVersion: knownVersionRef.current,
+          });
+          if (outcome.status === "saved") {
+            if (typeof outcome.version === "number") {
+              knownVersionRef.current = outcome.version;
+            }
+            setConflict(null);
+            return;
+          }
+          // 版本冲突：本地改动绝不静默覆盖别人。
+          // 冲突态 + 本地恢复副本都留着，等用户点「重新加载」或「覆盖保存」。
+          setConflict({ version: outcome.version, content });
+          if (writeCanvasRecoveryCopy(canvasIdRef.current, content)) {
+            setRecoveryCopy(readCanvasRecoveryCopy(canvasIdRef.current));
+          }
+          throw new CanvasVersionConflictError(outcome.version);
         };
         saveQueueRef.current = saveQueueRef.current
           .catch((error) => console.warn("[canvas-editor] previous save failed:", error))
@@ -567,6 +735,14 @@ export function CanvasEditor({
           })
           .catch((err) => {
             if (pendingSaveRef.current === content) setSaveState("error");
+            if (isCanvasVersionConflictError(err)) {
+              // 恢复副本与冲突提示已在 save() 里处理；这里不能当成普通错误重写。
+              console.warn(
+                "[canvas-editor] canvas save conflict, server version:",
+                err.currentVersion,
+              );
+              return;
+            }
             console.error("[canvas-editor] save failed:", err);
             // Keep the newest edits on this device so a refresh cannot lose them.
             if (writeCanvasRecoveryCopy(canvasIdRef.current, content)) {
@@ -808,12 +984,24 @@ export function CanvasEditor({
     pendingSaveRef.current = payload;
     setSaveState("saving");
     const save = async () => {
-      const { canvas } = await fetchCanvas(accessTokenRef.current, canvasIdRef.current);
-      await saveCanvas(
-        accessTokenRef.current,
-        canvasIdRef.current,
-        mergeCanvasSaveWithRemoteContent(payload, canvas.content),
-      );
+      const outcome = await saveCanvasWithVersion({
+        accessToken: accessTokenRef.current,
+        canvasId: canvasIdRef.current,
+        content: payload,
+        baseVersion: knownVersionRef.current,
+      });
+      if (outcome.status === "saved") {
+        if (typeof outcome.version === "number") {
+          knownVersionRef.current = outcome.version;
+        }
+        setConflict(null);
+        return;
+      }
+      setConflict({ version: outcome.version, content: payload });
+      if (writeCanvasRecoveryCopy(canvasIdRef.current, payload)) {
+        setRecoveryCopy(readCanvasRecoveryCopy(canvasIdRef.current));
+      }
+      throw new CanvasVersionConflictError(outcome.version);
     };
     saveQueueRef.current = saveQueueRef.current
       .catch((error) => console.warn("[canvas-editor] previous save failed:", error))
@@ -830,6 +1018,13 @@ export function CanvasEditor({
       })
       .catch((error) => {
         if (pendingSaveRef.current === payload) setSaveState("error");
+        if (isCanvasVersionConflictError(error)) {
+          console.warn(
+            "[canvas-editor] retry save conflict, server version:",
+            error.currentVersion,
+          );
+          return;
+        }
         console.error("[canvas-editor] retry save failed:", error);
         if (writeCanvasRecoveryCopy(canvasIdRef.current, payload)) {
           setRecoveryCopy(readCanvasRecoveryCopy(canvasIdRef.current));
@@ -856,12 +1051,16 @@ export function CanvasEditor({
     setRecoveryBusy(true);
     setRecoveryError(false);
     try {
-      const { canvas } = await fetchCanvas(accessTokenRef.current, canvasIdRef.current);
+      const remote = await fetchCanvas(accessTokenRef.current, canvasIdRef.current);
+      // 用户显式点了「恢复」：以刚读到的版本为基线写回；读-写之间若被人抢先，
+      // 服务端会 409，这里报错并保留本地副本，不会静默覆盖。
       await saveCanvas(
         accessTokenRef.current,
         canvasIdRef.current,
-        mergeCanvasSaveWithRemoteContent(copy.content, canvas.content),
+        mergeCanvasSaveWithRemoteContent(copy.content, remote.canvas.content),
+        { baseVersion: remote.version },
       );
+      knownVersionRef.current = remote.version;
       clearCanvasRecoveryCopy(canvasIdRef.current);
       setRecoveryCopy(null);
       // Reload so the editor hydrates from the restored server content.
@@ -878,6 +1077,49 @@ export function CanvasEditor({
     clearCanvasRecoveryCopy(canvasIdRef.current);
     setRecoveryCopy(null);
     setRecoveryError(false);
+  }, []);
+
+  /** 「覆盖保存」：用 409 带回来的服务端版本显式重发一次（用户已经知情并同意）。 */
+  const overwriteConflict = useCallback(() => {
+    const pending = conflictRef.current;
+    if (!pending) return;
+    setConflictBusy(true);
+    const save = async () => {
+      const outcome = await saveCanvasWithVersion({
+        accessToken: accessTokenRef.current,
+        canvasId: canvasIdRef.current,
+        content: pending.content,
+        baseVersion: pending.version,
+      });
+      if (outcome.status === "saved") {
+        if (typeof outcome.version === "number") {
+          knownVersionRef.current = outcome.version;
+        }
+        setConflict(null);
+        setSaveState("saved");
+        pendingSaveRef.current = null;
+        clearCanvasRecoveryCopy(canvasIdRef.current);
+        setRecoveryCopy(null);
+        setRecoveryError(false);
+        return;
+      }
+      // 又被别人抢先：保持冲突态，用最新的服务端版本重画提示。
+      setConflict({ version: outcome.version, content: pending.content });
+    };
+    saveQueueRef.current = saveQueueRef.current
+      .catch((error) => console.warn("[canvas-editor] previous save failed:", error))
+      .then(save)
+      .catch((error) => {
+        console.error("[canvas-editor] overwrite save failed:", error);
+        setSaveState("error");
+      })
+      .finally(() => setConflictBusy(false));
+  }, []);
+
+  /** 「重新加载」：放弃本地视图、按服务端最新内容刷新。本地副本已在恢复副本里，不会丢。 */
+  const reloadAfterConflict = useCallback(() => {
+    setConflict(null);
+    if (typeof window !== "undefined") window.location.reload();
   }, []);
 
   // Flush pending save on page close (beforeunload) and component unmount
@@ -897,16 +1139,21 @@ export function CanvasEditor({
       // keepalive requests are limited to 64 KiB total in-flight per page; for
       // canvases with very large embedded files this may exceed the limit, but
       // it's the best-effort approach -- sendBeacon has the same constraint.
+      // 带上已知版本：卸载路径同样不能静默覆盖别人的并发修改。失败不阻塞卸载
+      // （keepalive 请求是 fire-and-forget，本地副本已经写进恢复副本）。
       const url = `${getServerBaseUrl()}/api/canvases/${canvasIdRef.current}`;
+      const headers = buildCanvasSaveHeaders(
+        accessTokenRef.current,
+        knownVersionRef.current,
+      );
       try {
-        fetch(url, {
+        void fetch(url, {
           method: "PUT",
-          headers: {
-            Authorization: `Bearer ${accessTokenRef.current}`,
-            "Content-Type": "application/json",
-          },
+          headers,
           body: JSON.stringify({ content: payload }),
           keepalive: true,
+        }).catch(() => {
+          // Best-effort -- nothing we can do if it fails during page teardown
         });
       } catch {
         // Best-effort -- nothing we can do if it fails during page teardown
@@ -930,8 +1177,20 @@ export function CanvasEditor({
           saveQueueRef.current = saveQueueRef.current
             .catch((error) => console.warn("[canvas-editor] previous save failed:", error))
             .then(async () => {
-              const { canvas } = await fetchCanvas(accessTokenRef.current, canvasIdRef.current);
-              await saveCanvas(accessTokenRef.current, canvasIdRef.current, mergeCanvasSaveWithRemoteContent(payload, canvas.content));
+              const outcome = await saveCanvasWithVersion({
+                accessToken: accessTokenRef.current,
+                canvasId: canvasIdRef.current,
+                content: payload,
+                baseVersion: knownVersionRef.current,
+              });
+              if (outcome.status === "conflict") {
+                // 卸载时没有人能回答冲突提示：把本地改动留在恢复副本里，下次打开再定。
+                writeCanvasRecoveryCopy(canvasIdRef.current, payload);
+                return;
+              }
+              if (typeof outcome.version === "number") {
+                knownVersionRef.current = outcome.version;
+              }
             });
           saveQueueRef.current.catch(console.error);
         }
@@ -1072,7 +1331,7 @@ export function CanvasEditor({
           <span className={saveState === "error" ? "text-destructive" : saveState === "pending" || saveState === "saving" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}>
             {canvasSaveStateLabel(saveState)}
           </span>
-          {saveState === "error" && <button type="button" onClick={retrySave} className="rounded-full px-2 py-0.5 font-medium text-foreground underline decoration-dotted underline-offset-2 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">重试保存</button>}
+          {saveState === "error" && !conflict && <button type="button" onClick={retrySave} className="rounded-full px-2 py-0.5 font-medium text-foreground underline decoration-dotted underline-offset-2 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">重试保存</button>}
           {recoveryCopy && (
             <span className="flex items-center gap-2 border-l border-border/60 pl-2">
               <span className="text-amber-700 dark:text-amber-300">
@@ -1088,6 +1347,13 @@ export function CanvasEditor({
           )}
           {recoveryError && <span className="text-destructive">恢复失败，请重试</span>}
         </div>
+        {conflict && (
+          <CanvasSaveConflictNotice
+            busy={conflictBusy}
+            onReload={reloadAfterConflict}
+            onOverwrite={overwriteConflict}
+          />
+        )}
         {excalidrawApi && (
           <MemoizedCanvasToolMenu
             accessToken={accessToken}

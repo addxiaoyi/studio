@@ -127,6 +127,16 @@ export const canvasSummarySchema = z.object({
   isPrimary: z.boolean(),
 });
 
+/**
+ * How a project came into existence.
+ * - `home`: auto-created by the desktop home entry point from a user goal
+ * - `manual`: created by an explicit "new project" action anywhere else
+ * - `import`: created from imported content (website capture, archive, ...)
+ *
+ * Persisted as `projects.source` (not null, default 'manual').
+ */
+export const projectSourceSchema = z.enum(["home", "manual", "import"]);
+
 export const projectSummarySchema = z.object({
   id: projectIdSchema,
   name: z.string().min(1),
@@ -137,6 +147,11 @@ export const projectSummarySchema = z.object({
   primaryCanvas: canvasSummarySchema,
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
+  /**
+   * Optional on the wire so payloads produced before the column existed still
+   * parse. Consumers must fall back to `manual`, which is the column default.
+   */
+  source: projectSourceSchema.optional(),
 });
 
 export const canvasContentSchema = z.object({
@@ -310,6 +325,7 @@ export type VideoGenerationPreference = z.infer<
 export type DesktopExecutionContext = z.infer<typeof desktopExecutionContextSchema>;
 export type ContentBlock = z.infer<typeof contentBlockSchema>;
 export type ChatSessionSummary = z.infer<typeof chatSessionSummarySchema>;
+export type ProjectSource = z.infer<typeof projectSourceSchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export type ChatMessageCreateRequest = z.infer<typeof chatMessageCreateRequestSchema>;
 export type ChatToolActivity = z.infer<typeof chatToolActivitySchema>;

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ProjectSummary } from "@helstera/shared";
+import type { ProjectSource, ProjectSummary } from "@helstera/shared";
 import { Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -16,6 +16,26 @@ interface ProjectListProps {
   highlightId?: string | null;
   onCreateClick: () => void;
   onDeleted?: (projectId: string) => void;
+}
+
+/**
+ * Human-readable label for `projects.source`.
+ *
+ * A payload without `source` (older server, older cached response) falls back to
+ * the same meaning as the database default, so a project never renders an empty
+ * or raw English enum in the card.
+ */
+export function projectSourceLabel(source: ProjectSource | null | undefined): string {
+  switch (source) {
+    case "home":
+      return "首页创建";
+    case "import":
+      return "导入创建";
+    case "manual":
+      return "手动创建";
+    default:
+      return "手动创建";
+  }
 }
 
 export function ProjectList({
@@ -128,8 +148,16 @@ export function ProjectList({
               <p className="truncate text-xs text-foreground leading-tight">
                 {project.name}
               </p>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {formatDate(project.updatedAt)}
+              <div className="mt-1 flex items-center gap-1.5">
+                <span className="shrink-0 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+                  {projectSourceLabel(project.source)}
+                </span>
+                <span className="truncate text-[11px] text-muted-foreground">
+                  创建 {formatDate(project.createdAt)}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground/70">
+                更新 {formatDate(project.updatedAt)}
               </p>
             </div>
             </Link>
