@@ -586,7 +586,39 @@ export const messages = {
   },
 } as const;
 
+/** Explicit locale chosen by the user. Written only when a switch is provided. */
+export const LOCALE_STORAGE_KEY = "helstera.locale";
+export const LOCALE_CHANGED_EVENT = "helstera:locale-changed";
+
+export function readStoredLocale(): Locale | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = window.localStorage?.getItem(LOCALE_STORAGE_KEY);
+    return stored === "zh-CN" || stored === "en-US" ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist an explicit choice and notify every mounted `useLocale` consumer.
+ * Without the event the switch would only affect components mounted afterwards.
+ */
+export function setStoredLocale(locale: Locale): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage?.setItem(LOCALE_STORAGE_KEY, locale);
+  } catch {
+    // Private mode or a full quota: the choice stays in-memory for this session.
+  }
+  window.dispatchEvent(new CustomEvent(LOCALE_CHANGED_EVENT, { detail: locale }));
+}
+
 export function detectLocale(): Locale {
+  // An explicit choice always wins over the document language, which is hardcoded
+  // to zh-CN for the Chinese-first web product.
+  const stored = readStoredLocale();
+  if (stored) return stored;
   if (typeof window === "undefined") return "zh-CN";
   const lang = document.documentElement.lang || window.navigator?.language || "";
   if (lang.toLowerCase().startsWith("zh")) return "zh-CN";
@@ -599,6 +631,11 @@ export function t(locale: Locale | null | undefined): (typeof messages)[Locale] 
 
 export function useLocale(): Locale {
   const [locale, setLocale] = useState<Locale>("zh-CN");
-  useEffect(() => setLocale(detectLocale()), []);
+  useEffect(() => {
+    setLocale(detectLocale());
+    const onLocaleChanged = () => setLocale(detectLocale());
+    window.addEventListener(LOCALE_CHANGED_EVENT, onLocaleChanged);
+    return () => window.removeEventListener(LOCALE_CHANGED_EVENT, onLocaleChanged);
+  }, []);
   return locale;
 }

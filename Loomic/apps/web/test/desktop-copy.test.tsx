@@ -265,7 +265,8 @@ const chromeEnKeys = Object.keys(enFlat).filter((key) => key.startsWith("chrome.
 describe("桌面壳层文案 chrome 分组", () => {
   it("zh-CN 与 en-US 键集合一致，英文值非空且不含中文", () => {
     // 键数先钉死：新增壳层文案必须显式更新这条断言，删键则直接红。
-    expect(chromeZhKeys).toHaveLength(44);
+    // 51 = 44 + 7 条窗口/导航失败文案（titlebar 的 windowStateFail 等）。
+    expect(chromeZhKeys).toHaveLength(51);
     expect(chromeEnKeys).toEqual(chromeZhKeys);
 
     const offenders = chromeZhKeys

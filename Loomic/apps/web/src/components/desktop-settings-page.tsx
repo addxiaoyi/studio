@@ -92,8 +92,9 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
   useEffect(() => {
     void refreshFolder().catch((cause) => {
       const message = cause instanceof Error ? cause.message : copy.settings.folderReadFailed;
-      setError(message);
-      toast.push({ tone: "error", message: formatDesktopCopy(copy.settings.folderReadFailToast, { reason: message }), key: "settings:folder-load" });
+      const failure = formatDesktopCopy(copy.settings.folderReadFailToast, { reason: message });
+      setError(failure);
+      toast.push({ tone: "error", message: failure, key: "settings:folder-load" });
     });
   }, [copy, refreshFolder, toast]);
 
@@ -101,14 +102,16 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
     if (!api) return;
     void api.getAppVersion().then(setVersion).catch((cause) => {
       const message = cause instanceof Error ? cause.message : copy.settings.versionReadFailed;
-      setError(message);
-      toast.push({ tone: "error", message: formatDesktopCopy(copy.settings.versionReadFailToast, { reason: message }), key: "settings:version-load" });
+      const failure = formatDesktopCopy(copy.settings.versionReadFailToast, { reason: message });
+      setError(failure);
+      toast.push({ tone: "error", message: failure, key: "settings:version-load" });
     });
     setPlatform(api.getPlatform());
     void api.getUpdateState().then(setUpdate).catch((cause) => {
       const message = cause instanceof Error ? cause.message : copy.settings.updateStateReadFailed;
-      setError(message);
-      toast.push({ tone: "error", message: formatDesktopCopy(copy.settings.updateStateReadFailToast, { reason: message }), key: "settings:update-state" });
+      const failure = formatDesktopCopy(copy.settings.updateStateReadFailToast, { reason: message });
+      setError(failure);
+      toast.push({ tone: "error", message: failure, key: "settings:update-state" });
     });
     return api.onUpdateState(setUpdate);
   }, [api, copy, toast]);
@@ -130,8 +133,9 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "AbortError") return;
       const message = cause instanceof Error ? cause.message : copy.settings.folderChooseFailed;
-      setError(message);
-      toast.push({ tone: "error", message: formatDesktopCopy(copy.settings.folderChooseFailToast, { reason: message }), key: "settings:folder-choose" });
+      const failure = formatDesktopCopy(copy.settings.folderChooseFailToast, { reason: message });
+      setError(failure);
+      toast.push({ tone: "error", message: failure, key: "settings:folder-choose" });
     } finally {
       setFolderBusy(false);
     }
@@ -146,8 +150,9 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
       toast.push({ tone: "success", message: copy.settings.folderCleared, key: "settings:folder-cleared" });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : copy.settings.folderClearFailed;
-      setError(message);
-      toast.push({ tone: "error", message: formatDesktopCopy(copy.settings.folderClearFailToast, { reason: message }), key: "settings:folder-clear" });
+      const failure = formatDesktopCopy(copy.settings.folderClearFailToast, { reason: message });
+      setError(failure);
+      toast.push({ tone: "error", message: failure, key: "settings:folder-clear" });
     } finally {
       setFolderBusy(false);
     }
@@ -162,8 +167,9 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
       setUpdate(next);
       if (next.status === "error") {
         const message = next.message ?? copy.settings.updateNoReason;
-        setError(message);
-        toast.push({ tone: "error", message: formatDesktopCopy(copy.settings.updateCheckFailToast, { reason: message }), key: "settings:update-check" });
+        const failure = formatDesktopCopy(copy.settings.updateCheckFailToast, { reason: message });
+        setError(failure);
+        toast.push({ tone: "error", message: failure, key: "settings:update-check" });
       } else if (next.status === "available") {
         toast.push({ tone: "success", message: formatDesktopCopy(copy.settings.updateAvailableToast, { version: next.version ?? copy.settings.newVersion }), key: "settings:update-available" });
       } else if (next.status === "not-available") {

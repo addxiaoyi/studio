@@ -97,22 +97,30 @@ describe("DesktopSettingsPage feedback", () => {
 
     await user.click(await screen.findByRole("button", { name: /选择文件夹/ }));
 
-    const toastMessage = await screen.findByText(/保存本地保存位置失败/);
-    expect(toastMessage.textContent).toBe("保存本地保存位置失败：磁盘写保护，无法写入");
-    expect(toastByClassName("error")).not.toBeNull();
+    // The failure must reach the user through both channels with the *same* sentence:
+    // one transient toast plus one persistent inline alert, not two different wordings.
+    const matches = await screen.findAllByText(/保存本地保存位置失败/);
+    expect(matches).toHaveLength(2);
+    for (const node of matches) {
+      expect(node.textContent).toBe("保存本地保存位置失败：磁盘写保护，无法写入");
+    }
+    expect(toastByClassName("error")?.textContent).toBe("保存本地保存位置失败：磁盘写保护，无法写入");
     expect(toastByClassName("success")).toBeNull();
 
     const inline = document.querySelector(".desktop-settings__error");
     expect(inline?.getAttribute("role")).toBe("alert");
-    expect(inline?.textContent).toBe("磁盘写保护，无法写入");
+    expect(inline?.textContent).toBe("保存本地保存位置失败：磁盘写保护，无法写入");
   });
 
   it("reports a folder-state read failure instead of only mutating state silently", async () => {
     mocks.getLocalAssetFolderState.mockRejectedValueOnce(new Error("IndexedDB 已被浏览器禁用"));
     renderPage();
 
-    const toastMessage = await screen.findByText(/读取本地保存位置失败/);
-    expect(toastMessage.textContent).toBe("读取本地保存位置失败：IndexedDB 已被浏览器禁用");
+    const matches = await screen.findAllByText(/读取本地保存位置失败/);
+    expect(matches.length).toBeGreaterThanOrEqual(2);
+    for (const node of matches) {
+      expect(node.textContent).toBe("读取本地保存位置失败：IndexedDB 已被浏览器禁用");
+    }
     expect(toastByClassName("error")).not.toBeNull();
   });
 

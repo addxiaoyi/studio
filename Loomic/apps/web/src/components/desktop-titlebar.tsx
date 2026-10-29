@@ -232,11 +232,11 @@ export function DesktopTitlebar() {
     void bridge
       .getWindowState()
       .then((state) => setIsMaximized(state.isMaximized))
-      .catch(() => setChromeError("无法读取窗口状态。"));
+      .catch(() => setChromeError(chrome.windowStateFail));
     void bridge
       .getNavigationState()
       .then(setHistory)
-      .catch(() => setChromeError("无法读取页面历史。"));
+      .catch(() => setChromeError(chrome.historyStateFail));
     const stopWindowUpdates = bridge.onWindowState((state) =>
       setIsMaximized(state.isMaximized),
     );
@@ -357,7 +357,7 @@ export function DesktopTitlebar() {
     void api
       ?.navigateHistory(direction)
       .then(setHistory)
-      .catch(() => setChromeError("页面导航失败，请重试。"));
+      .catch(() => setChromeError(chrome.navigateFail));
   }
 
   function toggleSidebar() {
@@ -377,12 +377,12 @@ export function DesktopTitlebar() {
     setPendingWindowCommand(command);
     const failureMessage =
       command === "minimize"
-        ? "窗口最小化失败。"
+        ? chrome.minimizeFail
         : command === "maximize"
-          ? "窗口大小调整失败。"
+          ? chrome.maximizeFail
           : command === "fullscreen"
-            ? "切换全屏失败。"
-            : "窗口关闭失败。";
+            ? chrome.fullscreenFail
+            : chrome.closeFail;
     const action =
       command === "minimize"
         ? api?.minimizeWindow()
