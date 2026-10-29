@@ -29,7 +29,7 @@ win:
     - target: nsis
       arch:
         - x64
-    - target: zip
+    - target: portable
       arch:
         - x64
 
@@ -42,6 +42,9 @@ nsis:
   shortcutName: Helstera
 
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
+portable:
+  artifactName: "${productName}-${version}-Windows-x64-portable.${ext}"
 
 protocols:
   - name: Helstera Desktop Login

@@ -136,6 +136,15 @@ def installer_pattern(target: str, version: str) -> str:
     return patterns[target]
 
 
+def portable_pattern(target: str, version: str) -> str:
+    patterns = {
+        "windows-x64": f"Helstera-{version}-Windows-x64-portable.exe",
+    }
+    if target not in patterns:
+        raise RuntimeError(f"Target {target} does not provide a portable package")
+    return patterns[target]
+
+
 def ensure_native_host(target: str) -> None:
     expected = {
         "windows-x64": ("Windows", "x86_64"),
@@ -196,7 +205,7 @@ def build_desktop(root: pathlib.Path, target: str, output_dir: pathlib.Path | No
         subprocess.run([*builder, *base_args], cwd=root, env=build_env, check=True)
         if target == "windows-x64":
             portable_config = create_builder_config(portable=True)
-            portable_args = ["--win", "zip", "--x64", "--publish", "never"]
+            portable_args = ["--win", "portable", "--x64", "--publish", "never"]
             if portable_config:
                 portable_args.extend(["--config", str(portable_config)])
             subprocess.run([*builder, *portable_args], cwd=root, env=build_env, check=True)
@@ -233,9 +242,10 @@ def files_for_release(root: pathlib.Path, target: str, version: str, stage: path
     shutil.copy2(installer_matches[0], public_installer)
     portable_installer: pathlib.Path | None = None
     if target == "windows-x64":
-        portable_matches = sorted(path for path in release.glob(f"*-{version}-win-x64.zip") if path.is_file())
+        expected_portable = portable_pattern(target, version)
+        portable_matches = sorted(path for path in release.glob(expected_portable) if path.is_file())
         if len(portable_matches) != 1:
-            raise RuntimeError(f"Expected one Windows portable archive for version {version} in {release}")
+            raise RuntimeError(f"Expected one Windows portable executable matching {expected_portable} in {release}")
         portable_installer = downloads / portable_matches[0].name
         shutil.copy2(portable_matches[0], portable_installer)
     manifest = release / manifest_names[target]

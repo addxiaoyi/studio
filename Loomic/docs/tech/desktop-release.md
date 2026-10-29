@@ -15,7 +15,7 @@ Override connection endpoints with `HELT_DEPLOY_HOST`, `HELT_DEPLOY_USER`, `HELT
 
 ## Build And Publish
 
-Run the script on the matching native operating system. Each machine builds and publishes its own package; Windows builds a portable ZIP and an NSIS installer. Extract the ZIP and launch `Helstera.exe` without installing; installed users retain in-app updates. macOS can build Intel and Apple Silicon packages separately.
+Run the script on the matching native operating system. Each machine builds and publishes its own package; Windows builds a single-file portable EXE and an NSIS installer. Download the portable EXE and double-click it without installing; application data is kept in the current user's profile. macOS can build Intel and Apple Silicon packages separately.
 
 Electron runtime binaries are fetched from the configured `npmmirror.com` Electron mirror, not GitHub. Set `ELECTRON_MIRROR` to an internally hosted compatible mirror on private build machines if external mirror access is not desired. npm packages still use the package registry configured by pnpm.
 
@@ -36,7 +36,7 @@ Use `--skip-build --repair-current` only to restore missing files for the curren
 python scripts/release-desktop.py --platform windows-x64 --skip-build --repair-current
 ```
 
-The Windows portable ZIP stores application data in the current user's profile and is updated by downloading and extracting the next archive. Windows NSIS and Linux AppImage installations can update automatically. macOS automatic replacement requires a Developer ID code signature; signing is not configured, so Mac users must install releases manually from the download page.
+The Windows portable EXE stores application data in the current user's profile. It is a standalone launch artifact, not an installation and not a ZIP archive. Do not claim automatic in-place replacement for the portable EXE until a real Windows update test proves safe replacement; users can download a newer portable EXE manually. Windows NSIS and Linux AppImage installations can update automatically. macOS automatic replacement requires a Developer ID code signature; signing is not configured, so Mac users must install releases manually from the download page.
 
 ## Code Signing
 
@@ -67,8 +67,8 @@ EV certificates still need a few weeks of SmartScreen reputation before the warn
 
 `scripts/release-desktop.py` requires a working Python installation with `paramiko` and `PyYAML`. If it cannot run, publish by hand in this order so the public state is never half-updated:
 
-1. Build with `electron-builder --win nsis zip --x64 --publish never` in `apps/desktop`.
-2. Upload the installer and portable ZIP to `downloads/`, and the `Setup` installer plus `.blockmap` plus `latest.yml` to `downloads/updates/windows-x64/`.
+1. Build with `electron-builder --win nsis portable --x64 --publish never` in `apps/desktop`.
+2. Upload the installer and single-file portable EXE to `downloads/`, and the `Setup` installer plus `.blockmap` plus `latest.yml` to `downloads/updates/windows-x64/`.
 3. Upload `desktop-release-windows-x64.json` and `SHA256SUMS-windows-x64.txt` **last**, after the binaries are in place.
 4. Verify by downloading the public installer and comparing its SHA-256 against the manifest, and its SHA-512 against `latest.yml`.
 

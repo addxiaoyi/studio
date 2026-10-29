@@ -59,9 +59,42 @@ class ReleasePathTests(unittest.TestCase):
     def test_platform_installer_patterns_match_electron_builder_arch_names(self) -> None:
         version = "0.2.14"
         self.assertEqual(release_desktop.installer_pattern("windows-x64", version), "Helstera-Setup-0.2.14-Windows-x64.exe")
+        self.assertEqual(release_desktop.portable_pattern("windows-x64", version), "Helstera-0.2.14-Windows-x64-portable.exe")
         self.assertEqual(release_desktop.installer_pattern("macos-x64", version), "Helstera-0.2.14-mac-x64.dmg")
         self.assertEqual(release_desktop.installer_pattern("macos-arm64", version), "Helstera-0.2.14-mac-arm64.dmg")
         self.assertEqual(release_desktop.installer_pattern("linux-x64", version), "*.AppImage")
+
+    def test_files_for_release_publishes_portable_exe_and_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            release = root / "release"
+            release.mkdir()
+            stage = root / "stage"
+            portable = release / "Helstera-0.2.14-Windows-x64-portable.exe"
+            portable.write_bytes(b"portable-content")
+            installer = release / "Helstera-Setup-0.2.14-Windows-x64.exe"
+            installer.write_bytes(b"installer-content")
+            updater_package = release / "Helstera-Setup-0.2.14-Windows-x64.exe"
+            manifest = release / "latest.yml"
+            manifest.write_text(yaml.safe_dump({
+                "version": "0.2.14",
+                "files": [{"url": updater_package.name}],
+                "path": updater_package.name,
+            }), encoding="utf-8")
+
+            files, _, release_manifest = release_desktop.files_for_release(
+                root,
+                "windows-x64",
+                "0.2.14",
+                stage,
+                release_dir=release,
+            )
+
+            public_portable = stage / "downloads" / portable.name
+            self.assertIn(public_portable, files)
+            document = json.loads(release_manifest.read_text(encoding="utf-8"))
+            self.assertEqual(document["portableFileName"], portable.name)
+            self.assertEqual(document["portableSha256"], hashlib.sha256(portable.read_bytes()).hexdigest())
 
     def test_remote_download_root_uses_posix_separators(self) -> None:
         self.assertEqual(str(release_desktop.DOWNLOAD_ROOT), "/www/helstera/apps/web/out/downloads")
