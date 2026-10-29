@@ -51,9 +51,22 @@ function setDesktopApi(api: TitlebarApi | undefined) {
   });
 }
 
+/**
+ * The desktop shell keeps navigation in the titlebar, so the sidebar collapse control is
+ * only meaningful when an embedded workspace route actually mounted a sidebar. The
+ * titlebar detects that element, therefore sidebar tests need one present.
+ */
+function mountSidebarStub() {
+  const stub = document.createElement("div");
+  stub.className = "desktop-workspace-sidebar";
+  document.body.appendChild(stub);
+  return stub;
+}
+
 beforeEach(() => {
   canvasStorage.clear();
   Object.defineProperty(window, "localStorage", { configurable: true, value: canvasStorage });
+  mountSidebarStub();
 });
 
 afterEach(() => {
@@ -64,6 +77,7 @@ afterEach(() => {
   Reflect.deleteProperty(document.documentElement.dataset, "sidebarCollapsed");
   document.documentElement.style.removeProperty("--desktop-sidebar-expanded-width");
   document.documentElement.style.removeProperty("--desktop-sidebar-collapsed-width");
+  for (const node of document.querySelectorAll(".desktop-workspace-sidebar")) node.remove();
 });
 
 function makeApi(overrides: Partial<TitlebarApi> = {}): TitlebarApi {
@@ -390,3 +404,29 @@ function getSwitcherDialog(): HTMLDialogElement {
   if (!dialog) throw new Error("未找到快速跳转 dialog");
   return dialog;
 }
+
+describe("DesktopTitlebar sidebar control gating", () => {
+  // Real-renderer E2E found the collapse button on every /desktop-app route while zero
+  // sidebar items existed: the control flipped data-sidebar-collapsed and moved nothing.
+  it("hides the collapse toggle when no sidebar is mounted", async () => {
+    for (const node of document.querySelectorAll(".desktop-workspace-sidebar")) node.remove();
+    setDesktopApi(makeApi());
+    render(<DesktopTitlebar />);
+    await waitFor(() =>
+      expect(document.querySelector(".helstera-desktop-titlebar")).not.toBeNull(),
+    );
+    expect(screen.queryByRole("button", { name: /侧栏/ })).toBeNull();
+  });
+
+  it("reveals the toggle once an embedded route mounts a sidebar", async () => {
+    for (const node of document.querySelectorAll(".desktop-workspace-sidebar")) node.remove();
+    setDesktopApi(makeApi());
+    render(<DesktopTitlebar />);
+    await waitFor(() =>
+      expect(document.querySelector(".helstera-desktop-titlebar")).not.toBeNull(),
+    );
+    expect(screen.queryByRole("button", { name: /侧栏/ })).toBeNull();
+    mountSidebarStub();
+    expect(await screen.findByRole("button", { name: /侧栏/ })).toBeTruthy();
+  });
+});

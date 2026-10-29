@@ -192,10 +192,16 @@ export function DesktopAppPage({ mode }: { mode: "home" | "canvas" | "projects" 
   if (mode === "projects") return <DesktopModule active="projects"><Suspense fallback={<DesktopLoading />}><ProjectsPage /></Suspense></DesktopModule>;
   if (mode === "assets") return <DesktopModule active="assets"><Suspense fallback={<DesktopLoading />}><AssetsPage /></Suspense></DesktopModule>;
   if (mode === "marketplace") return <DesktopModule active="marketplace"><Suspense fallback={<DesktopLoading />}><AgentMarketplacePage /></Suspense></DesktopModule>;
-  if (mode === "settings") return <DesktopSettingsPage />;
+  // Settings ran ~7.5k px tall with no scroll container of its own: at 720x480 the whole
+  // lower page was unreachable. Every mode must live inside the shell main.
+  if (mode === "settings") return <DesktopModule active="settings"><DesktopSettingsPage /></DesktopModule>;
   if (mode === "mcp") return <DesktopAdvancedPage initialView="mcp" locale={locale} />;
   if (mode === "development") return <DesktopAdvancedPage initialView="development" locale={locale} />;
-  return <DesktopAgentHome email={user.email} accessToken={session?.access_token ?? ""} locale={locale} />;
+  // The home branch used to render bare, so it never received <main class="desktop-feature">.
+  // That main is the only element with `overflow-y: auto`, so at a 720x480 window the lower
+  // 437px of the agent form were clipped and window.scrollTo() could not reach them — the
+  // real-renderer E2E caught it; jsdom cannot.
+  return <DesktopModule active="home"><DesktopAgentHome email={user.email} accessToken={session?.access_token ?? ""} locale={locale} /></DesktopModule>;
 }
 
 function DesktopAgentHome({ email, accessToken, locale }: { email: string; accessToken: string; locale: Locale }) {

@@ -126,12 +126,18 @@ const mcpServers: McpServerFixture[] = [
 beforeEach(() => {
   vi.clearAllMocks();
   document.documentElement.lang = "";
+  // The titlebar only renders its sidebar toggle when a sidebar exists; this suite asserts
+  // the toggle's copy parity, so a sidebar has to be present.
+  const stub = document.createElement("div");
+  stub.className = "desktop-workspace-sidebar";
+  document.body.appendChild(stub);
 });
 
 afterEach(() => {
   cleanup();
   document.documentElement.lang = "";
   Reflect.deleteProperty(window, "electronAPI");
+  for (const node of document.querySelectorAll(".desktop-workspace-sidebar")) node.remove();
 });
 
 describe("桌面面板 locale 渲染", () => {

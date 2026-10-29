@@ -198,6 +198,7 @@ export function DesktopTitlebar() {
   const [sidebar, setSidebar] = useState<SidebarPreferences>(
     DEFAULT_SIDEBAR_PREFERENCES,
   );
+  const [hasSidebar, setHasSidebar] = useState(false);
   const [pendingWindowCommand, setPendingWindowCommand] = useState<
     "minimize" | "maximize" | "fullscreen" | "close" | null
   >(null);
@@ -306,6 +307,27 @@ export function DesktopTitlebar() {
     return () => window.removeEventListener("keydown", handleQuickSwitcherHotkey);
   }, []);
 
+  // The desktop shell keeps its navigation in the titlebar, so `.desktop-workspace-sidebar`
+  // is only present when an embedded workspace route mounts it. Rendering the toggle
+  // unconditionally produced a visible control that moved nothing: a real-renderer E2E
+  // found zero sidebar items on every /desktop-app route while the button kept flipping
+  // `data-sidebar-collapsed`.
+  //
+  // Must stay above the early return below: a hook placed after it renders conditionally.
+  useEffect(() => {
+    const sync = () => setHasSidebar(Boolean(document.querySelector(".desktop-workspace-sidebar")));
+    sync();
+    // Embedded workspace routes mount after the titlebar paints.
+    const timers = [window.setTimeout(sync, 300), window.setTimeout(sync, 1_200)];
+    window.addEventListener("popstate", sync);
+    window.addEventListener("desktop:route-changed", sync);
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+      window.removeEventListener("popstate", sync);
+      window.removeEventListener("desktop:route-changed", sync);
+    };
+  }, []);
+
   const filteredRoutes = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     if (!normalized) return routes;
@@ -370,6 +392,10 @@ export function DesktopTitlebar() {
     persistSidebarPreferences(next);
   }
 
+  // The desktop shell keeps its navigation in the titlebar, so `.desktop-workspace-sidebar`
+  // is only present when an embedded workspace route mounts it. Rendering the toggle
+  // unconditionally produced a visible control that moved nothing: a real-renderer E2E
+  // found zero sidebar items on every /desktop-app route while the button kept flipping
   function runWindowCommand(command: "minimize" | "maximize" | "fullscreen" | "close") {
     // 一条命令在途时锁住整组窗口按钮：既防连点重复关窗，也让 :disabled 态真实可见。
     if (pendingWindowCommand) return;
@@ -417,20 +443,22 @@ export function DesktopTitlebar() {
           >
             <HelsteraBrandMark size="sm" />
           </Link>
-          <button
-            type="button"
-            className="helstera-desktop-titlebar__sidebar-toggle"
-            aria-label={sidebar.collapsed ? chrome.expandSidebar : chrome.collapseSidebar}
-            aria-expanded={!sidebar.collapsed}
-            title={sidebar.collapsed ? chrome.expandSidebar : chrome.collapseSidebar}
-            onClick={toggleSidebar}
-          >
-            {sidebar.collapsed ? (
-              <PanelLeftOpen aria-hidden="true" />
-            ) : (
-              <PanelLeftClose aria-hidden="true" />
-            )}
-          </button>
+          {hasSidebar ? (
+            <button
+              type="button"
+              className="helstera-desktop-titlebar__sidebar-toggle"
+              aria-label={sidebar.collapsed ? chrome.expandSidebar : chrome.collapseSidebar}
+              aria-expanded={!sidebar.collapsed}
+              title={sidebar.collapsed ? chrome.expandSidebar : chrome.collapseSidebar}
+              onClick={toggleSidebar}
+            >
+              {sidebar.collapsed ? (
+                <PanelLeftOpen aria-hidden="true" />
+              ) : (
+                <PanelLeftClose aria-hidden="true" />
+              )}
+            </button>
+          ) : null}
           <div
             className="helstera-desktop-titlebar__history"
             aria-label={chrome.history}

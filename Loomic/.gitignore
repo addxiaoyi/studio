@@ -94,3 +94,6 @@ deploy/
 .dsh-switchman/
 /eng.traineddata
 .tmp-*.py
+
+# Electron E2E artifacts: Chromium profile holds live session cookies
+apps/desktop/e2e/screenshots/
