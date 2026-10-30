@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.electron.json && vite build && electron-builder",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.electron.json --noEmit",
-    "test": "vitest run --config vitest.config.ts electron/local-workspace.test.ts electron/mcp-registry.test.ts electron/window-controls.test.ts electron/global-shortcut.test.ts electron/browser-pairing.test.ts electron/desktop-login.test.ts electron/desktop-marketplace-link.test.ts electron/native-automation.test.ts electron/recorder-lock.test.ts electron/desktop-plan-review.test.ts electron/assistant-reconnect.test.ts src/AgentProgressCards.test.ts src/agent-history-store.test.ts",
+    "test": "vitest run --config vitest.config.ts electron/local-workspace.test.ts electron/mcp-registry.test.ts electron/window-controls.test.ts electron/global-shortcut.test.ts electron/browser-pairing.test.ts electron/desktop-login.test.ts electron/desktop-marketplace-link.test.ts electron/native-automation.test.ts electron/recorder-lock.test.ts electron/desktop-plan-review.test.ts electron/assistant-reconnect.test.ts electron/update-policy.test.ts src/AgentProgressCards.test.ts src/agent-history-store.test.ts",
     "smoke": "node scripts/smoke-desktop-agent.mjs"
   },
   "dependencies": {

@@ -61,6 +61,7 @@ import { RecorderLock } from "./recorder-lock.js";
 import { parseMarketplaceInstallSlug } from "./desktop-marketplace-link.js";
 import { formatDesktopPlanReview } from "./desktop-plan-review.js";
 import { assistantReconnectDelay, shouldReconnectAssistant } from "./assistant-reconnect.js";
+import { getDesktopUpdatePolicy } from "./update-policy.js";
 import {
   decideMainWindowNavigation,
   observeMainWindowLifecycle,
@@ -410,7 +411,7 @@ function updateFeedUrl() {
 }
 
 async function checkForDesktopUpdate() {
-  if (!app.isPackaged || updateCheckActive) return updateState;
+  if (!desktopUpdatePolicy().enabled || updateCheckActive) return updateState;
   updateCheckActive = true;
   publishUpdateState({ status: "checking" });
   try {
@@ -426,8 +427,24 @@ async function checkForDesktopUpdate() {
   return updateState;
 }
 
+function desktopUpdatePolicy() {
+  return getDesktopUpdatePolicy({
+    isPackaged: app.isPackaged,
+    isPortable: Boolean(process.env.PORTABLE_EXECUTABLE_FILE),
+  });
+}
+
 function configureAutoUpdates() {
-  if (!app.isPackaged) return;
+  const policy = desktopUpdatePolicy();
+  if (!policy.enabled) {
+    if (policy.reason === "portable build requires manual update") {
+      publishUpdateState({
+        status: "not-available",
+        message: "便携版请下载新版本 EXE 手动更新",
+      });
+    }
+    return;
+  }
   // electron-updater's default logger writes to a parent console pipe that can
   // close while the desktop app stays open; an EPIPE there must not crash main.
   autoUpdater.logger = {
@@ -488,7 +505,9 @@ ipcMain.handle("desktop.update-state", () => updateState);
 ipcMain.handle("desktop.check-updates", () => checkForDesktopUpdate());
 ipcMain.handle("app-version", () => app.getVersion());
 ipcMain.handle("desktop.install-update", () => {
-  if (updateState.status !== "downloaded") return { ok: false };
+  if (!desktopUpdatePolicy().canInstall || updateState.status !== "downloaded") {
+    return { ok: false };
+  }
   autoUpdater.quitAndInstall(false, true);
   return { ok: true };
 });
