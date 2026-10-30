@@ -105,6 +105,18 @@ export const billingErrorEventSchema = z.object({
   dailyClaimed: z.boolean().optional(),
 });
 
+export const agentGoalEventSchema = z.object({
+  type: z.literal("agent.goal"),
+  goalId: z.string().uuid(),
+  taskId: z.string().uuid().optional(),
+  canvasId: z.string().uuid().optional(),
+  eventType: z.string().min(1),
+  status: z.string().min(1),
+  detail: z.string().nullable().optional(),
+  payload: z.record(z.unknown()).default({}),
+  timestamp: timestampSchema,
+});
+
 export const streamEventSchema = z.discriminatedUnion("type", [
   runStartedEventSchema,
   messageDeltaEventSchema,
@@ -116,6 +128,7 @@ export const streamEventSchema = z.discriminatedUnion("type", [
   runFailedEventSchema,
   canvasSyncEventSchema,
   billingErrorEventSchema,
+  agentGoalEventSchema,
 ]);
 
 export type StreamEvent = z.infer<typeof streamEventSchema>;

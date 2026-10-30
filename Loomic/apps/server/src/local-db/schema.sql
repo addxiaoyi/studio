@@ -126,6 +126,7 @@ create table if not exists chat_messages (
 
 create index if not exists chat_sessions_canvas_idx on chat_sessions(canvas_id);
 create index if not exists chat_messages_session_idx on chat_messages(session_id, created_at);
+alter table chat_messages add column if not exists client_message_id text;
 create unique index if not exists chat_messages_session_client_message_idx on chat_messages(session_id, client_message_id);
 
 create table if not exists project_story_assets (

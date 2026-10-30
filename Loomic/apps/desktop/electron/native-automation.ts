@@ -255,6 +255,11 @@ export async function pressNativeKey(key: string, modifiers: string[] = []): Pro
   const cleanKey = key.trim().toLowerCase();
   const nutKeyName = NATIVE_KEY_ALIASES[cleanKey] ?? (/^f([1-9]|1[0-2])$/.test(cleanKey) ? cleanKey.toUpperCase() : undefined);
   if (!nutKeyName) throw new Error(`Unsupported native key: ${key}`);
+  for (const modifier of modifiers) {
+    if (!NATIVE_MODIFIER_ALIASES[modifier.toLowerCase()]) {
+      throw new Error(`Unsupported modifier: ${modifier}`);
+    }
+  }
   const { Key, keyboard } = await import("@nut-tree/nut-js");
   const keyMap = Key as unknown as Record<string, unknown>;
   const targetKey = keyMap[nutKeyName];

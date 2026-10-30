@@ -20,6 +20,7 @@ import {
   desktopMcpToolResultSchema,
   isDesktopActionAuthorized,
 } from "@helstera/shared";
+import { buildAgentGoalPlan } from "../agent-goals/agent-goal-service.js";
 import { hashToken } from "../../local-db/auth.js";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import {
@@ -716,6 +717,7 @@ export class WebsiteAssistantHub {
     workspaceId: string,
     input: DesktopAgentTaskRequest,
     chatSessionId?: string,
+    goalIdOverride?: string,
   ) {
     const { rows: connections } = await this.options.db.query<{ id: string }>(
       `select id from website_capture_connections
@@ -731,6 +733,8 @@ export class WebsiteAssistantHub {
     if (!connectionId || !live || live.ws.readyState !== 1)
       throw new Error("本地桌面助手未连接。");
     const taskId = randomUUID();
+    const goalId = goalIdOverride ?? randomUUID();
+    const goalPlan = buildAgentGoalPlan(input.goal, input.executionMode);
     const plannedActions = input.plannedActions.map((action, index) => ({
       ...action,
       taskId,
@@ -739,13 +743,21 @@ export class WebsiteAssistantHub {
     if (plannedActions.some((action) => !isDesktopActionAuthorized(action, input.capabilities))) {
       throw new Error("The desktop action plan requests a capability that was not granted for this task.");
     }
-    const task = { ...input, plannedActions, taskId, createdAt: new Date().toISOString() };
-    const inserted = await this.options.db.query<{ id: string }>(
-      `with connection_lock as materialized (
+    const task = { ...input, plannedActions, taskId, goalId, createdAt: new Date().toISOString() };
+    const insertSql = goalIdOverride
+      ? `with connection_lock as materialized (
          select pg_advisory_xact_lock(hashtextextended($4::text, 0))
+       ), goal_target as (
+       select id from agent_goals
+        where id=$15 and workspace_id=$2 and created_by=$3
+          and status in ('draft','running','waiting_desktop','paused')
+       ), goal_started as (
+         insert into agent_goal_events(goal_id,event_type,detail,payload)
+         select id,'goal.task_started','Agent goal task dispatched.',$17::jsonb from goal_target
        ), inserted_task as (
-       insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,target_url,canvas_id,execution_mode,planned_actions,max_duration_seconds,chat_session_id,status)
-         select $1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11::jsonb,$12,$13,'running' from connection_lock
+       insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,target_url,canvas_id,execution_mode,planned_actions,max_duration_seconds,chat_session_id,goal_id,status)
+         select $1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11::jsonb,$12,$13,g.id,'running'
+           from goal_target g
           where not exists (
             select 1 from desktop_agent_tasks where connection_id=$4 and status in ('queued','running')
           )
@@ -754,7 +766,36 @@ export class WebsiteAssistantHub {
          insert into desktop_agent_events(task_id,event_type,detail)
          select id,'started',$14 from inserted_task returning task_id
        )
-       select inserted_task.id from inserted_task join started_event on started_event.task_id=inserted_task.id`,
+       select inserted_task.id from inserted_task join started_event on started_event.task_id=inserted_task.id`
+      : `with connection_lock as materialized (
+         select pg_advisory_xact_lock(hashtextextended($4::text, 0))
+       ), inserted_goal as (
+       insert into agent_goals(id,workspace_id,created_by,canvas_id,chat_session_id,goal,status,plan,execution_mode,capabilities,attachments,idempotency_key)
+         select $15,$2,$3,$9,$13,$5,'running',$16::jsonb,$10,$7::jsonb,'[]'::jsonb,$1 from connection_lock
+          where not exists (
+            select 1 from desktop_agent_tasks where connection_id=$4 and status in ('queued','running')
+          )
+         returning id
+       ), goal_events as (
+         insert into agent_goal_events(goal_id,event_type,detail,payload)
+         select id,'goal.created','目标已创建',$17::jsonb from inserted_goal
+         union all
+         select id,'goal.plan_ready','执行计划已生成',$16::jsonb from inserted_goal
+         returning goal_id
+       ), inserted_task as (
+       insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,target_url,canvas_id,execution_mode,planned_actions,max_duration_seconds,chat_session_id,goal_id,status)
+         select distinct $1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11::jsonb,$12,$13,g.id,'running' from inserted_goal g join goal_events ge on ge.goal_id=g.id
+          where not exists (
+            select 1 from desktop_agent_tasks where connection_id=$4 and status in ('queued','running')
+          )
+         returning id
+       ), started_event as (
+         insert into desktop_agent_events(task_id,event_type,detail)
+         select id,'started',$14 from inserted_task returning task_id
+       )
+       select inserted_task.id from inserted_task join started_event on started_event.task_id=inserted_task.id`;
+    const inserted = await this.options.db.query<{ id: string }>(
+      insertSql,
       [
         taskId,
         workspaceId,
@@ -770,6 +811,9 @@ export class WebsiteAssistantHub {
         input.maxDurationSeconds,
         chatSessionId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(chatSessionId) ? chatSessionId : null,
         "Desktop Agent task dispatched to the active connection.",
+        goalId,
+        JSON.stringify(goalPlan),
+        JSON.stringify({ goal: input.goal, executionMode: input.executionMode }),
       ],
     );
     if (!inserted.rows[0])
@@ -783,6 +827,7 @@ export class WebsiteAssistantHub {
     await this.expireDesktopAgentApprovals(userId, workspaceId, taskId);
     const { rows } = await this.options.db.query<{
       id: string;
+      goal_id: string | null;
       goal: string;
       role: string;
       capabilities: string[];
@@ -811,7 +856,7 @@ export class WebsiteAssistantHub {
         expiresAt: string;
       }>;
     }>(
-      `select t.id,t.goal,t.role,t.capabilities,t.target_url,t.canvas_id,t.chat_session_id,t.execution_mode,t.status,t.result,t.error_message,t.created_at,t.updated_at,t.completed_at,
+      `select t.id,t.goal_id,t.goal,t.role,t.capabilities,t.target_url,t.canvas_id,t.chat_session_id,t.execution_mode,t.status,t.result,t.error_message,t.created_at,t.updated_at,t.completed_at,
               coalesce((
                 select json_agg(json_build_object(
                   'eventType',event_type,
@@ -833,6 +878,7 @@ export class WebsiteAssistantHub {
     );
     return rows.map((row) => ({
       taskId: row.id,
+      ...(row.goal_id ? { goalId: row.goal_id } : {}),
       goal: row.goal,
       role: row.role,
       capabilities: row.capabilities,
@@ -866,7 +912,7 @@ export class WebsiteAssistantHub {
       goal: string;
     }>(
       `update desktop_agent_tasks set status='canceled',error_message=null,updated_at=now(),completed_at=now()
-        where id=$1 and created_by=$2 and workspace_id=$3 and status in ('queued','running')
+        where id=$1 and created_by=$2 and workspace_id=$3 and status in ('queued','running','waiting_approval','waiting_desktop','paused')
         returning id,connection_id,chat_session_id,created_by,goal`,
       [taskId, userId, workspaceId],
     );
@@ -1490,6 +1536,7 @@ export class WebsiteAssistantHub {
     const event = parsed.data;
     const result = await this.options.db.query<{
       id: string;
+      goal_id: string | null;
       status: string;
       workspace_id: string;
       created_by: string;
@@ -1499,11 +1546,11 @@ export class WebsiteAssistantHub {
       canvas_id: string | null;
       chat_session_id: string | null;
     }>(
-      `select id,status,workspace_id,created_by,target_url,goal,capabilities,canvas_id,chat_session_id from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3`,
+      `select id,goal_id,status,workspace_id,created_by,target_url,goal,capabilities,canvas_id,chat_session_id from desktop_agent_tasks where id=$1 and created_by=$2 and connection_id=$3`,
       [event.taskId, live.userId, live.id],
     );
     const task = result.rows[0];
-    if (!task || !["queued", "running"].includes(task.status)) return;
+    if (!task || !["queued", "running", "waiting_approval"].includes(task.status)) return;
     if (event.eventType === "approval_required") {
       const action = event.action;
       if (
@@ -1551,6 +1598,8 @@ export class WebsiteAssistantHub {
           JSON.stringify({ approvalId, action, expiresAt }),
         ],
       );
+      await this.options.db.query("update desktop_agent_tasks set status='waiting_approval',wait_reason=$2,updated_at=now() where id=$1 and status in ('queued','running')", [event.taskId, detail]);
+      if (task.goal_id) await this.options.db.query("update agent_goals set status='waiting_approval',updated_at=now() where id=$1", [task.goal_id]);
       this.send(live, {
         type: "desktop_agent.approval_pending",
         taskId: event.taskId,
@@ -1659,8 +1708,12 @@ export class WebsiteAssistantHub {
       ],
     );
     const terminal = ["completed", "failed", "canceled"].includes(event.eventType);
+    const checkpoint = event.stepId || event.progress !== undefined
+      ? { stepId: event.stepId ?? null, progress: event.progress ?? null, eventType: event.eventType }
+      : {};
+    const resumeToken = event.stepId ? `${event.taskId}:${event.stepId}` : `${event.taskId}:${event.eventType}`;
     const updated = await this.options.db.query<{ id: string }>(
-      `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb when $6::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $6::jsonb else result end,error_message=case when $2 in ('failed','canceled') then $5 else null end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1 and status in ('queued','running') returning id`,
+      `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb when $6::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $6::jsonb else result end,error_message=case when $2 in ('failed','canceled') then $5 else null end,checkpoint=case when $7::jsonb <> '{}'::jsonb then $7::jsonb else checkpoint end,resume_token=case when $8 <> '' then $8 else resume_token end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1 and status in ('queued','running','waiting_approval') returning id`,
       [
         event.taskId,
         event.eventType === "failed"
@@ -1674,11 +1727,19 @@ export class WebsiteAssistantHub {
         JSON.stringify(safeResult),
         event.detail ?? null,
         JSON.stringify(safeResult),
+        JSON.stringify(checkpoint),
+        resumeToken,
       ],
     );
     if (!updated.rows[0]) return;
     if (terminal) {
       this.clearDesktopTaskTimer(event.taskId);
+      if (task.goal_id) {
+        await this.options.db.query(
+          `update agent_goals set status=$2,result=case when $3::jsonb <> '{}'::jsonb then $3::jsonb else result end,error_message=case when $2='failed' then $4 else null end,updated_at=now(),completed_at=case when $2 in ('completed','failed','canceled') then now() else completed_at end where id=$1`,
+          [task.goal_id, event.eventType === "completed" ? "completed" : event.eventType, JSON.stringify(safeResult), event.detail ?? null],
+        );
+      }
       await this.options.db.query(
         "update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'",
         [event.taskId],
@@ -1851,13 +1912,16 @@ export class WebsiteAssistantHub {
   }
 
   private async failDesktopTask(taskId: string, message: string) {
-    const failed = await this.options.db.query<{ id: string; chat_session_id: string | null; created_by: string; goal: string }>(
-      "update desktop_agent_tasks set status='failed',error_message=$2,updated_at=now(),completed_at=now() where id=$1 and status in ('queued','running') returning id,chat_session_id,created_by,goal",
+    const failed = await this.options.db.query<{ id: string; goal_id: string | null; chat_session_id: string | null; created_by: string; goal: string }>(
+      "update desktop_agent_tasks set status='failed',error_message=$2,updated_at=now(),completed_at=now() where id=$1 and status in ('queued','running','waiting_approval','waiting_desktop') returning id,goal_id,chat_session_id,created_by,goal",
       [taskId, message],
     );
     if (!failed.rows[0]) {
       this.clearDesktopTaskTimer(taskId);
       return;
+    }
+    if (failed.rows[0].goal_id) {
+      await this.options.db.query("update agent_goals set status='failed',error_message=$2,updated_at=now(),completed_at=now() where id=$1", [failed.rows[0].goal_id, message]);
     }
     await this.options.db.query(
       "update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'",
@@ -1923,16 +1987,18 @@ export class WebsiteAssistantHub {
       canvas_id: string | null;
       execution_mode: DesktopAgentExecutionMode;
       planned_actions: DesktopAgentAction[];
+      checkpoint: Record<string, unknown> | null;
+      resume_token: string | null;
       max_duration_seconds: number;
       created_at: string | Date;
     }>(
       `select t.id,t.connection_id as old_connection_id,t.goal,t.role,t.capabilities,t.target_url,t.canvas_id,
-              t.execution_mode,t.planned_actions,t.max_duration_seconds,t.created_at
+              t.execution_mode,t.planned_actions,t.checkpoint,t.resume_token,t.max_duration_seconds,t.created_at
          from desktop_agent_tasks t
          join website_capture_connections c on c.id=t.connection_id
-        where t.created_by=$1 and t.workspace_id=$2 and t.status='running'
+        where t.created_by=$1 and t.workspace_id=$2 and t.status in ('running','waiting_desktop')
           and t.execution_mode <> 'connected_browser_tab'
-          and (t.connection_id=$3 or (c.disconnected_at is not null and c.disconnected_at > now() - interval '2 minutes'))
+          and (t.status='waiting_desktop' or t.connection_id=$3 or (c.disconnected_at is not null and c.disconnected_at > now() - interval '24 hours'))
           and c.revoked_at is null
         order by t.updated_at asc limit 10`,
       [live.userId, live.workspaceId, live.id],
@@ -1969,11 +2035,15 @@ export class WebsiteAssistantHub {
       if (activeRecording?.processingPromise) await activeRecording.processingPromise.catch((error: unknown) => {
         console.error("[desktop-agent] recording persistence before reconnect failed", { taskId: row.id, error: error instanceof Error ? error.message : String(error) });
       });
-      const updated = await this.options.db.query<{ id: string }>(
-        "update desktop_agent_tasks set connection_id=$2,updated_at=now() where id=$1 and status='running' returning id",
+      const updated = await this.options.db.query<{ id: string; goal_id: string | null }>(
+        "update desktop_agent_tasks set connection_id=$2,status='running',wait_reason=null,updated_at=now() where id=$1 and status in ('running','waiting_desktop') returning id,goal_id",
         [row.id, live.id],
       );
       if (!updated.rows[0]) continue;
+      if (updated.rows[0].goal_id) {
+        await this.options.db.query("update agent_goals set status='running',updated_at=now() where id=$1 and status in ('waiting_desktop','paused')", [updated.rows[0].goal_id]);
+        await this.options.db.query("insert into agent_goal_events(goal_id,task_id,event_type,detail) values($1,$2,'goal.reconnected','桌面已重连，任务从断点恢复')", [updated.rows[0].goal_id, row.id]);
+      }
       await this.options.db.query(
         "update desktop_agent_approvals set connection_id=$2 where task_id=$1 and status='pending' and expires_at>now()",
         [row.id, live.id],
@@ -1989,6 +2059,8 @@ export class WebsiteAssistantHub {
         capabilities: row.capabilities,
         executionMode: row.execution_mode,
         plannedActions: row.planned_actions,
+        ...(row.checkpoint ? { checkpoint: row.checkpoint } : {}),
+        ...(row.resume_token ? { resumeToken: row.resume_token } : {}),
         createdAt: new Date(row.created_at).toISOString(),
         maxDurationSeconds: row.max_duration_seconds,
         pageLimit: 3,
@@ -2006,25 +2078,26 @@ export class WebsiteAssistantHub {
 
   private failDisconnectedDesktopTasks(connectionId: string) {
     this.desktopReconnectTimers.delete(connectionId);
-    void this.options.db.query<{ id: string; chat_session_id: string | null; created_by: string; goal: string }>(
-      `update desktop_agent_tasks set status='failed',error_message='Desktop connection was interrupted. Collected evidence was retained; review the task before retrying.',updated_at=now(),completed_at=now()
-        where connection_id=$1 and status in ('queued','running') returning id,chat_session_id,created_by,goal`,
+    void this.options.db.query<{ id: string; goal_id: string | null; chat_session_id: string | null; created_by: string; goal: string }>(
+      `update desktop_agent_tasks set status='waiting_desktop',wait_reason='Desktop connection was interrupted. Waiting for the desktop session to reconnect.',updated_at=now()
+        where connection_id=$1 and status in ('queued','running','waiting_approval') returning id,goal_id,chat_session_id,created_by,goal`,
       [connectionId],
     ).then(async ({ rows }) => {
       for (const task of rows) {
+        if (task.goal_id) await this.options.db.query("update agent_goals set status='waiting_desktop',updated_at=now() where id=$1", [task.goal_id]);
         this.clearDesktopTaskTimer(task.id);
         await this.options.db.query(
           "update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'",
           [task.id],
         );
         await this.options.db.query(
-          "insert into desktop_agent_events(task_id,event_type,detail) values($1,'failed',$2)",
-          [task.id, "Desktop connection was interrupted. Collected evidence was retained; review the task before retrying."],
+          "insert into desktop_agent_events(task_id,event_type,detail) values($1,'waiting_desktop',$2)",
+          [task.id, "Desktop connection was interrupted. Waiting for the desktop session to reconnect."],
         );
         if (task.chat_session_id) await this.options.db.query(
           `insert into chat_messages(session_id,role,content)
            select cs.id,'assistant',$2 from chat_sessions cs where cs.id=$1 and cs.created_by=$3`,
-          [task.chat_session_id, `Desktop Agent task failed after the desktop disconnected.\nGoal: ${task.goal}\nPreviously collected evidence remains available in task history.`, task.created_by],
+          [task.chat_session_id, `Desktop Agent task is waiting for the desktop to reconnect.\nGoal: ${task.goal}\nPreviously collected evidence remains available.`, task.created_by],
         );
       }
     }).catch((error: unknown) => {
@@ -2069,20 +2142,21 @@ export class WebsiteAssistantHub {
       `update desktop_agent_approvals a set status='expired'
         from desktop_agent_tasks t
        where t.id=a.task_id and t.created_by=$1 and t.workspace_id=$2
-         and ($3::uuid is null or t.id=$3) and t.status in ('queued','running')
+         and ($3::uuid is null or t.id=$3) and t.status in ('queued','running','waiting_approval')
          and a.status='pending' and a.expires_at<=now()
        returning a.id,a.task_id,a.action,a.expires_at`,
       [userId, workspaceId, taskId ?? null],
     );
     for (const approval of rows) {
-      const expired = await this.options.db.query<{ connection_id: string; chat_session_id: string | null; created_by: string; goal: string }>(
+      const expired = await this.options.db.query<{ connection_id: string; goal_id: string | null; chat_session_id: string | null; created_by: string; goal: string }>(
         `update desktop_agent_tasks set status='failed',error_message=$2,updated_at=now(),completed_at=now()
-          where id=$1 and status in ('queued','running') returning connection_id,chat_session_id,created_by,goal`,
+          where id=$1 and status in ('queued','running','waiting_approval') returning connection_id,goal_id,chat_session_id,created_by,goal`,
         [approval.task_id, "Approval expired. The requested action was not executed."],
       );
       const task = expired.rows[0];
       if (!task) continue;
       const detail = "Approval expired. The requested action was not executed.";
+      if (task.goal_id) await this.options.db.query("update agent_goals set status='failed',error_message=$2,updated_at=now(),completed_at=now() where id=$1", [task.goal_id, detail]);
       const expiresAt = new Date(approval.expires_at).toISOString();
       await this.options.db.query(
         "insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,'approval_expired',$2,$3::jsonb)",

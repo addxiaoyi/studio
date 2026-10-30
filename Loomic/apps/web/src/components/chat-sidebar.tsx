@@ -870,6 +870,7 @@ export function ChatSidebar({
         const runIdRef = { current: "" };
 
         const cleanup = ws.onEvent((event) => {
+          if (event.type === "agent.goal") return;
           if (!runIdRef.current || event.runId !== runIdRef.current) return;
           if (abortRef.current) {
             resolveStream();
@@ -1417,6 +1418,7 @@ export function ChatSidebar({
 
           // Reuse the shared stream event handler — eliminates ~70 lines of duplication
           const unsub = ws.onEvent((evt) => {
+            if (evt.type === "agent.goal") return;
             if (evt.runId !== activeRunId) return;
 
             applyStreamEvent(evt, assistantId, sessionId);

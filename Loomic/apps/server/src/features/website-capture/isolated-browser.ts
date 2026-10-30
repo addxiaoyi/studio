@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Agent, request as httpRequest } from "undici";
 import { chromium, type Route, type WebSocketRoute } from "playwright";
+import { z } from "zod";
 import type { Pool, PoolClient } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import type { WebsiteCapturePage, WebsiteCaptureResult } from "@helstera/shared";
@@ -16,6 +17,15 @@ const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 40 * 1024 * 1024;
 const MAX_HEADINGS = 16;
+
+const pageFactsSchema = z.object({
+  url: z.string().url(),
+  title: z.string(),
+  description: z.string(),
+  headings: z.array(z.string()),
+  navigation: z.array(z.string()),
+  links: z.array(z.string().url()),
+});
 
 export type CaptureTask = {
   id: string;
@@ -34,6 +44,35 @@ type PageFacts = Omit<WebsiteCapturePage, "assetId" | "screenshotUrl"> & {
   width: number;
   height: number;
 };
+
+const PAGE_FACTS_SCRIPT = String.raw`(maxHeadings) => {
+  const document = globalThis.document;
+  const location = globalThis.location;
+  const clean = (value) => (value ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
+  const description = clean(
+    document.querySelector('meta[name="description"]')?.getAttribute("content")
+      ?? document.querySelector('meta[property="og:description"]')?.getAttribute("content"),
+  );
+  const headings = Array.from(document.querySelectorAll("h1, h2, h3"))
+    .map((heading) => clean(heading.textContent))
+    .filter(Boolean)
+    .slice(0, maxHeadings);
+  const navigation = Array.from(document.querySelectorAll("header a, nav a"))
+    .map((anchor) => clean(anchor.textContent))
+    .filter(Boolean)
+    .slice(0, 24);
+  const links = Array.from(document.querySelectorAll("a[href]"))
+    .map((anchor) => anchor.href)
+    .filter((href) => href.startsWith("https://") || href.startsWith("http://"));
+  return {
+    url: location.href,
+    title: clean(document.title) || location.hostname,
+    description,
+    headings,
+    navigation: [...new Set(navigation)],
+    links: [...new Set(links)].slice(0, 80),
+  };
+}`;
 
 export class WebsiteCaptureError extends Error {
   readonly code: string;
@@ -60,9 +99,11 @@ export async function captureIsolatedWebsite(options: {
 
   try {
     await options.onProgress(5, "browser_starting", "Starting a temporary browser");
+    const executablePath = process.env.HELSTERA_PLAYWRIGHT_EXECUTABLE_PATH?.trim();
     browser = await chromium.launch({
       headless: true,
       args: ["--disable-background-networking", "--disable-component-update", "--disable-sync"],
+      ...(executablePath ? { executablePath } : {}),
     });
     const context = await browser.newContext({
       acceptDownloads: false,
@@ -111,48 +152,9 @@ export async function captureIsolatedWebsite(options: {
       try {
         await page.goto(nextUrl, { waitUntil: "domcontentloaded" });
         await page.waitForTimeout(PAGE_SETTLE_MS);
-        const facts = await page.evaluate((maxHeadings) => {
-          type ElementLike = {
-            textContent: string | null;
-            getAttribute(name: string): string | null;
-          };
-          type AnchorLike = ElementLike & { href: string };
-          const browser = globalThis as unknown as {
-            document: {
-              title: string;
-              querySelector(selector: string): ElementLike | null;
-              querySelectorAll(selector: string): ArrayLike<ElementLike | AnchorLike>;
-            };
-            location: { href: string; hostname: string };
-          };
-          const document = browser.document;
-          const location = browser.location;
-          const clean = (value: string | null | undefined) =>
-            (value ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
-          const description = clean(
-            document.querySelector('meta[name="description"]')?.getAttribute("content")
-              ?? document.querySelector('meta[property="og:description"]')?.getAttribute("content"),
-          );
-          const headings = Array.from(document.querySelectorAll("h1, h2, h3"))
-            .map((heading) => clean(heading.textContent))
-            .filter(Boolean)
-            .slice(0, maxHeadings);
-          const navigation = Array.from(document.querySelectorAll("header a, nav a"))
-            .map((anchor) => clean(anchor.textContent))
-            .filter(Boolean)
-            .slice(0, 24);
-          const links = Array.from(document.querySelectorAll("a[href]"))
-            .map((anchor) => (anchor as AnchorLike).href)
-            .filter((href) => href.startsWith("https://") || href.startsWith("http://"));
-          return {
-            url: location.href,
-            title: clean(document.title) || location.hostname,
-            description,
-            headings,
-            navigation: [...new Set(navigation)],
-            links: [...new Set(links)].slice(0, 80),
-          };
-        }, MAX_HEADINGS);
+        const facts = pageFactsSchema.parse(
+          await page.evaluate(`(${PAGE_FACTS_SCRIPT})(${MAX_HEADINGS})`),
+        );
 
         const responseUrl = await validatePublicHttpUrl(facts.url);
         const screenshot = await page.screenshot({ type: "jpeg", quality: 76, fullPage: false });
@@ -385,13 +387,13 @@ async function fulfillPublicReadOnlyRequest(route: Route): Promise<number> {
     const headers = selectResponseHeaders(response.headers as Record<string, string | string[] | undefined>);
     if (method === "HEAD" || response.statusCode === 204 || response.statusCode === 304 || (response.statusCode >= 300 && response.statusCode < 400)) {
       await route.fulfill({ status: response.statusCode, headers, body: Buffer.alloc(0) });
-      response.body.destroy();
+      abortResponseBody(response.body);
       return 0;
     }
 
     const declaredLength = Number(response.headers["content-length"] ?? 0);
     if (declaredLength > MAX_RESPONSE_BYTES) {
-      response.body.destroy();
+      abortResponseBody(response.body);
       await route.abort("blockedbyclient");
       return 0;
     }
@@ -401,7 +403,7 @@ async function fulfillPublicReadOnlyRequest(route: Route): Promise<number> {
       const part = Buffer.from(chunk);
       total += part.length;
       if (total > MAX_RESPONSE_BYTES) {
-        response.body.destroy();
+        abortResponseBody(response.body);
         await route.abort("blockedbyclient");
         return 0;
       }
@@ -410,11 +412,22 @@ async function fulfillPublicReadOnlyRequest(route: Route): Promise<number> {
     const body = Buffer.concat(chunks, total);
     await route.fulfill({ status: response.statusCode, headers, body });
     return total;
-  } catch {
+  } catch (error) {
+    console.warn("[website-capture] public request blocked", {
+      host: parsedUrl.hostname,
+      reason: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+    });
     await route.abort("failed").catch(() => undefined);
     return 0;
   } finally {
     await dispatcher.close();
+  }
+}
+
+function abortResponseBody(body: NodeJS.ReadableStream) {
+  body.once("error", () => undefined);
+  if ("destroy" in body && typeof body.destroy === "function") {
+    body.destroy();
   }
 }
 

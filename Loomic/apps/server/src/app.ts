@@ -139,7 +139,11 @@ import { registerDouyinOAuthRoutes } from "./http/douyin-oauth.js";
 import { DouyinCredentialManager } from "./features/douyin/douyin-credentials.js";
 import { registerStorageRoutes } from "./http/storage.js";
 import { registerWebsiteCaptureRoutes } from "./http/website-capture.js";
+import { registerAgentGoalRoutes } from "./http/agent-goals.js";
 import { WebsiteAssistantHub, registerWebsiteAssistantWsRoute } from "./features/website-capture/assistant-hub.js";
+import { AgentGoalEventPublisher } from "./features/agent-goals/agent-goal-events.js";
+import { AgentGoalWorker } from "./features/agent-goals/agent-goal-worker.js";
+import { createBackgroundGoalExecutor } from "./features/agent-goals/agent-goal-background.js";
 import { CanvasEventBuffer } from "./ws/event-buffer.js";
 import { ConnectionManager } from "./ws/connection-manager.js";
 import { registerWsRoute } from "./ws/handler.js";
@@ -259,6 +263,27 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
   const eventBuffer = new CanvasEventBuffer();
   setInterval(() => eventBuffer.cleanup(), 5 * 60 * 1000);
+  const agentGoalWorker = new AgentGoalWorker(
+    localDb,
+    websiteAssistantHub,
+    1_000,
+    createBackgroundGoalExecutor({
+      db: localDb,
+      storage: storageProvider,
+      storageRoot: env.storageRoot ?? "/www/helstera/uploads",
+      webOrigin: env.webOrigin,
+    }),
+  );
+  const agentGoalEvents = new AgentGoalEventPublisher(localDb, connectionManager, eventBuffer);
+  if (process.env.NODE_ENV !== "test") {
+    agentGoalWorker.start();
+    agentGoalEvents.start();
+  }
+  app.addHook("onClose", async () => {
+    agentGoalWorker.stop();
+    agentGoalEvents.stop();
+    eventBuffer.dispose();
+  });
   if (localDb) {
     let isAssetRetentionRunning = false;
     const runAssetRetention = async () => {
@@ -541,6 +566,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     generationApprovalService: createGenerationApprovalService(localDb),
     creditService,
     tierGuard,
+  });
+  registerAgentGoalRoutes(app, {
+    auth,
+    db: localDb,
+    viewerService,
+    assistantHub: websiteAssistantHub,
   });
   if (localDb) {
     registerGenerationApprovalRoutes(app, {

@@ -33,6 +33,8 @@ import type {
   WebsiteCapturePairing,
   WebsiteActionRequest,
   DesktopAgentTaskRequest,
+  AgentGoal,
+  AgentGoalCreateRequest,
 } from "@helstera/shared";
 
 import {
@@ -2370,6 +2372,7 @@ export async function revokeWebsiteAssistant(accessToken: string): Promise<void>
 
 export type DesktopAgentTaskResponse = {
   taskId: string;
+  goalId?: string;
   goal: string;
   role: string;
   capabilities: string[];
@@ -2427,6 +2430,48 @@ export async function resolveDesktopAgentApproval(accessToken: string, approvalI
   });
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json() as { ok: true; data: { approvalId: string; status: "approved" | "rejected" } }).data;
+}
+
+export async function createAgentGoal(accessToken: string, input: AgentGoalCreateRequest): Promise<AgentGoal> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: AgentGoal }).data;
+}
+
+export async function fetchAgentGoals(accessToken: string): Promise<AgentGoal[]> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals`, { headers: authHeaders(accessToken) });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: AgentGoal[] }).data;
+}
+
+export async function fetchAgentGoal(accessToken: string, goalId: string): Promise<AgentGoal> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals/${encodeURIComponent(goalId)}`, { headers: authHeaders(accessToken) });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: AgentGoal }).data;
+}
+
+export async function updateAgentGoal(accessToken: string, goalId: string, action: "pause" | "resume" | "cancel" | "retry"): Promise<AgentGoal> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals/${encodeURIComponent(goalId)}/${action}`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: "{}",
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: AgentGoal }).data;
+}
+
+export async function resolveAgentGoalApproval(accessToken: string, goalId: string, approvalId: string, decision: "approve" | "reject") {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals/${encodeURIComponent(goalId)}/approvals/${encodeURIComponent(approvalId)}/${decision}`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: "{}",
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { approvalId: string; status: string } }).data;
 }
 
 // --- Skills API ---

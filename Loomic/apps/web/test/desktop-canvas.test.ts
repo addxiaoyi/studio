@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  canvasSessionHref,
   clearLastDesktopCanvas,
   desktopCanvasHref,
   getLastDesktopCanvasId,
@@ -42,5 +43,16 @@ describe("desktop canvas recovery", () => {
     expect(desktopCanvasHref("/desktop-app/projects/", "canvas-a")).toBe(
       "/desktop-app/projects/",
     );
+  });
+
+  it("keeps the goal when a chat session is added to the canvas route", () => {
+    expect(
+      canvasSessionHref(
+        "/canvas/",
+        new URLSearchParams("id=canvas-a&goalId=goal-a&assetId=asset-a"),
+        "canvas-a",
+        "session-a",
+      ),
+    ).toBe("/canvas/?id=canvas-a&goalId=goal-a&assetId=asset-a&session=session-a");
   });
 });

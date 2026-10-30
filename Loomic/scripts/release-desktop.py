@@ -278,11 +278,11 @@ def files_for_release(root: pathlib.Path, target: str, version: str, stage: path
 
 
 def load_host_keys(client: paramiko.SSHClient) -> None:
-    known_hosts = os.environ.get("HELT_DEPLOY_KNOWN_HOSTS")
-    if known_hosts:
-        client.load_host_keys(known_hosts)
-    else:
-        client.load_system_host_keys()
+    known_hosts = os.environ.get("HELT_DEPLOY_KNOWN_HOSTS") or str(pathlib.Path(__file__).with_name("production-known-hosts"))
+    if not pathlib.Path(known_hosts).is_file():
+        raise FileNotFoundError(f"Pinned production host keys are missing: {known_hosts}")
+    client.load_system_host_keys()
+    client.load_host_keys(known_hosts)
     client.set_missing_host_key_policy(paramiko.RejectPolicy())
 
 

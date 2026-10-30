@@ -30,3 +30,18 @@ export function desktopCanvasHref(href: string, canvasId: string | null) {
   route.searchParams.set("id", canvasId);
   return route.pathname + route.search + route.hash;
 }
+
+export function canvasSessionHref(
+  route: string,
+  current: { toString(): string },
+  canvasId: string,
+  sessionId: string,
+  browserMode?: string,
+) {
+  const params = new URLSearchParams(current.toString());
+  params.set("id", canvasId);
+  params.set("session", sessionId);
+  if (browserMode) params.set("browserMode", browserMode);
+  else params.delete("browserMode");
+  return `${route}?${params.toString()}`;
+}

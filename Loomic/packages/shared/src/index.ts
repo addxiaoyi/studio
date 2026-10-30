@@ -17,3 +17,4 @@ export * from "./automation-contracts.js";
 export * from "./website-capture.js";
 export * from "./desktop-control.js";
 export * from "./desktop-mcp.js";
+export * from "./agent-goals.js";

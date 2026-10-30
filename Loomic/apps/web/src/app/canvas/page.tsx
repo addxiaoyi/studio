@@ -19,7 +19,7 @@ import { EditableProjectName } from "../../components/editable-project-name";
 import { createExcalidrawImageElement, insertImageOnCanvas, insertVideoOnCanvas } from "../../lib/canvas-elements";
 import { getServerBaseUrl } from "../../lib/env";
 import { ApiApplicationError, ApiAuthError, createProject, deleteEmptyProject, fetchCanvas, fetchProject, fetchWorkspaceSettings } from "../../lib/server-api";
-import { clearLastDesktopCanvas, getLastDesktopCanvasId, rememberDesktopCanvas } from "../../lib/desktop-canvas";
+import { canvasSessionHref, clearLastDesktopCanvas, getLastDesktopCanvasId, rememberDesktopCanvas } from "../../lib/desktop-canvas";
 import { BrandKitSelector } from "../../components/brand-kit-selector";
 import { CanvasBottomBar } from "../../components/canvas-bottom-bar";
 import { CanvasFilesPanel } from "../../components/canvas-files-panel";
@@ -27,6 +27,7 @@ import { CanvasLayersPanel } from "../../components/canvas-layers-panel";
 import { CanvasTimelinePanel } from "../../components/canvas-timeline-panel";
 import { CreditHeaderButton } from "../../components/credits/credit-header-button";
 import type { DesktopExecutionContext } from "@helstera/shared";
+import { AgentGoalPanel } from "../../components/agent-goal-panel";
 
 function isBlankCanvasContent(content: {
   elements: Record<string, unknown>[];
@@ -393,11 +394,17 @@ function CanvasPageContent() {
       const route = pathname.startsWith("/desktop-app/")
         ? "/desktop-app/canvas/"
         : "/canvas/";
-      const params = new URLSearchParams({ id: canvasId, session: sessionId });
-      if (desktopExecutionContext) params.set("browserMode", desktopExecutionContext.browserMode);
-      routerRef.current.replace(`${route}?${params.toString()}`);
+      routerRef.current.replace(
+        canvasSessionHref(
+          route,
+          searchParams,
+          canvasId,
+          sessionId,
+          desktopExecutionContext?.browserMode,
+        ),
+      );
     },
-    [canvasId, pathname, desktopExecutionContext],
+    [canvasId, pathname, desktopExecutionContext, searchParams],
   );
 
   const handleRequestCanvasImages = useCallback((): CanvasImageItem[] => {
@@ -552,6 +559,13 @@ function CanvasPageContent() {
         <div className="absolute top-3 right-3 z-20">
           <CreditHeaderButton />
         </div>
+        <AgentGoalPanel
+          accessToken={accessToken}
+          canvasId={canvasData.id}
+          ws={ws}
+          {...(initialSessionId ? { chatSessionId: initialSessionId } : {})}
+          {...(searchParams.get("goalId") ? { goalId: searchParams.get("goalId")! } : {})}
+        />
         <CanvasEditor
           key={canvasData.id}
           canvasId={canvasData.id}

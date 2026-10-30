@@ -33,6 +33,8 @@ export function streamEventKey(event: StreamEvent): string {
       return `${event.runId}:${event.type}:${event.timestamp}`;
     case "billing.error":
       return `${event.runId}:${event.type}:${event.timestamp}:${event.code}`;
+    case "agent.goal":
+      return `${event.goalId}:${event.eventType}:${event.timestamp}`;
   }
 }
 

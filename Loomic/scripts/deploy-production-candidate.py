@@ -262,7 +262,14 @@ def deploy(args: argparse.Namespace) -> None:
             "apps/server/src/local-db/migrations/20261026000000_agent_marketplace_catalog.sql",
             "apps/server/src/local-db/migrations/20261026000001_desktop_agent_recovery.sql",
             "apps/server/src/local-db/migrations/20261026000002_desktop_agent_chat_recovery.sql",
-            "deploy/server-runtime/pnpm-lock.yaml",
+            "apps/server/src/local-db/migrations/20261030000000_agent_goals.sql",
+            "apps/server/src/local-db/migrations/20261030000001_agent_goal_retry.sql",
+            "apps/server/src/local-db/migrations/20261030000002_agent_goal_background.sql",
+            "apps/server/src/features/agent-goals/agent-goal-background.ts",
+            "apps/server/src/features/agent-goals/agent-goal-events.ts",
+            "apps/server/src/features/agent-goals/agent-goal-service.ts",
+            "apps/server/src/features/agent-goals/agent-goal-worker.ts",
+            "apps/server/src/http/agent-goals.ts",
             "deploy/server-runtime/pnpm-lock.yaml",
             "deploy/server-runtime/pnpm-workspace.yaml",
             "RELEASE-MANIFEST.json",
@@ -312,6 +319,17 @@ def deploy(args: argparse.Namespace) -> None:
             timeout=300,
         )
         remote_run(target, f"cd {root} && CI=true pnpm --dir .server-runtime install --frozen-lockfile --ignore-scripts --no-prod", timeout=600)
+        remote_run(
+            target,
+            f"cd {root} && pnpm --dir .server-runtime --filter @helstera/server exec playwright install chromium",
+            timeout=1200,
+        )
+        remote_run(
+            target,
+            f"test -d \"$HOME/.cache/ms-playwright\" && "
+            f"find \"$HOME/.cache/ms-playwright\" -type f \( -name chrome -o -name headless_shell \) -perm -u+x -print -quit | grep -q .",
+            timeout=60,
+        )
         remote_run(
             target,
             f"cd {root} && rm -rf node_modules apps/server/node_modules && ln -s .server-runtime/node_modules node_modules && ln -s ../../.server-runtime/apps/server/node_modules apps/server/node_modules",

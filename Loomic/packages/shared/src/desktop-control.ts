@@ -115,13 +115,14 @@ export const desktopAgentActionSchema = z.object({
 
 export const desktopAgentTaskSchema = desktopAgentTaskRequestSchema.extend({
   taskId: z.string().uuid(),
+  goalId: z.string().uuid().optional(),
   createdAt: z.string(),
   plannedActions: z.array(desktopAgentActionSchema).max(8).default([]),
 });
 
 export const desktopAgentEventSchema = z.object({
   taskId: z.string().uuid(),
-  eventType: z.enum(["started", "plan", "step", "evidence", "asset_created", "progress", "page", "approval_required", "approval_expired", "deadline_warning", "completed", "failed", "canceled"]),
+  eventType: z.enum(["started", "plan", "step", "evidence", "asset_created", "progress", "page", "approval_required", "approval_expired", "deadline_warning", "reobserve", "visual_grounding", "waiting_desktop", "completed", "failed", "canceled"]),
   approvalId: z.string().uuid().optional(),
   stepId: z.string().max(120).optional(),
   detail: z.string().max(2_000).optional(),

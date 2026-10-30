@@ -44,6 +44,15 @@ DESKTOP_MARKERS = ("HELSTERA DESKTOP / AGENT", "desktop-browser-connection")
 MARKETPLACE_MARKER = "HELSTERA / AGENT MARKETPLACE"
 
 
+def configure_ssh(client: paramiko.SSHClient) -> None:
+    client.load_system_host_keys()
+    pinned_hosts = pathlib.Path(__file__).with_name("production-known-hosts")
+    if not pinned_hosts.is_file():
+        raise FileNotFoundError(f"Pinned production host keys are missing: {pinned_hosts}")
+    client.load_host_keys(str(pinned_hosts))
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+
+
 class ScriptSources(html.parser.HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -304,11 +313,9 @@ def deploy(args: argparse.Namespace) -> None:
             return
 
         jump = paramiko.SSHClient()
-        jump.load_system_host_keys()
-        jump.set_missing_host_key_policy(paramiko.RejectPolicy())
+        configure_ssh(jump)
         target = paramiko.SSHClient()
-        target.load_system_host_keys()
-        target.set_missing_host_key_policy(paramiko.RejectPolicy())
+        configure_ssh(target)
         backup_path: str | None = None
         stage_path: str | None = None
         exchanged = False

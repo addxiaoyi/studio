@@ -1,4 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const keyboard = vi.hoisted(() => ({
+  pressKey: vi.fn().mockResolvedValue(undefined),
+  type: vi.fn().mockResolvedValue(undefined),
+  releaseKey: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@nut-tree/nut-js", () => ({
+  Key: {
+    Enter: 13,
+    Escape: 27,
+    LeftControl: 17,
+    LeftShift: 16,
+  },
+  keyboard,
+}));
 import {
   groundNativeTarget,
   isSensitiveNativeTree,
