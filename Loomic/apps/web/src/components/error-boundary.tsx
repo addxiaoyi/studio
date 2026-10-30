@@ -83,13 +83,14 @@ export class ErrorBoundary extends React.Component<
           </div>
 
           <div className="space-y-1">
-            <h3 className="text-sm font-medium text-foreground">出错了</h3>
-            <p className="text-xs text-muted-foreground">
-              {process.env.NODE_ENV === "development"
-                ? error.message
-                : "页面组件发生异常，请重试或刷新页面"}
-            </p>
+            <h3 className="text-sm font-medium text-foreground">当前区域加载失败</h3>
+            <p className="text-xs text-muted-foreground">可以重试当前区域；如果问题持续，请返回工作台继续其他任务。</p>
           </div>
+
+          <details className="w-full text-left text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none">技术详情</summary>
+            <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2">{error.message}</pre>
+          </details>
 
           <div className="flex items-center gap-2">
             <button
@@ -97,14 +98,14 @@ export class ErrorBoundary extends React.Component<
               onClick={this.reset}
               className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-all duration-300 hover:bg-primary/90"
             >
-              重试
+              重试当前区域
             </button>
             <button
               type="button"
-              onClick={() => window.location.reload()}
+              onClick={() => { window.location.hash = "#/"; }}
               className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-all duration-300 hover:bg-foreground/[0.04] hover:text-foreground"
             >
-              刷新页面
+              返回工作台
             </button>
           </div>
         </div>

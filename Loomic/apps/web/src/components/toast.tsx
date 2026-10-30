@@ -69,7 +69,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={ctx}>
       {children}
 
-      <div className="fixed bottom-6 left-1/2 z-[9999] flex -translate-x-1/2 flex-col items-center gap-2">
+      <div className="fixed bottom-6 left-1/2 z-[9999] flex -translate-x-1/2 flex-col items-center gap-2" aria-label="通知">
         <AnimatePresence>
           {toasts.map((t) => (
             <ToastItem key={t.id} toast={t} onDismiss={() => remove(t.id)} />
@@ -92,7 +92,7 @@ const variantStyles: Record<ToastVariant, { dot: string; icon: ReactNode }> = {
   success: {
     dot: "bg-success",
     icon: (
-      <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 shrink-0 text-success">
+      <svg aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 shrink-0 text-success">
         <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
       </svg>
     ),
@@ -100,7 +100,7 @@ const variantStyles: Record<ToastVariant, { dot: string; icon: ReactNode }> = {
   error: {
     dot: "bg-destructive",
     icon: (
-      <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 shrink-0 text-destructive">
+      <svg aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 shrink-0 text-destructive">
         <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1ZM7.25 4.75a.75.75 0 0 1 1.5 0v3.5a.75.75 0 0 1-1.5 0v-3.5ZM8 11.5A.75.75 0 1 1 8 10a.75.75 0 0 1 0 1.5Z" />
       </svg>
     ),
@@ -108,7 +108,7 @@ const variantStyles: Record<ToastVariant, { dot: string; icon: ReactNode }> = {
   info: {
     dot: "bg-info",
     icon: (
-      <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 shrink-0 text-info">
+      <svg aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 shrink-0 text-info">
         <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1ZM7.25 4.5a.75.75 0 0 1 1.5 0v.5a.75.75 0 0 1-1.5 0v-.5ZM6.75 7.75A.75.75 0 0 1 7.5 7h.25a.75.75 0 0 1 .75.75v3h.25a.75.75 0 0 1 0 1.5h-1.5a.75.75 0 0 1 0-1.5H7.5V8.5h-.25a.75.75 0 0 1-.75-.75Z" />
       </svg>
     ),
@@ -117,6 +117,7 @@ const variantStyles: Record<ToastVariant, { dot: string; icon: ReactNode }> = {
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
   const { icon } = variantStyles[toast.variant];
+  const role = toast.variant === "error" ? "alert" : "status";
 
   return (
     <motion.div
@@ -125,11 +126,19 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -8, scale: 0.95 }}
       transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
-      onClick={onDismiss}
-      className="flex cursor-pointer items-center gap-2.5 rounded-full glass-strong border border-border/40 px-4 py-2.5 text-sm font-light text-foreground/90 shadow-card-hover"
+      role={role}
+      className="flex items-center gap-2.5 rounded-full glass-strong border border-border/40 px-4 py-2.5 text-sm font-light text-foreground/90 shadow-card-hover"
     >
       {icon}
       <span className="text-foreground/80">{toast.message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="关闭通知"
+        className="ml-1 inline-flex size-6 items-center justify-center rounded-full text-foreground/60 hover:bg-foreground/10 hover:text-foreground"
+      >
+        <span aria-hidden="true">×</span>
+      </button>
     </motion.div>
   );
 }

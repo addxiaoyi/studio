@@ -61,6 +61,7 @@ import { RecorderLock } from "./recorder-lock.js";
 import { parseMarketplaceInstallSlug } from "./desktop-marketplace-link.js";
 import { formatDesktopPlanReview } from "./desktop-plan-review.js";
 import { assistantReconnectDelay, shouldReconnectAssistant } from "./assistant-reconnect.js";
+import { checkDesktopUpdate, installDesktopUpdate } from "./update-actions.js";
 import { getDesktopUpdatePolicy } from "./update-policy.js";
 import {
   decideMainWindowNavigation,
@@ -125,6 +126,7 @@ type UpdateState = {
   version?: string;
   percent?: number;
   message?: string;
+  reason?: "portable build requires manual update";
 };
 type UpdateStateInput = Omit<UpdateState, "currentVersion">;
 let updateState: UpdateState = {
@@ -411,11 +413,12 @@ function updateFeedUrl() {
 }
 
 async function checkForDesktopUpdate() {
-  if (!desktopUpdatePolicy().enabled || updateCheckActive) return updateState;
+  const policy = desktopUpdatePolicy();
+  if (!policy.enabled || updateCheckActive) return updateState;
   updateCheckActive = true;
   publishUpdateState({ status: "checking" });
   try {
-    await autoUpdater.checkForUpdates();
+    await checkDesktopUpdate(policy, updateState, () => autoUpdater.checkForUpdates(), false);
   } catch (error) {
     publishUpdateState({
       status: "error",
@@ -431,6 +434,7 @@ function desktopUpdatePolicy() {
   return getDesktopUpdatePolicy({
     isPackaged: app.isPackaged,
     isPortable: Boolean(process.env.PORTABLE_EXECUTABLE_FILE),
+    platform: process.platform,
   });
 }
 
@@ -440,6 +444,7 @@ function configureAutoUpdates() {
     if (policy.reason === "portable build requires manual update") {
       publishUpdateState({
         status: "not-available",
+        reason: policy.reason,
         message: "便携版请下载新版本 EXE 手动更新",
       });
     }
@@ -504,13 +509,13 @@ function configureAutoUpdates() {
 ipcMain.handle("desktop.update-state", () => updateState);
 ipcMain.handle("desktop.check-updates", () => checkForDesktopUpdate());
 ipcMain.handle("app-version", () => app.getVersion());
-ipcMain.handle("desktop.install-update", () => {
-  if (!desktopUpdatePolicy().canInstall || updateState.status !== "downloaded") {
-    return { ok: false };
-  }
-  autoUpdater.quitAndInstall(false, true);
-  return { ok: true };
-});
+ipcMain.handle("desktop.install-update", () =>
+  installDesktopUpdate(
+    desktopUpdatePolicy(),
+    updateState,
+    () => autoUpdater.quitAndInstall(false, true),
+  ),
+);
 
 ipcMain.handle("desktop.open-browser-pairing", async (event, input: unknown) => {
   requireMainWindow(event);

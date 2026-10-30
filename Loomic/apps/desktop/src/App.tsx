@@ -10,8 +10,9 @@
  */
 import React from "react";
 
-import DesktopAgentProgressCards from "./AgentProgressCards";
 import DesktopAgentHistoryPanel from "./AgentHistoryPanel";
+import DesktopAgentProgressCards from "./AgentProgressCards";
+import { DESKTOP_DOWNLOADS_URL, isPortableManualUpdate } from "./update-download";
 
 type DesktopUpdateState = {
   status: "idle" | "checking" | "available" | "downloading" | "downloaded" | "not-available" | "error";
@@ -19,6 +20,7 @@ type DesktopUpdateState = {
   version?: string;
   percent?: number;
   message?: string;
+  reason?: "portable build requires manual update";
 };
 
 type DesktopApi = {
@@ -81,6 +83,10 @@ function AppShell() {
     }
   };
 
+  const openDownloadPage = () => {
+    window.open(DESKTOP_DOWNLOADS_URL, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <div style={{ minHeight: "100vh", padding: 32, background: "#f7f7f4", color: "#191918", fontFamily: "system-ui, sans-serif" }}>
       <DesktopAgentProgressCards />
@@ -107,7 +113,9 @@ function AppShell() {
                   {update.status === "downloading" && typeof update.percent === "number" ? ` · ${update.percent}%` : ""}
                 </p>
               </div>
-              {update.status === "downloaded" ? (
+              {isPortableManualUpdate(update) ? (
+                <button type="button" onClick={openDownloadPage} style={updateButtonStyle}>打开下载页</button>
+              ) : update.status === "downloaded" ? (
                 <button type="button" onClick={() => void installUpdate()} disabled={updateBusy} style={updateButtonStyle}>重启安装</button>
               ) : (
                 <button type="button" onClick={() => void checkUpdates()} disabled={updateBusy || update.status === "checking" || update.status === "downloading"} style={updateButtonStyle}>

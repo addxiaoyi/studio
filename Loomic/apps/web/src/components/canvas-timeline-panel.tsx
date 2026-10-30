@@ -3,6 +3,7 @@
 import { Download, Film, Image as ImageIcon, Music, Pause, Play, Plus, Type, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { uploadFile } from "../lib/server-api";
+import { OperationStatus, type OperationStatusKind } from "./operation-status";
 
 type TimelinePanelProps = {
   excalidrawApi: any;
@@ -43,6 +44,8 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, 
   const [playhead, setPlayhead] = useState(0);
   const [previewing, setPreviewing] = useState(false);
   const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState<OperationStatusKind>("idle");
+  const [exportError, setExportError] = useState<string | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const wasOpenRef = useRef(false);
 
@@ -214,7 +217,11 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, 
   }, [accessToken, excalidrawApi, projectId]);
 
   const exportProject = useCallback(() => {
-    const elements = (excalidrawApi?.getSceneElements?.() ?? []).filter((element: any) => !element.isDeleted);
+    if (exportStatus === "saving" || exportStatus === "running") return;
+    setExportStatus("running");
+    setExportError(null);
+    try {
+      const elements = (excalidrawApi?.getSceneElements?.() ?? []).filter((element: any) => !element.isDeleted);
     const manifest = {
       format: "helstera-timeline-v1",
       exportedAt: new Date().toISOString(),
@@ -223,14 +230,19 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, 
         .filter((element: any) => element.type === "image" || element.customData?.isVideo || element.customData?.isSubtitle || element.customData?.isAudio)
         .map((element: any) => ({ id: element.id, type: element.customData?.isAudio ? "audio" : element.customData?.isSubtitle ? "subtitle" : element.customData?.isVideo ? "video" : "image", title: element.customData?.title ?? element.text ?? null, url: element.customData?.audioUrl ?? element.customData?.url ?? null, start: Number(element.customData?.subtitleStart ?? element.customData?.trimStart ?? 0), end: Number(element.customData?.subtitleEnd ?? element.customData?.trimEnd ?? element.customData?.durationSeconds ?? 0), text: element.customData?.isSubtitle ? element.text : undefined })),
     };
-    const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "helstera-timeline.json";
-    link.click();
-    URL.revokeObjectURL(url);
-  }, [excalidrawApi, totalDuration]);
+      const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "helstera-timeline.json";
+      link.click();
+      URL.revokeObjectURL(url);
+      setExportStatus("success");
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "导出失败，请重试");
+      setExportStatus("error-retryable");
+    }
+  }, [excalidrawApi, exportStatus, totalDuration]);
 
   const syncAudioPreview = useCallback((id: string, audio: HTMLAudioElement) => {
     const item = items.find((candidate) => candidate.id === id);
@@ -260,7 +272,13 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, 
         <input aria-label="字幕内容" value={subtitle} onChange={(event) => setSubtitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addSubtitle(); }} placeholder="输入字幕内容" className="h-10 min-w-0 basis-full rounded-lg border border-border/60 bg-muted/40 px-2.5 text-base outline-none focus:border-foreground/30 focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:flex-1 sm:basis-auto sm:text-xs" />
         <button type="button" onClick={() => void addSubtitle()} disabled={!subtitle.trim()} className="inline-flex min-h-10 items-center gap-1 rounded-lg bg-foreground px-2.5 text-xs text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 sm:h-8 sm:min-h-0"><Plus className="size-3.5" aria-hidden="true" />添加字幕</button>
         <label className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-lg border border-border/60 px-2.5 text-xs text-foreground hover:bg-muted focus-within:outline-none focus-within:ring-2 focus-within:ring-ring sm:h-8 sm:min-h-0"><Upload className="size-3.5" aria-hidden="true" />音频<input aria-label="上传音频" type="file" accept="audio/*" className="sr-only" onChange={(event) => void addAudio(event)} /></label>
-        <button type="button" onClick={exportProject} className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-border/60 px-2.5 text-xs text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:min-h-0"><Download className="size-3.5" aria-hidden="true" />导出清单</button>
+        <button type="button" onClick={exportProject} disabled={exportStatus === "running"} className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-border/60 px-2.5 text-xs text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:min-h-0"><Download className="size-3.5" aria-hidden="true" />{exportStatus === "running" ? "导出中…" : "导出清单"}</button>
+        <OperationStatus
+          status={exportStatus}
+          label="时间线导出"
+          {...(exportError || exportStatus === "success" ? { detail: exportError ?? "文件已下载到本地" } : {})}
+          {...(exportStatus === "error-retryable" ? { actionLabel: "重试", onAction: exportProject } : {})}
+        />
       </div>
       <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-2">
         <div className="flex items-center gap-2"><button type="button" onClick={() => setPreviewing((value) => !value)} className="flex size-7 items-center justify-center rounded-full bg-foreground text-background" aria-label={previewing ? "暂停预览" : "播放预览"}>{previewing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}</button><input aria-label="时间线播放头" type="range" min="0" max={totalDuration} step="0.1" value={playhead} onChange={(event) => { setPreviewing(false); setPlayhead(Number(event.target.value)); }} className="h-1 flex-1 accent-foreground" /><span className="w-20 text-right text-[10px] tabular-nums text-muted-foreground">{playhead.toFixed(1)} / {totalDuration.toFixed(1)}s</span></div>

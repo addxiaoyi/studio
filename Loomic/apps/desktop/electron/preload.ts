@@ -186,6 +186,7 @@ type DesktopUpdateState = {
   version?: string;
   percent?: number;
   message?: string;
+  reason?: "portable build requires manual update";
 };
 
 type DesktopLoginStatus =

@@ -18,6 +18,13 @@ describe("getDesktopUpdatePolicy", () => {
     });
   });
 
+  it("does not treat a non-Windows process with the portable marker as portable", () => {
+    expect(getDesktopUpdatePolicy({ isPackaged: true, isPortable: true, platform: "darwin" })).toEqual({
+      enabled: true,
+      canInstall: true,
+    });
+  });
+
   it("enables updates for packaged installer builds", () => {
     expect(getDesktopUpdatePolicy({ isPackaged: true, isPortable: false })).toEqual({
       enabled: true,

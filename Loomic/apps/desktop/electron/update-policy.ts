@@ -1,7 +1,11 @@
+export type DesktopUpdateReason =
+  | "development build"
+  | "portable build requires manual update";
+
 export type DesktopUpdatePolicy = {
   enabled: boolean;
   canInstall: boolean;
-  reason?: string;
+  reason?: DesktopUpdateReason;
 };
 
 /**
@@ -12,12 +16,17 @@ export type DesktopUpdatePolicy = {
 export function getDesktopUpdatePolicy(input: {
   isPackaged: boolean;
   isPortable: boolean;
+  platform?: NodeJS.Platform;
 }): DesktopUpdatePolicy {
   if (!input.isPackaged) {
     return { enabled: false, canInstall: false, reason: "development build" };
   }
-  if (input.isPortable) {
-    return { enabled: false, canInstall: false, reason: "portable build requires manual update" };
+  if (input.isPortable && (input.platform ?? process.platform) === "win32") {
+    return {
+      enabled: false,
+      canInstall: false,
+      reason: "portable build requires manual update",
+    };
   }
   return { enabled: true, canInstall: true };
 }
