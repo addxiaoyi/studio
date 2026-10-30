@@ -218,8 +218,13 @@ export class AgentGoalService {
     }
     if (input.chatSessionId) {
       const session = await this.db.query(
-        "select id from chat_sessions where id=$1 and created_by=$2",
-        [input.chatSessionId, userId],
+        `select cs.id
+           from chat_sessions cs
+           join canvases c on c.id=cs.canvas_id
+           join projects p on p.id=c.project_id
+           join workspace_members wm on wm.workspace_id=p.workspace_id and wm.user_id=$3
+          where cs.id=$1 and cs.created_by=$2 and p.workspace_id=$4`,
+        [input.chatSessionId, userId, userId, workspaceId],
       );
       if (!session.rows[0]) throw new Error("Chat session is not available.");
     }
