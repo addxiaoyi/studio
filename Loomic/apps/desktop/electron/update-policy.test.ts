@@ -11,7 +11,7 @@ describe("getDesktopUpdatePolicy", () => {
   });
 
   it("disables in-place updates for portable builds", () => {
-    expect(getDesktopUpdatePolicy({ isPackaged: true, isPortable: true })).toEqual({
+    expect(getDesktopUpdatePolicy({ isPackaged: true, isPortable: true, platform: "win32" })).toEqual({
       enabled: false,
       canInstall: false,
       reason: "portable build requires manual update",
