@@ -11,6 +11,35 @@ describe("generation approval routes", () => {
     app = undefined;
   });
 
+  it.each([
+    ["/api/generation-approvals/pending/confirm", { canvasId: "canvas-1" }],
+    ["/api/generation-approvals/approval-1/confirm", {}],
+  ])("rejects disabled media generation before approval or charging: %s", async (url, payload) => {
+    const query = vi.fn().mockImplementation((sql: string) => {
+      if (sql.includes("agent_connector_permissions")) return { rows: [{ enabled: false }] };
+      if (sql.includes("select id from generation_approvals")) return { rows: [{ id: "approval-1" }] };
+      throw new Error(`Unexpected query: ${sql}`);
+    });
+    const createJob = vi.fn();
+    const deductCredits = vi.fn();
+    app = Fastify();
+    registerGenerationApprovalRoutes(app, {
+      auth: { authenticate: vi.fn().mockResolvedValue({ id: "user-1" }) } as any,
+      viewerService: { ensureViewer: vi.fn().mockResolvedValue({ workspace: { id: "workspace-1" } }) } as any,
+      db: { query } as any,
+      jobService: { createJob } as any,
+      creditService: { deductCredits } as any,
+    });
+
+    const response = await app.inject({ method: "POST", url, payload });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe("connector_disabled");
+    expect(createJob).not.toHaveBeenCalled();
+    expect(deductCredits).not.toHaveBeenCalled();
+    expect(query.mock.calls.some(([sql]) => /update\s+generation_approvals/i.test(sql))).toBe(false);
+  });
+
   it("returns an empty successful response when no approval is pending", async () => {
     const db = { query: vi.fn().mockResolvedValue({ rows: [] }) };
     app = Fastify();

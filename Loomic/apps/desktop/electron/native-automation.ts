@@ -1,10 +1,78 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inspectWindowsUia, setWindowsUiaValue } from "./windows-uia.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
-const SECRET_HINT = /password|passcode|one[- ]?time|verification|auth[- ]?code|\botp\b|\bmfa\b/i;
+const SECRET_HINT = /password|passcode|one[- ]?time|verification|auth[- ]?code|\botp\b|\bmfa\b|密码|验证码|口令|密钥/i;
 const MAX_TREE_NODES = 240;
 const MAX_OCR_TEXT = 12_000;
+
+export type NativeBackendAvailability = {
+  platform: NodeJS.Platform;
+  backend: "windows-uia" | "macos-accessibility" | "linux-atspi" | "nutjs-ocr";
+  supported: boolean;
+  permission: "granted" | "denied" | "unknown" | "not_required";
+  reason?: string;
+};
+
+export function getNativeBackendAvailability(platform: NodeJS.Platform, sessionType?: string): NativeBackendAvailability {
+  if (platform === "win32") return { platform, backend: "windows-uia", supported: true, permission: "not_required" };
+  if (platform === "darwin") return { platform, backend: "macos-accessibility", supported: false, permission: "unknown", reason: "Accessibility and Screen Recording permission probes have not completed." };
+  if (platform === "linux" && sessionType?.toLowerCase() === "wayland") return { platform, backend: "linux-atspi", supported: false, permission: "unknown", reason: "The current native driver requires an X11 session; Wayland support is not enabled." };
+  if (platform === "linux") return { platform, backend: "linux-atspi", supported: false, permission: "unknown", reason: "AT-SPI bus and X11 display probes have not completed." };
+  return { platform, backend: "nutjs-ocr", supported: false, permission: "unknown", reason: "No native desktop backend is registered for this platform." };
+}
+
+export type NativePermissionProbe = NativeBackendAvailability & {
+  accessibility: "granted" | "denied" | "unknown" | "not_required";
+  screenCapture: "granted" | "denied" | "unknown" | "not_required";
+  setupUrl?: string;
+};
+
+const execFileAsync = promisify(execFile);
+
+async function canRun(command: string, args: string[]) {
+  try {
+    await execFileAsync(command, args, { timeout: 2_000, windowsHide: true, maxBuffer: 64_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function probeNativePermissions(platform = process.platform, sessionType = process.env.XDG_SESSION_TYPE): Promise<NativePermissionProbe> {
+  const base = getNativeBackendAvailability(platform, sessionType);
+  if (platform === "win32") return { ...base, accessibility: "granted", screenCapture: "granted" };
+  if (platform === "darwin") {
+    const accessibility = await canRun("/usr/bin/osascript", ["-e", "tell application \"System Events\" to return name of first process"])
+      ? "granted" : "denied";
+    const screenCapture = await canRun("/usr/sbin/screencapture", ["-x", "-t", "png", "/dev/null"])
+      ? "granted" : "denied";
+    return {
+      ...base,
+      supported: accessibility === "granted" && screenCapture === "granted",
+      permission: accessibility === "granted" && screenCapture === "granted" ? "granted" : "denied",
+      accessibility,
+      screenCapture,
+      setupUrl: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+      reason: accessibility === "granted" && screenCapture === "granted" ? undefined : "Grant Accessibility and Screen Recording permissions in System Settings.",
+    };
+  }
+  if (platform === "linux") {
+    const atspi = sessionType?.toLowerCase() !== "wayland" && (Boolean(process.env.AT_SPI_BUS_ADDRESS) || await canRun("busctl", ["--user", "--no-pager", "list"]));
+    return {
+      ...base,
+      supported: atspi,
+      permission: atspi ? "granted" : "denied",
+      accessibility: atspi ? "granted" : "denied",
+      screenCapture: sessionType?.toLowerCase() === "wayland" ? "unknown" : "granted",
+      reason: atspi ? undefined : "AT-SPI2 is unavailable. Install and start the desktop accessibility bus, then use an X11 session.",
+    };
+  }
+  return { ...base, accessibility: "unknown", screenCapture: "unknown" };
+}
 
 export type NativeWindowNode = {
   title?: string;
@@ -14,6 +82,7 @@ export type NativeWindowNode = {
   subRole?: string;
   isFocused?: boolean;
   isEnabled?: boolean;
+  isPassword?: boolean;
   region?: { left?: number; top?: number; width?: number; height?: number };
   children?: NativeWindowNode[];
 };
@@ -35,7 +104,7 @@ export type NativeDesktopEvidence = {
 export function isSensitiveNativeTree(tree: NativeWindowNode | null | undefined): boolean {
   if (!tree) return false;
   const label = [tree.title, tree.type, tree.role, tree.subRole].filter(Boolean).join(" ");
-  if (SECRET_HINT.test(label)) return true;
+  if (tree.isPassword || SECRET_HINT.test(label)) return true;
   return (tree.children ?? []).some(isSensitiveNativeTree);
 }
 
@@ -61,9 +130,8 @@ export async function inspectNativeDesktop(options: {
   sessionType?: string;
   preferVision?: boolean;
 }): Promise<NativeDesktopEvidence> {
-  if (options.platform === "linux" && options.sessionType?.toLowerCase() === "wayland") {
-    throw new Error("Linux native automation currently requires an X11 session; Wayland is not supported by the installed driver.");
-  }
+  const availability = getNativeBackendAvailability(options.platform, options.sessionType);
+  if (!availability.supported) throw new Error(availability.reason ?? "Native desktop automation is unavailable on this platform.");
 
   const [{ screen, getActiveWindow, FileType }, { createWorker }] = await Promise.all([
     import("@nut-tree/nut-js"),
@@ -78,7 +146,11 @@ export async function inspectNativeDesktop(options: {
 
   let tree: NativeWindowNode | null = null;
   let fallbackReason: string | undefined;
-  if (options.preferVision) {
+  const windowsSnapshot = options.platform === "win32" ? await inspectWindowsUia() : null;
+  if (windowsSnapshot) {
+    if (windowsSnapshot.title !== (await activeWindow.title).slice(0, 300)) throw new Error("The active window changed during inspection. Observe again before acting.");
+    tree = { title: windowsSnapshot.title, role: "window", children: windowsSnapshot.controls };
+  } else if (options.preferVision) {
     fallbackReason = "Visual/OCR mode was selected for this task.";
   } else {
     try {
@@ -271,9 +343,18 @@ export async function pressNativeKey(key: string, modifiers: string[] = []): Pro
     if (typeof resolved !== "number") throw new Error(`Unsupported modifier: ${modifier}`);
     return resolved;
   });
-  for (const modifier of modifierKeys) await keyboard.pressKey(modifier as never);
-  await keyboard.type(targetKey as never);
-  for (const modifier of [...modifierKeys].reverse()) await keyboard.releaseKey(modifier as never);
+  const pressed: number[] = [];
+  try {
+    for (const modifier of modifierKeys) {
+      pressed.push(modifier);
+      await keyboard.pressKey(modifier as never);
+    }
+    await keyboard.type(targetKey as never);
+  } finally {
+    const released = await Promise.allSettled(pressed.reverse().map((modifier) => keyboard.releaseKey(modifier as never)));
+    const failures = released.filter((entry): entry is PromiseRejectedResult => entry.status === "rejected");
+    if (failures.length) throw new AggregateError(failures.map((entry) => entry.reason), "Could not release native keyboard modifiers. Release held keys before continuing.");
+  }
 }
 
 export async function scrollNativeWindow(dx: number, dy: number): Promise<void> {
@@ -451,6 +532,14 @@ export async function waitForNativeText(
 export async function typeIntoNativeControl(target: string, value: string, _userDataPath: string): Promise<void> {
   const cleanTarget = target.replace(/\s+/g, " ").trim().toLocaleLowerCase();
   if (!cleanTarget || cleanTarget.length > 160 || value.length > 10_000) throw new Error("Native text entry is invalid or too long.");
+  const snapshot = await inspectWindowsUia();
+  if (snapshot) {
+    if (isSensitiveNativeTree({ title: snapshot.title, children: snapshot.controls })) throw new Error("A credential control is visible; native text entry was blocked.");
+    const matches = snapshot.controls.filter((control) => control.role === "edit" && control.title.replace(/\s+/g, " ").trim().toLocaleLowerCase() === cleanTarget);
+    if (matches.length !== 1 || !matches[0]!.isEnabled) throw new Error("Choose one enabled, uniquely named native text field.");
+    await setWindowsUiaValue(snapshot, matches[0]!.title, value);
+    return;
+  }
   const { getActiveWindow, mouse, keyboard } = await import("@nut-tree/nut-js");
   const window = await getActiveWindow();
   let tree: NativeWindowNode;

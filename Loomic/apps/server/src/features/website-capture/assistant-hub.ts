@@ -21,6 +21,7 @@ import {
   isDesktopActionAuthorized,
 } from "@helstera/shared";
 import { buildAgentGoalPlan } from "../agent-goals/agent-goal-service.js";
+import { assertConnectorEnabled } from "../agent-goals/connector-gate.js";
 import { hashToken } from "../../local-db/auth.js";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import {
@@ -362,6 +363,13 @@ export class WebsiteAssistantHub {
     return live?.mcpTools ?? [];
   }
 
+  isDesktopReady(userId: string, workspaceId: string): boolean {
+    return [...this.connections.values()].some((connection) =>
+      connection.userId === userId && connection.workspaceId === workspaceId &&
+      connection.clientKind === "desktop-app" && !connection.paused && connection.ws.readyState === 1,
+    );
+  }
+
   async analyzeDesktopScreenshotViaDesktop(input: {
     userId: string;
     workspaceId: string;
@@ -369,6 +377,7 @@ export class WebsiteAssistantHub {
     taskId?: string;
     timeoutMs?: number;
   }): Promise<{ found: boolean; x: number; y: number; confidence: number }> {
+    await assertConnectorEnabled(this.options.db, input.workspaceId, input.userId, "desktop-agent");
     const handler = this.visionAnalyzer ?? this.options.analyzeDesktopScreenshot;
     if (!handler)
       throw new Error("Visual grounding is not configured on the server.");
@@ -513,6 +522,7 @@ export class WebsiteAssistantHub {
     arguments: Record<string, unknown>;
     desktopExecutionContext?: DesktopExecutionContext;
   }): Promise<string> {
+    await assertConnectorEnabled(this.options.db, input.workspaceId, input.userId, "desktop-agent");
     const live = [...this.connections.values()]
       .reverse()
       .find(
@@ -723,6 +733,7 @@ export class WebsiteAssistantHub {
     chatSessionId?: string,
     goalIdOverride?: string,
   ) {
+    await assertConnectorEnabled(this.options.db, workspaceId, userId, "desktop-agent");
     const { rows: connections } = await this.options.db.query<{ id: string }>(
       `select id from website_capture_connections
         where user_id=$1 and workspace_id=$2 and revoked_at is null and disconnected_at is null and paused=false
@@ -972,15 +983,23 @@ export class WebsiteAssistantHub {
     workspaceId: string,
     approvalId: string,
   ) {
+    await assertConnectorEnabled(this.options.db, workspaceId, userId, "desktop-agent");
     const token = randomBytes(32).toString("base64url");
     const { rows } = await this.options.db.query<{
       task_id: string;
       connection_id: string;
       action: DesktopAgentAction;
     }>(
-      `update desktop_agent_approvals set status='approved',approved_at=now(),approval_token_hash=$4
-        where id=$1 and user_id=$2 and workspace_id=$3 and status='pending' and expires_at>now()
-        returning task_id,connection_id,action`,
+      `with approved as (
+         update desktop_agent_approvals a set status='approved',approved_at=now(),approval_token_hash=$4
+          where a.id=$1 and a.user_id=$2 and a.workspace_id=$3 and a.status='pending' and a.expires_at>now()
+            and exists (select 1 from desktop_agent_tasks t where t.id=a.task_id and t.status='waiting_approval')
+          returning a.task_id,a.connection_id,a.action,a.id
+       ), recorded as (
+         update desktop_agent_tasks t set checkpoint=coalesce(t.checkpoint,'{}'::jsonb) ||
+           jsonb_build_object('action',jsonb_build_object('approvalId',a.id,'requestId',a.action->>'requestId','kind',a.action->>'kind','state','dispatched')),
+           updated_at=now() from approved a where t.id=a.task_id returning t.id
+       ) select a.task_id,a.connection_id,a.action from approved a join recorded r on r.id=a.task_id`,
       [approvalId, userId, workspaceId, hashToken(token)],
     );
     const approval = rows[0];
@@ -991,6 +1010,7 @@ export class WebsiteAssistantHub {
         "update desktop_agent_approvals set status='pending',approved_at=null,approval_token_hash=null where id=$1 and status='approved'",
         [approvalId],
       );
+      await this.options.db.query("update desktop_agent_tasks set checkpoint=coalesce(checkpoint,'{}'::jsonb) - 'action' where id=$1 and checkpoint->'action'->>'approvalId'=$2", [approval.task_id, approvalId]);
       throw new Error("桌面助手未连接或已暂停。");
     }
     this.send(live, {
@@ -1559,7 +1579,7 @@ export class WebsiteAssistantHub {
       const action = event.action;
       if (
         !action ||
-        !["click", "type", "native_click", "native_type", "native_key", "native_drag"].includes(action.kind) ||
+        !["click", "type", "native_click", "native_double_click", "native_right_click", "native_type", "native_key", "native_drag", "start_recording", "stop_recording"].includes(action.kind) ||
         !isDesktopActionAuthorized(action, task.capabilities) ||
         isDesktopCredentialField(action.fieldType) ||
         action.approvalToken
@@ -1674,6 +1694,8 @@ export class WebsiteAssistantHub {
     }));
     const safeResult = {
       ...(event.result?.summary ? { summary: event.result.summary } : {}),
+      ...(event.result?.windowTitle ? { windowTitle: event.result.windowTitle } : {}),
+      ...(event.result?.controls ? { controls: event.result.controls } : {}),
       ...(event.result?.page ? { page: event.result.page } : {}),
       ...(screenshotAsset ? { screenshotAsset } : {}),
       ...(recordingAsset ? { recordingAsset } : {}),
@@ -1684,14 +1706,20 @@ export class WebsiteAssistantHub {
       : undefined;
     if (event.approvalId && event.action?.approvalToken) {
       const consumed = await this.options.db.query<{ id: string }>(
-        `update desktop_agent_approvals set status='executed',consumed_at=now()
+        `with consumed as (update desktop_agent_approvals set status='executed',consumed_at=now()
           where id=$1 and task_id=$2 and connection_id=$3 and status='approved' and expires_at>now() and approval_token_hash=$4
-          returning id`,
+            and action=($5::jsonb - 'approvalId' - 'approvalToken')
+          returning id,task_id), recorded as (
+            update desktop_agent_tasks t set checkpoint=jsonb_set(coalesce(t.checkpoint,'{}'::jsonb),'{action,state}',to_jsonb($6::text)),updated_at=now()
+              from consumed c where t.id=c.task_id and t.checkpoint->'action'->>'approvalId'=c.id::text returning t.id
+          ) select id from consumed`,
         [
           event.approvalId,
           event.taskId,
           live.id,
           hashToken(event.action.approvalToken),
+          JSON.stringify(event.action),
+          event.eventType === "progress" ? "completed" : "uncertain",
         ],
       );
       if (!consumed.rows[0]) return;
@@ -1717,7 +1745,7 @@ export class WebsiteAssistantHub {
       : {};
     const resumeToken = event.stepId ? `${event.taskId}:${event.stepId}` : `${event.taskId}:${event.eventType}`;
     const updated = await this.options.db.query<{ id: string }>(
-      `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb when $6::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $6::jsonb else result end,error_message=case when $2 in ('failed','canceled') then $5 else null end,checkpoint=case when $7::jsonb <> '{}'::jsonb then $7::jsonb else checkpoint end,resume_token=case when $8 <> '' then $8 else resume_token end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1 and status in ('queued','running','waiting_approval') returning id`,
+      `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb when $6::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $6::jsonb else result end,error_message=case when $2 in ('failed','canceled') then $5 else null end,checkpoint=case when $7::jsonb <> '{}'::jsonb then coalesce(checkpoint,'{}'::jsonb) || $7::jsonb else checkpoint end,resume_token=case when $8 <> '' then $8 else resume_token end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1 and status in ('queued','running','waiting_approval') returning id`,
       [
         event.taskId,
         event.eventType === "failed"
@@ -2038,6 +2066,24 @@ export class WebsiteAssistantHub {
 
     const resumed: Array<{ task: Record<string, unknown>; pendingApprovals: Array<{ approvalId: string; action: DesktopAgentAction; expiresAt: string }> }> = [];
     for (const row of rows) {
+      const checkpointAction = row.checkpoint?.action;
+      const checkpointState = checkpointAction && typeof checkpointAction === "object"
+        ? (checkpointAction as { state?: unknown }).state : undefined;
+      if (checkpointState === "dispatched" || checkpointState === "uncertain") {
+        const held = await this.options.db.query<{ goal_id: string | null }>(
+          `update desktop_agent_tasks set status='waiting_desktop',wait_reason=$2,updated_at=now()
+            where id=$1 and status in ('running','waiting_desktop')
+              and checkpoint->'action'->>'state' in ('dispatched','uncertain') returning goal_id`,
+          [row.id, "The last action has an unknown outcome. Stop the desktop session and review it before continuing."],
+        );
+        if (held.rows[0]?.goal_id) await this.options.db.query(
+          "update agent_goals set status='waiting_desktop',updated_at=now() where id=$1 and status in ('running','waiting_desktop')",
+          [held.rows[0].goal_id],
+        );
+        this.clearDesktopTaskTimer(row.id);
+        this.send(live, { type: "desktop_agent.stop", taskId: row.id });
+        continue;
+      }
       const activeRecording = [...this.pendingRecordingUploads.values()].find((upload) => upload.taskId === row.id);
       if (activeRecording?.processingPromise) await activeRecording.processingPromise.catch((error: unknown) => {
         console.error("[desktop-agent] recording persistence before reconnect failed", { taskId: row.id, error: error instanceof Error ? error.message : String(error) });

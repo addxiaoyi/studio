@@ -34,7 +34,20 @@ import type {
   WebsiteActionRequest,
   DesktopAgentTaskRequest,
   AgentGoal,
+  AgentGoalActivity,
   AgentGoalCreateRequest,
+  AgentGoalOutput,
+  AgentMemory,
+  AgentSuggestion,
+  AgentConnector,
+} from "@helstera/shared";
+import {
+  agentConnectorSchema,
+  agentGoalSchema,
+  agentGoalActivitySchema,
+  agentGoalOutputSchema,
+  agentMemorySchema,
+  agentSuggestionSchema,
 } from "@helstera/shared";
 
 import {
@@ -2432,6 +2445,18 @@ export async function resolveDesktopAgentApproval(accessToken: string, approvalI
   return (await response.json() as { ok: true; data: { approvalId: string; status: "approved" | "rejected" } }).data;
 }
 
+async function readAgentResponse<T>(response: Response, schema: {
+  safeParse(value: unknown): { success: true; data: T } | { success: false };
+}): Promise<T> {
+  const envelope: unknown = await response.json();
+  if (!envelope || typeof envelope !== "object" || !("ok" in envelope) || envelope.ok !== true || !("data" in envelope)) {
+    throw new Error("Agent response is invalid. Please reload and try again.");
+  }
+  const parsed = schema.safeParse(envelope.data);
+  if (!parsed.success) throw new Error("Agent response is invalid. Please reload and try again.");
+  return parsed.data;
+}
+
 export async function createAgentGoal(accessToken: string, input: AgentGoalCreateRequest): Promise<AgentGoal> {
   const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals`, {
     method: "POST",
@@ -2439,19 +2464,41 @@ export async function createAgentGoal(accessToken: string, input: AgentGoalCreat
     body: JSON.stringify(input),
   });
   if (!response.ok) return handleErrorResponse(response);
-  return (await response.json() as { ok: true; data: AgentGoal }).data;
+  return readAgentResponse(response, agentGoalSchema);
 }
 
 export async function fetchAgentGoals(accessToken: string): Promise<AgentGoal[]> {
   const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals`, { headers: authHeaders(accessToken) });
   if (!response.ok) return handleErrorResponse(response);
-  return (await response.json() as { ok: true; data: AgentGoal[] }).data;
+  return readAgentResponse(response, agentGoalSchema.array());
 }
 
 export async function fetchAgentGoal(accessToken: string, goalId: string): Promise<AgentGoal> {
   const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals/${encodeURIComponent(goalId)}`, { headers: authHeaders(accessToken) });
   if (!response.ok) return handleErrorResponse(response);
-  return (await response.json() as { ok: true; data: AgentGoal }).data;
+  return readAgentResponse(response, agentGoalSchema);
+}
+
+export async function fetchAgentGoalEvents(accessToken: string, goalId: string): Promise<AgentGoalActivity[]> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals/${encodeURIComponent(goalId)}/events`, { headers: authHeaders(accessToken) });
+  if (!response.ok) return handleErrorResponse(response);
+  return readAgentResponse(response, agentGoalActivitySchema.array());
+}
+
+export async function fetchAgentGoalAssets(accessToken: string, goalId: string): Promise<AgentGoalOutput[]> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals/${encodeURIComponent(goalId)}/assets`, { headers: authHeaders(accessToken) });
+  if (!response.ok) return handleErrorResponse(response);
+  return readAgentResponse(response, agentGoalOutputSchema.array());
+}
+
+export async function confirmAgentGoal(accessToken: string, goalId: string): Promise<AgentGoal> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals/${encodeURIComponent(goalId)}/confirm`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: "{}",
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return readAgentResponse(response, agentGoalSchema);
 }
 
 export async function updateAgentGoal(accessToken: string, goalId: string, action: "pause" | "resume" | "cancel" | "retry"): Promise<AgentGoal> {
@@ -2461,7 +2508,7 @@ export async function updateAgentGoal(accessToken: string, goalId: string, actio
     body: "{}",
   });
   if (!response.ok) return handleErrorResponse(response);
-  return (await response.json() as { ok: true; data: AgentGoal }).data;
+  return readAgentResponse(response, agentGoalSchema);
 }
 
 export async function resolveAgentGoalApproval(accessToken: string, goalId: string, approvalId: string, decision: "approve" | "reject") {
@@ -2472,6 +2519,81 @@ export async function resolveAgentGoalApproval(accessToken: string, goalId: stri
   });
   if (!response.ok) return handleErrorResponse(response);
   return (await response.json() as { ok: true; data: { approvalId: string; status: string } }).data;
+}
+
+export async function reviewAgentGoalAction(accessToken: string, goalId: string, approvalId: string, outcome: "observed_completed" | "observed_not_completed") {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/goals/${encodeURIComponent(goalId)}/approvals/${encodeURIComponent(approvalId)}/review`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: JSON.stringify({ outcome }),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { taskId: string; approvalId: string; outcome: string; replayed: false } }).data;
+}
+
+export async function fetchAgentMemories(accessToken: string): Promise<AgentMemory[]> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/memories`, { headers: authHeaders(accessToken) });
+  if (!response.ok) return handleErrorResponse(response);
+  return readAgentResponse(response, agentMemorySchema.array());
+}
+
+export async function updateAgentMemory(accessToken: string, memoryId: string, input: { value?: string; enabled?: boolean }): Promise<AgentMemory> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/memories/${encodeURIComponent(memoryId)}`, {
+    method: "PATCH",
+    headers: authJsonHeaders(accessToken),
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return readAgentResponse(response, agentMemorySchema);
+}
+
+export async function deleteAgentMemory(accessToken: string, memoryId: string): Promise<void> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/memories/${encodeURIComponent(memoryId)}`, {
+    method: "DELETE",
+    headers: authHeaders(accessToken),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+}
+
+export async function fetchAgentSuggestions(accessToken: string): Promise<AgentSuggestion[]> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/suggestions`, { headers: authHeaders(accessToken) });
+  if (!response.ok) return handleErrorResponse(response);
+  return readAgentResponse(response, agentSuggestionSchema.array());
+}
+
+export async function acceptAgentSuggestion(accessToken: string, suggestionId: string): Promise<{ suggestionId: string; goal: AgentGoal }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/suggestions/${encodeURIComponent(suggestionId)}/accept`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: "{}",
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { suggestionId: string; goal: AgentGoal } }).data;
+}
+
+export async function dismissAgentSuggestion(accessToken: string, suggestionId: string): Promise<void> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/suggestions/${encodeURIComponent(suggestionId)}/dismiss`, {
+    method: "POST",
+    headers: authJsonHeaders(accessToken),
+    body: "{}",
+  });
+  if (!response.ok) return handleErrorResponse(response);
+}
+
+export async function fetchAgentConnectors(accessToken: string): Promise<AgentConnector[]> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/connectors`, { headers: authHeaders(accessToken) });
+  if (!response.ok) return handleErrorResponse(response);
+  return readAgentResponse(response, agentConnectorSchema.array());
+}
+
+export async function setAgentConnectorEnabled(accessToken: string, connectorId: string, enabled: boolean, permissions: string[] = []) {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent/connectors/${encodeURIComponent(connectorId)}`, {
+    method: "PATCH",
+    headers: authJsonHeaders(accessToken),
+    body: JSON.stringify({ enabled, permissions }),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { connector_id: string; enabled: boolean; permissions: string[] } }).data;
 }
 
 // --- Skills API ---
@@ -2711,6 +2833,7 @@ export async function setAgentMarketplaceEnabled(accessToken: string, itemId: st
     body: JSON.stringify({ enabled }),
   });
   if (!response.ok) return handleErrorResponse(response);
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("desktop:marketplace-install-changed"));
 }
 
 export async function fetchSkillVersions(accessToken: string, skillId: string) {

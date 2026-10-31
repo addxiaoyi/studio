@@ -1,6 +1,7 @@
 import { captureIsolatedWebsite, WebsiteCaptureError } from "../../website-capture/isolated-browser.js";
 import { softDeleteWebsiteCaptureAssets } from "../../website-capture/asset-cleanup.js";
 import { registerExecutor, type ExecutorContext } from "../job-executor.js";
+import { assertConnectorEnabled } from "../../agent-goals/connector-gate.js";
 
 async function resolveCaptureTaskId(jobId: string, ctx: ExecutorContext): Promise<string> {
   const job = await ctx.jobService.getJobAdmin(jobId);
@@ -47,6 +48,7 @@ registerExecutor("website_capture", async (jobId, _queueMessage, ctx: ExecutorCo
   await appendEvent(ctx, taskId, "connecting", "正在启动隔离浏览器");
 
   const onProgress = async (progress: number, stage: string, detail = "") => {
+    await assertConnectorEnabled(ctx.localDb!, task.workspace_id, task.created_by, "isolated-browser");
     await ctx.localDb!.query(
       "update website_capture_tasks set progress=$2, stage=$3, updated_at=now() where id=$1 and status='running'",
       [taskId, Math.max(0, Math.min(100, progress)), stage],
@@ -56,6 +58,7 @@ registerExecutor("website_capture", async (jobId, _queueMessage, ctx: ExecutorCo
   };
 
   try {
+    await assertConnectorEnabled(ctx.localDb, task.workspace_id, task.created_by, "isolated-browser");
     const result = await captureIsolatedWebsite({
       db: ctx.localDb,
       storage: ctx.storage,

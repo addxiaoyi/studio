@@ -55,6 +55,8 @@ export function DesktopExtensionBridge({ accessToken }: { accessToken: string })
     if (!syncDesktopExtensions || !getMcpServers || !accessToken || lastToken.current === accessToken) return;
     lastToken.current = accessToken;
     let canceled = false;
+    let syncing = false;
+    let syncAgain = false;
 
     const sync = async () => {
       const [catalogResponse, installs, localServers] = await Promise.all([
@@ -97,17 +99,29 @@ export function DesktopExtensionBridge({ accessToken }: { accessToken: string })
       if (!canceled) await syncDesktopExtensions(syncInput);
     };
     const syncAfterInstall = () => {
+      if (syncing) {
+        syncAgain = true;
+        return;
+      }
+      syncing = true;
       void sync().catch((error) => {
         if (!canceled) console.warn("[desktop-extensions] catalog sync failed", error);
+      }).finally(() => {
+        syncing = false;
+        if (syncAgain && !canceled) {
+          syncAgain = false;
+          syncAfterInstall();
+        }
       });
     };
     window.addEventListener("desktop:marketplace-install-changed", syncAfterInstall);
-    void sync().catch((error) => {
-      if (!canceled) console.warn("[desktop-extensions] catalog sync failed", error);
-    });
+    const timer = window.setInterval(syncAfterInstall, 15_000);
+    syncAfterInstall();
 
     return () => {
       canceled = true;
+      window.clearInterval(timer);
+      if (lastToken.current === accessToken) lastToken.current = null;
       window.removeEventListener("desktop:marketplace-install-changed", syncAfterInstall);
     };
   }, [accessToken]);

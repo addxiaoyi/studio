@@ -72,10 +72,8 @@ export function DesktopExtensionPanel({ locale }: { locale?: string | null | und
     setBusyId(extension.itemId);
     setError(null);
     try {
-      if (extension.kind !== "mcp") {
         if (!session?.access_token) throw new Error(english ? "Sign in again to update this extension." : "请重新登录后更新扩展状态。");
         await setAgentMarketplaceEnabled(session.access_token, extension.itemId, !extension.enabled);
-      }
       setExtensions(await api.setDesktopExtensionEnabled({ itemId: extension.itemId, enabled: !extension.enabled }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : (english ? "Could not update the extension." : "无法更新扩展状态。"));

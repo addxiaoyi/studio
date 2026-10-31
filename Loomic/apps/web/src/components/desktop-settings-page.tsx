@@ -26,12 +26,14 @@ type DesktopUpdateState = {
 };
 
 type DesktopSettingsApi = {
+  openAssetFolder?: () => Promise<void>;
   getAppVersion: () => Promise<string>;
   getPlatform: () => string;
   getUpdateState: () => Promise<DesktopUpdateState>;
   checkForUpdates: () => Promise<DesktopUpdateState>;
   installUpdate: () => Promise<{ ok: boolean }>;
   onUpdateState: (callback: (state: DesktopUpdateState) => void) => () => void;
+  getNativePermissions?: () => Promise<{ backend: string; supported: boolean; permission: string; accessibility: string; screenCapture: string; reason?: string }>;
 };
 
 type FolderState = Awaited<ReturnType<typeof getLocalAssetFolderState>>;
@@ -80,6 +82,7 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
   const [updateBusy, setUpdateBusy] = useState(false);
   const [signOutBusy, setSignOutBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nativePermissions, setNativePermissions] = useState<Awaited<ReturnType<NonNullable<DesktopSettingsApi["getNativePermissions"]>>> | null>(null);
 
   const refreshFolder = useCallback(async () => {
     setFolderLoading(true);
@@ -108,6 +111,7 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
       toast.push({ tone: "error", message: failure, key: "settings:version-load" });
     });
     setPlatform(api.getPlatform());
+    void api.getNativePermissions?.().then(setNativePermissions).catch(() => undefined);
     void api.getUpdateState().then(setUpdate).catch((cause) => {
       const message = cause instanceof Error ? cause.message : copy.settings.updateStateReadFailed;
       const failure = formatDesktopCopy(copy.settings.updateStateReadFailToast, { reason: message });
@@ -226,6 +230,18 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
         ? copy.settings.permissionDenied
         : copy.settings.permissionUnselected;
 
+  async function openFolder() {
+    if (!api?.openAssetFolder || folderBusy) return;
+    setFolderBusy(true);
+    try {
+      await api.openAssetFolder();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : copy.settings.folderUnavailable);
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
   return (
     <main className="desktop-settings">
       <header className="desktop-settings__header">
@@ -247,6 +263,11 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
 
       <section className="desktop-settings__section" aria-labelledby="desktop-settings-storage">
         <div className="desktop-settings__section-heading"><h2 id="desktop-settings-storage">{copy.settings.storage}</h2><p>{copy.settings.storageHint}</p></div>
+        {folder.path ? <p className="break-all">{folder.path}</p> : null}
+        {typeof folder.availableBytes === "number" ? <p>{formatDesktopCopy(copy.settings.folderAvailableSpace, { size: (folder.availableBytes / 1_000_000_000).toFixed(1) })}</p> : null}
+        {folder.lastWriteAt ? <p>{formatDesktopCopy(copy.settings.folderLastWrite, { time: new Date(folder.lastWriteAt).toLocaleString() })}</p> : null}
+        {folder.error ? <p role="alert">{copy.settings.folderUnavailable}</p> : null}
+        {api?.openAssetFolder && folder.path ? <button type="button" onClick={openFolder} disabled={folderBusy || folder.permission !== "granted"}>{copy.settings.folderOpen}</button> : null}
         <div className="desktop-settings__row">
           <div><strong>{copy.settings.folder}</strong><p>{folderLoading ? copy.settings.folderLoading : folder.name ? `${folder.name} · ${permissionLabel}` : copy.settings.folderUnset}</p></div>
           <div className="desktop-settings__actions">
@@ -261,6 +282,14 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
         <div className="desktop-settings__row">
           <div><strong>{user?.email ?? copy.settings.defaultAccount}</strong><p>{copy.settings.accountHint}</p></div>
           <button type="button" className="desktop-settings__command" onClick={() => void leaveAccount()} disabled={signOutBusy}><LogOut aria-hidden="true" />{signOutBusy ? copy.settings.signingOut : copy.settings.signOut}</button>
+        </div>
+      </section>
+
+      <section className="desktop-settings__section" aria-labelledby="desktop-settings-native">
+        <div className="desktop-settings__section-heading"><h2 id="desktop-settings-native">Native controls</h2><p>Desktop Agent permissions and backend readiness.</p></div>
+        <div className="desktop-settings__row">
+          <div><strong>{nativePermissions?.backend ?? "Checking native backend"}</strong><p>{nativePermissions?.reason ?? (nativePermissions?.supported ? "Ready for native control tasks." : "Permission status is not ready.")}</p></div>
+          <span className="desktop-settings__version">{nativePermissions?.permission ?? "unknown"}</span>
         </div>
       </section>
 

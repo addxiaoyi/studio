@@ -6,6 +6,9 @@ import { generateConfiguredImage } from "../local-db/provider-generation.js";
 
 vi.mock("../generation/image-generation.js", () => ({ generateImage: vi.fn() }));
 vi.mock("../local-db/provider-generation.js", () => ({ generateConfiguredImage: vi.fn() }));
+vi.mock("./model-availability.js", () => ({
+  resolveConfiguredModel: vi.fn(async (_db, _kind, model) => ({ model_id: model })),
+}));
 vi.mock("../generation/providers/registry.js", () => ({
   resolveImageProviderName: () => "legacy", getAvailableVideoModels: () => [],
 }));
@@ -30,11 +33,30 @@ async function imageApi(configured = true) {
     auth: { authenticate: vi.fn().mockResolvedValue({ id: "user-id", accessToken: "test", userMetadata: {} }) },
     viewerService: { ensureViewer: vi.fn().mockResolvedValue({ workspace: { id: "workspace-id" } }) } as never,
     uploadService: { uploadFile } as never,
-    ...(configured ? { localDb: {} as never } : {}),
+    ...(configured ? { localDb: { query: vi.fn().mockResolvedValue({ rows: [] }) } as never } : {}),
   });
   await app.ready();
   return { app, uploadFile };
 }
+
+it("rejects a disabled media connector before calling the image provider", async () => {
+  const app = Fastify();
+  apps.push(app);
+  const query = vi.fn().mockResolvedValue({ rows: [{ enabled: false }] });
+  const uploadFile = vi.fn();
+  await registerGenerateRoutes(app, {
+    auth: { authenticate: vi.fn().mockResolvedValue({ id: "user-id" }) },
+    viewerService: { ensureViewer: vi.fn().mockResolvedValue({ workspace: { id: "workspace-id" } }) } as never,
+    uploadService: { uploadFile } as never,
+    localDb: { query } as never,
+  });
+  const response = await app.inject({ method: "POST", url: "/api/agent/generate-image", payload: { prompt: "One mug" } });
+  expect(response.statusCode).toBe(403);
+  expect(response.json().error.code).toBe("connector_disabled");
+  expect(generateConfiguredImage).not.toHaveBeenCalled();
+  expect(generateImage).not.toHaveBeenCalled();
+  expect(uploadFile).not.toHaveBeenCalled();
+});
 
 it("uses the configured Image 2 provider and persists the returned image", async () => {
   const reference = "data:image/png;base64,dGVzdA==";

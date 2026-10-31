@@ -1,11 +1,12 @@
 import type { Pool } from "pg";
 
-import type { DesktopAgentTaskRequest } from "@helstera/shared";
-
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import { insertLocalImageElement, insertLocalVideoElement } from "../canvas/canvas-element-writer.js";
 import { captureIsolatedWebsite } from "../website-capture/isolated-browser.js";
 import type { BackgroundGoalExecutor } from "./agent-goal-worker.js";
+import { buildWebsiteDocument } from "./agent-goal-document.js";
+import { ReadOnlyGoalPausedError } from "./agent-goal-interruption.js";
+import { assertConnectorEnabled } from "./connector-gate.js";
 
 type BackgroundGoalOptions = {
   db: Pool;
@@ -28,6 +29,20 @@ export function createBackgroundGoalExecutor(
     insertVideo: insertLocalVideoElement,
   };
   return async ({ taskId, goal, request }) => {
+    const assertActive = async () => {
+      await assertConnectorEnabled(options.db, goal.workspace_id, goal.created_by, "isolated-browser");
+      const { rows } = await options.db.query<{ status: string; task_status: string }>(
+        `select g.status,t.status as task_status from agent_goals g join desktop_agent_tasks t on t.goal_id=g.id
+         where g.id=$1 and t.id=$2`,
+        [goal.id, taskId],
+      );
+      const current = rows[0];
+      if (current?.status === "running" && current.task_status === "running") return;
+      if (current && ["running", "paused"].includes(current.status) && ["running", "paused"].includes(current.task_status)) {
+        throw new ReadOnlyGoalPausedError();
+      }
+      throw new InactiveGoalError("The goal is no longer running; capture writeback stopped.");
+    };
     const startUrl = request.targetUrl;
     if (!startUrl) {
       throw new Error(
@@ -35,7 +50,11 @@ export function createBackgroundGoalExecutor(
       );
     }
 
-    const recordVideo = /\b(record|录制|录像)\b/i.test(goal.goal);
+    await assertActive();
+    const recordVideo = /\brecord\b|录制|录像|录屏/i.test(goal.goal);
+    if (recordVideo || goal.output_kind === "video") {
+      throw new Error("Recording requires an exact action approval. Use the desktop task approval flow; background website reports are read-only.");
+    }
     await options.db.query(
       `insert into website_capture_tasks
         (id,workspace_id,created_by,session_id,mode,start_url,page_limit,record_video,follow_external,idempotency_key,status,stage)
@@ -48,7 +67,7 @@ export function createBackgroundGoalExecutor(
         startUrl,
         request.pageLimit,
         recordVideo,
-        `agent-goal:${goal.id}`,
+        `agent-goal:${goal.id}:${taskId}`,
       ],
     );
 
@@ -68,6 +87,7 @@ export function createBackgroundGoalExecutor(
           follow_external: false,
         },
         onProgress: async (progress, stage, detail) => {
+          await assertActive();
           await options.db.query(
             "update website_capture_tasks set progress=$2,stage=$3,updated_at=now() where id=$1 and status='running'",
             [taskId, progress, stage],
@@ -84,10 +104,10 @@ export function createBackgroundGoalExecutor(
         },
       });
 
-      await options.db.query(
-        "update website_capture_tasks set status='succeeded',progress=100,stage='completed',result=$2::jsonb,completed_at=now(),updated_at=now() where id=$1 and status='running'",
-        [taskId, JSON.stringify(capture)],
-      );
+      await assertActive();
+      const documents = ["auto", "canvas", "document", "bundle"].includes(goal.output_kind)
+        ? [buildWebsiteDocument(goal.id, capture)]
+        : [];
 
       const assets: Array<{
         id: string;
@@ -140,11 +160,18 @@ export function createBackgroundGoalExecutor(
             pages: capture.pages,
             recordingAssetId: capture.recordingAssetId,
             recordingUrl: capture.recordingUrl,
+            beforeWrite: assertActive,
           })
         : [];
 
+      await assertActive();
+      await options.db.query(
+        "update website_capture_tasks set status='succeeded',progress=100,stage='completed',result=$2::jsonb,completed_at=now(),updated_at=now() where id=$1 and status='running'",
+        [taskId, JSON.stringify(capture)],
+      );
       return {
         summary: capture.introduction,
+        documents,
         sourceUrl: capture.startUrl,
         assets,
         evidence,
@@ -153,13 +180,15 @@ export function createBackgroundGoalExecutor(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await options.db.query(
-        "update website_capture_tasks set status='failed',stage='failed',error_message=$2,updated_at=now() where id=$1 and status='running'",
-        [taskId, message.slice(0, 1_000)],
+        "update website_capture_tasks set status=$3,stage=$3,error_message=$2,updated_at=now() where id=$1 and status='running'",
+        [taskId, message.slice(0, 1_000), error instanceof InactiveGoalError || error instanceof ReadOnlyGoalPausedError ? "canceled" : "failed"],
       );
       throw error;
     }
   };
 }
+
+class InactiveGoalError extends Error {}
 
 export async function writeCaptureToCanvas(input: {
   db: Pool;
@@ -171,6 +200,7 @@ export async function writeCaptureToCanvas(input: {
   pages: Array<{ assetId: string; title: string }>;
   recordingAssetId?: string | undefined;
   recordingUrl?: string | undefined;
+  beforeWrite?: () => Promise<void>;
 }) {
   const imageAssetIds = input.pages.map((page) => page.assetId).filter(Boolean);
   const assetIds = [...new Set([...imageAssetIds, input.recordingAssetId].filter(Boolean))] as string[];
@@ -185,6 +215,7 @@ export async function writeCaptureToCanvas(input: {
   for (const [index, page] of input.pages.entries()) {
     const asset = assets.get(page.assetId);
     if (!asset) continue;
+    await input.beforeWrite?.();
     const inserted = await input.writer.insertImage(input.db, input.storage, {
       canvasId: input.canvasId,
       objectPath: asset.object_path,
@@ -198,6 +229,7 @@ export async function writeCaptureToCanvas(input: {
     elementIds.push(inserted.elementId);
   }
   if (input.recordingAssetId && input.recordingUrl) {
+    await input.beforeWrite?.();
     const inserted = await input.writer.insertVideo(input.db, {
       canvasId: input.canvasId,
       signedUrl: input.recordingUrl,

@@ -10,6 +10,7 @@ import {
 import { createGenerationApprovalService } from "../features/generation/generation-approval-service.js";
 import type { JobService } from "../features/jobs/job-service.js";
 import type { CreditService } from "../features/credits/credit-service.js";
+import { assertConnectorEnabled, ConnectorDisabledError } from "../features/agent-goals/connector-gate.js";
 
 export function registerGenerationApprovalRoutes(
   app: FastifyInstance,
@@ -35,6 +36,7 @@ export function registerGenerationApprovalRoutes(
       if (!approvalId) {
         return reply.send({ ok: true, data: null });
       }
+      await assertConnectorEnabled(options.db, viewer.workspace.id, user.id, "media-generation");
       const approval = await approvals.approve({ approvalId, workspaceId: viewer.workspace.id, userId: user.id });
       if (!options.jobService) return reply.send({ ok: true, data: { state: "approved", approval } });
       const job = await options.jobService.createJob(user, {
@@ -208,6 +210,7 @@ export function registerGenerationApprovalRoutes(
       if (!user) return unauthorized(reply);
       const viewer = await options.viewerService.ensureViewer(user);
       const { approvalId } = request.params as { approvalId: string };
+      await assertConnectorEnabled(options.db, viewer.workspace.id, user.id, "media-generation");
       const approval = await approvals.approve({ approvalId, workspaceId: viewer.workspace.id, userId: user.id });
       if (approval.jobId) return reply.code(200).send({ ok: true, data: { state: "approved", approval, jobId: approval.jobId } });
       if (!options.jobService) return reply.code(200).send({ ok: true, data: { state: "approved", approval } });
@@ -275,6 +278,9 @@ function unauthorized(reply: FastifyReply) {
 }
 
 function approvalError(error: unknown, reply: FastifyReply) {
+  if (error instanceof ConnectorDisabledError) {
+    return reply.code(403).send({ ok: false, error: { code: "connector_disabled", message: error.message } });
+  }
   if (error instanceof GenerationApprovalError) {
     return reply.code(error.statusCode).send({ ok: false, error: { code: error.code, message: error.message } });
   }

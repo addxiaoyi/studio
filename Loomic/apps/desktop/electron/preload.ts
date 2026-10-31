@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // App info
   getAppVersion: () => ipcRenderer.invoke("app-version"),
   getPlatform: () => process.platform,
+  getNativePermissions: () => ipcRenderer.invoke("desktop.native-permissions"),
   getUpdateState: () => ipcRenderer.invoke("desktop.update-state"),
   checkForUpdates: () => ipcRenderer.invoke("desktop.check-updates"),
   installUpdate: () => ipcRenderer.invoke("desktop.install-update"),
@@ -126,6 +127,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   selectWorkspace: () => ipcRenderer.invoke("workspace.select"),
   selectDirectory: (title?: string) => ipcRenderer.invoke("dialog.select-directory", title),
   selectAssetFolder: () => ipcRenderer.invoke("assets.select-folder"),
+  getAssetFolderStatus: () => ipcRenderer.invoke("assets.folder-status"),
+  openAssetFolder: () => ipcRenderer.invoke("assets.open-folder"),
+  clearAssetFolder: () => ipcRenderer.invoke("assets.clear-folder"),
   writeAssetToLocal: (input: { directory: string; fileName: string; bytes: ArrayBuffer }) =>
     ipcRenderer.invoke("assets.write-local", input),
   getWorkspaceTree: () => ipcRenderer.invoke("workspace.tree"),

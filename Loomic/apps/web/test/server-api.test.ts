@@ -8,6 +8,8 @@ import {
   fetchProjects,
   fetchVideoModels,
   fetchViewer,
+  fetchAgentGoals,
+  fetchAgentConnectors,
   videoPollDelayMs,
 } from "../src/lib/server-api";
 
@@ -16,6 +18,11 @@ globalThis.fetch = mockFetch;
 const mockToken = "token_" + "abc";
 
 describe("authenticated server API", () => {
+  it.each([null, {}, { ok: true, data: null }, { ok: true, data: [{}] }, { ok: false, data: [] }])("rejects malformed Agent payloads: %j", async (payload) => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => payload });
+    await expect(fetchAgentGoals("test")).rejects.toThrow("Agent response is invalid");
+    await expect(fetchAgentConnectors("test")).rejects.toThrow("Agent response is invalid");
+  });
   it("uses bounded backoff for long video polling", () => {
     expect(videoPollDelayMs(0)).toBe(2_000);
     expect(videoPollDelayMs(3)).toBe(8_000);

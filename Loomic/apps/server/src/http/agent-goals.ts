@@ -64,6 +64,41 @@ export function registerAgentGoalRoutes(app: FastifyInstance, options: GoalRoute
     }
   });
 
+  app.get<{ Params: { goalId: string } }>("/api/agent/goals/:goalId/events", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      const goal = await service.get(user.id, viewer.workspace.id, request.params.goalId);
+      return reply.send({ ok: true, data: goal.activities });
+    } catch (error) {
+      return sendGoalError(error, reply);
+    }
+  });
+
+  app.get<{ Params: { goalId: string } }>("/api/agent/goals/:goalId/assets", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      const goal = await service.get(user.id, viewer.workspace.id, request.params.goalId);
+      return reply.send({ ok: true, data: goal.outputs });
+    } catch (error) {
+      return sendGoalError(error, reply);
+    }
+  });
+
+  app.post<{ Params: { goalId: string } }>("/api/agent/goals/:goalId/confirm", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      return reply.send({ ok: true, data: await service.confirm(user.id, viewer.workspace.id, request.params.goalId) });
+    } catch (error) {
+      return sendGoalError(error, reply);
+    }
+  });
+
   for (const suffix of ["pause", "resume", "cancel", "retry"] as const) {
     app.post<{ Params: { goalId: string } }>(`/api/agent/goals/:goalId/${suffix}`, async (request, reply) => {
       const user = await options.auth.authenticate(request);
@@ -92,4 +127,19 @@ export function registerAgentGoalRoutes(app: FastifyInstance, options: GoalRoute
       }
     });
   }
+
+  app.post<{ Params: { goalId: string; approvalId: string } }>("/api/agent/goals/:goalId/approvals/:approvalId/review", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    const body = request.body as { outcome?: unknown } | null;
+    if (body?.outcome !== "observed_completed" && body?.outcome !== "observed_not_completed") {
+      return reply.code(400).send({ ok: false, error: { code: "invalid_review", message: "A valid observed outcome is required." } });
+    }
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      return reply.send({ ok: true, data: await service.reviewInterruptedAction(user.id, viewer.workspace.id, request.params.goalId, request.params.approvalId, body.outcome) });
+    } catch (error) {
+      return sendGoalError(error, reply);
+    }
+  });
 }

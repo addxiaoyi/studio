@@ -14,6 +14,8 @@ type DirectoryPickerWindow = Window & {
   showDirectoryPicker?: (options: { mode: "readwrite" }) => Promise<LocalDirectory>;
   electronAPI?: {
     selectAssetFolder?: () => Promise<NativeDirectory | null>;
+    getAssetFolderStatus?: () => Promise<{ name: string | null; path: string | null; permission: PermissionState | "unselected"; availableBytes?: number; lastWriteAt?: string | null; error?: string }>;
+    clearAssetFolder?: () => Promise<void>;
     writeAssetToLocal?: (input: { directory: string; fileName: string; bytes: ArrayBuffer }) => Promise<{ path: string }>;
   };
 };
@@ -32,6 +34,15 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 async function readDirectory(): Promise<StoredDirectory | null> {
+  const desktop = (window as DirectoryPickerWindow).electronAPI;
+  if (desktop?.getAssetFolderStatus) {
+    const status = await desktop.getAssetFolderStatus();
+    if (status.permission === "unselected") return null;
+    if (status.permission !== "granted" || !status.path || !status.name) {
+      throw new Error(status.error ?? "The selected local folder is unavailable.");
+    }
+    return { kind: "native", path: status.path, name: status.name };
+  }
   const database = await openDatabase();
   try {
     return await new Promise((resolve, reject) => {
@@ -64,7 +75,7 @@ export async function chooseLocalAssetFolder(): Promise<string> {
   if (desktop?.selectAssetFolder) {
     const directory = await desktop.selectAssetFolder();
     if (!directory) throw new DOMException("Folder selection cancelled.", "AbortError");
-    await writeDirectory(directory);
+    if (!desktop.getAssetFolderStatus) await writeDirectory({ ...directory, kind: "native" });
     return directory.name;
   }
   const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
@@ -75,13 +86,21 @@ export async function chooseLocalAssetFolder(): Promise<string> {
 }
 
 export async function getLocalAssetFolderName(): Promise<string | null> {
+  const desktop = (window as DirectoryPickerWindow).electronAPI;
+  if (desktop?.getAssetFolderStatus) return (await desktop.getAssetFolderStatus()).name;
   return (await readDirectory())?.name ?? null;
 }
 
 export async function getLocalAssetFolderState(): Promise<{
   name: string | null;
   permission: PermissionState | "unselected";
+  path?: string | null;
+  availableBytes?: number;
+  lastWriteAt?: string | null;
+  error?: string;
 }> {
+  const desktop = (window as DirectoryPickerWindow).electronAPI;
+  if (desktop?.getAssetFolderStatus) return desktop.getAssetFolderStatus();
   const directory = await readDirectory();
   if (!directory) return { name: null, permission: "unselected" };
   return {
@@ -93,6 +112,8 @@ export async function getLocalAssetFolderState(): Promise<{
 }
 
 export async function clearLocalAssetFolder(): Promise<void> {
+  const desktop = (window as DirectoryPickerWindow).electronAPI;
+  if (desktop?.clearAssetFolder) await desktop.clearAssetFolder();
   const database = await openDatabase();
   try {
     await new Promise<void>((resolve, reject) => {

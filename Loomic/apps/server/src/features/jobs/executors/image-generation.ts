@@ -11,6 +11,7 @@ import { getModelCallProfile } from "../../../local-db/model-call-profiles.js";
 import { createProviderAssetUrl } from "../../uploads/provider-asset-url.js";
 import { isRemovedImageModelId } from "../../../generation/removed-models.js";
 import type { GeneratedImage } from "../../../generation/types.js";
+import { assertConnectorEnabled } from "../../agent-goals/connector-gate.js";
 
 registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorContext) => {
   const t0 = Date.now();
@@ -60,6 +61,10 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
   const isManualSelection = Array.isArray(selectedModels) && selectedModels.length > 0;
   if (!providerCheckpoint && isRemovedImageModelId(requestedModel)) {
     throw Object.assign(new Error(`Image model ${requestedModel} has been retired`), { code: "model_not_found" });
+  }
+  if (!providerCheckpoint && ctx.localDb) {
+    if (!createdBy || !jobRow.workspace_id) throw new Error("Media job owner or workspace is missing.");
+    await assertConnectorEnabled(ctx.localDb, workspaceId, createdBy, "media-generation");
   }
   const routedModel = !providerCheckpoint && ctx.localDb
     ? await resolveConfiguredModel(ctx.localDb, "image", requestedModel, {

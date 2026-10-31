@@ -58,6 +58,7 @@ describe("desktop MCP bridge", () => {
     const connection = activeConnection(vi.fn());
     internals.connections.set(connection.id, connection);
     query
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [{ id: connection.id }] } as never)
       .mockResolvedValueOnce({ rows: [] } as never);
 
@@ -74,6 +75,22 @@ describe("desktop MCP bridge", () => {
     const insert = query.mock.calls.find(([sql]) => String(sql).includes("insert into desktop_agent_tasks"));
     expect(insert?.[0]).toContain("pg_advisory_xact_lock");
     expect(insert?.[0]).toContain("status in ('queued','running')");
+  });
+
+  it("does not dispatch an MCP call after the desktop connector is disabled", async () => {
+    const { hub, query, internals } = createHub();
+    const send = vi.fn();
+    const connection = activeConnection(send);
+    internals.connections.set(connection.id, connection);
+    query.mockImplementation(async (sql: string) => sql.includes("agent_connector_permissions")
+      ? { rows: [{ enabled: false }] } as never : { rows: [] } as never);
+
+    await expect(hub.callDesktopMcpTool({
+      userId: connection.userId, workspaceId: connection.workspaceId,
+      serverId: connection.mcpTools[0]!.serverId, toolName: "search", arguments: {},
+    })).rejects.toThrow("desktop-agent connector is disabled");
+    expect(send).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalledWith(expect.stringContaining("insert into desktop_mcp_tool_calls"), expect.anything());
   });
 
   it("expires pending approvals, fails the paused task, and notifies the desktop", async () => {

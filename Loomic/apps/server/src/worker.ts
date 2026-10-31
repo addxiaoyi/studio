@@ -455,6 +455,7 @@ async function processMessage(
       "provider_auth_failed",
       "provider_request_failed",
       "job_canceled",
+      "connector_disabled",
       "invalid_url",
       "blocked_protocol",
       "url_credentials_blocked",

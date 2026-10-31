@@ -81,6 +81,7 @@ sessionId
 
 # Desktop build output (0.2.x installers are published, never committed)
 apps/desktop/release/
+apps/desktop/resources/native/
 
 # Release candidate builds (local only)
 release-candidates/

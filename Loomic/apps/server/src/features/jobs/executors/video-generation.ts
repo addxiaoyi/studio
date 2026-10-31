@@ -9,6 +9,7 @@ import { createProviderAssetUrl } from "../../uploads/provider-asset-url.js";
 import { decodeVideoDataUri, readVideoBody, resolveVideoMimeType } from "./video-download.js";
 import type { GeneratedVideo } from "../../../generation/types.js";
 import { getModelCallProfile } from "../../../local-db/model-call-profiles.js";
+import { assertConnectorEnabled } from "../../agent-goals/connector-gate.js";
 
 const VIDEO_DOWNLOAD_TIMEOUT_MS = 60_000;
 const MIN_MINIMAX_FRAME_EDGE = 300;
@@ -81,6 +82,10 @@ registerExecutor("video_generation", async (jobId, _rawPayload, ctx: ExecutorCon
   const providerCheckpoint = jobRow.provider_result as (GeneratedVideo & { model?: string }) | null;
   const createdBy: string | null = jobRow.created_by ?? null;
   const workspaceId: string = jobRow.workspace_id ?? jobId;
+  if (!providerCheckpoint && ctx.localDb) {
+    if (!createdBy || !jobRow.workspace_id) throw new Error("Media job owner or workspace is missing.");
+    await assertConnectorEnabled(ctx.localDb, workspaceId, createdBy, "media-generation");
+  }
   const model = providerCheckpoint?.model ?? payload.model ?? "wan-video/wan-2.6";
   const configuredApiFormat = !providerCheckpoint && ctx.localDb
     ? (await ctx.localDb.query<{ api_format: string }>(

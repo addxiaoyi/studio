@@ -27,7 +27,7 @@ import { CanvasLayersPanel } from "../../components/canvas-layers-panel";
 import { CanvasTimelinePanel } from "../../components/canvas-timeline-panel";
 import { CreditHeaderButton } from "../../components/credits/credit-header-button";
 import type { DesktopExecutionContext } from "@helstera/shared";
-import { AgentGoalPanel } from "../../components/agent-goal-panel";
+import { AgentWorkspacePanel } from "../../components/agent-workspace-panel";
 
 function isBlankCanvasContent(content: {
   elements: Record<string, unknown>[];
@@ -559,7 +559,7 @@ function CanvasPageContent() {
         <div className="absolute top-3 right-3 z-20">
           <CreditHeaderButton />
         </div>
-        <AgentGoalPanel
+        <AgentWorkspacePanel
           accessToken={accessToken}
           canvasId={canvasData.id}
           ws={ws}

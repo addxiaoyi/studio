@@ -33,6 +33,13 @@ afterEach(async () => {
 });
 
 describe("desktop extension registry", () => {
+  it("applies explicit cloud enablement changes while preserving legacy local state", async () => {
+    const registry = await makeRegistry();
+    await registry.reconcile([base]);
+    expect((await registry.reconcile([{ ...base, metadata: { ...base.metadata, enabled: false } }]))[0]).toMatchObject({ enabled: false, status: "disabled" });
+    expect((await registry.reconcile([base]))[0]).toMatchObject({ enabled: false, status: "disabled" });
+    expect((await registry.reconcile([{ ...base, metadata: { ...base.metadata, enabled: true } }]))[0]).toMatchObject({ enabled: true });
+  });
   it("persists an installed MCP and restores its enabled state", async () => {
     const registry = await makeRegistry();
     const first = await registry.reconcile([base]);

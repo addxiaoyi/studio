@@ -18,10 +18,16 @@ vi.mock("@nut-tree/nut-js", () => ({
 import {
   groundNativeTarget,
   isSensitiveNativeTree,
+  getNativeBackendAvailability,
   type NativeWindowNode,
 } from "./native-automation.js";
 
 describe("native UI credential filtering", () => {
+  it("reports platform-specific permission states without claiming unsupported backends", () => {
+    expect(getNativeBackendAvailability("win32")).toMatchObject({ backend: "windows-uia", supported: true, permission: "not_required" });
+    expect(getNativeBackendAvailability("darwin")).toMatchObject({ backend: "macos-accessibility", supported: false, permission: "unknown" });
+    expect(getNativeBackendAvailability("linux", "wayland")).toMatchObject({ backend: "linux-atspi", supported: false, permission: "unknown" });
+  });
   it.each(["Password", "One-time code", "OTP", "Verification code", "MFA token"])(
     "blocks screenshots if a sensitive control is present: %s",
     (title) => {

@@ -13,6 +13,19 @@ import {
   streamEventSchema,
 } from "./index.js";
 import * as sharedExports from "./index.js";
+import { agentGoalSchema, agentGoalTaskSchema } from "./agent-goals.js";
+
+describe("legacy Agent Goal responses", () => {
+  const timestamp = "2026-10-31T00:00:00Z";
+  const id = "00000000-0000-4000-8000-000000000001";
+
+  it("defaults new goal and task fields without requiring a data migration", () => {
+    const task = { taskId: id, goal: "Read a page", role: "operator", executionMode: "automatic", capabilities: [], status: "succeeded", createdAt: timestamp, updatedAt: timestamp };
+    const parsed = agentGoalSchema.parse({ id, workspaceId: id, createdBy: id, goal: "Read a page", status: "completed", plan: { steps: [], generatedAt: timestamp }, executionMode: "automatic", capabilities: [], tasks: [task], createdAt: timestamp, updatedAt: timestamp });
+    expect(parsed).toMatchObject({ outputKind: "auto", source: "user", executionPolicy: "approval_required", outputs: [] });
+    expect(agentGoalTaskSchema.parse(task)).toMatchObject({ outputKind: "auto", connectionIds: [] });
+  });
+});
 
 const databaseTypeSource = readFileSync(
   new URL("./supabase/database.ts", import.meta.url),

@@ -7,6 +7,7 @@ import {
   type AgentGoalCreateRequest,
   type AgentGoalPlan,
   type AgentGoalPlanStep,
+  type AgentGoalOutput,
   type AgentGoalStatus,
   type DesktopAgentExecutionMode,
 } from "@helstera/shared";
@@ -21,12 +22,32 @@ type GoalRow = {
   status: AgentGoalStatus;
   plan: AgentGoalPlan;
   execution_mode: DesktopAgentExecutionMode;
+  output_kind: AgentGoal["outputKind"];
+  source: AgentGoal["source"];
+  execution_policy: AgentGoal["executionPolicy"];
+  parent_goal_id: string | null;
+  connection_ids: string[];
+  memory_context_ids: string[];
+  suggestion_state: AgentGoal["suggestionState"];
   capabilities: string[];
   result: Record<string, unknown> | null;
   error_message: string | null;
   created_at: string | Date;
   updated_at: string | Date;
   completed_at: string | Date | null;
+  confirmed_at: string | Date | null;
+};
+
+type OutputRow = {
+  id: string;
+  goal_id: string;
+  kind: string;
+  local_path: string | null;
+  cloud_asset_id: string | null;
+  status: AgentGoalOutput["status"];
+  metadata: Record<string, unknown>;
+  created_at: string | Date;
+  updated_at: string | Date;
 };
 
 const nativeModes = new Set<DesktopAgentExecutionMode>(["windows_ui", "visual_ocr"]);
@@ -43,7 +64,11 @@ export class AgentGoalTransitionError extends Error {
   }
 }
 
-export function buildAgentGoalPlan(goal: string, executionMode: DesktopAgentExecutionMode): AgentGoalPlan {
+export function buildAgentGoalPlan(
+  goal: string,
+  executionMode: DesktopAgentExecutionMode,
+  outputKind: AgentGoal["outputKind"] = "auto",
+): AgentGoalPlan {
   const needsApproval = approvalWords.test(goal);
   const requiresDesktop = nativeModes.has(executionMode);
   const steps: AgentGoalPlanStep[] = [
@@ -80,17 +105,17 @@ function iso(value: string | Date) {
 }
 
 export class AgentGoalService {
-  constructor(private readonly db: Pool) {}
+  constructor(private readonly db: Pick<Pool, "query">) {}
 
   async create(userId: string, workspaceId: string, rawInput: AgentGoalCreateRequest): Promise<AgentGoal> {
     const input = agentGoalCreateRequestSchema.parse(rawInput);
     await this.assertContext(userId, workspaceId, input);
-    const plan = buildAgentGoalPlan(input.goal, input.executionMode);
+    const plan = buildAgentGoalPlan(input.goal, input.executionMode, input.outputKind);
     const goalId = randomUUID();
     const inserted = await this.db.query<{ id: string }>(
       `insert into agent_goals
-        (id,workspace_id,created_by,canvas_id,chat_session_id,goal,status,plan,execution_mode,capabilities,attachments,idempotency_key)
-       values($1,$2,$3,$4,$5,$6,'draft',$7::jsonb,$8,$9::jsonb,$10::jsonb,$11)
+        (id,workspace_id,created_by,canvas_id,chat_session_id,goal,status,plan,execution_mode,output_kind,source,execution_policy,parent_goal_id,connection_ids,memory_context_ids,capabilities,attachments,idempotency_key,suggestion_state)
+       values($1,$2,$3,$4,$5,$6,'draft',$7::jsonb,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17,$18)
        on conflict (workspace_id,created_by,idempotency_key) do nothing
        returning id`,
       [
@@ -102,9 +127,16 @@ export class AgentGoalService {
         input.goal,
         JSON.stringify(plan),
         input.executionMode,
+        input.outputKind,
+        input.source,
+        input.executionPolicy,
+        input.parentGoalId ?? null,
+        JSON.stringify(input.connectionIds),
+        JSON.stringify(input.memoryContextIds),
         JSON.stringify(input.capabilities),
         JSON.stringify(input.attachments),
         input.idempotencyKey,
+        input.source === "suggestion" ? "accepted" : "none",
       ],
     );
     const actualId = inserted.rows[0]?.id ?? (await this.db.query<{ id: string }>(
@@ -132,30 +164,36 @@ export class AgentGoalService {
 
   async get(userId: string, workspaceId: string, goalId: string): Promise<AgentGoal> {
     const goal = await this.db.query<GoalRow>(
-      `select id,workspace_id,created_by,canvas_id,chat_session_id,goal,status,plan,execution_mode,capabilities,result,error_message,created_at,updated_at,completed_at
+      `select id,workspace_id,created_by,canvas_id,chat_session_id,goal,status,plan,execution_mode,output_kind,source,execution_policy,parent_goal_id,connection_ids,memory_context_ids,suggestion_state,capabilities,result,error_message,created_at,updated_at,completed_at,confirmed_at
          from agent_goals where id=$1 and created_by=$2 and workspace_id=$3`,
       [goalId, userId, workspaceId],
     );
     const row = goal.rows[0];
     if (!row) throw new Error("Agent goal not found.");
-    const [tasks, activities, approvals] = await Promise.all([
-      this.db.query(
-        `select id as "taskId",goal_id as "goalId",parent_task_id as "parentTaskId",goal,role,execution_mode as "executionMode",capabilities,status,checkpoint,"wait_reason" as "waitReason",result,error_message as error,created_at as "createdAt",updated_at as "updatedAt"
-           from desktop_agent_tasks where goal_id=$1 order by created_at asc`,
+    // The service can share a transaction client; keep queries sequential on that connection.
+    const tasks = await this.db.query(
+        `select t.id as "taskId",t.goal_id as "goalId",t.parent_task_id as "parentTaskId",t.goal,t.role,t.execution_mode as "executionMode",t.capabilities,t.status,t.checkpoint,t.wait_reason as "waitReason",t.result,t.error_message as error,t.created_at as "createdAt",t.updated_at as "updatedAt",
+           coalesce(t.status in ('waiting_desktop','paused','failed','canceled') and (c.disconnected_at is not null or c.revoked_at is not null)
+             and t.checkpoint->'action'->>'state' in ('dispatched','uncertain'),false) as "reviewAvailable"
+           from desktop_agent_tasks t left join website_capture_connections c on c.id=t.connection_id where t.goal_id=$1 order by t.created_at asc`,
         [goalId],
-      ),
-      this.db.query(
+      );
+    const activities = await this.db.query(
         `select id,task_id as "taskId",event_type as "eventType",detail,payload,created_at as "createdAt"
            from agent_goal_events where goal_id=$1 order by created_at desc limit 100`,
         [goalId],
-      ),
-      this.db.query(
+      );
+    const approvals = await this.db.query(
         `select a.id as "approvalId",a.task_id as "taskId",a.action,a.status,a.expires_at as "expiresAt"
            from desktop_agent_approvals a join desktop_agent_tasks t on t.id=a.task_id
           where t.goal_id=$1 order by a.created_at desc limit 50`,
         [goalId],
-      ),
-    ]);
+      );
+    const outputs = await this.db.query<OutputRow>(
+        `select id,goal_id,kind,local_path,cloud_asset_id,status,metadata,created_at,updated_at
+           from agent_goal_outputs where goal_id=$1 order by created_at asc`,
+        [goalId],
+      );
     return {
       id: row.id,
       workspaceId: row.workspace_id,
@@ -166,19 +204,45 @@ export class AgentGoalService {
       status: row.status,
       plan: row.plan,
       executionMode: row.execution_mode,
+      outputKind: row.output_kind,
+      source: row.source,
+      executionPolicy: row.execution_policy,
+      ...(row.parent_goal_id ? { parentGoalId: row.parent_goal_id } : {}),
+      connectionIds: row.connection_ids,
+      memoryContextIds: row.memory_context_ids,
+      suggestionState: row.suggestion_state,
       capabilities: row.capabilities as AgentGoal["capabilities"],
       tasks: tasks.rows.map((task) => ({
         ...task,
+        outputKind: row.output_kind,
+        source: row.source,
+        executionPolicy: row.execution_policy,
+        parentGoalId: row.parent_goal_id,
+        connectionIds: row.connection_ids,
+        memoryContextIds: row.memory_context_ids,
+        suggestionState: row.suggestion_state,
         createdAt: iso(task.createdAt),
         updatedAt: iso(task.updatedAt),
       })),
       activities: activities.rows.map((activity) => ({
         ...activity,
+        taskId: activity.taskId ?? undefined,
         createdAt: iso(activity.createdAt),
       })),
       approvals: approvals.rows.map((approval) => ({
         ...approval,
         expiresAt: iso(approval.expiresAt),
+      })),
+      outputs: outputs.rows.map((output) => ({
+        id: output.id,
+        goalId: output.goal_id,
+        kind: output.kind,
+        ...(output.local_path ? { localPath: output.local_path } : {}),
+        ...(output.cloud_asset_id ? { cloudAssetId: output.cloud_asset_id } : {}),
+        status: output.status,
+        metadata: output.metadata ?? {},
+        createdAt: iso(output.created_at),
+        updatedAt: iso(output.updated_at),
       })),
       result: row.result,
       error: row.error_message,
@@ -186,6 +250,29 @@ export class AgentGoalService {
       updatedAt: iso(row.updated_at),
       completedAt: row.completed_at ? iso(row.completed_at) : null,
     };
+  }
+
+  async confirm(userId: string, workspaceId: string, goalId: string) {
+    const updated = await this.db.query<{ id: string }>(
+      `with confirmed as (update agent_goals
+          set status='running', confirmed_at=coalesce(confirmed_at, now()), updated_at=now(), error_message=null
+        where id=$1 and created_by=$2 and workspace_id=$3 and status='draft' and execution_policy='approval_required'
+        returning id)
+       insert into agent_goal_events(goal_id,event_type,detail)
+       select id,'goal.confirmed','Agent goal confirmed by the user.' from confirmed
+       returning goal_id as id`,
+      [goalId, userId, workspaceId],
+    );
+    if (!updated.rows[0]) {
+      const current = await this.db.query<{ status: AgentGoalStatus }>(
+        "select status from agent_goals where id=$1 and created_by=$2 and workspace_id=$3",
+        [goalId, userId, workspaceId],
+      );
+      if (current.rows[0]?.status === "running") return this.get(userId, workspaceId, goalId);
+      if (!current.rows[0]) throw new Error("Agent goal not found.");
+      throw new AgentGoalTransitionError(`Agent goal cannot be confirmed from status ${current.rows[0].status}.`);
+    }
+    return this.get(userId, workspaceId, goalId);
   }
 
   async transition(userId: string, workspaceId: string, goalId: string, transition: AgentGoalTransition) {
@@ -204,13 +291,31 @@ export class AgentGoalService {
     if (idempotent) return this.get(userId, workspaceId, goalId);
 
     const allowed: Record<AgentGoalTransition, readonly AgentGoalStatus[]> = {
-      pause: ["draft", "running", "waiting_approval", "waiting_desktop"],
+      pause: ["running", "waiting_approval", "waiting_desktop"],
       resume: ["paused", "waiting_desktop"],
       cancel: ["draft", "running", "waiting_approval", "waiting_desktop", "paused"],
       retry: ["failed", "canceled"],
     };
     if (!allowed[transition].includes(current)) {
       throw new AgentGoalTransitionError(`Agent goal cannot ${transition} from status ${current}.`);
+    }
+
+    if (transition === "resume") {
+      const unresolved = await this.db.query(
+        `select 1 from desktop_agent_tasks where goal_id=$1 and status in ('paused','waiting_desktop')
+          and checkpoint->'action'->>'state' in ('dispatched','uncertain') limit 1`,
+        [goalId],
+      );
+      if (unresolved.rows.length) throw new AgentGoalTransitionError("The last action has an unknown outcome. Disconnect the desktop and review the action before continuing.");
+    }
+
+    if (transition === "retry") {
+      const unsafe = await this.db.query(
+        `select 1 from desktop_agent_tasks t where t.goal_id=$1 and t.execution_mode in ('windows_ui','visual_ocr')
+          and (t.checkpoint ? 'action' or exists (select 1 from desktop_agent_approvals a where a.task_id=t.id and a.status in ('approved','executed'))) limit 1`,
+        [goalId],
+      );
+      if (unsafe.rows.length) throw new AgentGoalTransitionError("This native task has dispatched actions. Review its history and create a new goal; automatic replay is not safe.");
     }
 
     const status: AgentGoalStatus = transition === "pause"
@@ -227,6 +332,8 @@ export class AgentGoalService {
               updated_at=now(),
               completed_at=case when $5 then now() when $4='running' then null else completed_at end
         where id=$1 and created_by=$2 and workspace_id=$3 and status=$6
+          and ($4 <> 'running' or (execution_policy='approval_required' and
+            (confirmed_at is not null or exists (select 1 from desktop_agent_tasks where goal_id=$1))))
         returning id`,
       [goalId, userId, workspaceId, status, terminal, current],
     );
@@ -265,7 +372,49 @@ export class AgentGoalService {
     if (!result.rows[0]) throw new Error("Agent goal approval not found.");
   }
 
+  async reviewInterruptedAction(userId: string, workspaceId: string, goalId: string, approvalId: string, outcome: "observed_completed" | "observed_not_completed") {
+    const reviewed = await this.db.query<{ task_id: string }>(
+      `with eligible as (
+         select a.id,a.task_id from desktop_agent_approvals a
+         join desktop_agent_tasks t on t.id=a.task_id
+         join website_capture_connections c on c.id=t.connection_id
+         where a.id=$1 and t.goal_id=$2 and a.user_id=$3 and a.workspace_id=$4
+           and a.status in ('approved','executed') and t.status in ('waiting_desktop','paused','failed','canceled')
+           and (c.disconnected_at is not null or c.revoked_at is not null)
+           and t.checkpoint->'action'->>'approvalId'=a.id::text
+           and t.checkpoint->'action'->>'state' in ('dispatched','uncertain')
+         for update of t
+       ), recorded as (
+         update desktop_agent_tasks t set checkpoint=jsonb_set(t.checkpoint,'{action,state}',to_jsonb($5::text)),updated_at=now()
+         from eligible e where t.id=e.task_id returning t.id
+       ), logged as (
+         insert into desktop_agent_events(task_id,event_type,detail,payload)
+         select e.task_id,'action_manually_reviewed','User recorded an observation; the action was not replayed.',jsonb_build_object('approvalId',e.id,'outcome',$5::text)
+         from eligible e join recorded r on r.id=e.task_id returning task_id
+       ) select task_id from logged`,
+      [approvalId, goalId, userId, workspaceId, outcome],
+    );
+    if (!reviewed.rows[0]) throw new AgentGoalTransitionError("No disconnected action is available for review, or it was already reviewed.");
+    return { taskId: reviewed.rows[0].task_id, approvalId, outcome, replayed: false as const };
+  }
+
   private async assertContext(userId: string, workspaceId: string, input: AgentGoalCreateRequest) {
+    if (input.parentGoalId) {
+      const parent = await this.db.query(
+        "select id from agent_goals where id=$1 and workspace_id=$2 and created_by=$3",
+        [input.parentGoalId, workspaceId, userId],
+      );
+      if (!parent.rows[0]) throw new Error("Parent goal is not available in this workspace.");
+    }
+    if (input.memoryContextIds?.length) {
+      const ids = [...new Set(input.memoryContextIds)];
+      const memories = await this.db.query(
+        `select id from agent_memories where id=any($1::uuid[]) and workspace_id=$2 and user_id=$3
+           and enabled=true and (expires_at is null or expires_at > now())`,
+        [ids, workspaceId, userId],
+      );
+      if (memories.rows.length !== ids.length) throw new Error("Selected memories are unavailable or disabled.");
+    }
     if (input.canvasId) {
       const canvas = await this.db.query(
         `select c.id from canvases c join projects p on p.id=c.project_id join workspace_members wm on wm.workspace_id=p.workspace_id

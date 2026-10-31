@@ -140,6 +140,8 @@ import { DouyinCredentialManager } from "./features/douyin/douyin-credentials.js
 import { registerStorageRoutes } from "./http/storage.js";
 import { registerWebsiteCaptureRoutes } from "./http/website-capture.js";
 import { registerAgentGoalRoutes } from "./http/agent-goals.js";
+import { registerAgentMemoryRoutes } from "./http/agent-memory.js";
+import { registerAgentConnectorRoutes } from "./http/agent-connectors.js";
 import { WebsiteAssistantHub, registerWebsiteAssistantWsRoute } from "./features/website-capture/assistant-hub.js";
 import { AgentGoalEventPublisher } from "./features/agent-goals/agent-goal-events.js";
 import { AgentGoalWorker } from "./features/agent-goals/agent-goal-worker.js";
@@ -568,6 +570,17 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     tierGuard,
   });
   registerAgentGoalRoutes(app, {
+    auth,
+    db: localDb,
+    viewerService,
+    assistantHub: websiteAssistantHub,
+  });
+  registerAgentMemoryRoutes(app, {
+    auth,
+    db: localDb,
+    viewerService,
+  });
+  registerAgentConnectorRoutes(app, {
     auth,
     db: localDb,
     viewerService,

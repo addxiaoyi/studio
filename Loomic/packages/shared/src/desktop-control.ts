@@ -137,6 +137,13 @@ export const desktopAgentEventSchema = z.object({
       navigation: z.array(z.string().max(300)).max(24).optional(),
     }).optional(),
     summary: z.string().max(8_000).optional(),
+    windowTitle: z.string().max(300).optional(),
+    controls: z.array(z.object({
+      title: z.string().max(300),
+      role: z.string().max(80).optional(),
+      enabled: z.boolean().optional(),
+      focused: z.boolean().optional(),
+    }).strict()).max(240).optional(),
     evidence: z.array(z.object({
       kind: z.enum(["page", "screenshot", "recording", "window", "ocr"]),
       sourceUrl: z.string().url().optional(),
@@ -192,7 +199,7 @@ export function isDesktopActionAuthorized(action: DesktopAgentAction, capabiliti
 }
 
 const alwaysDeniedFieldTypes = new Set(["password", "otp", "one-time-code", "verification-code"]);
-const approvalActions = new Set<DesktopActionKind>(["click", "type", "native_click", "native_type", "native_key", "native_drag", "start_recording", "stop_recording"]);
+const approvalActions = new Set<DesktopActionKind>(["click", "type", "native_click", "native_double_click", "native_right_click", "native_type", "native_key", "native_drag", "start_recording", "stop_recording"]);
 
 const allowedNativeKeys = new Set([
   "enter", "tab", "escape", "space", "backspace", "delete",

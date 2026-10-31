@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
+import { agentGoalDocumentSchema } from "@helstera/shared";
+import { ReadOnlyGoalPausedError } from "./agent-goal-interruption.js";
 
 import type {
   AgentGoalPlan,
+  AgentGoalOutput,
   AgentGoalStatus,
   DesktopAgentExecutionMode,
   DesktopAgentTaskRequest,
@@ -39,6 +42,8 @@ type GoalRow = {
   status: AgentGoalStatus;
   plan: AgentGoalPlan;
   execution_mode: DesktopAgentExecutionMode;
+  output_kind: "auto" | "canvas" | "document" | "image" | "video" | "bundle";
+  execution_policy: "approval_required" | "suggest_only";
   capabilities: DesktopCapability[];
   next_attempt_at: string | Date | null;
 };
@@ -170,15 +175,44 @@ export class AgentGoalWorker {
     this.running = true;
     try {
       const { rows } = await this.db.query<GoalRow>(
-        `select id,workspace_id,created_by,canvas_id,chat_session_id,goal,status,plan,execution_mode,capabilities,next_attempt_at
+        `select id,workspace_id,created_by,canvas_id,chat_session_id,goal,status,plan,execution_mode,output_kind,execution_policy,capabilities,next_attempt_at
            from agent_goals
-          where status in ('draft','running')
+          where status = 'running'
              or (status='waiting_desktop'
                  and (next_attempt_at is null or next_attempt_at <= now()))
           order by updated_at asc
           limit 20`,
       );
-      for (const goal of rows) await this.process(goal);
+      for (const goal of rows) {
+        const client = await this.db.connect();
+        let locked = false;
+        let releaseError: Error | undefined;
+        try {
+          const lock = await client.query<{ locked: boolean }>(
+            "select pg_try_advisory_lock(hashtextextended($1, 0)) as locked",
+            [`agent-goal:${goal.id}`],
+          );
+          locked = lock.rows[0]?.locked === true;
+          if (!locked) continue;
+          // Recheck after locking: another worker or the user may have changed it.
+          const current = await client.query<GoalRow>(
+            "select * from agent_goals where id=$1 and status in ('running','waiting_desktop') and execution_policy='approval_required'",
+            [goal.id],
+          );
+          if (current.rows[0]) {
+            await new GoalExecution(client, this.dispatcher, this.backgroundExecutor).process(current.rows[0]);
+          }
+        } finally {
+          try {
+            if (locked) await client.query("select pg_advisory_unlock(hashtextextended($1, 0))", [`agent-goal:${goal.id}`]);
+          } catch (error) {
+            releaseError = error instanceof Error ? error : new Error(String(error));
+            throw error;
+          } finally {
+            client.release(releaseError);
+          }
+        }
+      }
     } catch (error) {
       console.error("[agent-goal-worker] tick failed:", error);
     } finally {
@@ -186,7 +220,17 @@ export class AgentGoalWorker {
     }
   }
 
-  private async process(goal: GoalRow) {
+}
+
+class GoalExecution {
+  constructor(
+    private readonly db: Pick<Pool, "query">,
+    private readonly dispatcher: GoalDispatcher,
+    private readonly backgroundExecutor?: BackgroundGoalExecutor,
+  ) {}
+
+  async process(goal: GoalRow) {
+    if (!["running", "waiting_desktop"].includes(goal.status) || goal.execution_policy !== "approval_required") return;
     const task = await this.latestTask(goal.id);
     const canRetryTerminalTask =
       task &&
@@ -211,20 +255,18 @@ export class AgentGoalWorker {
       status: AgentGoalStatus;
     }>(
       `update agent_goals
-          set status=case when status='draft' then 'running' else status end,
-              next_attempt_at=case
+          set next_attempt_at=case
                 when status='waiting_desktop' then now() + ($2 * interval '1 second')
                 when $3::boolean then now() + ($2 * interval '1 second')
                 else null
               end,
               updated_at=now()
         where id=$1 and (
-          status='draft'
-          or (status='waiting_desktop' and (next_attempt_at is null or next_attempt_at <= now()))
-          or ($3::boolean and status='running' and next_attempt_at is null)
+          (status='waiting_desktop' and (next_attempt_at is null or next_attempt_at <= now()))
+          or ($3::boolean and status='running' and (next_attempt_at is null or next_attempt_at <= now()))
         )
       returning id,status`,
-      [goal.id, DESKTOP_RETRY_COOLDOWN_SECONDS, Boolean(canRetryTerminalTask)],
+      [goal.id, DESKTOP_RETRY_COOLDOWN_SECONDS, !task || Boolean(canRetryTerminalTask)],
     );
     if (!claimed.rows[0]) return;
 
@@ -298,24 +340,37 @@ export class AgentGoalWorker {
 
     try {
       const result = await this.backgroundExecutor({ taskId, goal, request });
-      await this.db.query(
+      const saved = await this.db.query<{ id: string }>(
         `update desktop_agent_tasks
             set status='succeeded',result=$2::jsonb,completed_at=now(),updated_at=now()
-          where id=$1 and status='running'`,
+          where id=$1 and status='running' returning id`,
         [taskId, JSON.stringify(result)],
       );
+      if (!saved.rows[0]) return;
       await this.db.query(
         "insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,'completed',$2,$3::jsonb)",
         [taskId, "Background browser task completed.", JSON.stringify(result)],
       );
     } catch (error) {
+      if (error instanceof ReadOnlyGoalPausedError) {
+        // Only the read-only capture executor emits this: never replay paid or native actions here.
+        const paused = await this.db.query<{ id: string }>(
+          `update desktop_agent_tasks
+              set status='canceled',wait_reason='paused_read_only_capture',error_message=$2,completed_at=now(),updated_at=now()
+            where id=$1 and connection_id is null and status in ('running','paused') returning id`,
+          [taskId, error.message],
+        );
+        if (paused.rows[0]) await this.appendEvent(goal.id, "goal.activity", error.message, { taskId, resumeBehavior: "restart_read_only_capture" });
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
-      await this.db.query(
+      const failed = await this.db.query<{ id: string }>(
         `update desktop_agent_tasks
             set status='failed',error_message=$2,completed_at=now(),updated_at=now()
-          where id=$1 and status='running'`,
+          where id=$1 and status='running' returning id`,
         [taskId, message.slice(0, 1_000)],
       );
+      if (!failed.rows[0]) return;
       await this.db.query(
         "insert into desktop_agent_events(task_id,event_type,detail) values($1,'failed',$2)",
         [taskId, message.slice(0, 1_000)],
@@ -364,21 +419,30 @@ export class AgentGoalWorker {
           status: "succeeded" as const,
         })),
       };
-      const updated = await this.db.query<{ id: string }>(
-        `update agent_goals
+      await this.db.query("begin");
+      try {
+        const updated = await this.db.query<{ id: string }>(
+          `update agent_goals
             set status='completed',result=$2::jsonb,plan=$3::jsonb,error_message=null,completed_at=now(),updated_at=now()
-          where id=$1 and status <> 'completed'
+          where id=$1 and status in ('running','waiting_desktop','waiting_approval')
         returning id`,
-        [goal.id, JSON.stringify(result), JSON.stringify(plan)],
-      );
-      if (updated.rows[0]) {
-        await this.appendEvent(
-          goal.id,
-          "goal.completed",
-          "Agent goal completed.",
-          result,
+          [goal.id, JSON.stringify(result), JSON.stringify(plan)],
         );
-        await this.appendGoalChatMessage(goal, "completed", result);
+        if (updated.rows[0]) {
+          await this.persistOutputs(goal.id, result);
+          await this.appendEvent(
+            goal.id,
+            "goal.completed",
+            "Agent goal completed.",
+            result,
+          );
+          await this.appendGoalChatMessage(goal, "completed", result);
+          await this.learnFromGoal(goal);
+        }
+        await this.db.query("commit");
+      } catch (error) {
+        await this.db.query("rollback");
+        throw error;
       }
       return;
     }
@@ -400,7 +464,7 @@ export class AgentGoalWorker {
     const changed = await this.db.query<{ id: string }>(
       `update agent_goals
           set status='waiting_desktop',updated_at=now(),next_attempt_at=now() + ($2 * interval '1 second')
-        where id=$1 and status <> 'waiting_desktop'
+        where id=$1 and status='running'
       returning id`,
       [goal.id, DESKTOP_RETRY_COOLDOWN_SECONDS],
     );
@@ -422,7 +486,7 @@ export class AgentGoalWorker {
   ) {
     const updated = await this.db.query<{ id: string }>(
       `update agent_goals set status=$2,error_message=$3,completed_at=now(),updated_at=now()
-        where id=$1 and status not in ('completed','failed','canceled')
+        where id=$1 and status in ('running','waiting_desktop','waiting_approval')
       returning id`,
       [goal.id, status, detail],
     );
@@ -439,7 +503,7 @@ export class AgentGoalWorker {
   ) {
     const updated = await this.db.query<{ id: string }>(
       `update agent_goals set status=$2,next_attempt_at=null,updated_at=now()
-        where id=$1 and status <> $2
+        where id=$1 and status <> $2 and status in ('running','waiting_desktop','waiting_approval')
       returning id`,
       [goal.id, status],
     );
@@ -494,5 +558,94 @@ export class AgentGoalWorker {
       "update chat_sessions set updated_at=now() where id=$1",
       [goal.chat_session_id],
     );
+  }
+
+  private async learnFromGoal(goal: GoalRow) {
+    const memory = await this.db.query<{ id: string }>(
+      `insert into agent_memories
+        (id,workspace_id,user_id,kind,key,value,source,confidence)
+       values($1,$2,$3,'workflow','preferred_execution_mode',$4,$5,0.65)
+       on conflict (workspace_id,user_id,kind,key)
+       do update set value=excluded.value,source=excluded.source,confidence=greatest(agent_memories.confidence, excluded.confidence),last_used_at=now(),updated_at=now()
+       where agent_memories.enabled=true
+       returning id`,
+      [randomUUID(), goal.workspace_id, goal.created_by, goal.execution_mode, `goal:${goal.id}`],
+    );
+    if (!memory.rows[0]) return;
+    await this.db.query(
+      "insert into agent_memory_events(memory_id,event_type,source_type,source_id,detail) values($1,'learned','agent_goal',$2,$3)",
+      [memory.rows[0].id, goal.id, `Learned the execution mode used for ${goal.output_kind} output.`],
+    );
+    if (goal.output_kind === "auto") return;
+    await this.db.query(
+      `insert into agent_suggestions
+        (id,workspace_id,user_id,canvas_id,chat_session_id,kind,title,detail,goal,source_memory_ids,expires_at,execution_mode,output_kind)
+       values($1,$2,$3,$4,$5,'workflow',$6,$7,$8,$9::jsonb,now() + interval '30 days',$10,$11)`,
+      [
+        randomUUID(),
+        goal.workspace_id,
+        goal.created_by,
+        goal.canvas_id,
+        goal.chat_session_id,
+        `Reuse the ${goal.output_kind} workflow`,
+        `The last goal used ${goal.execution_mode}. I can prepare the same type of result again, but will wait for your confirmation before running it.`,
+        `Create another ${goal.output_kind} result using the same execution mode.`,
+        JSON.stringify([memory.rows[0].id]),
+        goal.execution_mode,
+        goal.output_kind,
+      ],
+    );
+  }
+
+  private async persistOutputs(goalId: string, result: Record<string, unknown>) {
+    const outputs: Array<{
+      kind: string;
+      localPath: string | null;
+      cloudAssetId: string | null;
+      status: AgentGoalOutput["status"];
+      metadata: Record<string, unknown>;
+    }> = [];
+    const localPaths = Array.isArray(result.localPaths)
+      ? result.localPaths.filter((path): path is string => typeof path === "string" && path.length > 0)
+      : [];
+    if (Array.isArray(result.documents)) {
+      for (const entry of result.documents) {
+        const document = agentGoalDocumentSchema.parse(entry);
+        outputs.push({
+          kind: "document", localPath: null, cloudAssetId: null, status: "pending",
+          metadata: {
+            documentId: document.id, title: document.title, fileName: document.fileName,
+            mimeType: document.mimeType, sourceUrls: document.sourceUrls, saveState: "pending_local",
+          },
+        });
+      }
+    }
+    for (const localPath of localPaths) {
+      outputs.push({ kind: "local_file", localPath, cloudAssetId: null, status: "saved_local", metadata: {} });
+    }
+    const assets = Array.isArray(result.assets)
+      ? result.assets.filter((asset): asset is Record<string, unknown> => Boolean(asset) && typeof asset === "object" && !Array.isArray(asset))
+      : [];
+    for (const asset of assets) {
+      const assetId = typeof asset.id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(asset.id)
+        ? asset.id
+        : null;
+      const localPath = typeof asset.localPath === "string" ? asset.localPath : null;
+      outputs.push({
+        kind: typeof asset.mediaType === "string" ? asset.mediaType : "asset",
+        localPath,
+        cloudAssetId: assetId,
+        status: localPath && assetId ? "saved_both" : localPath ? "saved_local" : assetId ? "saved_cloud" : "pending",
+        metadata: asset,
+      });
+    }
+    for (const output of outputs) {
+      await this.db.query(
+        `insert into agent_goal_outputs
+          (id,goal_id,kind,local_path,cloud_asset_id,status,metadata)
+         values($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+        [randomUUID(), goalId, output.kind, output.localPath, output.cloudAssetId, output.status, JSON.stringify(output.metadata)],
+      );
+    }
   }
 }

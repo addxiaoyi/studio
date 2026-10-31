@@ -24,6 +24,9 @@ electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
 
 win:
+  extraResources:
+    - from: resources/native/helstera-uia.exe
+      to: native/helstera-uia.exe
   icon: resources/icon.ico
   target:
     - target: nsis

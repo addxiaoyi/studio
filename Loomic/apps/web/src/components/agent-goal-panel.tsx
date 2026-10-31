@@ -1,14 +1,22 @@
 "use client";
 
 import { Activity, Check, ChevronDown, Pause, Play, RotateCcw, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
-import type { AgentGoal, AgentGoalStatus } from "@helstera/shared";
+import type { AgentGoal, AgentGoalStatus, AgentConnector, AgentMemory, AgentSuggestion } from "@helstera/shared";
 import { useLocale } from "../lib/i18n";
 import type { WebSocketHandle } from "../hooks/use-websocket";
 import {
   fetchAgentGoal,
   fetchAgentGoals,
+  fetchAgentConnectors,
+  fetchAgentMemories,
+  fetchAgentSuggestions,
+  createAgentGoal,
+  confirmAgentGoal,
+  acceptAgentSuggestion,
+  dismissAgentSuggestion,
+  deleteAgentMemory,
   resolveAgentGoalApproval,
   updateAgentGoal,
 } from "../lib/server-api";
@@ -22,6 +30,11 @@ type Props = {
 };
 
 const activeStatuses = new Set<AgentGoalStatus>(["draft", "running", "waiting_approval", "waiting_desktop", "paused"]);
+
+const outputLabels = {
+  "zh-CN": { auto: "自动选择", canvas: "画布结果", document: "文档", image: "图片", video: "视频", bundle: "素材包" },
+  "en-US": { auto: "Automatic", canvas: "Canvas result", document: "Document", image: "Image", video: "Video", bundle: "Asset bundle" },
+} as const;
 
 const modeLabels = {
   "zh-CN": {
@@ -62,6 +75,13 @@ export function AgentGoalPanel({ accessToken, canvasId, chatSessionId, goalId, w
   const [selectedId, setSelectedId] = useState(goalId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [draftGoal, setDraftGoal] = useState("");
+  const [outputKind, setOutputKind] = useState<AgentGoal["outputKind"]>("auto");
+  const [executionMode, setExecutionMode] = useState<AgentGoal["executionMode"]>("automatic");
+  const [suggestions, setSuggestions] = useState<AgentSuggestion[]>([]);
+  const [memories, setMemories] = useState<AgentMemory[]>([]);
+  const [connectors, setConnectors] = useState<AgentConnector[]>([]);
+  const [composerBusy, setComposerBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -74,6 +94,21 @@ export function AgentGoalPanel({ accessToken, canvasId, chatSessionId, goalId, w
   }, [accessToken, english]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.allSettled([
+      fetchAgentSuggestions(accessToken),
+      fetchAgentMemories(accessToken),
+      fetchAgentConnectors(accessToken),
+    ]).then(([suggestionResult, memoryResult, connectorResult]) => {
+      if (cancelled) return;
+      if (suggestionResult.status === "fulfilled") setSuggestions(suggestionResult.value);
+      if (memoryResult.status === "fulfilled") setMemories(memoryResult.value);
+      if (connectorResult.status === "fulfilled") setConnectors(connectorResult.value);
+    });
+    return () => { cancelled = true; };
+  }, [accessToken]);
 
   useEffect(() => {
     if (!ws) return;
@@ -127,6 +162,84 @@ export function AgentGoalPanel({ accessToken, canvasId, chatSessionId, goalId, w
       setError(cause instanceof Error ? cause.message : (english ? "Action failed" : "操作失败"));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function createGoal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const goal = draftGoal.trim();
+    if (!goal || composerBusy) return;
+    setComposerBusy(true);
+    try {
+      const next = await createAgentGoal(accessToken, {
+        goal,
+        canvasId,
+        ...(chatSessionId ? { chatSessionId } : {}),
+        executionMode,
+        outputKind,
+        source: "user",
+        executionPolicy: "approval_required",
+        connectionIds: [],
+        memoryContextIds: [],
+        capabilities: [],
+        attachments: [],
+        idempotencyKey: crypto.randomUUID(),
+      });
+      setGoals((current) => [next, ...current.filter((item) => item.id !== next.id)].slice(0, 50));
+      setSelectedId(next.id);
+      setDraftGoal("");
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : (english ? "Unable to create the goal" : "无法创建目标"));
+    } finally {
+      setComposerBusy(false);
+    }
+  }
+
+  async function confirmSelectedGoal() {
+    if (!selected || selected.status !== "draft" || busy) return;
+    setBusy(true);
+    try {
+      const next = await confirmAgentGoal(accessToken, selected.id);
+      setGoals((current) => current.map((goal) => goal.id === next.id ? next : goal));
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : (english ? "Unable to confirm the goal" : "无法确认目标"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function acceptSuggestion(suggestionId: string) {
+    if (composerBusy) return;
+    setComposerBusy(true);
+    try {
+      const accepted = await acceptAgentSuggestion(accessToken, suggestionId);
+      setSuggestions((current) => current.filter((suggestion) => suggestion.id !== suggestionId));
+      setGoals((current) => [accepted.goal, ...current.filter((goal) => goal.id !== accepted.goal.id)].slice(0, 50));
+      setSelectedId(accepted.goal.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : (english ? "Unable to accept the suggestion" : "无法接受建议"));
+    } finally {
+      setComposerBusy(false);
+    }
+  }
+
+  async function dismissSuggestion(suggestionId: string) {
+    try {
+      await dismissAgentSuggestion(accessToken, suggestionId);
+      setSuggestions((current) => current.filter((suggestion) => suggestion.id !== suggestionId));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : (english ? "Unable to dismiss the suggestion" : "无法忽略建议"));
+    }
+  }
+
+  async function forgetMemory(memoryId: string) {
+    try {
+      await deleteAgentMemory(accessToken, memoryId);
+      setMemories((current) => current.filter((memory) => memory.id !== memoryId));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : (english ? "Unable to forget the memory" : "无法删除记忆"));
     }
   }
 

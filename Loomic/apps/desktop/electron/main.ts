@@ -14,6 +14,10 @@ import {
   type DesktopMarketplaceExtensionInput,
 } from "@helstera/shared";
 import { buildBrowserPairingUrl } from "./browser-pairing.js";
+import { readAssetFolderStatus, verifyAssetFolder } from "./asset-folder.js";
+import { configureWindowsUia } from "./windows-uia.js";
+import { executeBrowserDomAction } from "./browser-dom-action.js";
+import { DesktopActionApprovals } from "./desktop-action-approval.js";
 import {
   clickNativeText,
   clickNativeCoordinates,
@@ -32,6 +36,7 @@ import {
   closeApplicationByPid,
   inspectNativeDesktop,
   typeIntoNativeControl,
+  probeNativePermissions,
 } from "./native-automation.js";
 import {
   DesktopLoginCallbackQueue,
@@ -59,6 +64,7 @@ import {
 } from "./global-shortcut.js";
 import { LocalWorkspace } from "./local-workspace.js";
 import { DesktopExtensionRegistry } from "./desktop-extension-registry.js";
+import { abortMcpServer, mcpSyncChanges } from "./extension-sync.js";
 import { McpRegistry, resolveMarketplaceMcpConfig, type McpServerInput } from "./mcp-registry.js";
 import { RecorderLock } from "./recorder-lock.js";
 import { parseMarketplaceInstallSlug } from "./desktop-marketplace-link.js";
@@ -100,6 +106,7 @@ type PendingRecordingUpload = {
 const pendingRecordingUploads = new Map<string, PendingRecordingUpload>();
 const desktopAgentTasks = new Map<string, DesktopAgentTask>();
 const desktopAgentPlans = new Map<string, DesktopAgentAction[]>();
+const desktopActionApprovals = new DesktopActionApprovals();
 const desktopAgentRounds = new Map<string, number>();
 const desktopAgentDeadlineWarnings = new Set<string>();
 const desktopAgentInterruptedTasks = new Set<string>();
@@ -160,6 +167,19 @@ const workspaceRuns = new Map<string, AbortController>();
 let mcpRegistry: McpRegistry | null = null;
 let desktopExtensionRegistry: DesktopExtensionRegistry | null = null;
 const desktopMcpCalls = new Map<string, AbortController>();
+const desktopMcpCallServers = new Map<string, string>();
+
+function abortDesktopMcpServer(serverId: string) {
+  abortMcpServer(desktopMcpCalls, desktopMcpCallServers, serverId);
+}
+
+async function assertMcpServerEnabled(serverId: string) {
+  if (!desktopExtensionRegistry) throw new Error("Desktop extension registry is not ready yet.");
+  const extensions = await desktopExtensionRegistry.list();
+  if (extensions.some((extension) => extension.kind === "mcp" && extension.localServerId === serverId && !extension.enabled)) {
+    throw new Error("This marketplace MCP is disabled.");
+  }
+}
 
 registerWindowControlHandlers(ipcMain, {
   getMainWindow: () => mainWindow,
@@ -547,6 +567,7 @@ function configureAutoUpdates() {
 ipcMain.handle("desktop.update-state", () => updateState);
 ipcMain.handle("desktop.check-updates", () => checkForDesktopUpdate());
 ipcMain.handle("app-version", () => app.getVersion());
+ipcMain.handle("desktop.native-permissions", () => probeNativePermissions());
 ipcMain.handle("desktop.install-update", () =>
   installDesktopUpdate(
     desktopUpdatePolicy(),
@@ -658,8 +679,24 @@ ipcMain.handle("assets.select-folder", async (event) => {
   });
   if (result.canceled || !result.filePaths[0]) return null;
   const directory = resolve(result.filePaths[0]);
+  const verified = await verifyAssetFolder(directory);
   await writeFile(join(app.getPath("userData"), "asset-storage.json"), JSON.stringify({ directory }), "utf8");
-  return { path: directory, name: basename(directory) };
+  return verified;
+});
+ipcMain.handle("assets.folder-status", async (event) => {
+  requireMainWindow(event);
+  return readAssetFolderStatus(join(app.getPath("userData"), "asset-storage.json"));
+});
+ipcMain.handle("assets.open-folder", async (event) => {
+  requireMainWindow(event);
+  const folder = await readAssetFolderStatus(join(app.getPath("userData"), "asset-storage.json"));
+  if (folder.permission !== "granted" || !folder.path) throw new Error("Choose an available local folder first.");
+  const error = await shell.openPath(folder.path);
+  if (error) throw new Error("The local folder could not be opened.");
+});
+ipcMain.handle("assets.clear-folder", async (event) => {
+  requireMainWindow(event);
+  await rm(join(app.getPath("userData"), "asset-storage.json"), { force: true });
 });
 ipcMain.handle("assets.write-local", async (event, input: unknown) => {
   requireMainWindow(event);
@@ -680,7 +717,8 @@ ipcMain.handle("assets.write-local", async (event, input: unknown) => {
   const target = resolve(savedDirectory, safeName);
   const targetRelative = relative(savedDirectory, target);
   if (isAbsolute(targetRelative) || targetRelative.startsWith(`..${sep}`) || targetRelative === "..") throw new Error("素材保存路径越界。");
-  await writeFile(target, Buffer.from(value.bytes));
+  await writeFile(target, Buffer.from(value.bytes), { flag: "wx" });
+  await writeFile(join(app.getPath("userData"), "asset-storage.json"), JSON.stringify({ directory: savedDirectory, lastWriteAt: new Date().toISOString() }), "utf8");
   return { path: target, name: safeName };
 });
 ipcMain.handle("workspace.tree", async (event) =>
@@ -1351,9 +1389,11 @@ async function runDesktopMcpCall(input: unknown) {
   const call = parsed.data;
   const controller = new AbortController();
   desktopMcpCalls.set(call.requestId, controller);
+  desktopMcpCallServers.set(call.requestId, call.serverId);
   try {
     const isNativeScreenCall = call.serverId === NATIVE_SCREEN_SERVER_ID;
     const isLocalWorkspaceCall = call.serverId === localWorkspaceSessionId;
+    if (!isNativeScreenCall && !isLocalWorkspaceCall) await assertMcpServerEnabled(call.serverId);
     const rawOutput = isNativeScreenCall
       ? await runNativeScreenTool(call.toolName, call.arguments)
       : isLocalWorkspaceCall
@@ -1369,6 +1409,7 @@ async function runDesktopMcpCall(input: unknown) {
           JSON.stringify(call.arguments),
           controller.signal,
         );
+    controller.signal.throwIfAborted();
     if (
       !isNativeScreenCall &&
       !isLocalWorkspaceCall &&
@@ -1405,6 +1446,7 @@ async function runDesktopMcpCall(input: unknown) {
     });
   } finally {
     desktopMcpCalls.delete(call.requestId);
+    desktopMcpCallServers.delete(call.requestId);
   }
 }
 ipcMain.handle("mcp.list", (event) => requireMcpRegistry(event).list());
@@ -1417,9 +1459,20 @@ ipcMain.handle("desktop.extensions.sync", async (event, input: unknown) => {
     return result.success ? [result.data] : [];
   });
   if (parsed.length !== input.length) throw new Error("Desktop extension sync payload contains invalid entries.");
+  const previous = await registry.list();
   const extensions = await registry.reconcile(parsed as DesktopMarketplaceExtensionInput[]);
+  const changes = mcpSyncChanges(previous, extensions);
+  if (mcpRegistry) {
+    for (const serverId of changes.disconnect) {
+      abortDesktopMcpServer(serverId);
+      await mcpRegistry.disconnect(serverId);
+    }
+    for (const serverId of changes.connect) await mcpRegistry.connect(serverId);
+    await refreshDesktopExtensionMcpStates();
+  }
+  publishDesktopMcpTools();
   publishDesktopExtensions();
-  return extensions;
+  return registry.list();
 });
 ipcMain.handle("desktop.extensions.set-enabled", async (event, input: unknown) => {
   const registry = requireDesktopExtensionRegistry(event);
@@ -1438,6 +1491,7 @@ ipcMain.handle("desktop.extensions.set-enabled", async (event, input: unknown) =
     if (value.enabled) {
       await mcpRegistry.connect(current.localServerId);
     } else {
+      abortDesktopMcpServer(current.localServerId);
       await mcpRegistry.disconnect(current.localServerId);
     }
     await registry.setConnection(current.itemId, value.enabled);
@@ -1502,8 +1556,9 @@ ipcMain.handle("mcp.install-marketplace", async (event, input: unknown) => {
     throw error;
   }
 });
-ipcMain.handle("mcp.connect", (event, id: unknown) => {
+ipcMain.handle("mcp.connect", async (event, id: unknown) => {
   if (typeof id !== "string") throw new Error("An MCP server id is required.");
+  await assertMcpServerEnabled(id);
   return requireMcpRegistry(event)
     .connect(id)
     .then((servers) => {
@@ -1532,7 +1587,7 @@ ipcMain.handle("mcp.remove", (event, id: unknown) => {
       return servers;
     });
 });
-ipcMain.handle("mcp.call", (event, input: unknown) => {
+ipcMain.handle("mcp.call", async (event, input: unknown) => {
   if (!input || typeof input !== "object" || Array.isArray(input))
     throw new Error("An MCP tool call is required.");
   const call = input as { id?: unknown; name?: unknown; arguments?: unknown };
@@ -1542,7 +1597,21 @@ ipcMain.handle("mcp.call", (event, input: unknown) => {
     typeof call.arguments !== "string"
   )
     throw new Error("MCP tool call fields are invalid.");
-  return requireMcpRegistry(event).call(call.id, call.name, call.arguments);
+  const registry = requireMcpRegistry(event);
+  const requestId = randomUUID();
+  const controller = new AbortController();
+  desktopMcpCalls.set(requestId, controller);
+  desktopMcpCallServers.set(requestId, call.id);
+  try {
+    await assertMcpServerEnabled(call.id);
+    controller.signal.throwIfAborted();
+    const output = await registry.call(call.id, call.name, call.arguments, controller.signal);
+    controller.signal.throwIfAborted();
+    return output;
+  } finally {
+    desktopMcpCalls.delete(requestId);
+    desktopMcpCallServers.delete(requestId);
+  }
 });
 
 ipcMain.handle("desktop.marketplace-install.pending", (event) => {
@@ -2177,6 +2246,7 @@ function isNativeDesktopTask(task: DesktopAgentTask) {
 }
 
 function finishDesktopAgentTask(taskId: string) {
+  desktopActionApprovals.clearTask(taskId);
   desktopAgentPlans.delete(taskId);
   desktopAgentTasks.delete(taskId);
   desktopTaskTabs.delete(taskId);
@@ -2353,19 +2423,6 @@ async function runDesktopAgentTask(rawTask: unknown) {
       finishDesktopAgentTask(task.taskId);
       return;
     }
-    if (task.capabilities.includes("browser.record")) {
-      try {
-        nativeTaskRecordings.set(task.taskId, await startNativeScreenRecording(task.taskId));
-      } catch (error) {
-        sendAssistant({
-          type: "desktop_agent.event",
-          taskId: task.taskId,
-          eventType: "failed",
-          detail: error instanceof Error ? error.message : "原生录屏启动失败。",
-        });
-        return;
-      }
-    }
     if (task.executionMode === "windows_ui" || task.executionMode === "visual_ocr") {
       const evidence = await inspectNativeDesktop({
         platform: process.platform,
@@ -2391,6 +2448,14 @@ async function runDesktopAgentTask(rawTask: unknown) {
         stepId: "inspect-native-window",
         progress: 80,
         detail: summary.slice(0, 2_000),
+        result: {
+          summary,
+          windowTitle: evidence.windowTitle,
+          controls: evidence.controls,
+          evidence: [{ kind: "window", title: evidence.windowTitle, excerpt: controls.slice(0, 4_000) }],
+          screenshotBase64: evidence.screenshotBase64,
+          screenshotMimeType: evidence.screenshotMimeType,
+        },
       });
       desktopAgentPlans.set(task.taskId, [...task.plannedActions]);
       if (task.plannedActions.length > 0) await continueDesktopAgentPlan(task.taskId);
@@ -2525,6 +2590,7 @@ async function resumeDesktopAgentTasks(rawTasks: unknown) {
 
     const approvalActions = pendingApprovals.map((approval) => ({ ...approval.action, approvalId: approval.approvalId }));
     if (approvalActions.length) {
+      for (const approval of pendingApprovals) desktopActionApprovals.register(approval.approvalId, approval.action, approval.expiresAt);
       desktopAgentPlans.set(task.taskId, approvalActions);
       for (const approval of pendingApprovals) forwardDesktopAgentEvent({
         type: "desktop_agent.event",
@@ -2541,16 +2607,8 @@ async function resumeDesktopAgentTasks(rawTasks: unknown) {
 
     desktopAgentInterruptedTasks.add(task.taskId);
     if (isNativeDesktopTask(task)) {
-      desktopAgentPlans.set(task.taskId, []);
-      desktopAgentRounds.set(task.taskId, 0);
-      forwardDesktopAgentEvent({
-        type: "desktop_agent.event",
-        taskId: task.taskId,
-        eventType: "progress",
-        progress: 5,
-        detail: "Connection restored. Re-observing the active window before choosing the next action.",
-      });
-      await continueDesktopAgentPlan(task.taskId);
+      sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "failed", detail: "The connection was interrupted and the last native action may have completed. Review the target and task history before retrying." });
+      finishDesktopAgentTask(task.taskId);
       continue;
     }
 
@@ -2596,6 +2654,11 @@ async function executeDesktopAgentAction(rawAction: unknown) {
       action,
       detail: "该动作需要用户批准，或涉及禁止的凭据字段",
     });
+    return;
+  }
+  if (classifyDesktopAction(action) === "confirm" && !desktopActionApprovals.consume(action)) {
+    sendAssistant({ type: "desktop_agent.event", taskId: action.taskId, eventType: "failed", detail: "The action approval is missing, expired, already used, or does not match the requested action." });
+    finishDesktopAgentTask(action.taskId);
     return;
   }
   try {
@@ -2679,6 +2742,8 @@ async function executeDesktopAgentAction(rawAction: unknown) {
           detail: evidence.ocrText,
           result: {
             summary: evidence.ocrText,
+            windowTitle: evidence.windowTitle,
+            controls: evidence.controls,
             evidence: [{ kind: "window", title: evidence.windowTitle, excerpt: evidence.controls.map((control) => control.title).join("; ") }],
             screenshotBase64: evidence.screenshotBase64,
             screenshotMimeType: evidence.screenshotMimeType,
@@ -2856,6 +2921,30 @@ async function executeDesktopAction(message: any) {
     return;
   }
   let ok = false;
+  if (action.kind === "click" || action.kind === "fill") {
+    let resultMessage = "Browser action failed.";
+    try {
+      await executeBrowserDomAction(browser.webContents, {
+        kind: action.kind,
+        target: String(action.target ?? ""),
+        ...(action.kind === "fill" ? { value: String(action.value ?? "") } : {}),
+      });
+      ok = true;
+      resultMessage = action.kind === "click" ? "Browser click completed." : "Browser field filled.";
+    } catch (error) {
+      resultMessage = error instanceof Error ? error.message : "Browser action failed.";
+    }
+    if (message.actionId) sendAssistant({
+      type: "website_capture.action_result",
+      actionId: message.actionId,
+      taskId: message.taskId,
+      approvalToken: message.approvalToken,
+      action: websiteActionReceipt(action),
+      ok,
+      message: resultMessage,
+    });
+    return;
+  }
   let resultMessage = "动作未执行";
   try {
     if (
@@ -3016,6 +3105,10 @@ function connectEmbeddedAssistant(wssUrl: string, code: string, retrying = false
       return;
     }
     if (message.type === "desktop_agent.approval_pending") {
+      const pending = desktopAgentActionSchema.safeParse(message.action);
+      if (pending.success && typeof message.approvalId === "string" && typeof message.expiresAt === "string") {
+        desktopActionApprovals.register(message.approvalId, pending.data, message.expiresAt);
+      }
       forwardDesktopAgentEvent({
         ...message,
         type: "desktop_agent.event",
@@ -3423,6 +3516,9 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === "win32" && process.arch === "x64") {
+    configureWindowsUia(join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources"), "native", "helstera-uia.exe"));
+  }
   mcpRegistry = new McpRegistry(
     join(app.getPath("userData"), "mcp-registry.json"),
     safeStorage,

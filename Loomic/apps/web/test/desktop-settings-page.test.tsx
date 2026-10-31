@@ -29,6 +29,7 @@ vi.mock("@/lib/local-asset-storage", () => ({
 }));
 
 const electronApi = {
+  openAssetFolder: vi.fn().mockResolvedValue(undefined),
   getAppVersion: vi.fn().mockResolvedValue("0.2.14"),
   getPlatform: vi.fn().mockReturnValue("win32"),
   getUpdateState: vi.fn().mockResolvedValue({ status: "idle", currentVersion: "0.2.14" }),
@@ -55,6 +56,17 @@ afterEach(() => {
 });
 
 describe("DesktopSettingsPage", () => {
+  it("shows native storage evidence and opens only a verified folder", async () => {
+    mocks.getLocalAssetFolderState.mockResolvedValue({
+      name: "Assets", path: "D:/Assets", permission: "granted", availableBytes: 12_500_000_000,
+      lastWriteAt: "2026-10-31T00:00:00Z",
+    });
+    render(<DesktopSettingsPage locale="en-US" />);
+    expect(await screen.findByText("D:/Assets")).toBeInTheDocument();
+    expect(screen.getByText("Available space: 12.5 GB")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Open folder" }));
+    expect(electronApi.openAssetFolder).toHaveBeenCalledOnce();
+  });
   it("shows account, platform, version, and operating local-save controls", async () => {
     const user = userEvent.setup();
     mocks.getLocalAssetFolderState

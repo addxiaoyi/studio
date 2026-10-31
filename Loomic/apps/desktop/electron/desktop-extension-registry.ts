@@ -150,8 +150,9 @@ export class DesktopExtensionRegistry {
       const old = previous.get(input.itemId);
       const enabled = reason
         ? false
-        : old?.enabled
-          ?? (typeof input.metadata.enabled === "boolean" ? input.metadata.enabled : true);
+        : typeof input.metadata.enabled === "boolean"
+          ? input.metadata.enabled
+          : old?.enabled ?? true;
       next.push({
         ...input,
         enabled,

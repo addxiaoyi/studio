@@ -35,6 +35,7 @@ import { resolveConfiguredModel } from "./model-availability.js";
 import { isRemovedImageModelId } from "../generation/removed-models.js";
 import { approvalRequiredResponse } from "./generation-approvals.js";
 import { buildMediaRoute } from "../features/media/media-routing.js";
+import { assertConnectorEnabled, ConnectorDisabledError } from "../features/agent-goals/connector-gate.js";
 import {
   createGenerationApprovalService,
   GenerationApprovalError,
@@ -67,6 +68,7 @@ export async function registerJobRoutes(
       }
       const idempotencyKey = typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"].trim().slice(0, 160) : undefined;
       const viewer = await options.viewerService.ensureViewer(user);
+      if (options.localDb) await assertConnectorEnabled(options.localDb, viewer.workspace.id, user.id, "media-generation");
       if (options.localDb && idempotencyKey) {
         const existing = await options.localDb.query("select id from background_jobs where created_by=$1 and idempotency_key=$2", [user.id, idempotencyKey]);
         if (existing.rows[0]) return reply.code(200).send(jobResponseSchema.parse({ job: await options.jobService.getJob(user, existing.rows[0].id) }));
@@ -225,6 +227,7 @@ export async function registerJobRoutes(
       const payload = createVideoJobRequestSchema.parse(request.body);
       const idempotencyKey = typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"].trim().slice(0, 160) : undefined;
       const viewer = await options.viewerService.ensureViewer(user);
+      if (options.localDb) await assertConnectorEnabled(options.localDb, viewer.workspace.id, user.id, "media-generation");
       if (options.localDb && idempotencyKey) {
         const existing = await options.localDb.query("select id from background_jobs where created_by=$1 and idempotency_key=$2", [user.id, idempotencyKey]);
         if (existing.rows[0]) return reply.code(200).send(jobResponseSchema.parse({ job: await options.jobService.getJob(user, existing.rows[0].id) }));
@@ -522,6 +525,9 @@ function sendJobError(
   reply: FastifyReply,
   fallbackCode: JobErrorFallbackCode,
 ) {
+  if (error instanceof ConnectorDisabledError) {
+    return reply.code(403).send({ error: { code: "connector_disabled", message: error.message } });
+  }
   if (error instanceof Error && "code" in error && error.code === "invalid_input") {
     return reply.code(422).send({ error: { code: "invalid_input", message: error.message } });
   }

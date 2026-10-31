@@ -31,6 +31,7 @@ import {
 } from "../features/generation/generation-approval-service.js";
 import { buildMediaRoute } from "../features/media/media-routing.js";
 import { createProviderAssetUrl } from "../features/uploads/provider-asset-url.js";
+import { assertConnectorEnabled, ConnectorDisabledError } from "../features/agent-goals/connector-gate.js";
 
 const generateImageRequestSchema = z.object({
   prompt: z.string().max(12_000).default(""),
@@ -118,6 +119,7 @@ export async function registerGenerateRoutes(
     try {
       // ── Tier guard + credit checks ──
       const viewer = await options.viewerService.ensureViewer(user);
+      if (options.localDb) await assertConnectorEnabled(options.localDb, viewer.workspace.id, user.id, "media-generation");
       if (options.creditService && options.tierGuard) {
         // Top-up credit system: no plan-based restrictions.
         const quality: ImageQualityLevel = payload.quality ?? "hd";
@@ -217,6 +219,9 @@ export async function registerGenerateRoutes(
           )
           .catch((refundError) => console.error("[generate-image] direct debit refund failed", refundError));
         directImageDebit = null;
+      }
+      if (error instanceof ConnectorDisabledError) {
+        return reply.code(403).send({ error: { code: "connector_disabled", message: error.message } });
       }
       // Handle tier/credit errors
       if (error instanceof TierGuardError) {
@@ -333,6 +338,7 @@ export async function registerGenerateRoutes(
     try {
       // ── Tier guard + credit checks ──
       const viewer = await options.viewerService.ensureViewer(user);
+      if (options.localDb) await assertConnectorEnabled(options.localDb, viewer.workspace.id, user.id, "media-generation");
       const workspaceId = viewer.workspace.id;
       payload.resolution = resolveVideoResolution(model, payload.resolution as VideoResolution | undefined);
       let creditsCost = 0;
@@ -458,6 +464,9 @@ export async function registerGenerateRoutes(
         durationSeconds: result.duration_seconds,
       });
     } catch (error) {
+      if (error instanceof ConnectorDisabledError) {
+        return reply.code(403).send({ error: { code: "connector_disabled", message: error.message } });
+      }
       if (error instanceof TierGuardError) {
         return reply.code(error.statusCode).send(
           applicationErrorResponseSchemaLoose.parse({

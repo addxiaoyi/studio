@@ -155,6 +155,18 @@ describe("desktop recording chunk upload", () => {
 });
 
 describe("desktop vision grounding bridge", () => {
+  it("does not request a screenshot after the desktop connector is disabled", async () => {
+    const { hub, query, internals } = createHub({ visionAnalyzer: async () => ({ found: false, x: 0, y: 0, confidence: 0 }) });
+    query.mockImplementation(async (sql?: string) => sql?.includes("agent_connector_permissions")
+      ? { rows: [{ enabled: false }] } as never : { rows: [] } as never);
+    const sent: Array<Record<string, unknown>> = [];
+    const live = activeConnection(sent);
+    internals.connections.set(live.id, live);
+    await expect(hub.analyzeDesktopScreenshotViaDesktop({ userId: live.userId, workspaceId: live.workspaceId, description: "button" }))
+      .rejects.toThrow("desktop-agent connector is disabled");
+    expect(sent).toHaveLength(0);
+  });
+
   it("captures a screenshot from the desktop, analyzes it, and returns coordinates", async () => {
     const { hub, internals } = createHub({
       visionAnalyzer: async (input) => {

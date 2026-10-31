@@ -1,0 +1,70 @@
+name: Desktop Candidate CI
+
+on:
+  push:
+    branches: [master, main, 'codex/**']
+    paths: ['Loomic/**', '.github/workflows/desktop-ci.yml']
+  pull_request:
+    paths: ['Loomic/**', '.github/workflows/desktop-ci.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: Desktop ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            os: windows-2022
+            args: --win nsis --x64
+          - platform: macos-arm64
+            os: macos-14
+            args: --mac dmg --arm64
+          - platform: linux-x64
+            os: ubuntu-24.04
+            args: --linux AppImage --x64
+    defaults:
+      run:
+        working-directory: Loomic
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build shared contracts
+        run: pnpm --filter @helstera/shared build
+      - name: Typecheck and test desktop
+        run: |
+          pnpm --filter @helstera/desktop typecheck
+          pnpm --filter @helstera/desktop test
+          pnpm --filter @helstera/desktop exec vitest run --config vitest.config.ts electron/extension-sync.test.ts
+      - name: Build native helper
+        run: pnpm --filter @helstera/desktop build:native
+      - name: Disable macOS signing auto-discovery
+        if: runner.os == 'macOS'
+        run: echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+      - name: Build candidate package
+        run: |
+          pnpm --filter @helstera/desktop exec tsc -p tsconfig.electron.json
+          pnpm --filter @helstera/desktop exec vite build
+          pnpm --filter @helstera/desktop exec electron-builder ${{ matrix.args }} --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-candidate-${{ matrix.platform }}
+          path: |
+            Loomic/apps/desktop/release/*.exe
+            Loomic/apps/desktop/release/*.dmg
+            Loomic/apps/desktop/release/*.AppImage
+          if-no-files-found: error
+          retention-days: 7
