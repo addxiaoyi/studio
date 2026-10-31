@@ -110,12 +110,15 @@ def run(command: list[str], cwd: pathlib.Path) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 
-def pnpm_command() -> str:
+def pnpm_command() -> list[str]:
     command = "pnpm.cmd" if os.name == "nt" else "pnpm"
     resolved = shutil.which(command)
-    if not resolved:
-        raise RuntimeError(f"{command} is required to build desktop packages")
-    return resolved
+    if resolved:
+        return [resolved]
+    corepack = shutil.which("corepack")
+    if corepack:
+        return [corepack, "pnpm"]
+    raise RuntimeError(f"{command} or Corepack is required to build desktop packages")
 
 
 def desktop_version(root: pathlib.Path) -> str:
@@ -175,7 +178,7 @@ def build_desktop(root: pathlib.Path, target: str, output_dir: pathlib.Path | No
     }[target]
     build_env = os.environ.copy()
     build_env.setdefault("ELECTRON_MIRROR", "https://npmmirror.com/mirrors/electron/")
-    subprocess.run([pnpm, "--filter", "@helstera/shared", "build"], cwd=root, env=build_env, check=True)
+    subprocess.run([*pnpm, "--filter", "@helstera/shared", "build"], cwd=root, env=build_env, check=True)
     desktop_root = root / "apps/desktop"
     config_paths: list[pathlib.Path] = []
 
@@ -195,9 +198,9 @@ def build_desktop(root: pathlib.Path, target: str, output_dir: pathlib.Path | No
         return config_path
 
     try:
-        subprocess.run([pnpm, "--filter", "@helstera/desktop", "exec", "tsc", "-p", "tsconfig.electron.json"], cwd=root, env=build_env, check=True)
-        subprocess.run([pnpm, "--filter", "@helstera/desktop", "exec", "vite", "build"], cwd=root, env=build_env, check=True)
-        builder = [pnpm, "--filter", "@helstera/desktop", "exec", "electron-builder"]
+        subprocess.run([*pnpm, "--filter", "@helstera/desktop", "exec", "tsc", "-p", "tsconfig.electron.json"], cwd=root, env=build_env, check=True)
+        subprocess.run([*pnpm, "--filter", "@helstera/desktop", "exec", "vite", "build"], cwd=root, env=build_env, check=True)
+        builder = [*pnpm, "--filter", "@helstera/desktop", "exec", "electron-builder"]
         base_args = [*args, "--publish", "never"]
         base_config = create_builder_config(portable=False)
         if base_config:

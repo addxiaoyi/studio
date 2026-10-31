@@ -112,6 +112,10 @@ class ReleasePathTests(unittest.TestCase):
         self.assertFalse(allowed["protobufjs"])
         self.assertTrue(all(type(value) is bool for value in allowed.values()))
 
+    def test_pnpm_command_falls_back_to_corepack(self) -> None:
+        with patch.object(release_desktop.shutil, "which", side_effect=lambda name: "/usr/bin/corepack" if name == "corepack" else None):
+            self.assertEqual(release_desktop.pnpm_command(), ["/usr/bin/corepack", "pnpm"])
+
     def test_updater_manifest_requires_package_size_and_sha512_to_match(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             release = pathlib.Path(temporary)
