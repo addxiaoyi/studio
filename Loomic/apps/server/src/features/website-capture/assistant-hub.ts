@@ -28,6 +28,7 @@ import {
   classifyWebsiteAction,
 } from "./action-policy.js";
 import { decodeJpegPayload } from "./capture-payload.js";
+import { softDeleteWebsiteCaptureAssets } from "./asset-cleanup.js";
 import {
   type CaptureTask,
   buildWebsiteIntroduction,
@@ -679,6 +680,7 @@ export class WebsiteAssistantHub {
     const live = this.connections.get(task.assistant_connection_id);
     if (!live || live.ws.readyState !== 1 || live.paused)
       throw new Error("Local browser assistant is not connected.");
+    await this.cleanupTaskAssets(taskId);
     this.pages.delete(taskId);
     this.lastProgressEventAt.delete(taskId);
     await this.options.db.query(
@@ -1731,7 +1733,10 @@ export class WebsiteAssistantHub {
         resumeToken,
       ],
     );
-    if (!updated.rows[0]) return;
+    if (!updated.rows[0]) {
+      await this.cleanupTaskAssets(task.id);
+      return;
+    }
     if (terminal) {
       this.clearDesktopTaskTimer(event.taskId);
       if (task.goal_id) {
@@ -2287,6 +2292,7 @@ export class WebsiteAssistantHub {
       [task.id, JSON.stringify(result)],
     );
     if (!completed.rows[0]) {
+      await this.cleanupTaskAssets(task.id);
       this.pages.delete(task.id);
       this.lastProgressEventAt.delete(task.id);
       this.clearTaskTimer(task.id);
@@ -2357,6 +2363,7 @@ export class WebsiteAssistantHub {
       [taskId, message.slice(0, 1000), live.id],
     );
     if (!failed.rows[0]) return;
+    await this.cleanupTaskAssets(taskId);
     await this.options.db.query(
       "update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')",
       [taskId],
@@ -2401,6 +2408,7 @@ export class WebsiteAssistantHub {
     for (const task of tasks.rows) {
       this.clearTaskTimer(task.id);
       this.lastProgressEventAt.delete(task.id);
+      await this.cleanupTaskAssets(task.id);
       await this.options.db.query(
         "update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')",
         [task.id],
@@ -2438,6 +2446,15 @@ export class WebsiteAssistantHub {
       "insert into website_capture_events(task_id,stage,detail) values($1,$2,$3)",
       [taskId, stage.slice(0, 80), detail.slice(0, 1000)],
     );
+  }
+
+  private async cleanupTaskAssets(taskId: string) {
+    try {
+      const count = await softDeleteWebsiteCaptureAssets(this.options.db, taskId);
+      if (count) await this.event(taskId, "asset_cleanup", `已回收${count}个失败素材，进入恢复期`);
+    } catch (error) {
+      console.error(`[website-capture] failed to clean assets for ${taskId}`, error);
+    }
   }
 
   private consumeDesktopMcpResult(live: LiveConnection, raw: unknown) {

@@ -26,8 +26,9 @@ function taskRow(status = "queued") {
 
 function buildApp(query: ReturnType<typeof vi.fn>, retryJob = vi.fn().mockResolvedValue(undefined), authUser: typeof user | null = user) {
   const app = Fastify();
+  const cleanupClient = { query: vi.fn().mockResolvedValue({ rows: [] }), release: vi.fn() };
   registerWebsiteCaptureRoutes(app, {
-    db: { query } as never,
+    db: { query, connect: vi.fn().mockResolvedValue(cleanupClient) } as never,
     auth: { authenticate: vi.fn().mockResolvedValue(authUser) } as never,
     viewerService: { ensureViewer: vi.fn().mockResolvedValue(viewer) } as never,
     jobService: { retryJob } as never,

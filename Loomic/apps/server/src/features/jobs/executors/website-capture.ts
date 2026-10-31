@@ -1,4 +1,5 @@
 import { captureIsolatedWebsite, WebsiteCaptureError } from "../../website-capture/isolated-browser.js";
+import { softDeleteWebsiteCaptureAssets } from "../../website-capture/asset-cleanup.js";
 import { registerExecutor, type ExecutorContext } from "../job-executor.js";
 
 async function resolveCaptureTaskId(jobId: string, ctx: ExecutorContext): Promise<string> {
@@ -76,6 +77,9 @@ registerExecutor("website_capture", async (jobId, _queueMessage, ctx: ExecutorCo
       "update website_capture_tasks set status=case when status='canceled' then 'canceled' else 'failed' end, stage=case when status='canceled' then 'canceled' else 'failed' end, error_message=$2, updated_at=now() where id=$1 and status in ('queued','running')",
       [taskId, message],
     );
+    await softDeleteWebsiteCaptureAssets(ctx.localDb, taskId).catch((cleanupError) => {
+      console.error("[website-capture] failed to soft-delete failed assets", cleanupError);
+    });
     await appendEvent(ctx, taskId, code, message);
     throw Object.assign(error instanceof Error ? error : new Error(message), { code });
   }

@@ -8,6 +8,7 @@ import type { ViewerService } from "../features/bootstrap/ensure-user-foundation
 import { validatePublicHttpUrl, WebsiteCaptureError } from "../features/website-capture/isolated-browser.js";
 import { WebsiteAssistantHub, validateLocalExactUrl } from "../features/website-capture/assistant-hub.js";
 import { claimWebsiteCaptureRetry } from "../features/website-capture/retry.js";
+import { softDeleteWebsiteCaptureAssets } from "../features/website-capture/asset-cleanup.js";
 import type { JobService } from "../features/jobs/job-service.js";
 import type { CreditService } from "../features/credits/credit-service.js";
 import type { TierGuard } from "../features/credits/tier-guard.js";
@@ -255,8 +256,9 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
             [task.id, viewer.workspace.id, user.id, errorMessage],
           );
           if (failed.rows[0]) {
+            const cleaned = await cleanupCaptureAssets(options.db, task.id);
             await options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')", [task.id]);
-            await options.db.query("insert into website_capture_events(task_id,stage,detail) values($1,'failed',$2)", [task.id, errorMessage]);
+            await options.db.query("insert into website_capture_events(task_id,stage,detail) values($1,'failed',$2),($1,'asset_cleanup',$3)", [task.id, errorMessage, `已回收${cleaned}个失败素材，进入恢复期`]);
             task = toTask(failed.rows[0]);
           }
         }
@@ -316,11 +318,12 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         [request.params.taskId, viewer.workspace.id, user.id],
       );
       if (!updated.rows[0]) return reply.code(409).send({ ok: false, error: { code: "task_not_cancelable", message: "任务不存在或已经结束。" } });
+      const cleaned = await cleanupCaptureAssets(options.db, updated.rows[0].id);
       await options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')", [updated.rows[0].id]);
       const jobId = updated.rows[0].background_job_id;
       if (jobId) await options.db.query("update background_jobs set status='canceled', canceled_at=now(), updated_at=now() where id=$1 and status in ('queued','running')", [jobId]);
       if (updated.rows[0].mode === "local") await options.assistantHub.revokeTask(updated.rows[0].id);
-      await options.db.query("insert into website_capture_events(task_id, stage, detail) values($1,'canceled','用户取消了网站浏览任务')", [request.params.taskId]);
+      await options.db.query("insert into website_capture_events(task_id, stage, detail) values($1,'canceled','用户取消了网站浏览任务'),($1,'asset_cleanup',$2)", [request.params.taskId, `已回收${cleaned}个失败素材`]);
       return reply.send({ ok: true, data: { task: toTask(updated.rows[0]) } });
     } catch (error) {
       return sendWebsiteCaptureError(error, reply);
@@ -360,14 +363,17 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       }
       if (taskRow.mode !== "local" && !taskRow.background_job_id) {
         await options.db.query("update website_capture_tasks set status='failed',stage='failed',error_message='缺少后台任务记录，无法安全重试',updated_at=now() where id=$1 and status='queued'", [taskRow.id]);
+        await cleanupCaptureAssets(options.db, taskRow.id);
         return reply.code(409).send({ ok: false, error: { code: "task_not_retryable", message: "缺少后台任务记录，无法安全重试。" } });
       }
       try {
+        await cleanupCaptureAssets(options.db, taskRow.id);
         if (taskRow.mode === "local") await options.assistantHub.startLocalTask(taskRow.id, user.id);
         else await options.jobService.retryJob(user, taskRow.background_job_id!);
       } catch (error) {
         const message = error instanceof Error ? error.message.slice(0, 1000) : "网站任务重新排队失败。";
         await options.db.query("update website_capture_tasks set status='failed',stage='failed',error_message=$2,updated_at=now() where id=$1 and status in ('queued','running')", [taskRow.id, message]);
+        await cleanupCaptureAssets(options.db, taskRow.id);
         await options.db.query("insert into website_capture_events(task_id,stage,detail) values($1,'retry_failed',$2)", [taskRow.id, message]);
         throw error;
       }
@@ -455,6 +461,15 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       return sendWebsiteCaptureError(error, reply);
     }
   });
+}
+
+async function cleanupCaptureAssets(db: Pool, taskId: string): Promise<number> {
+  try {
+    return await softDeleteWebsiteCaptureAssets(db, taskId);
+  } catch (error) {
+    console.error(`[website-capture] failed to clean assets for ${taskId}`, error);
+    return 0;
+  }
 }
 
 async function loadTask(db: Pool, taskId: string, workspaceId: string): Promise<WebsiteCaptureTask | null> {
