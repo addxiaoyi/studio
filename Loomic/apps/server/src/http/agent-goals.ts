@@ -21,7 +21,10 @@ function unauthorized(reply: FastifyReply) {
 
 function sendGoalError(error: unknown, reply: FastifyReply) {
   const message = error instanceof Error ? error.message : "Agent goal request failed.";
-  const status = /not found/i.test(message) ? 404 : /not available|not configured|not connected/i.test(message) ? 409 : 400;
+  const explicitStatus = typeof (error as { statusCode?: unknown }).statusCode === "number"
+    ? Number((error as { statusCode: number }).statusCode)
+    : null;
+  const status = explicitStatus ?? (/not found/i.test(message) ? 404 : /not available|not configured|not connected/i.test(message) ? 409 : 400);
   return reply.code(status).send({ ok: false, error: { code: "agent_goal_error", message } });
 }
 
@@ -61,13 +64,13 @@ export function registerAgentGoalRoutes(app: FastifyInstance, options: GoalRoute
     }
   });
 
-  for (const [suffix, status] of [["pause", "paused"], ["resume", "running"], ["cancel", "canceled"], ["retry", "running"]] as const) {
+  for (const suffix of ["pause", "resume", "cancel", "retry"] as const) {
     app.post<{ Params: { goalId: string } }>(`/api/agent/goals/:goalId/${suffix}`, async (request, reply) => {
       const user = await options.auth.authenticate(request);
       if (!user) return unauthorized(reply);
       try {
         const viewer = await options.viewerService.ensureViewer(user);
-        return reply.send({ ok: true, data: await service.setStatus(user.id, viewer.workspace.id, request.params.goalId, status) });
+        return reply.send({ ok: true, data: await service.transition(user.id, viewer.workspace.id, request.params.goalId, suffix) });
       } catch (error) {
         return sendGoalError(error, reply);
       }

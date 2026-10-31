@@ -32,6 +32,17 @@ type GoalRow = {
 const nativeModes = new Set<DesktopAgentExecutionMode>(["windows_ui", "visual_ocr"]);
 const approvalWords = /点击|输入|录制|上传|下载|发布|删除|购买|支付|付费|click|type|record|upload|publish|delete|purchase|payment/i;
 
+export type AgentGoalTransition = "pause" | "resume" | "cancel" | "retry";
+
+export class AgentGoalTransitionError extends Error {
+  readonly statusCode = 409;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "AgentGoalTransitionError";
+  }
+}
+
 export function buildAgentGoalPlan(goal: string, executionMode: DesktopAgentExecutionMode): AgentGoalPlan {
   const needsApproval = approvalWords.test(goal);
   const requiresDesktop = nativeModes.has(executionMode);
@@ -177,23 +188,69 @@ export class AgentGoalService {
     };
   }
 
-  async setStatus(userId: string, workspaceId: string, goalId: string, status: AgentGoalStatus) {
-    const terminal = ["completed", "failed", "canceled"].includes(status);
-    const updated = await this.db.query<{ id: string }>(
-      `update agent_goals set status=$4,error_message=case when $4='canceled' then null else error_message end,updated_at=now(),completed_at=case when $5 then now() else completed_at end
-        where id=$1 and created_by=$2 and workspace_id=$3 returning id`,
-      [goalId, userId, workspaceId, status, terminal],
+  async transition(userId: string, workspaceId: string, goalId: string, transition: AgentGoalTransition) {
+    const currentResult = await this.db.query<{ status: AgentGoalStatus }>(
+      "select status from agent_goals where id=$1 and created_by=$2 and workspace_id=$3",
+      [goalId, userId, workspaceId],
     );
-    if (!updated.rows[0]) throw new Error("Agent goal not found.");
+    const current = currentResult.rows[0]?.status;
+    if (!current) throw new Error("Agent goal not found.");
+
+    const idempotent =
+      (transition === "pause" && current === "paused") ||
+      (transition === "resume" && current === "running") ||
+      (transition === "cancel" && current === "canceled") ||
+      (transition === "retry" && current === "running");
+    if (idempotent) return this.get(userId, workspaceId, goalId);
+
+    const allowed: Record<AgentGoalTransition, readonly AgentGoalStatus[]> = {
+      pause: ["draft", "running", "waiting_approval", "waiting_desktop"],
+      resume: ["paused", "waiting_desktop"],
+      cancel: ["draft", "running", "waiting_approval", "waiting_desktop", "paused"],
+      retry: ["failed", "canceled"],
+    };
+    if (!allowed[transition].includes(current)) {
+      throw new AgentGoalTransitionError(`Agent goal cannot ${transition} from status ${current}.`);
+    }
+
+    const status: AgentGoalStatus = transition === "pause"
+      ? "paused"
+      : transition === "cancel"
+        ? "canceled"
+        : "running";
+    const terminal = status === "canceled";
+    const updated = await this.db.query<{ id: string }>(
+      `update agent_goals
+          set status=$4,
+              error_message=case when $4 in ('running','canceled') then null else error_message end,
+              updated_at=now(),
+              completed_at=case when $5 then now() when $4='running' then null else completed_at end
+        where id=$1 and created_by=$2 and workspace_id=$3 and status=$6
+        returning id`,
+      [goalId, userId, workspaceId, status, terminal, current],
+    );
+    if (!updated.rows[0]) {
+      const latest = (await this.db.query<{ status: AgentGoalStatus }>(
+        "select status from agent_goals where id=$1 and created_by=$2 and workspace_id=$3",
+        [goalId, userId, workspaceId],
+      )).rows[0]?.status;
+      if (
+        (transition === "pause" && latest === "paused") ||
+        (transition === "resume" && latest === "running") ||
+        (transition === "cancel" && latest === "canceled") ||
+        (transition === "retry" && latest === "running")
+      ) return this.get(userId, workspaceId, goalId);
+      throw new AgentGoalTransitionError(`Agent goal changed before it could ${transition}.`);
+    }
     if (status === "paused") {
       await this.db.query("update desktop_agent_tasks set status='paused',updated_at=now() where goal_id=$1 and status in ('queued','running','waiting_approval','waiting_desktop')", [goalId]);
     } else if (status === "canceled") {
       await this.db.query("update desktop_agent_tasks set status='canceled',completed_at=now(),updated_at=now() where goal_id=$1 and status in ('queued','running','waiting_approval','waiting_desktop','paused')", [goalId]);
       await this.db.query("update desktop_agent_approvals set status='expired' where task_id in (select id from desktop_agent_tasks where goal_id=$1) and status='pending'", [goalId]);
     } else if (status === "running") {
-      await this.db.query("update desktop_agent_tasks set status='running',updated_at=now() where goal_id=$1 and status='paused'", [goalId]);
+      await this.db.query("update desktop_agent_tasks set status='running',wait_reason=null,updated_at=now() where goal_id=$1 and status in ('paused','waiting_desktop')", [goalId]);
     }
-    await this.db.query("insert into agent_goal_events(goal_id,event_type,detail) values($1,$2,$3)", [goalId, `goal.${status}`, `目标状态已更新为 ${status}`]);
+    await this.db.query("insert into agent_goal_events(goal_id,event_type,detail) values($1,$2,$3)", [goalId, `goal.${transition}`, `目标已执行${transition}操作，当前状态为 ${status}`]);
     return this.get(userId, workspaceId, goalId);
   }
 
