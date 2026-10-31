@@ -3,6 +3,7 @@ import type { Pool } from "pg";
 import type { DesktopAgentTaskRequest } from "@helstera/shared";
 
 import type { StorageProvider } from "../../storage/storage-provider.js";
+import { insertLocalImageElement, insertLocalVideoElement } from "../canvas/canvas-element-writer.js";
 import { captureIsolatedWebsite } from "../website-capture/isolated-browser.js";
 import type { BackgroundGoalExecutor } from "./agent-goal-worker.js";
 
@@ -11,11 +12,21 @@ type BackgroundGoalOptions = {
   storage: StorageProvider;
   storageRoot: string;
   webOrigin: string;
+  canvasWriter?: {
+    insertImage: typeof insertLocalImageElement;
+    insertVideo: typeof insertLocalVideoElement;
+  };
 };
+
+type CaptureCanvasWriter = NonNullable<BackgroundGoalOptions["canvasWriter"]>;
 
 export function createBackgroundGoalExecutor(
   options: BackgroundGoalOptions,
 ): BackgroundGoalExecutor {
+  const canvasWriter: CaptureCanvasWriter = options.canvasWriter ?? {
+    insertImage: insertLocalImageElement,
+    insertVideo: insertLocalVideoElement,
+  };
   return async ({ taskId, goal, request }) => {
     const startUrl = request.targetUrl;
     if (!startUrl) {
@@ -118,11 +129,26 @@ export function createBackgroundGoalExecutor(
         });
       }
 
+      const canvasElementIds = goal.canvas_id
+        ? await writeCaptureToCanvas({
+            db: options.db,
+            storage: options.storage,
+            writer: canvasWriter,
+            canvasId: goal.canvas_id,
+            taskId,
+            workspaceId: goal.workspace_id,
+            pages: capture.pages,
+            recordingAssetId: capture.recordingAssetId,
+            recordingUrl: capture.recordingUrl,
+          })
+        : [];
+
       return {
         summary: capture.introduction,
         sourceUrl: capture.startUrl,
         assets,
         evidence,
+        ...(canvasElementIds.length ? { canvasElementIds } : {}),
       } satisfies Record<string, unknown>;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -133,4 +159,56 @@ export function createBackgroundGoalExecutor(
       throw error;
     }
   };
+}
+
+export async function writeCaptureToCanvas(input: {
+  db: Pool;
+  storage: StorageProvider;
+  writer: CaptureCanvasWriter;
+  canvasId: string;
+  taskId: string;
+  workspaceId: string;
+  pages: Array<{ assetId: string; title: string }>;
+  recordingAssetId?: string | undefined;
+  recordingUrl?: string | undefined;
+}) {
+  const imageAssetIds = input.pages.map((page) => page.assetId).filter(Boolean);
+  const assetIds = [...new Set([...imageAssetIds, input.recordingAssetId].filter(Boolean))] as string[];
+  if (!assetIds.length) return [];
+  const { rows } = await input.db.query<{ id: string; object_path: string; mime_type: string | null }>(
+    `select id,object_path,mime_type from generated_assets
+      where id=any($1::uuid[]) and workspace_id=$2 and deleted_at is null`,
+    [assetIds, input.workspaceId],
+  );
+  const assets = new Map(rows.map((row) => [row.id, row]));
+  const elementIds: string[] = [];
+  for (const [index, page] of input.pages.entries()) {
+    const asset = assets.get(page.assetId);
+    if (!asset) continue;
+    const inserted = await input.writer.insertImage(input.db, input.storage, {
+      canvasId: input.canvasId,
+      objectPath: asset.object_path,
+      width: 1280,
+      height: 720,
+      mimeType: asset.mime_type ?? "image/jpeg",
+      title: `网站捕获截图 ${index + 1}：${page.title}`,
+      assetId: page.assetId,
+      jobId: `${input.taskId}:screenshot:${page.assetId}`,
+    });
+    elementIds.push(inserted.elementId);
+  }
+  if (input.recordingAssetId && input.recordingUrl) {
+    const inserted = await input.writer.insertVideo(input.db, {
+      canvasId: input.canvasId,
+      signedUrl: input.recordingUrl,
+      width: 1280,
+      height: 720,
+      mimeType: "video/webm",
+      title: "网站捕获浏览录屏",
+      assetId: input.recordingAssetId,
+      jobId: `${input.taskId}:recording:${input.recordingAssetId}`,
+    });
+    elementIds.push(inserted.elementId);
+  }
+  return elementIds;
 }

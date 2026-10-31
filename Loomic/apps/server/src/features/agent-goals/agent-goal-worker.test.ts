@@ -12,6 +12,7 @@ const goal = {
   id: "00000000-0000-4000-8000-000000000001",
   workspace_id: "00000000-0000-4000-8000-000000000002",
   created_by: "00000000-0000-4000-8000-000000000003",
+  canvas_id: null,
   chat_session_id: null,
   goal: "Read https://example.com/docs and summarize it",
   status: "draft" as const,

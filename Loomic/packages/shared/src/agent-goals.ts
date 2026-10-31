@@ -53,6 +53,7 @@ export const agentGoalResultSchema = z.object({
   cost: z.record(z.unknown()).optional(),
   sourceUrl: z.string().url().optional(),
   executionMode: desktopAgentExecutionModeSchema.optional(),
+  canvasElementIds: z.array(z.string()).max(64).optional(),
   completedAt: z.string().datetime({ offset: true }).optional(),
 });
 

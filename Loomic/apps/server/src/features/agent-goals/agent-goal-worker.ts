@@ -33,6 +33,7 @@ type GoalRow = {
   id: string;
   workspace_id: string;
   created_by: string;
+  canvas_id: string | null;
   chat_session_id: string | null;
   goal: string;
   status: AgentGoalStatus;
@@ -169,7 +170,7 @@ export class AgentGoalWorker {
     this.running = true;
     try {
       const { rows } = await this.db.query<GoalRow>(
-        `select id,workspace_id,created_by,chat_session_id,goal,status,plan,execution_mode,capabilities,next_attempt_at
+        `select id,workspace_id,created_by,canvas_id,chat_session_id,goal,status,plan,execution_mode,capabilities,next_attempt_at
            from agent_goals
           where status in ('draft','running')
              or (status='waiting_desktop'
