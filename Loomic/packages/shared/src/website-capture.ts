@@ -47,11 +47,26 @@ export const websiteCapturePageSchema = z.object({
   screenshotUrl: z.string(),
 });
 
+export const websiteCaptureEvidenceSchema = z.object({
+  url: z.string().url(),
+  pageTitle: z.string(),
+  kind: z.enum(["title", "description", "heading", "navigation"]),
+  excerpt: z.string().max(1_000),
+});
+
+export const websiteCaptureClaimSchema = z.object({
+  text: z.string().max(2_000),
+  sourceUrls: z.array(z.string().url()).max(8),
+  status: z.enum(["observed", "inferred", "unverified"]),
+});
+
 export const websiteCaptureResultSchema = z.object({
   title: z.string(),
   introduction: z.string(),
   startUrl: z.string().url(),
   pages: z.array(websiteCapturePageSchema),
+  evidence: z.array(websiteCaptureEvidenceSchema).max(128).default([]),
+  claims: z.array(websiteCaptureClaimSchema).max(32).default([]),
   recordingAssetId: z.string().uuid().optional(),
   recordingUrl: z.string().optional(),
   completedAt: z.string(),
@@ -97,6 +112,8 @@ export type WebsiteCapturePromoStatus = z.infer<typeof websiteCapturePromoStatus
 export type WebsiteCaptureAssistantConnection = z.infer<typeof websiteCaptureAssistantConnectionSchema>;
 export type WebsiteCapturePairing = z.infer<typeof websiteCapturePairingSchema>;
 export type WebsiteCapturePage = z.infer<typeof websiteCapturePageSchema>;
+export type WebsiteCaptureEvidence = z.infer<typeof websiteCaptureEvidenceSchema>;
+export type WebsiteCaptureClaim = z.infer<typeof websiteCaptureClaimSchema>;
 export type WebsiteCaptureResult = z.infer<typeof websiteCaptureResultSchema>;
 export type CreateWebsiteCaptureRequest = z.infer<typeof createWebsiteCaptureRequestSchema>;
 export type WebsiteCaptureTask = z.infer<typeof websiteCaptureTaskSchema>;

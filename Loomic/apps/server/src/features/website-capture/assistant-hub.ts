@@ -31,6 +31,8 @@ import { decodeJpegPayload } from "./capture-payload.js";
 import { softDeleteWebsiteCaptureAssets } from "./asset-cleanup.js";
 import {
   type CaptureTask,
+  buildWebsiteClaims,
+  buildWebsiteEvidence,
   buildWebsiteIntroduction,
   persistCaptureAsset,
 } from "./isolated-browser.js";
@@ -2279,6 +2281,8 @@ export class WebsiteAssistantHub {
       introduction: buildWebsiteIntroduction(task.start_url, pages),
       startUrl: task.start_url,
       pages,
+      evidence: buildWebsiteEvidence(pages),
+      claims: buildWebsiteClaims(task.start_url, pages),
       ...(recordingAsset
         ? {
             recordingAssetId: recordingAsset.id,

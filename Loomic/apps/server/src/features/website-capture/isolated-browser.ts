@@ -9,7 +9,7 @@ import { chromium, type Route, type WebSocketRoute } from "playwright";
 import { z } from "zod";
 import type { Pool, PoolClient } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
-import type { WebsiteCapturePage, WebsiteCaptureResult } from "@helstera/shared";
+import type { WebsiteCaptureClaim, WebsiteCaptureEvidence, WebsiteCapturePage, WebsiteCaptureResult } from "@helstera/shared";
 
 const PAGE_TIMEOUT_MS = 15_000;
 const PAGE_SETTLE_MS = 650;
@@ -246,13 +246,17 @@ export async function captureIsolatedWebsite(options: {
     }
 
     const title = pages[0]?.title || startUrl.hostname;
-    const introduction = buildWebsiteIntroduction(startUrl.toString(), pages);
+    const evidence = buildWebsiteEvidence(pages);
+    const claims = buildWebsiteClaims(startUrl.toString(), pages);
+    const introduction = buildWebsiteIntroduction(startUrl.toString(), pages, claims);
     await options.onProgress(96, "writing_report", "Preparing the sourced website introduction");
     return {
       title,
       introduction,
       startUrl: startUrl.toString(),
       pages,
+      evidence,
+      claims,
       ...(recordingAssetId ? { recordingAssetId } : {}),
       ...(recordingUrl ? { recordingUrl } : {}),
       completedAt: new Date().toISOString(),
@@ -316,12 +320,54 @@ export async function blockIsolatedWebSocket(route: WebSocketRoute): Promise<voi
   await route.close({ code: 1008, reason: "WebSocket access is disabled in isolated capture." });
 }
 
-export function buildWebsiteIntroduction(startUrl: string, pages: WebsiteCapturePage[]): string {
+export function buildWebsiteEvidence(pages: WebsiteCapturePage[]): WebsiteCaptureEvidence[] {
+  return pages.flatMap((page) => [
+    { url: page.url, pageTitle: page.title, kind: "title" as const, excerpt: page.title },
+    ...(page.description ? [{ url: page.url, pageTitle: page.title, kind: "description" as const, excerpt: page.description }] : []),
+    ...page.headings.slice(0, 8).map((heading) => ({ url: page.url, pageTitle: page.title, kind: "heading" as const, excerpt: heading })),
+    ...page.navigation.slice(0, 8).map((label) => ({ url: page.url, pageTitle: page.title, kind: "navigation" as const, excerpt: label })),
+  ]).slice(0, 128);
+}
+
+export function buildWebsiteClaims(startUrl: string, pages: WebsiteCapturePage[]): WebsiteCaptureClaim[] {
+  const root = pages[0];
+  if (!root) return [{ text: "无法从页面证据确认网站定位、功能或用户路径。", sourceUrls: [], status: "unverified" }];
+  const navigation = [...new Set(pages.flatMap((page) => page.navigation))].slice(0, 12);
+  return [
+    {
+      text: root.description || root.title || new URL(startUrl).hostname,
+      sourceUrls: [root.url],
+      status: "observed",
+    },
+    {
+      text: `已读取 ${pages.length} 个页面，页面标题和摘要如下所列。`,
+      sourceUrls: pages.map((page) => page.url),
+      status: "observed",
+    },
+    {
+      text: navigation.length ? `主导航可能体现以下用户路径：${navigation.join("、")}。` : "未读取到足够主导航，无法推断用户路径。",
+      sourceUrls: pages.filter((page) => page.navigation.length > 0).map((page) => page.url),
+      status: navigation.length ? "inferred" : "unverified",
+    },
+    {
+      text: "登录后功能、后台能力、业务真实性和未读取页面内容无法通过本次公开页面证据验证。",
+      sourceUrls: [],
+      status: "unverified",
+    },
+  ];
+}
+
+export function buildWebsiteIntroduction(startUrl: string, pages: WebsiteCapturePage[], claims = buildWebsiteClaims(startUrl, pages)): string {
   const root = pages[0];
   const siteName = root?.title || new URL(startUrl).hostname;
   const description = root?.description || root?.headings.slice(0, 3).join("、") || "页面未提供可读取的站点简介";
   const pageList = pages.map((page) => `- [${page.title}](${page.url})：${page.description || page.headings.slice(0, 4).join("、") || "页面摘要未提供"}`).join("\n");
   const navigation = [...new Set(pages.flatMap((page) => page.navigation))].slice(0, 12);
+  const claimList = claims.map((claim) => {
+    const source = claim.sourceUrls.length ? `来源：${claim.sourceUrls.map((url) => `[页面](${url})`).join("、")}` : "无可用来源页面";
+    const label = claim.status === "observed" ? "已观测" : claim.status === "inferred" ? "推断" : "无法验证";
+    return `- **${label}**：${claim.text}（${source}）`;
+  }).join("\n");
   return [
     `## ${siteName}`,
     "",
@@ -331,6 +377,9 @@ export function buildWebsiteIntroduction(startUrl: string, pages: WebsiteCapture
     pageList,
     "",
     `**导航线索**：${navigation.length ? navigation.join("、") : "页面未提供可识别的主导航"}。`,
+    "",
+    "**结论与证据边界**：",
+    claimList,
     "",
     `**访问入口**：${startUrl}`,
   ].join("\n");

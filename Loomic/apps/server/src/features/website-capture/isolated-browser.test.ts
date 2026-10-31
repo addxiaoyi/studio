@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { blockIsolatedWebSocket, buildWebsiteIntroduction, isPublicAddress, validatePublicHttpUrl } from "./isolated-browser.js";
+import { blockIsolatedWebSocket, buildWebsiteClaims, buildWebsiteEvidence, buildWebsiteIntroduction, isPublicAddress, validatePublicHttpUrl } from "./isolated-browser.js";
 
 describe("isolated website capture URL policy", () => {
   it.each([
@@ -54,5 +54,30 @@ describe("website capture introduction", () => {
     }]);
     expect(introduction).toContain("https://example.com/about");
     expect(introduction).toContain("未验证页面之外的业务事实");
+  });
+
+  it("returns structured evidence and labels observed, inferred, and unverifiable claims", () => {
+    const page = {
+      url: "https://example.com/about",
+      title: "About",
+      description: "About the company",
+      headings: ["Mission"],
+      navigation: ["Pricing"],
+      assetId: "00000000-0000-0000-0000-000000000001",
+      screenshotUrl: "https://studio.test/api/uploads/a/file",
+    };
+    const evidence = buildWebsiteEvidence([page]);
+    const claims = buildWebsiteClaims("https://example.com", [page]);
+    const introduction = buildWebsiteIntroduction("https://example.com", [page], claims);
+
+    expect(evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "description", url: page.url }),
+      expect.objectContaining({ kind: "heading", excerpt: "Mission" }),
+    ]));
+    expect(claims.map((claim) => claim.status)).toEqual(["observed", "observed", "inferred", "unverified"]);
+    expect(introduction).toContain("**已观测**");
+    expect(introduction).toContain("**推断**");
+    expect(introduction).toContain("**无法验证**");
+    expect(introduction).toContain("https://example.com/about");
   });
 });
