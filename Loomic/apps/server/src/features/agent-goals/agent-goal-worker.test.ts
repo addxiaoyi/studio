@@ -80,4 +80,33 @@ describe("agent goal worker planning", () => {
       expect.anything(),
     );
   });
+
+  it("recreates a task after a failed goal retry transitions back to running", async () => {
+    let latestTaskReads = 0;
+    const query = vi.fn(async (sql: string, _values?: unknown[]) => {
+      if (sql.includes("from agent_goals") && sql.includes("where status in")) {
+        return { rows: [{ ...goal, status: "running" }] };
+      }
+      if (sql.includes("from desktop_agent_tasks") && sql.includes("order by created_at desc")) {
+        latestTaskReads += 1;
+        return {
+          rows: [latestTaskReads === 1
+            ? { id: "old-task", status: "failed", result: null, error_message: "temporary failure" }
+            : { id: "new-task", status: "succeeded", result: { summary: "retried" }, error_message: null }],
+        };
+      }
+      if (sql.includes("update agent_goals") && sql.includes("status=case")) return { rows: [{ id: goal.id, status: "running" }] };
+      if (sql.includes("update desktop_agent_tasks") && sql.includes("status='succeeded'")) return { rows: [] };
+      if (sql.includes("insert into desktop_agent_tasks")) return { rows: [] };
+      return { rows: [] };
+    });
+    const backgroundExecutor = vi.fn().mockResolvedValue({ summary: "retried" });
+    const worker = new AgentGoalWorker({ query } as never, {} as never, 60_000, backgroundExecutor);
+
+    await worker.tick();
+
+    expect(backgroundExecutor).toHaveBeenCalledOnce();
+    const claim = query.mock.calls.find(([sql]) => String(sql).includes("or ($3::boolean and status='running'"));
+    expect(claim?.[1]).toEqual([goal.id, DESKTOP_RETRY_COOLDOWN_SECONDS, true]);
+  });
 });

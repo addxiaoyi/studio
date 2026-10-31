@@ -211,11 +211,19 @@ export class AgentGoalWorker {
     }>(
       `update agent_goals
           set status=case when status='draft' then 'running' else status end,
-              next_attempt_at=case when status='waiting_desktop' then now() + ($2 * interval '1 second') else null end,
+              next_attempt_at=case
+                when status='waiting_desktop' then now() + ($2 * interval '1 second')
+                when $3::boolean then now() + ($2 * interval '1 second')
+                else null
+              end,
               updated_at=now()
-        where id=$1 and (status='draft' or (status='waiting_desktop' and (next_attempt_at is null or next_attempt_at <= now())))
+        where id=$1 and (
+          status='draft'
+          or (status='waiting_desktop' and (next_attempt_at is null or next_attempt_at <= now()))
+          or ($3::boolean and status='running' and next_attempt_at is null)
+        )
       returning id,status`,
-      [goal.id, DESKTOP_RETRY_COOLDOWN_SECONDS],
+      [goal.id, DESKTOP_RETRY_COOLDOWN_SECONDS, Boolean(canRetryTerminalTask)],
     );
     if (!claimed.rows[0]) return;
 

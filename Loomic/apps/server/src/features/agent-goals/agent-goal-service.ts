@@ -223,6 +223,7 @@ export class AgentGoalService {
       `update agent_goals
           set status=$4,
               error_message=case when $4 in ('running','canceled') then null else error_message end,
+              next_attempt_at=case when $4='running' then null else next_attempt_at end,
               updated_at=now(),
               completed_at=case when $5 then now() when $4='running' then null else completed_at end
         where id=$1 and created_by=$2 and workspace_id=$3 and status=$6
