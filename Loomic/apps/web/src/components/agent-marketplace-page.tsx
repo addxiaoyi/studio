@@ -307,12 +307,10 @@ export function AgentMarketplacePage({ locale }: { locale?: DesktopLocale | null
     }
     setLoading(true);
     setError(null);
-    const params = new URLSearchParams();
-    if (kind !== "all") params.set("kind", kind);
     try {
       const headers = { Authorization: "Bearer " + session.access_token };
       const [marketResponse, installed] = await Promise.all([
-        fetch(getServerBaseUrl() + "/api/agent-marketplace?" + params, { headers }),
+        fetch(getServerBaseUrl() + "/api/agent-marketplace", { headers }),
         fetchAgentMarketplaceInstalls(session.access_token),
       ]);
       if (!marketResponse.ok) throw new Error(marketResponse.status === 404 ? copy.marketplace.marketDisabled : copy.marketplace.loadFailed);
@@ -324,7 +322,7 @@ export function AgentMarketplacePage({ locale }: { locale?: DesktopLocale | null
     } finally {
       setLoading(false);
     }
-  }, [copy, kind, session?.access_token]);
+  }, [copy, session?.access_token]);
 
   useEffect(() => {
     void load();
@@ -348,12 +346,13 @@ export function AgentMarketplacePage({ locale }: { locale?: DesktopLocale | null
   const visible = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     return entries.filter((entry) => {
+      if (kind !== "all" && entry.kind !== kind) return false;
       if (tab === "installed" && !installedIds.has(entry.id)) return false;
       if (normalizedQuery && ![entry.name, entry.slug, descriptionForEntry(entry, copy), entry.description]
         .some((value) => value.toLocaleLowerCase().includes(normalizedQuery))) return false;
       return true;
     });
-  }, [copy, entries, installedIds, query, tab]);
+  }, [copy, entries, installedIds, kind, query, tab]);
   const counts = useMemo(() => ({
     all: entries.length,
     skill: entries.filter((entry) => entry.kind === "skill").length,
@@ -430,6 +429,7 @@ export function AgentMarketplacePage({ locale }: { locale?: DesktopLocale | null
       }
       setNotice(formatDesktopCopy(copy.marketplace.installNotice, { name: entry.name }));
       toast.push({ tone: "success", message: formatDesktopCopy(copy.marketplace.installedToast, { name: entry.name }), key: "install:" + entry.id });
+      window.dispatchEvent(new Event("desktop:marketplace-install-changed"));
       await load();
     } catch (cause) {
       setError(messageOf(cause, copy));
@@ -472,6 +472,7 @@ export function AgentMarketplacePage({ locale }: { locale?: DesktopLocale | null
       });
       setNotice(formatDesktopCopy(copy.marketplace.syncedLocal, { name: entry.name }));
       toast.push({ tone: "success", message: formatDesktopCopy(copy.marketplace.installedToast, { name: entry.name }), key: "install:" + entry.id });
+      window.dispatchEvent(new Event("desktop:marketplace-install-changed"));
       await load();
     } catch (cause) {
       setError(messageOf(cause, copy));
@@ -559,6 +560,7 @@ export function AgentMarketplacePage({ locale }: { locale?: DesktopLocale | null
       });
       setNotice(formatDesktopCopy(copy.marketplace.installedAndConnected, { name: item.name }));
       toast.push({ tone: "success", message: formatDesktopCopy(copy.marketplace.installedToast, { name: item.name }), key: "install:" + item.id });
+      window.dispatchEvent(new Event("desktop:marketplace-install-changed"));
       setSetupItem(null);
       setConfig({});
       await load();
@@ -630,6 +632,7 @@ export function AgentMarketplacePage({ locale }: { locale?: DesktopLocale | null
       await removeAgentMarketplaceInstall(session.access_token, entry.id);
       setNotice(formatDesktopCopy(copy.marketplace.uninstalled, { name: entry.name }));
       toast.push({ tone: "success", message: formatDesktopCopy(copy.marketplace.uninstalledToast, { name: entry.name }), key: "uninstall:" + entry.id });
+      window.dispatchEvent(new Event("desktop:marketplace-install-changed"));
       await load();
     } catch (cause) {
       setError(messageOf(cause, copy));
@@ -660,6 +663,7 @@ export function AgentMarketplacePage({ locale }: { locale?: DesktopLocale | null
       await removeAgentMarketplaceInstall(session.access_token, install.item_id);
       setNotice(formatDesktopCopy(copy.marketplace.removed, { name: install.name }));
       toast.push({ tone: "success", message: formatDesktopCopy(copy.marketplace.removedToast, { name: install.name }), key: "remove:" + install.item_id });
+      window.dispatchEvent(new Event("desktop:marketplace-install-changed"));
       await load();
     } catch (cause) {
       setError(messageOf(cause, copy));

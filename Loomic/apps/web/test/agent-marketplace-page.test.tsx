@@ -97,6 +97,23 @@ describe("Agent marketplace installs", () => {
     expect(container.querySelectorAll(".agent-marketplace__card")).toHaveLength(entries.length);
   });
 
+  it("keeps global category counts while filtering the visible list", async () => {
+    const user = userEvent.setup();
+    render(<AgentMarketplacePage />);
+
+    await screen.findByRole("heading", { name: "Frontend Design" });
+    await user.click(screen.getByRole("button", { name: /MCP/ }));
+
+    const kindGroup = screen.getByRole("group", { name: "市场类型" });
+    expect(within(kindGroup).getByRole("button", { name: /全部/ })).toHaveTextContent("全部3");
+    expect(within(kindGroup).getByRole("button", { name: /Skill/ })).toHaveTextContent("Skill1");
+    expect(within(kindGroup).getByRole("button", { name: /MCP/ })).toHaveTextContent("MCP1");
+    expect(within(kindGroup).getByRole("button", { name: /插件/ })).toHaveTextContent("插件1");
+    expect(screen.getByRole("heading", { name: "PostgreSQL MCP" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Frontend Design" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Brand Voice" })).not.toBeInTheDocument();
+  });
+
   it("filters listings by their Chinese introduction text", async () => {
     render(<AgentMarketplacePage />);
     await screen.findByRole("heading", { name: "Frontend Design" });

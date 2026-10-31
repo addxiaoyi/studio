@@ -2704,6 +2704,15 @@ export async function removeAgentMarketplaceInstall(accessToken: string, itemId:
   if (!response.ok) return handleErrorResponse(response);
 }
 
+export async function setAgentMarketplaceEnabled(accessToken: string, itemId: string, enabled: boolean): Promise<void> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/agent-marketplace/${encodeURIComponent(itemId)}/install`, {
+    method: "PATCH",
+    headers: authJsonHeaders(accessToken),
+    body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+}
+
 export async function fetchSkillVersions(accessToken: string, skillId: string) {
   const response = await apiFetch(`${getServerBaseUrl()}/api/skills/${encodeURIComponent(skillId)}/versions`, { headers: authHeaders(accessToken) });
   if (!response.ok) return handleErrorResponse(response);

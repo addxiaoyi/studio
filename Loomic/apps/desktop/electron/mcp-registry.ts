@@ -320,6 +320,25 @@ export class McpRegistry {
     }
   }
 
+  async connectAll(skipIds: ReadonlySet<string> = new Set()) {
+    const servers = await this.readServers();
+    const failures: Array<{ id: string; name: string; message: string }> = [];
+    for (const server of servers) {
+      if (skipIds.has(server.id)) continue;
+      if (this.live.has(server.id)) continue;
+      try {
+        await this.connect(server.id);
+      } catch (error) {
+        failures.push({
+          id: server.id,
+          name: server.name,
+          message: error instanceof Error ? error.message : "MCP connection failed.",
+        });
+      }
+    }
+    return { servers: await this.list(), failures };
+  }
+
   async disconnect(id: string) {
     const active = this.live.get(id);
     if (!active) return this.list();

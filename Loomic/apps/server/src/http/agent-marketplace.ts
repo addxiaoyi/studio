@@ -210,6 +210,36 @@ export function registerAgentMarketplaceRoutes(app: FastifyInstance, options: Op
       : reply.code(404).send({ ok: false, error: { code: "marketplace_install_not_found", message: "This item is not installed." } });
   });
 
+  app.patch("/api/agent-marketplace/:id/install", async (request: any, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return reply.code(401).send({ ok: false, error: { code: "unauthorized", message: "Unauthorized" } });
+    const viewer = await options.viewerService.ensureViewer(user);
+    const body = isRecord(request.body) ? request.body : {};
+    if (typeof body.enabled !== "boolean") return reply.code(400).send({ ok: false, error: { code: "marketplace_enabled_invalid", message: "enabled must be a boolean." } });
+    const { rows } = await options.db.query<{ kind: MarketplaceKind }>("select kind from agent_marketplace_items where id=$1", [request.params.id]);
+    const item = rows[0];
+    if (!item) return reply.code(404).send({ ok: false, error: { code: "marketplace_item_not_found", message: "Marketplace item not found." } });
+    const install = await options.db.query<{ metadata: Record<string, unknown> }>(
+      "select metadata from agent_marketplace_installs where workspace_id=$1 and user_id=$2 and item_id=$3 and status='installed'",
+      [viewer.workspace.id, user.id, request.params.id],
+    );
+    if (!install.rows[0]) return reply.code(404).send({ ok: false, error: { code: "marketplace_install_not_found", message: "This item is not installed." } });
+    const metadata: Record<string, unknown> = { ...(install.rows[0].metadata ?? {}), enabled: body.enabled };
+    if (item.kind === "skill") {
+      const skillId = metadata.skillId;
+      if (typeof skillId !== "string") return reply.code(409).send({ ok: false, error: { code: "skill_install_metadata_missing", message: "The installed Skill is missing its workspace reference." } });
+      await options.db.query(
+        "update workspace_skills set enabled=$1 where workspace_id=$2 and skill_id=$3",
+        [body.enabled, viewer.workspace.id, skillId],
+      );
+    }
+    const updated = await options.db.query(
+      "update agent_marketplace_installs set metadata=$1::jsonb,updated_at=now() where workspace_id=$2 and user_id=$3 and item_id=$4 and status='installed' returning item_id,target,installed_version,status,metadata,installed_at,updated_at",
+      [JSON.stringify(metadata), viewer.workspace.id, user.id, request.params.id],
+    );
+    return { ok: true, data: updated.rows[0] };
+  });
+
   app.get("/api/admin/agent-marketplace", async (request: any, reply) => {
     if (!await requireAdmin(options, request, reply)) return;
     const { rows } = await options.db.query(

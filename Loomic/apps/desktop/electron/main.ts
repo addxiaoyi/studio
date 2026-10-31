@@ -5,11 +5,13 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "path";
 import {
   type DesktopAgentAction,
   type DesktopAgentTask,
+  desktopMarketplaceExtensionInputSchema,
   classifyDesktopAction,
   desktopAgentActionSchema,
   desktopAgentTaskSchema,
   desktopMcpToolCallSchema,
   desktopMcpToolCatalogSchema,
+  type DesktopMarketplaceExtensionInput,
 } from "@helstera/shared";
 import { buildBrowserPairingUrl } from "./browser-pairing.js";
 import {
@@ -56,6 +58,7 @@ import {
   releaseAgentFocusShortcuts,
 } from "./global-shortcut.js";
 import { LocalWorkspace } from "./local-workspace.js";
+import { DesktopExtensionRegistry } from "./desktop-extension-registry.js";
 import { McpRegistry, resolveMarketplaceMcpConfig, type McpServerInput } from "./mcp-registry.js";
 import { RecorderLock } from "./recorder-lock.js";
 import { parseMarketplaceInstallSlug } from "./desktop-marketplace-link.js";
@@ -155,6 +158,7 @@ let localWorkspace: LocalWorkspace | null = null;
 let localWorkspaceSessionId = "";
 const workspaceRuns = new Map<string, AbortController>();
 let mcpRegistry: McpRegistry | null = null;
+let desktopExtensionRegistry: DesktopExtensionRegistry | null = null;
 const desktopMcpCalls = new Map<string, AbortController>();
 
 registerWindowControlHandlers(ipcMain, {
@@ -205,6 +209,40 @@ function requireMcpRegistry(event: Electron.IpcMainInvokeEvent) {
   requireMainWindow(event);
   if (!mcpRegistry) throw new Error("MCP registry is not ready yet.");
   return mcpRegistry;
+}
+
+function requireDesktopExtensionRegistry(event: Electron.IpcMainInvokeEvent) {
+  requireMainWindow(event);
+  if (!desktopExtensionRegistry) throw new Error("Desktop extension registry is not ready yet.");
+  return desktopExtensionRegistry;
+}
+
+function publishDesktopExtensions() {
+  if (!desktopExtensionRegistry || !mainWindow || mainWindow.isDestroyed()) return;
+  void desktopExtensionRegistry.list()
+    .then((extensions) => mainWindow?.webContents.send("desktop:extensions-changed", extensions))
+    .catch((error) => console.warn("[desktop-extensions] could not publish extension state", error));
+}
+
+async function refreshDesktopExtensionMcpStates() {
+  if (!desktopExtensionRegistry || !mcpRegistry) return;
+  const [extensions, servers] = await Promise.all([
+    desktopExtensionRegistry.list(),
+    mcpRegistry.list(),
+  ]);
+  const mcpExtensions = extensions.filter((extension) => extension.kind === "mcp");
+  for (const extension of mcpExtensions) {
+    const configuredName = typeof extension.metadata.localServerName === "string"
+      ? extension.metadata.localServerName
+      : undefined;
+    const server = servers.find((entry) => entry.id === extension.localServerId)
+      ?? (configuredName ? servers.find((entry) => entry.name === configuredName) : undefined);
+    await desktopExtensionRegistry.setLocalServerState(extension.itemId, {
+      exists: Boolean(server),
+      ...(server ? { serverId: server.id } : {}),
+      connected: server?.connected ?? false,
+    });
+  }
 }
 
 function desktopWebsiteUrl() {
@@ -1370,11 +1408,52 @@ async function runDesktopMcpCall(input: unknown) {
   }
 }
 ipcMain.handle("mcp.list", (event) => requireMcpRegistry(event).list());
+ipcMain.handle("desktop.extensions.list", (event) => requireDesktopExtensionRegistry(event).list());
+ipcMain.handle("desktop.extensions.sync", async (event, input: unknown) => {
+  const registry = requireDesktopExtensionRegistry(event);
+  if (!Array.isArray(input) || input.length > 200) throw new Error("Desktop extension sync payload is invalid.");
+  const parsed = input.flatMap((entry) => {
+    const result = desktopMarketplaceExtensionInputSchema.safeParse(entry);
+    return result.success ? [result.data] : [];
+  });
+  if (parsed.length !== input.length) throw new Error("Desktop extension sync payload contains invalid entries.");
+  const extensions = await registry.reconcile(parsed as DesktopMarketplaceExtensionInput[]);
+  publishDesktopExtensions();
+  return extensions;
+});
+ipcMain.handle("desktop.extensions.set-enabled", async (event, input: unknown) => {
+  const registry = requireDesktopExtensionRegistry(event);
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Desktop extension state is required.");
+  const value = input as { itemId?: unknown; enabled?: unknown };
+  if (typeof value.itemId !== "string" || typeof value.enabled !== "boolean") throw new Error("Desktop extension state is invalid.");
+  const current = (await registry.list()).find((extension) => extension.itemId === value.itemId);
+  if (!current) throw new Error("The desktop extension is not installed.");
+  if (current.status === "blocked") {
+    throw new Error(`This extension is blocked by the desktop safety policy. ${current.statusMessage ?? ""}`.trim());
+  }
+  if (value.enabled && current.kind === "mcp" && !current.localServerId) {
+    throw new Error("Install this MCP on the desktop before enabling it.");
+  }
+  if (current.kind === "mcp" && current.localServerId && mcpRegistry) {
+    if (value.enabled) {
+      await mcpRegistry.connect(current.localServerId);
+    } else {
+      await mcpRegistry.disconnect(current.localServerId);
+    }
+    await registry.setConnection(current.itemId, value.enabled);
+  }
+  const extensions = await registry.setEnabled(value.itemId, value.enabled);
+  publishDesktopMcpTools();
+  publishDesktopExtensions();
+  return extensions;
+});
 ipcMain.handle("mcp.add", async (event, input: unknown) => {
   if (!input || typeof input !== "object" || Array.isArray(input))
     throw new Error("MCP server settings are required.");
   const saved = await requireMcpRegistry(event).add(input as McpServerInput);
   publishDesktopMcpTools();
+  await refreshDesktopExtensionMcpStates();
+  publishDesktopExtensions();
   return saved;
 });
 ipcMain.handle("mcp.install-marketplace", async (event, input: unknown) => {
@@ -1411,6 +1490,8 @@ ipcMain.handle("mcp.install-marketplace", async (event, input: unknown) => {
   try {
     const servers = await registry.connect(created.id);
     publishDesktopMcpTools();
+    await refreshDesktopExtensionMcpStates();
+    publishDesktopExtensions();
     return { id: created.id, servers };
   } catch (error) {
     try {
@@ -1427,6 +1508,7 @@ ipcMain.handle("mcp.connect", (event, id: unknown) => {
     .connect(id)
     .then((servers) => {
       publishDesktopMcpTools();
+      void refreshDesktopExtensionMcpStates().then(publishDesktopExtensions);
       return servers;
     });
 });
@@ -1436,6 +1518,7 @@ ipcMain.handle("mcp.disconnect", (event, id: unknown) => {
     .disconnect(id)
     .then((servers) => {
       publishDesktopMcpTools();
+      void refreshDesktopExtensionMcpStates().then(publishDesktopExtensions);
       return servers;
     });
 });
@@ -1445,6 +1528,7 @@ ipcMain.handle("mcp.remove", (event, id: unknown) => {
     .remove(id)
     .then((servers) => {
       publishDesktopMcpTools();
+      void refreshDesktopExtensionMcpStates().then(publishDesktopExtensions);
       return servers;
     });
 });
@@ -3343,11 +3427,31 @@ app.whenReady().then(() => {
     join(app.getPath("userData"), "mcp-registry.json"),
     safeStorage,
   );
+  desktopExtensionRegistry = new DesktopExtensionRegistry(
+    join(app.getPath("userData"), "desktop-extensions.json"),
+  );
   app.setAsDefaultProtocolClient("helstera");
   configureAutoUpdates();
   const startupMarketplaceUrl = process.argv.find((argument) => parseMarketplaceInstallSlug(argument));
   if (startupMarketplaceUrl) pendingMarketplaceInstallSlug = parseMarketplaceInstallSlug(startupMarketplaceUrl);
   createWindow();
+  void desktopExtensionRegistry.list().then(async (extensions) => {
+    const disabledMcpServerIds = new Set(
+      extensions
+        .filter((extension) => extension.kind === "mcp" && (!extension.enabled || extension.status === "blocked"))
+        .flatMap((extension) => extension.localServerId ? [extension.localServerId] : []),
+    );
+    return mcpRegistry!.connectAll(disabledMcpServerIds);
+  }).then(async ({ failures }) => {
+    for (const failure of failures) {
+      console.warn(`[mcp-startup] ${failure.name}: ${failure.message}`);
+    }
+    await refreshDesktopExtensionMcpStates();
+    publishDesktopMcpTools();
+    publishDesktopExtensions();
+  }).catch((error) => {
+    console.warn("[mcp-startup] could not restore installed MCP servers", error);
+  });
   registerAgentFocusShortcut(globalShortcut, {
     onTrigger: focusAgentComposer,
     log: (message, error) =>

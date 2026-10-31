@@ -7,6 +7,7 @@ import { Suspense, useCallback, useEffect, useRef, useState, type FormEvent, typ
 import type { WebsiteCaptureAssistantConnection, WebsiteCapturePairing } from "@helstera/shared";
 
 import { DesktopMcpPanel } from "@/components/desktop-mcp-panel";
+import { DesktopExtensionBridge } from "@/components/desktop-extension-bridge";
 import { AgentMarketplacePage } from "@/components/agent-marketplace-page";
 import { DesktopSettingsPage } from "@/components/desktop-settings-page";
 import { DesktopWorkbench } from "@/components/desktop-workbench";
@@ -471,10 +472,14 @@ function DesktopAdvancedPage({ initialView, locale }: { initialView: "mcp" | "de
 }
 
 function DesktopModule({ active, children }: { active: string; children: ReactNode }) {
+  const { session } = useAuth();
   return (
-    active === "canvas"
-      ? <main className="desktop-canvas-workspace">{children}</main>
-      : <main className="desktop-feature"><section className={`desktop-feature__content desktop-feature__content--${active}`}>{children}</section></main>
+    <>
+      <DesktopExtensionBridge accessToken={session?.access_token ?? ""} />
+      {active === "canvas"
+        ? <main className="desktop-canvas-workspace">{children}</main>
+        : <main className="desktop-feature"><section className={`desktop-feature__content desktop-feature__content--${active}`}>{children}</section></main>}
+    </>
   );
 }
 

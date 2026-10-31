@@ -138,6 +138,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   runWorkspaceScript: (name: string) => ipcRenderer.invoke("workspace.run-script", name),
   cancelWorkspaceScript: (runId: string) => ipcRenderer.invoke("workspace.cancel-script", runId),
   getMcpServers: () => ipcRenderer.invoke("mcp.list"),
+  getDesktopExtensions: () => ipcRenderer.invoke("desktop.extensions.list"),
+  syncDesktopExtensions: (input: DesktopExtensionSyncInput[]) => ipcRenderer.invoke("desktop.extensions.sync", input),
+  setDesktopExtensionEnabled: (input: { itemId: string; enabled: boolean }) => ipcRenderer.invoke("desktop.extensions.set-enabled", input),
+  onDesktopExtensionsChanged: (callback: (extensions: DesktopExtension[]) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, extensions: DesktopExtension[]) => callback(extensions);
+    ipcRenderer.on("desktop:extensions-changed", listener);
+    return () => ipcRenderer.removeListener("desktop:extensions-changed", listener);
+  },
   getPendingMarketplaceInstall: () => ipcRenderer.invoke("desktop.marketplace-install.pending"),
   acknowledgeMarketplaceInstall: (slug: string) => ipcRenderer.invoke("desktop.marketplace-install.acknowledge", slug),
   onMarketplaceInstallRequested: (callback: (slug: string) => void) => {
@@ -212,6 +220,27 @@ type MarketplaceMcpInstall = {
 };
 type McpTool = { name: string; description?: string; inputSchema: { type: "object"; properties?: Record<string, object>; required?: string[] }; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } };
 type McpServer = { id: string; name: string; transport: "stdio" | "http"; command?: string; args?: string[]; cwd?: string; url?: string; connected: boolean; tools: McpTool[] };
+type DesktopExtensionSyncInput = {
+  itemId: string;
+  slug: string;
+  name: string;
+  kind: "skill" | "mcp" | "plugin";
+  target: "workspace" | "desktop";
+  version: string;
+  description: string;
+  sourceUrl: string;
+  manifest: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  localServerId?: string;
+  localConnected?: boolean;
+};
+type DesktopExtension = DesktopExtensionSyncInput & {
+  enabled: boolean;
+  status: "enabled" | "disabled" | "blocked" | "missing" | "disconnected";
+  statusMessage?: string;
+  installedAt: string;
+  updatedAt: string;
+};
 
 // Type declarations for the exposed API
 declare global {
@@ -276,6 +305,10 @@ declare global {
       runWorkspaceScript: (name: string) => Promise<{ runId: string }>;
       cancelWorkspaceScript: (runId: string) => Promise<{ canceled: boolean }>;
       getMcpServers: () => Promise<McpServer[]>;
+      getDesktopExtensions: () => Promise<DesktopExtension[]>;
+      syncDesktopExtensions: (input: DesktopExtensionSyncInput[]) => Promise<DesktopExtension[]>;
+      setDesktopExtensionEnabled: (input: { itemId: string; enabled: boolean }) => Promise<DesktopExtension[]>;
+      onDesktopExtensionsChanged: (callback: (extensions: DesktopExtension[]) => void) => () => void;
       getPendingMarketplaceInstall: () => Promise<string | null>;
       acknowledgeMarketplaceInstall: (slug: string) => Promise<{ ok: boolean }>;
       onMarketplaceInstallRequested: (callback: (slug: string) => void) => () => void;

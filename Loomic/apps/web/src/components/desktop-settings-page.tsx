@@ -8,6 +8,7 @@ import { ArrowRight, FolderOpen, LogOut, Moon, RefreshCw, Sun, Laptop, Trash2 } 
 import { useAuth } from "@/lib/auth-context";
 import { clearLocalAssetFolder, chooseLocalAssetFolder, getLocalAssetFolderState } from "@/lib/local-asset-storage";
 import { CreditUsageHistory } from "@/components/credits/credit-usage-history";
+import { DesktopExtensionPanel } from "@/components/desktop-extension-panel";
 import { useDesktopToast } from "@/components/desktop-toast";
 import {
   formatDesktopCopy,
@@ -267,6 +268,8 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
         <div className="desktop-settings__section-heading"><h2 id="desktop-settings-usage">{copy.settings.usage}</h2><p>{copy.settings.usageHint}</p></div>
         <CreditUsageHistory />
       </section>
+
+      <DesktopExtensionPanel locale={locale} />
 
       <section className="desktop-settings__section" aria-labelledby="desktop-settings-updates">
         <div className="desktop-settings__section-heading"><h2 id="desktop-settings-updates">{copy.settings.updates}</h2><p>{copy.settings.updatesHint}</p></div>

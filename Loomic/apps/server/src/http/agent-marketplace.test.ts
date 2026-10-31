@@ -4,13 +4,14 @@ import { isMarketplaceItemAvailable, registerAgentMarketplaceRoutes } from "./ag
 
 const user = { id: "admin-1", accessToken: "token", email: "admin@example.test", userMetadata: {} };
 
-function buildApi(input: { role?: string; authenticated?: boolean; installs?: Array<Record<string, unknown>> } = {}) {
+function buildApi(input: { role?: string; authenticated?: boolean; installs?: Array<Record<string, unknown>>; itemKind?: "skill" | "mcp" | "plugin"; installMetadata?: Record<string, unknown> } = {}) {
   const app = Fastify();
-  const query = vi.fn(async (sql: string) => {
+  const query = vi.fn(async (sql: string, params?: unknown[]) => {
     if (sql.includes("from app_users")) return { rows: [{ system_role: input.role ?? "admin", workspace_id: "workspace-1" }] };
     if (sql.includes("from agent_marketplace_installs a join")) return { rows: input.installs ?? [] };
     if (sql.includes("from agent_marketplace_items i")) return { rows: [{ id: "item-1", kind: "mcp", name: "Playwright", slug: "playwright", version: "latest", status: "published", manifest: { transport: "stdio", command: "npx", args: ["@playwright/mcp"], token: "must-not-leak" } }] };
-    if (sql.includes("from agent_marketplace_items where id=$1")) return { rows: [{ id: "item-1", kind: "mcp", name: "Playwright", version: "0.0.83", status: "published" }] };
+    if (sql.includes("select metadata from agent_marketplace_installs")) return { rows: [{ metadata: input.installMetadata ?? {} }] };
+    if (sql.includes("from agent_marketplace_items where id=$1")) return { rows: [{ id: "item-1", kind: input.itemKind ?? "mcp", name: "Playwright", version: "0.0.83", status: "published" }] };
     if (sql.includes("from agent_marketplace_installs where workspace_id")) return { rows: [{ item_id: "item-1" }] };
     if (sql.includes("update agent_marketplace_items")) return { rows: [{ id: "item-1", kind: "skill", name: "Frontend Design", version: "1.1", status: "published", manifest: {} }] };
     return { rows: [] };
@@ -100,6 +101,19 @@ describe("agent marketplace routes", () => {
     // pre-existing field survives the projection.
     expect(first?.item_status).toBeUndefined();
     expect(first).toMatchObject({ item_id: "item-hidden", target: "workspace", installed_version: "1.0.0", kind: "plugin", name: "Brand Voice", slug: "brand-voice", status: "installed" });
+    await app.close();
+  });
+
+  it("persists the enabled state and applies it to a declarative plugin install", async () => {
+    const { app, query } = buildApi({ itemKind: "plugin", installMetadata: { module: "declarative-agent-guidance" } });
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/api/agent-marketplace/item-1/install",
+      headers: { authorization: "Bearer session" },
+      payload: { enabled: false },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(query.mock.calls.some(([sql, params]) => sql.includes("update agent_marketplace_installs") && String(params?.[0]).includes('"enabled":false'))).toBe(true);
     await app.close();
   });
 });

@@ -159,6 +159,7 @@ export async function loadLocalWorkspaceSkills(db: Pool, canvasId: string, userI
      join projects p on p.id=c.project_id
      join agent_marketplace_installs a on a.workspace_id=p.workspace_id and a.user_id=$2 and a.target='workspace' and a.status='installed'
      join agent_marketplace_items i on i.id=a.item_id and i.kind='plugin' and i.status='published'
+     and coalesce(a.metadata->>'enabled','true')='true'
      where c.id=$1 and p.archived_at is null
      order by a.installed_at,i.slug`,
     [canvasId, userId],
