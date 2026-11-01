@@ -70,7 +70,7 @@ import { RecorderLock } from "./recorder-lock.js";
 import { parseMarketplaceInstallSlug } from "./desktop-marketplace-link.js";
 import { formatDesktopPlanReview } from "./desktop-plan-review.js";
 import { DesktopActionReceipts } from "./desktop-action-receipts.js";
-import { assistantReconnectDelay, interruptedApprovalRequiresReview, nativeResumeIsReadOnly, shouldReconnectAssistant, verifyNativeResumeAction } from "./assistant-reconnect.js";
+import { assistantReconnectDelay, interruptedApprovalRequiresReview, nativeResumeIsReadOnly, readCurrentEvidence, shouldReconnectAssistant, verifyNativeResumeAction } from "./assistant-reconnect.js";
 import { checkDesktopUpdate, installDesktopUpdate } from "./update-actions.js";
 import { getDesktopUpdatePolicy } from "./update-policy.js";
 import {
@@ -2792,13 +2792,14 @@ async function executeDesktopAgentAction(rawAction: unknown) {
           await (await getActiveWindow()).focus();
         }
       } else if (action.kind === "capture_screen" || action.kind === "read_page") {
-        const evidence = await inspectNativeDesktop({
+        const captured = await readCurrentEvidence(() => inspectNativeDesktop({
           platform: process.platform,
           userDataPath: app.getPath("userData"),
           sessionType: process.env.XDG_SESSION_TYPE,
           preferVision: task.executionMode === "visual_ocr",
-        });
-        if (!resumedExecutionIsCurrent()) return;
+        }), resumedExecutionIsCurrent);
+        if (!captured.current) return;
+        const evidence = captured.evidence;
         sendAssistant({
           type: "desktop_agent.event",
           taskId: action.taskId,

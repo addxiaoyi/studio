@@ -22,6 +22,17 @@ export function nativeResumeIsReadOnly(actions: ReadonlyArray<{ kind: string }>)
   return actions.every((action) => resumableNativeActions.has(action.kind));
 }
 
+export async function readCurrentEvidence<T>(read: () => Promise<T>, isCurrent: () => boolean): Promise<{ current: true; evidence: T } | { current: false }> {
+  if (!isCurrent()) return { current: false };
+  try {
+    const evidence = await read();
+    return isCurrent() ? { current: true, evidence } : { current: false };
+  } catch (error) {
+    if (!isCurrent()) return { current: false };
+    throw error;
+  }
+}
+
 export async function verifyNativeResumeAction<T>(
   action: { kind: string },
   expectedWindow: unknown,

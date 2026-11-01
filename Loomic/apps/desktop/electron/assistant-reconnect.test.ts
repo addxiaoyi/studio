@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assistantReconnectDelay, interruptedApprovalRequiresReview, nativeResumeIsReadOnly, shouldReconnectAssistant, verifyNativeResumeAction } from "./assistant-reconnect.js";
+import { assistantReconnectDelay, interruptedApprovalRequiresReview, nativeResumeIsReadOnly, readCurrentEvidence, shouldReconnectAssistant, verifyNativeResumeAction } from "./assistant-reconnect.js";
 import { matchesUiaWindow } from "./windows-uia.js";
 
 describe("desktop assistant reconnect policy", () => {
@@ -46,5 +46,24 @@ describe("desktop assistant reconnect policy", () => {
     active = true;
     const disconnectedDuringFailure = async () => { active = false; throw new Error("helper unavailable"); };
     expect(await verifyNativeResumeAction({ kind: "read_page" }, original, disconnectedDuringFailure, matchesUiaWindow, () => active)).toBe(false);
+  });
+
+  it("discards evidence and errors when a task is canceled or reconnected during capture", async () => {
+    let generation = 1;
+    let finish!: (value: string) => void;
+    const pending = new Promise<string>((resolve) => { finish = resolve; });
+    const capture = readCurrentEvidence(() => pending, () => generation === 1);
+    generation = 2;
+    finish("old screenshot");
+    expect(await capture).toEqual({ current: false });
+
+    let rejectCapture!: (error: Error) => void;
+    const failing = new Promise<string>((_resolve, reject) => { rejectCapture = reject; });
+    const stale = readCurrentEvidence(() => failing, () => generation === 2);
+    generation = 3;
+    rejectCapture(new Error("capture failed"));
+    expect(await stale).toEqual({ current: false });
+    await expect(readCurrentEvidence(async () => { throw new Error("capture failed"); }, () => true)).rejects.toThrow("capture failed");
+    expect(await readCurrentEvidence(async () => "current screenshot", () => true)).toEqual({ current: true, evidence: "current screenshot" });
   });
 });
