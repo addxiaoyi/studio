@@ -564,6 +564,34 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     expect(saved.outputs).toHaveLength(1);
   });
 
+  it("rolls back outputs and completion when chat writeback fails, then retries without execution", async () => {
+    const goal = await create();
+    await goals.confirm(userId, workspaceId, goal.id);
+    await db.query(`create function reject_test_chat() returns trigger language plpgsql as $$ begin raise exception 'chat failure'; end; $$`);
+    await db.query("create trigger reject_test_chat before insert on chat_messages for each row execute function reject_test_chat()");
+    const executor = vi.fn().mockResolvedValue({ summary: "Recovered chat", localPaths: ["D:/test-assets/chat-recovery.txt"] });
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await new AgentGoalWorker(db, {} as never, 1_000, executor).tick();
+      expect((await goals.get(userId, workspaceId, goal.id)).status).toBe("running");
+      expect((await db.query("select id from agent_goal_outputs where goal_id=$1", [goal.id])).rows).toHaveLength(0);
+      expect((await db.query("select id from agent_goal_events where goal_id=$1 and event_type='goal.completed'", [goal.id])).rows).toHaveLength(0);
+      expect(log).toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+      await db.query("drop trigger reject_test_chat on chat_messages; drop function reject_test_chat()");
+    }
+    const worker = new AgentGoalWorker(db, {} as never, 1_000, executor);
+    await worker.tick();
+    await worker.tick();
+    expect(executor).toHaveBeenCalledOnce();
+    const saved = await goals.get(userId, workspaceId, goal.id);
+    expect(saved.status).toBe("completed");
+    expect(saved.outputs).toHaveLength(1);
+    expect((await db.query("select id from agent_goal_events where goal_id=$1 and event_type='goal.completed'", [goal.id])).rows).toHaveLength(1);
+    expect((await db.query("select id from chat_messages where client_message_id=$1", [`agent-goal:${goal.id}:completed`])).rows).toHaveLength(1);
+  });
+
   it("does not turn a canceled in-flight goal into a completed goal", async () => {
     const goal = await create();
     await goals.confirm(userId, workspaceId, goal.id);
