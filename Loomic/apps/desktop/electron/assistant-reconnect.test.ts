@@ -43,5 +43,8 @@ describe("desktop assistant reconnect policy", () => {
     let active = true;
     const canceledDuringInspect = async () => { active = false; return original; };
     expect(await verifyNativeResumeAction({ kind: "read_page" }, original, canceledDuringInspect, matchesUiaWindow, () => active)).toBe(false);
+    active = true;
+    const disconnectedDuringFailure = async () => { active = false; throw new Error("helper unavailable"); };
+    expect(await verifyNativeResumeAction({ kind: "read_page" }, original, disconnectedDuringFailure, matchesUiaWindow, () => active)).toBe(false);
   });
 });

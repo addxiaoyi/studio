@@ -30,6 +30,12 @@ export async function verifyNativeResumeAction<T>(
   isCurrent: () => boolean,
 ) {
   if (!nativeResumeIsReadOnly([action]) || !isCurrent()) return false;
-  const snapshot = await inspect();
+  let snapshot: T;
+  try {
+    snapshot = await inspect();
+  } catch (error) {
+    if (!isCurrent()) return false;
+    throw error;
+  }
   return isCurrent() && matches(snapshot, expectedWindow);
 }
