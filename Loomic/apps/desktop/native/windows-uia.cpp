@@ -66,6 +66,7 @@ struct Control {
 struct WindowSnapshot {
   HWND hwnd{};
   DWORD pid{};
+  ULONGLONG processStarted{};
   std::wstring title;
   std::vector<Control> controls;
 };
@@ -75,6 +76,14 @@ static WindowSnapshot inspect() {
   snapshot.hwnd = GetForegroundWindow();
   if (!snapshot.hwnd || !IsWindowVisible(snapshot.hwnd)) throw std::runtime_error("No accessible foreground window.");
   GetWindowThreadProcessId(snapshot.hwnd, &snapshot.pid);
+  HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, snapshot.pid);
+  if (process) {
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (GetProcessTimes(process, &created, &exited, &kernel, &user)) {
+      snapshot.processStarted = (static_cast<ULONGLONG>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+    }
+    CloseHandle(process);
+  }
   ComPtr<IUIAutomation> automation;
   check(CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&automation)));
   ComPtr<IUIAutomationElement> root;
@@ -172,7 +181,9 @@ int wmain(int argc, wchar_t** argv) {
       if (argc == 4) writeValue(snapshot, argv[2], argv[3]);
       else {
         char handle[32]; sprintf_s(handle, "%llx", static_cast<unsigned long long>(reinterpret_cast<ULONG_PTR>(snapshot.hwnd)));
-        std::cout << "{\"ok\":true,\"protocol\":1,\"windowId\":\"" << handle << "\",\"pid\":" << snapshot.pid << ",\"title\":" << json(snapshot.title) << ",\"controls\":[";
+        std::cout << "{\"ok\":true,\"protocol\":1,\"windowId\":\"" << handle << "\",\"pid\":" << snapshot.pid;
+        if (snapshot.processStarted) std::cout << ",\"processStarted\":\"" << snapshot.processStarted << "\"";
+        std::cout << ",\"title\":" << json(snapshot.title) << ",\"controls\":[";
         bool first = true;
         for (const auto& control : snapshot.controls) {
           if (!first) std::cout << ','; first = false;

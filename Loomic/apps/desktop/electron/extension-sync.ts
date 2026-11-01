@@ -13,7 +13,7 @@ export function mcpSyncChanges(previous: DesktopMarketplaceExtension[], current:
   ));
   const connect = current.flatMap((extension) => {
     const old = before.get(extension.itemId);
-    return extension.kind === "mcp" && extension.enabled && extension.localServerId && old && !old.enabled
+    return extension.kind === "mcp" && extension.enabled && extension.localServerId && old && (!old.enabled || extension.localConnected === false)
       ? [extension.localServerId]
       : [];
   });

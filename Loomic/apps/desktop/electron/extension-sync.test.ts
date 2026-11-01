@@ -7,6 +7,8 @@ it("disconnects disabled or removed MCPs and reconnects explicitly enabled MCPs"
   expect(mcpSyncChanges([extension], [disabled])).toEqual({ disconnect: ["server-1"], connect: [] });
   expect(mcpSyncChanges([extension], [])).toEqual({ disconnect: ["server-1"], connect: [] });
   expect(mcpSyncChanges([disabled], [extension])).toEqual({ disconnect: [], connect: ["server-1"] });
+  const disconnected = { itemId: "one", kind: "mcp", enabled: true, localServerId: "server-1", localConnected: false } as never;
+  expect(mcpSyncChanges([disconnected], [disconnected])).toEqual({ disconnect: [], connect: ["server-1"] });
 });
 
 it("aborts only the revoked server's in-flight calls", () => {

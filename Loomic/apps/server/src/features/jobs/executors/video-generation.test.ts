@@ -34,7 +34,7 @@ import "./image-generation.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
-function makeDb(options: { canvasId?: string | null; payload?: Record<string, unknown>; connectorDisabled?: boolean } = {}) {
+function makeDb(options: { canvasId?: string | null; payload?: Record<string, unknown>; connectorDisabled?: boolean | (() => boolean) } = {}) {
   const canvasContent = { elements: [] as Record<string, unknown>[] };
   const queries: string[] = [];
   let providerResult: Record<string, unknown> | null = null;
@@ -42,7 +42,10 @@ function makeDb(options: { canvasId?: string | null; payload?: Record<string, un
     query: vi.fn(async (sql: string, values?: unknown[]) => {
       queries.push(sql);
       if (sql.includes("select created_by, workspace_id")) return { rows: [{ created_by: "user-1", workspace_id: "workspace-1", canvas_id: options.canvasId === undefined ? "canvas-1" : options.canvasId, session_id: "session-1", status: "running", payload: options.payload ?? { prompt: "move product", model: "google-vertex/veo-3.1-generate-001", duration: 6 }, provider_result: providerResult }] };
-      if (sql.includes("agent_connector_permissions")) return { rows: options.connectorDisabled ? [{ enabled: false }] : [] };
+      if (sql.includes("agent_connector_permissions")) {
+        const disabled = typeof options.connectorDisabled === "function" ? options.connectorDisabled() : options.connectorDisabled;
+        return { rows: disabled ? [{ enabled: false }] : [] };
+      }
       if (sql.includes("set provider_result")) { providerResult = values?.[0] as Record<string, unknown>; return { rows: [] }; }
       if (sql.includes("insert into asset_objects")) return { rows: [{ id: "asset-1" }] };
       if (sql.includes("select content from canvases")) return { rows: [{ content: canvasContent }] };
@@ -73,6 +76,39 @@ function makeContext(db: Pool, storage: { upload: ReturnType<typeof vi.fn>; getP
 }
 
 describe("video generation worker persistence", () => {
+  it("persists a provider response when the connector is revoked after submission", async () => {
+    let disabled = false;
+    const { db, getProviderResult } = makeDb({ canvasId: null, connectorDisabled: () => disabled });
+    const storage = {
+      upload: vi.fn().mockResolvedValue({ error: null }),
+      getPublicUrl: vi.fn().mockResolvedValue({ data: { signedUrl: "https://assets.test/result.mp4" }, error: null }),
+    };
+    generateConfiguredVideoMock.mockImplementationOnce(async () => {
+      disabled = true;
+      return { url: "data:video/mp4;base64,AQID", mimeType: "video/mp4", width: 1280, height: 720, durationSeconds: 6 };
+    });
+    await expect(getExecutor("video_generation")!("job-in-flight", {}, makeContext(db, storage)))
+      .resolves.toMatchObject({ asset_id: "asset-1" });
+    expect(disabled).toBe(true);
+    expect(getProviderResult()).toMatchObject({ mimeType: "video/mp4" });
+    expect(storage.upload).toHaveBeenCalledOnce();
+    generateConfiguredVideoMock.mockClear();
+  });
+  it.each(["image_generation", "video_generation"])("blocks %s when revoked during preparation", async (kind) => {
+    let checks = 0;
+    const { db } = makeDb({ canvasId: null, connectorDisabled: () => ++checks > 1 });
+    const storage = { upload: vi.fn(), getPublicUrl: vi.fn() };
+    if (kind === "image_generation") resolveImageModelMock.mockResolvedValueOnce({ model_id: "test-model" });
+    const imageCalls = generateConfiguredImageMock.mock.calls.length;
+    const videoCalls = generateConfiguredVideoMock.mock.calls.length;
+    await expect(getExecutor(kind as "image_generation" | "video_generation")!("job-revoked-during-preparation", {}, makeContext(db, storage)))
+      .rejects.toMatchObject({ code: "connector_disabled" });
+    expect(checks).toBe(2);
+    expect(generateConfiguredImageMock).toHaveBeenCalledTimes(imageCalls);
+    expect(generateConfiguredVideoMock).toHaveBeenCalledTimes(videoCalls);
+    expect(storage.upload).not.toHaveBeenCalled();
+    resolveImageModelMock.mockClear();
+  });
   it.each(["image_generation", "video_generation"])("blocks a queued %s job after connector revocation", async (kind) => {
     const { db } = makeDb({ canvasId: null, connectorDisabled: true });
     const storage = { upload: vi.fn(), getPublicUrl: vi.fn() };

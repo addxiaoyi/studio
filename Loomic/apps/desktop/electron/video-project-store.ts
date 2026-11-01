@@ -1,12 +1,13 @@
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { videoProjectSchema, type VideoProject } from "@helstera/shared";
 
 const PROJECTS_DIRECTORY = "video-projects";
 
 function projectDirectory(projectsRoot: string, projectId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(projectId)) throw new Error("Invalid video project id.");
-  return join(userDataPath, PROJECTS_DIRECTORY, projectId);
+  return join(projectsRoot, projectId);
 }
 
 export class VideoProjectStore {
@@ -21,7 +22,7 @@ export class VideoProjectStore {
     const parsed = videoProjectSchema.parse(project);
     const directory = projectDirectory(this.root, parsed.projectId);
     await mkdir(directory, { recursive: true });
-    const temporary = join(directory, "project.json.tmp");
+    const temporary = join(directory, `project.${randomUUID()}.tmp`);
     const target = join(directory, "project.json");
     await writeFile(temporary, JSON.stringify(parsed, null, 2), { encoding: "utf8", flag: "wx" });
     await rename(temporary, target);

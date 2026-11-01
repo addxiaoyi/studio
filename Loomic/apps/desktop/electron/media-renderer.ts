@@ -69,8 +69,12 @@ export function runFfmpeg(args: readonly string[], options: FfmpegOptions = {}):
 
     child.stdout?.on("data", (chunk: Buffer | string) => { stdout += chunk.toString(); });
     child.stderr?.on("data", (chunk: Buffer | string) => { stderr += chunk.toString(); });
-    child.once("error", (error) => finish(new Error("FFmpeg failed to run.", { cause: error })));
-    child.once("close", (code) => {
+    const events = child as ChildProcess & {
+      once(event: "error", listener: (error: Error) => void): void;
+      once(event: "close", listener: (code: number | null) => void): void;
+    };
+    events.once("error", (error) => finish(new Error("FFmpeg failed to run.", { cause: error })));
+    events.once("close", (code) => {
       if (code === 0) finish(null, { code: 0, stdout, stderr });
       else finish(new Error(`FFmpeg exited with code ${code ?? "unknown"}: ${stderr.trim() || "no error output"}`));
     });

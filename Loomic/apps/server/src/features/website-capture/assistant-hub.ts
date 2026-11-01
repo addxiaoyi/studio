@@ -1695,6 +1695,7 @@ export class WebsiteAssistantHub {
     const safeResult = {
       ...(event.result?.summary ? { summary: event.result.summary } : {}),
       ...(event.result?.windowTitle ? { windowTitle: event.result.windowTitle } : {}),
+      ...(event.result?.windowIdentity ? { windowIdentity: event.result.windowIdentity } : {}),
       ...(event.result?.controls ? { controls: event.result.controls } : {}),
       ...(event.result?.page ? { page: event.result.page } : {}),
       ...(screenshotAsset ? { screenshotAsset } : {}),
@@ -1709,10 +1710,16 @@ export class WebsiteAssistantHub {
         `with consumed as (update desktop_agent_approvals set status='executed',consumed_at=now()
           where id=$1 and task_id=$2 and connection_id=$3 and status='approved' and expires_at>now() and approval_token_hash=$4
             and action=($5::jsonb - 'approvalId' - 'approvalToken')
-          returning id,task_id), recorded as (
+            and exists (select 1 from desktop_agent_tasks t where t.id=task_id and t.checkpoint->'action'->>'approvalId'=desktop_agent_approvals.id::text)
+          returning id,task_id,action), recorded as (
             update desktop_agent_tasks t set checkpoint=jsonb_set(coalesce(t.checkpoint,'{}'::jsonb),'{action,state}',to_jsonb($6::text)),updated_at=now()
               from consumed c where t.id=c.task_id and t.checkpoint->'action'->>'approvalId'=c.id::text returning t.id
-          ) select id from consumed`,
+          ), logged as (
+            insert into desktop_agent_events(task_id,event_type,detail,payload)
+            select c.task_id,'action_receipt','Desktop action receipt recorded',
+              jsonb_build_object('approvalId',c.id,'requestId',c.action->>'requestId','kind',c.action->>'kind','state',$6::text)
+            from consumed c join recorded r on r.id=c.task_id returning task_id
+          ) select c.id from consumed c join logged l on l.task_id=c.task_id`,
         [
           event.approvalId,
           event.taskId,
@@ -1740,9 +1747,10 @@ export class WebsiteAssistantHub {
       ],
     );
     const terminal = ["completed", "failed", "canceled"].includes(event.eventType);
-    const checkpoint = event.stepId || event.progress !== undefined
-      ? { stepId: event.stepId ?? null, progress: event.progress ?? null, eventType: event.eventType }
-      : {};
+    const checkpoint = {
+      ...(event.stepId || event.progress !== undefined ? { stepId: event.stepId ?? null, progress: event.progress ?? null, eventType: event.eventType } : {}),
+      ...(event.result?.windowIdentity ? { windowIdentity: event.result.windowIdentity } : {}),
+    };
     const resumeToken = event.stepId ? `${event.taskId}:${event.stepId}` : `${event.taskId}:${event.eventType}`;
     const updated = await this.options.db.query<{ id: string }>(
       `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb when $6::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $6::jsonb else result end,error_message=case when $2 in ('failed','canceled') then $5 else null end,checkpoint=case when $7::jsonb <> '{}'::jsonb then coalesce(checkpoint,'{}'::jsonb) || $7::jsonb else checkpoint end,resume_token=case when $8 <> '' then $8 else resume_token end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1 and status in ('queued','running','waiting_approval') returning id`,
@@ -1766,6 +1774,14 @@ export class WebsiteAssistantHub {
     if (!updated.rows[0]) {
       await this.cleanupTaskAssets(task.id);
       return;
+    }
+    if (event.eventType === "progress" && event.approvalId && event.action?.approvalToken) {
+      this.send(live, {
+        type: "desktop_agent.action_recorded",
+        taskId: event.taskId,
+        approvalId: event.approvalId,
+        requestId: event.action.requestId,
+      });
     }
     if (terminal) {
       this.clearDesktopTaskTimer(event.taskId);

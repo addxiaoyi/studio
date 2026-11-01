@@ -169,6 +169,7 @@ registerExecutor("video_generation", async (jobId, _rawPayload, ctx: ExecutorCon
       ? providerCheckpoint
       : null;
     if (!generated) {
+    if (ctx.localDb) await assertConnectorEnabled(ctx.localDb, workspaceId, createdBy!, "media-generation");
     const configuredVideo = ctx.localDb
       ? await generateConfiguredVideo(ctx.localDb, model, {
           prompt: payload.prompt,

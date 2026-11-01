@@ -82,6 +82,9 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     const internals = hub as unknown as { connections: Map<string, unknown>; handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void>; recoverDesktopAgentTasks(live: unknown): Promise<void> };
     internals.connections.set(connectionId, live);
+    const windowIdentity = { windowId: "ab12", pid: 42, processStarted: "133000000000000000" };
+    await internals.handleDesktopAgentEvent(live, { taskId, eventType: "step", stepId: "inspect-native-window", result: { windowIdentity } });
+    expect((await db.query("select checkpoint from desktop_agent_tasks where id=$1", [taskId])).rows[0].checkpoint.windowIdentity).toEqual(windowIdentity);
     await internals.handleDesktopAgentEvent(live, { taskId, eventType: "approval_required", action });
     const approvalId = (await db.query<{ id: string }>("select id from desktop_agent_approvals where task_id=$1", [taskId])).rows[0]!.id;
     await db.query("insert into agent_connector_permissions(id,workspace_id,user_id,connector_id,enabled,permissions) values($1,$2,$3,'desktop-agent',false,'[]'::jsonb)", [randomUUID(), workspaceId, userId]);
@@ -107,12 +110,26 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     await receipt(approved);
     expect(await status()).toBe("approved");
     await db.query("update desktop_agent_approvals set expires_at=now()+interval '1 minute' where id=$1", [approvalId]);
+    await db.query("alter table desktop_agent_events add constraint test_reject_action_receipt check (event_type <> 'action_receipt') not valid");
+    try {
+      await expect(receipt(approved)).rejects.toThrow();
+      expect(await status()).toBe("approved");
+      expect((await db.query("select checkpoint from desktop_agent_tasks where id=$1", [taskId])).rows[0].checkpoint.action.state).toBe("dispatched");
+      expect(sent.some((message) => message.type === "desktop_agent.action_recorded")).toBe(false);
+    } finally {
+      await db.query("alter table desktop_agent_events drop constraint test_reject_action_receipt");
+    }
     await receipt(approved);
     expect(await status()).toBe("executed");
     expect((await db.query("select checkpoint from desktop_agent_tasks where id=$1", [taskId])).rows[0].checkpoint.action.state).toBe("completed");
+    expect(sent.filter((message) => message.type === "desktop_agent.action_recorded")).toHaveLength(1);
     await receipt(approved);
     const events = await db.query("select id from desktop_agent_events where task_id=$1 and event_type='progress'", [taskId]);
     expect(events.rows).toHaveLength(1);
+    const receipts = await db.query("select payload from desktop_agent_events where task_id=$1 and event_type='action_receipt'", [taskId]);
+    expect(receipts.rows).toHaveLength(1);
+    expect(receipts.rows[0].payload).toMatchObject({ approvalId, requestId: action.requestId, kind: action.kind, state: "completed" });
+    expect(sent.filter((message) => message.type === "desktop_agent.action_recorded")).toHaveLength(1);
     await db.query("update desktop_agent_tasks set status='failed',checkpoint=jsonb_set(checkpoint,'{action,state}',to_jsonb('uncertain'::text)) where id=$1", [taskId]);
     await db.query("update agent_goals set status='failed' where id=$1", [goal.id]);
     await db.query("update website_capture_connections set disconnected_at=null where id=$1", [connectionId]);

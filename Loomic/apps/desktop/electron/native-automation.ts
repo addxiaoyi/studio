@@ -89,6 +89,7 @@ export type NativeWindowNode = {
 
 export type NativeDesktopEvidence = {
   windowTitle: string;
+  windowIdentity?: { windowId: string; pid: number; processStarted: string };
   windowRegion: { left: number; top: number; width: number; height: number };
   controls: Array<{ title: string; role?: string; enabled?: boolean; focused?: boolean }>;
   ocrText: string;
@@ -207,6 +208,7 @@ export async function inspectNativeDesktop(options: {
     const pixelScale = windowRegion.width > 0 ? screenshotWidth / windowRegion.width : 1;
     return {
       windowTitle: (await activeWindow.title).slice(0, 300),
+      ...(windowsSnapshot?.processStarted ? { windowIdentity: { windowId: windowsSnapshot.windowId, pid: windowsSnapshot.pid, processStarted: windowsSnapshot.processStarted } } : {}),
       windowRegion: {
         left: windowRegion.left,
         top: windowRegion.top,

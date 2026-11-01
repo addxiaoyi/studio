@@ -12,8 +12,8 @@ function fakeProcess() {
 
 describe("media renderer", () => {
   it("resolves the packaged FFmpeg path per platform", () => {
-    expect(resolveFfmpegPath("C:/resources", "win32")).toContain("ffmpeg/win-x64/ffmpeg.exe");
-    expect(resolveFfmpegPath("/resources", "linux")).toContain("ffmpeg/linux-x64/ffmpeg");
+    expect(resolveFfmpegPath("C:/resources", "win32").replaceAll("\\", "/")).toContain("ffmpeg/win-x64/ffmpeg.exe");
+    expect(resolveFfmpegPath("/resources", "linux").replaceAll("\\", "/")).toContain("ffmpeg/linux-x64/ffmpeg");
   });
 
   it("returns output for a successful render", async () => {

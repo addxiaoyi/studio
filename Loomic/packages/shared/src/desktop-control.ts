@@ -138,6 +138,11 @@ export const desktopAgentEventSchema = z.object({
     }).optional(),
     summary: z.string().max(8_000).optional(),
     windowTitle: z.string().max(300).optional(),
+    windowIdentity: z.object({
+      windowId: z.string().regex(/^[a-f0-9]{1,16}$/),
+      pid: z.number().int().positive().safe(),
+      processStarted: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    }).strict().optional(),
     controls: z.array(z.object({
       title: z.string().max(300),
       role: z.string().max(80).optional(),

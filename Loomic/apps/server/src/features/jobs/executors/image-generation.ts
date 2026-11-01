@@ -106,6 +106,7 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
     try {
       if (generated) lap("provider_checkpoint_restored");
       else {
+      if (ctx.localDb) await assertConnectorEnabled(ctx.localDb, workspaceId, createdBy!, "media-generation");
       generated = ctx.localDb
         ? await generateConfiguredImage(ctx.localDb, model, {
             prompt: payload.prompt,

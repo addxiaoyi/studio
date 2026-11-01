@@ -15,7 +15,7 @@ import {
 } from "@helstera/shared";
 import { buildBrowserPairingUrl } from "./browser-pairing.js";
 import { readAssetFolderStatus, verifyAssetFolder } from "./asset-folder.js";
-import { configureWindowsUia } from "./windows-uia.js";
+import { configureWindowsUia, inspectWindowsUia, matchesUiaWindow } from "./windows-uia.js";
 import { executeBrowserDomAction } from "./browser-dom-action.js";
 import { DesktopActionApprovals } from "./desktop-action-approval.js";
 import {
@@ -69,6 +69,7 @@ import { McpRegistry, resolveMarketplaceMcpConfig, type McpServerInput } from ".
 import { RecorderLock } from "./recorder-lock.js";
 import { parseMarketplaceInstallSlug } from "./desktop-marketplace-link.js";
 import { formatDesktopPlanReview } from "./desktop-plan-review.js";
+import { DesktopActionReceipts } from "./desktop-action-receipts.js";
 import { assistantReconnectDelay, shouldReconnectAssistant } from "./assistant-reconnect.js";
 import { checkDesktopUpdate, installDesktopUpdate } from "./update-actions.js";
 import { getDesktopUpdatePolicy } from "./update-policy.js";
@@ -106,6 +107,7 @@ type PendingRecordingUpload = {
 const pendingRecordingUploads = new Map<string, PendingRecordingUpload>();
 const desktopAgentTasks = new Map<string, DesktopAgentTask>();
 const desktopAgentPlans = new Map<string, DesktopAgentAction[]>();
+const pendingDesktopActionReceipts = new DesktopActionReceipts();
 const desktopActionApprovals = new DesktopActionApprovals();
 const desktopAgentRounds = new Map<string, number>();
 const desktopAgentDeadlineWarnings = new Set<string>();
@@ -2246,6 +2248,7 @@ function isNativeDesktopTask(task: DesktopAgentTask) {
 }
 
 function finishDesktopAgentTask(taskId: string) {
+  pendingDesktopActionReceipts.clear(taskId);
   desktopActionApprovals.clearTask(taskId);
   desktopAgentPlans.delete(taskId);
   desktopAgentTasks.delete(taskId);
@@ -2451,6 +2454,7 @@ async function runDesktopAgentTask(rawTask: unknown) {
         result: {
           summary,
           windowTitle: evidence.windowTitle,
+          ...(evidence.windowIdentity ? { windowIdentity: evidence.windowIdentity } : {}),
           controls: evidence.controls,
           evidence: [{ kind: "window", title: evidence.windowTitle, excerpt: controls.slice(0, 4_000) }],
           screenshotBase64: evidence.screenshotBase64,
@@ -2570,7 +2574,18 @@ async function resumeDesktopAgentTasks(rawTasks: unknown) {
 
     desktopAgentTasks.set(task.taskId, task);
     if (isNativeDesktopTask(task)) {
-      desktopTaskTabs.set(task.taskId, null);
+      const taskRecord = resume.task as { checkpoint?: { windowIdentity?: unknown } };
+      let sameWindow = false;
+      if (process.platform === "win32" && taskRecord.checkpoint?.windowIdentity) {
+        try { sameWindow = matchesUiaWindow(await inspectWindowsUia(), taskRecord.checkpoint.windowIdentity); }
+        catch (error) { console.warn("[desktop-agent] window identity verification failed", error instanceof Error ? error.message : "unknown error"); }
+      }
+      const detail = sameWindow
+        ? "The original window and process were verified, but the interrupted action still requires review. Pending approvals cannot be reused."
+        : "The original window and process could not be verified. Review the saved evidence before retrying; pending approvals cannot be reused.";
+      sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "failed", detail });
+      finishDesktopAgentTask(task.taskId);
+      continue;
     } else {
       const browser = embeddedBrowserWindow && !embeddedBrowserWindow.isDestroyed()
         ? embeddedBrowserWindow
@@ -2606,12 +2621,6 @@ async function resumeDesktopAgentTasks(rawTasks: unknown) {
     }
 
     desktopAgentInterruptedTasks.add(task.taskId);
-    if (isNativeDesktopTask(task)) {
-      sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "failed", detail: "The connection was interrupted and the last native action may have completed. Review the target and task history before retrying." });
-      finishDesktopAgentTask(task.taskId);
-      continue;
-    }
-
     const safeActions: DesktopAgentAction[] = [];
     if (task.capabilities.includes("browser.read")) safeActions.push({ taskId: task.taskId, requestId: `${task.taskId}:recovery:read`, kind: "read_page" });
     if (task.capabilities.includes("browser.capture")) safeActions.push({ taskId: task.taskId, requestId: `${task.taskId}:recovery:capture`, kind: "capture_screen" });
@@ -2802,6 +2811,9 @@ async function executeDesktopAgentAction(rawAction: unknown) {
       throw new Error("该桌面动作暂未实现。");
     }
     }
+    if (action.approvalId) {
+      pendingDesktopActionReceipts.register(action.taskId, action.approvalId, action.requestId);
+    }
     sendAssistant({
       type: "desktop_agent.event",
       taskId: action.taskId,
@@ -2811,6 +2823,7 @@ async function executeDesktopAgentAction(rawAction: unknown) {
       ...(action.approvalId ? { approvalId: action.approvalId } : {}),
       action: { ...action, approvalToken: action.approvalToken },
     });
+    if (action.approvalId) return;
     const pending = desktopAgentPlans.get(action.taskId);
     if (pending?.[0]?.requestId === action.requestId) pending.shift();
     await continueDesktopAgentPlan(action.taskId);
@@ -3154,6 +3167,17 @@ function connectEmbeddedAssistant(wssUrl: string, code: string, retrying = false
         detail: String(message.reason ?? "The approved action was denied."),
       });
       finishDesktopAgentTask(taskId);
+      return;
+    }
+    if (message.type === "desktop_agent.action_recorded") {
+      const taskId = String(message.taskId ?? "");
+      if (!pendingDesktopActionReceipts.consume(taskId, message.approvalId, message.requestId)) return;
+      const pending = desktopAgentPlans.get(taskId);
+      if (pending && pending[0]?.requestId === message.requestId) pending.shift();
+      void continueDesktopAgentPlan(taskId).catch((error) => {
+        sendAssistant({ type: "desktop_agent.event", taskId, eventType: "failed", detail: error instanceof Error ? error.message : "Unable to continue the desktop plan." });
+        finishDesktopAgentTask(taskId);
+      });
       return;
     }
     if (message.type === "desktop.mcp.call") void runDesktopMcpCall(message);

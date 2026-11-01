@@ -4,6 +4,7 @@ import { access } from "node:fs/promises";
 export type UiaSnapshot = {
   windowId: string;
   pid: number;
+  processStarted?: string;
   title: string;
   controls: Array<{ title: string; role: string; isPassword: boolean; isEnabled: boolean; isFocused: boolean }>;
 };
@@ -15,7 +16,7 @@ export function parseUiaSnapshot(value: unknown): UiaSnapshot {
   if (!value || typeof value !== "object") throw new Error("Invalid Windows accessibility response.");
   const snapshot = value as Record<string, unknown>;
   if (snapshot.ok !== true || snapshot.protocol !== 1 || typeof snapshot.windowId !== "string" || !/^[a-f0-9]{1,16}$/.test(snapshot.windowId) ||
-    !Number.isSafeInteger(snapshot.pid) || Number(snapshot.pid) <= 0 || typeof snapshot.title !== "string" || snapshot.title.length > 300 ||
+    !Number.isSafeInteger(snapshot.pid) || Number(snapshot.pid) <= 0 || (snapshot.processStarted !== undefined && (typeof snapshot.processStarted !== "string" || !/^[1-9][0-9]{0,19}$/.test(snapshot.processStarted))) || typeof snapshot.title !== "string" || snapshot.title.length > 300 ||
     !Array.isArray(snapshot.controls) || snapshot.controls.length > 240) throw new Error("Invalid Windows accessibility response.");
   for (const item of snapshot.controls) {
     if (!item || typeof item !== "object" || typeof item.title !== "string" || item.title.length > 300 ||
@@ -24,6 +25,12 @@ export function parseUiaSnapshot(value: unknown): UiaSnapshot {
     }
   }
   return snapshot as unknown as UiaSnapshot;
+}
+
+export function matchesUiaWindow(snapshot: UiaSnapshot | null, value: unknown): boolean {
+  if (!snapshot?.processStarted || !value || typeof value !== "object") return false;
+  const identity = value as Record<string, unknown>;
+  return identity.windowId === snapshot.windowId && identity.pid === snapshot.pid && identity.processStarted === snapshot.processStarted;
 }
 
 async function invoke(args: string[], input?: Buffer): Promise<unknown> {
