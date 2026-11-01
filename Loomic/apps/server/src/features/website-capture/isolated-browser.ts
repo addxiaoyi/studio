@@ -45,7 +45,7 @@ type PageFacts = Omit<WebsiteCapturePage, "assetId" | "screenshotUrl"> & {
   height: number;
 };
 
-const PAGE_FACTS_SCRIPT = String.raw`(maxHeadings) => {
+export const PAGE_FACTS_SCRIPT = String.raw`(maxHeadings) => {
   const document = globalThis.document;
   const location = globalThis.location;
   const clean = (value) => (value ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
@@ -473,7 +473,7 @@ async function fulfillPublicReadOnlyRequest(route: Route): Promise<number> {
   }
 }
 
-function abortResponseBody(body: NodeJS.ReadableStream) {
+export function abortResponseBody(body: NodeJS.ReadableStream) {
   body.once("error", () => undefined);
   if ("destroy" in body && typeof body.destroy === "function") {
     body.destroy();

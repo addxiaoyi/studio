@@ -1,0 +1,42 @@
+name: Website Capture CI
+
+on:
+  push:
+    branches: [master, main, 'codex/**']
+    paths:
+      - 'Loomic/apps/server/**'
+      - 'Loomic/packages/shared/**'
+      - 'Loomic/pnpm-lock.yaml'
+      - '.github/workflows/website-capture-ci.yml'
+  pull_request:
+    paths:
+      - 'Loomic/apps/server/**'
+      - 'Loomic/packages/shared/**'
+      - 'Loomic/pnpm-lock.yaml'
+      - '.github/workflows/website-capture-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chromium:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: Loomic
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @helstera/shared build
+      - name: Install Chromium and system dependencies
+        run: pnpm --filter @helstera/server exec playwright install --with-deps chromium
+      - name: Run real browser regression
+        run: pnpm --filter @helstera/server exec vitest run src/features/website-capture/isolated-browser.integration.test.ts
