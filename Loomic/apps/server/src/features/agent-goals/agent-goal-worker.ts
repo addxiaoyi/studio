@@ -180,6 +180,10 @@ export class AgentGoalWorker {
           where status = 'running'
              or (status='waiting_desktop'
                  and (next_attempt_at is null or next_attempt_at <= now()))
+             or (status='waiting_approval' and (
+               select t.status from desktop_agent_tasks t
+                where t.goal_id=agent_goals.id order by t.created_at desc limit 1
+             )='succeeded')
           order by updated_at asc
           limit 20`,
       );
@@ -196,7 +200,7 @@ export class AgentGoalWorker {
           if (!locked) continue;
           // Recheck after locking: another worker or the user may have changed it.
           const current = await client.query<GoalRow>(
-            "select * from agent_goals where id=$1 and status in ('running','waiting_desktop') and execution_policy='approval_required'",
+            "select * from agent_goals where id=$1 and status in ('running','waiting_desktop','waiting_approval') and execution_policy='approval_required'",
             [goal.id],
           );
           if (current.rows[0]) {
@@ -230,8 +234,9 @@ class GoalExecution {
   ) {}
 
   async process(goal: GoalRow) {
-    if (!["running", "waiting_desktop"].includes(goal.status) || goal.execution_policy !== "approval_required") return;
+    if (!["running", "waiting_desktop", "waiting_approval"].includes(goal.status) || goal.execution_policy !== "approval_required") return;
     const task = await this.latestTask(goal.id);
+    if (goal.status === "waiting_approval" && task?.status !== "succeeded") return;
     const canRetryTerminalTask =
       task &&
       ["failed", "canceled"].includes(task.status) &&

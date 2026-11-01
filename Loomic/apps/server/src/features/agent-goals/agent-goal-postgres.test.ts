@@ -460,6 +460,47 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     }
   }, 30_000);
 
+  it.each(["running", "waiting_approval"])("finalizes a desktop result through the worker from %s", async (status) => {
+    const goal = await create();
+    await goals.confirm(userId, workspaceId, goal.id);
+    const pairingId = randomUUID();
+    const connectionId = randomUUID();
+    const taskId = randomUUID();
+    await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,planned_actions,goal_id,chat_session_id) values($1,$2,$3,$4,'Test','operator','[]'::jsonb,'running','[]'::jsonb,$5,$6)", [taskId, workspaceId, userId, connectionId, goal.id, sessionId]);
+    await db.query("update agent_goals set status=$2 where id=$1", [goal.id, status]);
+    const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: vi.fn() } };
+    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const internals = hub as unknown as { handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void> };
+    await internals.handleDesktopAgentEvent(live, { taskId, eventType: "completed", result: { summary: "Desktop result" } });
+    expect((await db.query("select status from agent_goals where id=$1", [goal.id])).rows[0].status).toBe(status);
+    const worker = new AgentGoalWorker(db, { createDesktopAgentTask: vi.fn() });
+    await worker.tick();
+    await worker.tick();
+    const saved = await goals.get(userId, workspaceId, goal.id);
+    expect(saved.status).toBe("completed");
+    expect(saved.result?.summary).toBe("Desktop result");
+    expect(saved.activities.filter((event) => event.eventType === "goal.completed")).toHaveLength(1);
+    expect((await db.query("select id from chat_messages where client_message_id=$1", [`agent-goal:${goal.id}:completed`])).rows).toHaveLength(1);
+  });
+
+  it("does not replace a canceled goal with a late desktop failure", async () => {
+    const goal = await create();
+    const pairingId = randomUUID();
+    const connectionId = randomUUID();
+    const taskId = randomUUID();
+    await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,planned_actions,goal_id) values($1,$2,$3,$4,'Test','operator','[]'::jsonb,'running','[]'::jsonb,$5)", [taskId, workspaceId, userId, connectionId, goal.id]);
+    await db.query("update agent_goals set status='canceled' where id=$1", [goal.id]);
+    const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: vi.fn() } };
+    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const internals = hub as unknown as { handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void> };
+    await internals.handleDesktopAgentEvent(live, { taskId, eventType: "failed", detail: "Late failure" });
+    expect((await goals.get(userId, workspaceId, goal.id)).status).toBe("canceled");
+  });
+
   it("requires confirmation, dispatches only once across workers, and writes outputs/chat once", async () => {
     const goal = await create();
     expect(agentGoalSchema.safeParse(goal).success).toBe(true);

@@ -1843,10 +1843,10 @@ export class WebsiteAssistantHub {
     }
     if (terminal) {
       this.clearDesktopTaskTimer(event.taskId);
-      if (task.goal_id) {
+      if (task.goal_id && event.eventType !== "completed") {
         await this.options.db.query(
-          `update agent_goals set status=$2,result=case when $3::jsonb <> '{}'::jsonb then $3::jsonb else result end,error_message=case when $2='failed' then $4 else null end,updated_at=now(),completed_at=case when $2 in ('completed','failed','canceled') then now() else completed_at end where id=$1`,
-          [task.goal_id, event.eventType === "completed" ? "completed" : event.eventType, JSON.stringify(safeResult), event.detail ?? null],
+          `update agent_goals set status=$2,result=case when $3::jsonb <> '{}'::jsonb then $3::jsonb else result end,error_message=case when $2='failed' then $4 else null end,updated_at=now(),completed_at=case when $2 in ('completed','failed','canceled') then now() else completed_at end where id=$1 and status in ('running','waiting_desktop','waiting_approval')`,
+          [task.goal_id, event.eventType, JSON.stringify(safeResult), event.detail ?? null],
         );
       }
       await this.options.db.query(
