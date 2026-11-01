@@ -11,3 +11,7 @@ export function assistantReconnectDelay(attempt: number, random = Math.random) {
 export function shouldReconnectAssistant(code: number) {
   return ![4001, 4003, 4004].includes(code);
 }
+
+export function interruptedApprovalRequiresReview(pendingApprovalCount: number) {
+  return pendingApprovalCount > 0;
+}

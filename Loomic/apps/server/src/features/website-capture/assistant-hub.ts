@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import type { WebSocket } from "ws";
@@ -15,6 +15,7 @@ import {
   type WebsiteCapturePage,
   type WebsiteCapturePairing,
   desktopAgentEventSchema,
+  desktopAgentActionSchema,
   isReadOnlyNativeMcpTool,
   desktopMcpToolCatalogSchema,
   desktopMcpToolResultSchema,
@@ -51,6 +52,27 @@ const MCP_TOOL_TIMEOUT_MS = 310_000;
 const MAX_PENDING_MCP_CALLS_PER_CONNECTION = 8;
 const DESKTOP_AGENT_DEADLINE_GRACE_MS = 75_000;
 const DESKTOP_RECONNECT_GRACE_MS = 120_000;
+const MAX_DESKTOP_PLAN_ROUNDS = 5;
+const RECOVERABLE_ACTION_CHECKPOINT = `(
+  (not (coalesce(t.checkpoint,'{}'::jsonb) ? 'action')
+    and not exists (select 1 from desktop_agent_events e where e.task_id=t.id and e.event_type='action_receipt')
+    and not exists (select 1 from desktop_agent_approvals a where a.task_id=t.id and a.status in ('approved','executed'))
+  ) or coalesce((
+    t.checkpoint->'action'->>'state'='completed'
+    and not exists (select 1 from desktop_agent_approvals pending where pending.task_id=t.id and pending.status='approved')
+    and exists (
+      select 1 from desktop_agent_events e
+      join desktop_agent_approvals a on a.task_id=t.id and a.id::text=e.payload->>'approvalId' and a.status='executed'
+      where e.task_id=t.id and e.event_type='action_receipt'
+        and e.payload->>'state'='completed'
+        and e.payload->>'approvalId'=t.checkpoint->'action'->>'approvalId'
+        and e.payload->>'requestId'=t.checkpoint->'action'->>'requestId'
+        and e.payload->>'kind'=t.checkpoint->'action'->>'kind'
+        and a.action->>'requestId'=t.checkpoint->'action'->>'requestId'
+        and a.action->>'kind'=t.checkpoint->'action'->>'kind'
+    )
+  ),false)
+)`;
 
 type HubOptions = {
   db: Pool;
@@ -990,10 +1012,16 @@ export class WebsiteAssistantHub {
       connection_id: string;
       action: DesktopAgentAction;
     }>(
-      `with approved as (
+      `with target as (
+         select t.id from desktop_agent_tasks t
+         join desktop_agent_approvals a on a.task_id=t.id
+         where a.id=$1 and t.status='waiting_approval'
+         for update of t
+       ), approved as (
          update desktop_agent_approvals a set status='approved',approved_at=now(),approval_token_hash=$4
+          from target t
           where a.id=$1 and a.user_id=$2 and a.workspace_id=$3 and a.status='pending' and a.expires_at>now()
-            and exists (select 1 from desktop_agent_tasks t where t.id=a.task_id and t.status='waiting_approval')
+            and a.task_id=t.id
           returning a.task_id,a.connection_id,a.action,a.id
        ), recorded as (
          update desktop_agent_tasks t set checkpoint=coalesce(t.checkpoint,'{}'::jsonb) ||
@@ -1603,14 +1631,35 @@ export class WebsiteAssistantHub {
         `insert into desktop_agent_approvals(task_id,workspace_id,user_id,connection_id,request_id,action)
          select t.id,t.workspace_id,t.created_by,t.connection_id,$2,$3::jsonb
            from desktop_agent_tasks t where t.id=$1 and t.status in ('queued','running')
+             and t.connection_id=$4 and t.created_by=$5
+             and (
+               exists (select 1 from jsonb_array_elements(t.planned_actions) p(action) where p.action=$3::jsonb)
+               or exists (
+                 select 1 from desktop_agent_plan_rounds r
+                 cross join lateral jsonb_array_elements(r.actions) p(action)
+                 where r.task_id=t.id and p.action=$3::jsonb
+               )
+             )
          on conflict(task_id,request_id) do update set request_id=excluded.request_id
           where desktop_agent_approvals.status='pending' and desktop_agent_approvals.expires_at>now()
             and desktop_agent_approvals.action=excluded.action
          returning id,expires_at`,
-        [event.taskId, action.requestId, JSON.stringify(action)],
+        [event.taskId, action.requestId, JSON.stringify(action), live.id, live.userId],
       );
       const approvalRow = approval.rows[0];
-      if (!approvalRow) return;
+      if (!approvalRow) {
+        const current = await this.options.db.query<{ status: string }>(
+          "select status from desktop_agent_tasks where id=$1 and connection_id=$2 and created_by=$3",
+          [event.taskId, live.id, live.userId],
+        );
+        if (current.rows[0] && ["queued", "running"].includes(current.rows[0].status)) this.send(live, {
+          type: "desktop_agent.action_denied",
+          taskId: event.taskId,
+          requestId: action.requestId,
+          reason: "The requested action does not match the persisted task plan. Review the task before retrying.",
+        });
+        return;
+      }
       const approvalId = approvalRow.id;
       const expiresAt = new Date(approvalRow.expires_at).toISOString();
       const detail = event.detail ?? "桌面 Agent 请求执行一个需要批准的动作。";
@@ -1707,11 +1756,20 @@ export class WebsiteAssistantHub {
       : undefined;
     if (event.approvalId && event.action?.approvalToken) {
       const consumed = await this.options.db.query<{ id: string }>(
-        `with consumed as (update desktop_agent_approvals set status='executed',consumed_at=now()
-          where id=$1 and task_id=$2 and connection_id=$3 and status='approved' and expires_at>now() and approval_token_hash=$4
-            and action=($5::jsonb - 'approvalId' - 'approvalToken')
-            and exists (select 1 from desktop_agent_tasks t where t.id=task_id and t.checkpoint->'action'->>'approvalId'=desktop_agent_approvals.id::text)
-          returning id,task_id,action), recorded as (
+        `with target as (
+            select t.id from desktop_agent_tasks t
+            join desktop_agent_approvals a on a.task_id=t.id
+            where a.id=$1 and t.id=$2 and t.connection_id=$3
+              and t.status in ('running','waiting_approval')
+              and t.checkpoint->'action'->>'approvalId'=a.id::text
+              and t.checkpoint->'action'->>'requestId'=a.action->>'requestId'
+              and t.checkpoint->'action'->>'kind'=a.action->>'kind'
+              and t.checkpoint->'action'->>'state'='dispatched'
+            for update of t
+          ), consumed as (update desktop_agent_approvals a set status='executed',consumed_at=now()
+          from target t where a.id=$1 and a.task_id=t.id and a.connection_id=$3 and a.status='approved' and a.expires_at>now() and a.approval_token_hash=$4
+            and a.action=($5::jsonb - 'approvalId' - 'approvalToken')
+          returning a.id,a.task_id,a.action), recorded as (
             update desktop_agent_tasks t set checkpoint=jsonb_set(coalesce(t.checkpoint,'{}'::jsonb),'{action,state}',to_jsonb($6::text)),updated_at=now()
               from consumed c where t.id=c.task_id and t.checkpoint->'action'->>'approvalId'=c.id::text returning t.id
           ), logged as (
@@ -1910,7 +1968,7 @@ export class WebsiteAssistantHub {
     const round = Number(message.round ?? 0);
     const observation = String(message.observation ?? "").slice(0, 4_000);
     const windowTitle = String(message.windowTitle ?? "").slice(0, 500);
-    if (!taskId) return;
+    if (!taskId || !Number.isInteger(round) || round < 1 || round > MAX_DESKTOP_PLAN_ROUNDS) return;
     const taskResult = await this.options.db.query<{
       id: string;
       status: string;
@@ -1922,6 +1980,17 @@ export class WebsiteAssistantHub {
     );
     const task = taskResult.rows[0];
     if (!task || task.status !== "running") return;
+    const observationHash = createHash("sha256").update(JSON.stringify([windowTitle, observation])).digest("hex");
+    const prior = await this.options.db.query<{ observation_hash: string }>(
+      "select observation_hash from desktop_agent_plan_rounds where task_id=$1 and round=$2",
+      [taskId, round],
+    );
+    if (prior.rows[0]) {
+      if (prior.rows[0].observation_hash !== observationHash) {
+        this.send(live, { type: "desktop_agent.action_denied", taskId, reason: "This plan round was already recorded for a different window state. Review the task before continuing." });
+      }
+      return;
+    }
     await this.options.db.query(
       "insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,'reobserve',$2,$3::jsonb)",
       [
@@ -1932,7 +2001,7 @@ export class WebsiteAssistantHub {
     );
     const planNext = this.planNextHandler ?? this.options.onDesktopAgentPlanNext;
     if (!planNext) {
-      this.send(live, { type: "desktop_agent.plan_next", taskId, round, actions: [] });
+      this.send(live, { type: "desktop_agent.action_denied", taskId, reason: "The desktop planner is unavailable. Review the task before retrying." });
       return;
     }
     try {
@@ -1951,14 +2020,22 @@ export class WebsiteAssistantHub {
         rawActions as Array<{ kind: string }>,
         task.capabilities,
       );
-      const actions = filtered.map((action, index) => ({
+      const actions = filtered.map((action, index) => desktopAgentActionSchema.parse({
         ...action,
         taskId,
         requestId: `${taskId}:r${round}:${index + 1}`,
       }));
-      this.send(live, { type: "desktop_agent.plan_next", taskId, round, actions });
-    } catch {
-      this.send(live, { type: "desktop_agent.plan_next", taskId, round, actions: [] });
+      const saved = await this.options.db.query<{ actions: DesktopAgentAction[] }>(
+        `insert into desktop_agent_plan_rounds(task_id,round,observation_hash,actions)
+         select t.id,$2,$3,$4::jsonb from desktop_agent_tasks t
+          where t.id=$1 and t.created_by=$5 and t.connection_id=$6 and t.status='running'
+         on conflict(task_id,round) do nothing returning actions`,
+        [taskId, round, observationHash, JSON.stringify(actions), live.userId, live.id],
+      );
+      if (saved.rows[0]) this.send(live, { type: "desktop_agent.plan_next", taskId, round, actions: saved.rows[0].actions });
+    } catch (error) {
+      console.error("[desktop-agent] plan round persistence failed", { taskId, round, error: error instanceof Error ? error.message : String(error) });
+      this.send(live, { type: "desktop_agent.action_denied", taskId, reason: "The next plan could not be recorded. Review the task before retrying." });
     }
   }
 
@@ -2027,6 +2104,22 @@ export class WebsiteAssistantHub {
     this.desktopTaskTimers.set(taskId, timer);
   }
 
+  private async holdUncertainDesktopTask(taskId: string, live: LiveConnection) {
+    const held = await this.options.db.query<{ goal_id: string | null }>(
+      `update desktop_agent_tasks t set status='waiting_desktop',wait_reason=$2,updated_at=now()
+        where t.id=$1 and t.status in ('running','waiting_desktop')
+          and not ${RECOVERABLE_ACTION_CHECKPOINT} returning t.goal_id`,
+      [taskId, "The last action or its receipt cannot be verified. Stop the desktop session and review it before continuing."],
+    );
+    if (!held.rows.length) return;
+    if (held.rows[0]?.goal_id) await this.options.db.query(
+      "update agent_goals set status='waiting_desktop',updated_at=now() where id=$1 and status in ('running','waiting_desktop')",
+      [held.rows[0].goal_id],
+    );
+    this.clearDesktopTaskTimer(taskId);
+    this.send(live, { type: "desktop_agent.stop", taskId });
+  }
+
   private async recoverDesktopAgentTasks(live: LiveConnection) {
     const { rows } = await this.options.db.query<{
       id: string;
@@ -2038,15 +2131,21 @@ export class WebsiteAssistantHub {
       canvas_id: string | null;
       execution_mode: DesktopAgentExecutionMode;
       planned_actions: DesktopAgentAction[];
+      resume_actions: DesktopAgentAction[];
       checkpoint: Record<string, unknown> | null;
       resume_token: string | null;
       max_duration_seconds: number;
       created_at: string | Date;
     }>(
       `select t.id,t.connection_id as old_connection_id,t.goal,t.role,t.capabilities,t.target_url,t.canvas_id,
-              t.execution_mode,t.planned_actions,t.checkpoint,t.resume_token,t.max_duration_seconds,t.created_at
+              t.execution_mode,t.planned_actions,coalesce(round.actions,t.planned_actions) as resume_actions,
+              t.checkpoint,t.resume_token,t.max_duration_seconds,t.created_at
          from desktop_agent_tasks t
          join website_capture_connections c on c.id=t.connection_id
+         left join lateral (
+           select r.actions from desktop_agent_plan_rounds r
+            where r.task_id=t.id order by r.round desc limit 1
+         ) round on true
         where t.created_by=$1 and t.workspace_id=$2 and t.status in ('running','waiting_desktop')
           and t.execution_mode <> 'connected_browser_tab'
           and (t.status='waiting_desktop' or t.connection_id=$3 or (c.disconnected_at is not null and c.disconnected_at > now() - interval '24 hours'))
@@ -2086,18 +2185,7 @@ export class WebsiteAssistantHub {
       const checkpointState = checkpointAction && typeof checkpointAction === "object"
         ? (checkpointAction as { state?: unknown }).state : undefined;
       if (checkpointState === "dispatched" || checkpointState === "uncertain") {
-        const held = await this.options.db.query<{ goal_id: string | null }>(
-          `update desktop_agent_tasks set status='waiting_desktop',wait_reason=$2,updated_at=now()
-            where id=$1 and status in ('running','waiting_desktop')
-              and checkpoint->'action'->>'state' in ('dispatched','uncertain') returning goal_id`,
-          [row.id, "The last action has an unknown outcome. Stop the desktop session and review it before continuing."],
-        );
-        if (held.rows[0]?.goal_id) await this.options.db.query(
-          "update agent_goals set status='waiting_desktop',updated_at=now() where id=$1 and status in ('running','waiting_desktop')",
-          [held.rows[0].goal_id],
-        );
-        this.clearDesktopTaskTimer(row.id);
-        this.send(live, { type: "desktop_agent.stop", taskId: row.id });
+        await this.holdUncertainDesktopTask(row.id, live);
         continue;
       }
       const activeRecording = [...this.pendingRecordingUploads.values()].find((upload) => upload.taskId === row.id);
@@ -2105,10 +2193,16 @@ export class WebsiteAssistantHub {
         console.error("[desktop-agent] recording persistence before reconnect failed", { taskId: row.id, error: error instanceof Error ? error.message : String(error) });
       });
       const updated = await this.options.db.query<{ id: string; goal_id: string | null }>(
-        "update desktop_agent_tasks set connection_id=$2,status='running',wait_reason=null,updated_at=now() where id=$1 and status in ('running','waiting_desktop') returning id,goal_id",
+        `update desktop_agent_tasks t set connection_id=$2,status='running',wait_reason=null,updated_at=now()
+          where t.id=$1 and t.status in ('running','waiting_desktop')
+            and ${RECOVERABLE_ACTION_CHECKPOINT}
+          returning t.id,t.goal_id`,
         [row.id, live.id],
       );
-      if (!updated.rows[0]) continue;
+      if (!updated.rows[0]) {
+        await this.holdUncertainDesktopTask(row.id, live);
+        continue;
+      }
       if (updated.rows[0].goal_id) {
         await this.options.db.query("update agent_goals set status='running',updated_at=now() where id=$1 and status in ('waiting_desktop','paused')", [updated.rows[0].goal_id]);
         await this.options.db.query("insert into agent_goal_events(goal_id,task_id,event_type,detail) values($1,$2,'goal.reconnected','桌面已重连，任务从断点恢复')", [updated.rows[0].goal_id, row.id]);
@@ -2117,6 +2211,17 @@ export class WebsiteAssistantHub {
         "update desktop_agent_approvals set connection_id=$2 where task_id=$1 and status='pending' and expires_at>now()",
         [row.id, live.id],
       );
+      const completedActions = await this.options.db.query<{ request_id: string }>(
+        `select distinct payload->'action'->>'requestId' as request_id
+           from desktop_agent_events
+          where task_id=$1 and event_type='progress'
+            and payload->'action'->>'requestId' is not null
+            and payload->'action'->>'requestId' <> ''`,
+        [row.id],
+      );
+      const completedRequestIds = new Set(completedActions.rows.map((item) => item.request_id));
+      const persistedActions = row.resume_actions ?? row.planned_actions ?? [];
+      const resumeActions = persistedActions.filter((action) => !completedRequestIds.has(action.requestId));
       const priorTimer = this.desktopReconnectTimers.get(row.old_connection_id);
       if (priorTimer) clearTimeout(priorTimer);
       this.desktopReconnectTimers.delete(row.old_connection_id);
@@ -2127,7 +2232,7 @@ export class WebsiteAssistantHub {
         role: row.role,
         capabilities: row.capabilities,
         executionMode: row.execution_mode,
-        plannedActions: row.planned_actions,
+        plannedActions: resumeActions,
         ...(row.checkpoint ? { checkpoint: row.checkpoint } : {}),
         ...(row.resume_token ? { resumeToken: row.resume_token } : {}),
         createdAt: new Date(row.created_at).toISOString(),

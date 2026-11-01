@@ -70,7 +70,7 @@ import { RecorderLock } from "./recorder-lock.js";
 import { parseMarketplaceInstallSlug } from "./desktop-marketplace-link.js";
 import { formatDesktopPlanReview } from "./desktop-plan-review.js";
 import { DesktopActionReceipts } from "./desktop-action-receipts.js";
-import { assistantReconnectDelay, shouldReconnectAssistant } from "./assistant-reconnect.js";
+import { assistantReconnectDelay, interruptedApprovalRequiresReview, shouldReconnectAssistant } from "./assistant-reconnect.js";
 import { checkDesktopUpdate, installDesktopUpdate } from "./update-actions.js";
 import { getDesktopUpdatePolicy } from "./update-policy.js";
 import {
@@ -2573,6 +2573,16 @@ async function resumeDesktopAgentTasks(rawTasks: unknown) {
     }> : [];
 
     desktopAgentTasks.set(task.taskId, task);
+    if (interruptedApprovalRequiresReview(pendingApprovals.length)) {
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId: task.taskId,
+        eventType: "failed",
+        detail: "The session was interrupted while an action awaited approval. Review the saved evidence and request a new approval before retrying.",
+      });
+      finishDesktopAgentTask(task.taskId);
+      continue;
+    }
     if (isNativeDesktopTask(task)) {
       const taskRecord = resume.task as { checkpoint?: { windowIdentity?: unknown } };
       let sameWindow = false;
@@ -2603,29 +2613,21 @@ async function resumeDesktopAgentTasks(rawTasks: unknown) {
       desktopTaskTabs.set(task.taskId, browser);
     }
 
-    const approvalActions = pendingApprovals.map((approval) => ({ ...approval.action, approvalId: approval.approvalId }));
-    if (approvalActions.length) {
-      for (const approval of pendingApprovals) desktopActionApprovals.register(approval.approvalId, approval.action, approval.expiresAt);
-      desktopAgentPlans.set(task.taskId, approvalActions);
-      for (const approval of pendingApprovals) forwardDesktopAgentEvent({
+    desktopAgentInterruptedTasks.add(task.taskId);
+    const remainingActions = task.plannedActions.filter((action) => classifyDesktopAction(action) === "allow");
+    const blockedActions = task.plannedActions.length - remainingActions.length;
+    if (blockedActions > 0) {
+      sendAssistant({
         type: "desktop_agent.event",
         taskId: task.taskId,
-        canvasId: task.canvasId,
-        eventType: "approval_required",
-        approvalId: approval.approvalId,
-        expiresAt: approval.expiresAt,
-        action: approval.action,
-        detail: "A pending action was restored after reconnecting.",
+        eventType: "failed",
+        detail: "The interrupted browser task still has an action requiring approval. Review the saved evidence and request a new approval before continuing.",
       });
+      finishDesktopAgentTask(task.taskId);
       continue;
     }
-
-    desktopAgentInterruptedTasks.add(task.taskId);
-    const safeActions: DesktopAgentAction[] = [];
-    if (task.capabilities.includes("browser.read")) safeActions.push({ taskId: task.taskId, requestId: `${task.taskId}:recovery:read`, kind: "read_page" });
-    if (task.capabilities.includes("browser.capture")) safeActions.push({ taskId: task.taskId, requestId: `${task.taskId}:recovery:capture`, kind: "capture_screen" });
-    desktopAgentPlans.set(task.taskId, safeActions);
-    if (safeActions.length) await continueDesktopAgentPlan(task.taskId);
+    desktopAgentPlans.set(task.taskId, remainingActions);
+    if (remainingActions.length) await continueDesktopAgentPlan(task.taskId);
     else await completeDesktopAgentTask(task.taskId);
   }
 }

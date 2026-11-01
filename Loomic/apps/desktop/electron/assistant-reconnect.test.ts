@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assistantReconnectDelay, shouldReconnectAssistant } from "./assistant-reconnect.js";
+import { assistantReconnectDelay, interruptedApprovalRequiresReview, shouldReconnectAssistant } from "./assistant-reconnect.js";
 
 describe("desktop assistant reconnect policy", () => {
   it("uses capped exponential backoff with jitter", () => {
@@ -12,5 +12,11 @@ describe("desktop assistant reconnect policy", () => {
     expect(shouldReconnectAssistant(4001)).toBe(false);
     expect(shouldReconnectAssistant(4003)).toBe(false);
     expect(shouldReconnectAssistant(1006)).toBe(true);
+  });
+
+  it("requires review of approvals whose page context was interrupted", () => {
+    expect(interruptedApprovalRequiresReview(0)).toBe(false);
+    expect(interruptedApprovalRequiresReview(1)).toBe(true);
+    expect(interruptedApprovalRequiresReview(2)).toBe(true);
   });
 });

@@ -52,7 +52,8 @@ describe("AgentGoalService transitions", () => {
     const service = new AgentGoalService({ query } as never);
 
     await expect(service.transition("user-1", "workspace-1", "goal-1", "retry")).resolves.toBeDefined();
-    expect(query.mock.calls[1]?.[0]).toContain("and status=$6");
-    expect(query.mock.calls[1]?.[1]).toEqual(["goal-1", "user-1", "workspace-1", "running", false, "failed"]);
+    const update = query.mock.calls.find(([sql]) => sql.includes("update agent_goals") && sql.includes("and status=$6"));
+    expect(update).toBeDefined();
+    expect(update?.[1]).toEqual(["goal-1", "user-1", "workspace-1", "running", false, "failed"]);
   });
 });

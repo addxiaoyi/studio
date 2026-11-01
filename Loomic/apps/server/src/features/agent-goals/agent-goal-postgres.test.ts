@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import pg from "pg";
+import { WebSocket, WebSocketServer } from "ws";
 import { agentGoalSchema } from "@helstera/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentGoalService } from "./agent-goal-service.js";
@@ -39,7 +44,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
       catch (error) { throw new Error(`Migration failed: ${file}`, { cause: error }); }
     }
     // Replay this feature's incremental migrations to verify their idempotency.
-    for (const file of files.filter((file) => file.startsWith("20261031"))) {
+    for (const file of files.filter((file) => file.startsWith("20261031") || file.startsWith("20261101"))) {
       await db.query(await readFile(new URL(`migrations/${file}`, root), "utf8"));
     }
     await db.query("insert into app_users(id,email) values($1,'agent-test@example.test')", [userId]);
@@ -75,7 +80,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     const action = { taskId, requestId: "action-1", kind: "native_click", x: 10, y: 20 };
     await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
     await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
-    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status) values($1,$2,$3,$4,'Test','operator',$5::jsonb,'running')", [taskId, workspaceId, userId, connectionId, JSON.stringify(["window.click"])]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,planned_actions) values($1,$2,$3,$4,'Test','operator',$5::jsonb,'running',$6::jsonb)", [taskId, workspaceId, userId, connectionId, JSON.stringify(["window.click"]), JSON.stringify([action])]);
     await db.query("update desktop_agent_tasks set goal_id=$2,execution_mode='windows_ui' where id=$1", [taskId, goal.id]);
     const sent: Array<Record<string, unknown>> = [];
     const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } };
@@ -85,6 +90,10 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     const windowIdentity = { windowId: "ab12", pid: 42, processStarted: "133000000000000000" };
     await internals.handleDesktopAgentEvent(live, { taskId, eventType: "step", stepId: "inspect-native-window", result: { windowIdentity } });
     expect((await db.query("select checkpoint from desktop_agent_tasks where id=$1", [taskId])).rows[0].checkpoint.windowIdentity).toEqual(windowIdentity);
+    await internals.handleDesktopAgentEvent(live, { taskId, eventType: "approval_required", action: { ...action, x: 11 } });
+    expect(sent.some((message) => message.type === "desktop_agent.action_denied")).toBe(true);
+    expect((await db.query("select id from desktop_agent_approvals where task_id=$1", [taskId])).rows).toHaveLength(0);
+    sent.length = 0;
     await internals.handleDesktopAgentEvent(live, { taskId, eventType: "approval_required", action });
     const approvalId = (await db.query<{ id: string }>("select id from desktop_agent_approvals where task_id=$1", [taskId])).rows[0]!.id;
     await db.query("insert into agent_connector_permissions(id,workspace_id,user_id,connector_id,enabled,permissions) values($1,$2,$3,'desktop-agent',false,'[]'::jsonb)", [randomUUID(), workspaceId, userId]);
@@ -106,6 +115,17 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     const status = async () => (await db.query<{ status: string }>("select status from desktop_agent_approvals where id=$1", [approvalId])).rows[0]!.status;
     await receipt({ ...approved, x: 11 });
     expect(await status()).toBe("approved");
+    for (const [field, changed, original] of [
+      ["requestId", "different-request", action.requestId],
+      ["kind", "native_type", action.kind],
+      ["state", "uncertain", "dispatched"],
+    ]) {
+      await db.query("update desktop_agent_tasks set checkpoint=jsonb_set(checkpoint,array['action',$2],to_jsonb($3::text)) where id=$1", [taskId, field, changed]);
+      await receipt(approved);
+      expect(await status()).toBe("approved");
+      expect(sent.some((message) => message.type === "desktop_agent.action_recorded")).toBe(false);
+      await db.query("update desktop_agent_tasks set checkpoint=jsonb_set(checkpoint,array['action',$2],to_jsonb($3::text)) where id=$1", [taskId, field, original]);
+    }
     await db.query("update desktop_agent_approvals set expires_at=now()-interval '1 second' where id=$1", [approvalId]);
     await receipt(approved);
     expect(await status()).toBe("approved");
@@ -144,6 +164,293 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     await expect(goals.reviewInterruptedAction(userId, workspaceId, goal.id, approvalId, "observed_completed")).rejects.toThrow("already reviewed");
     await expect(goals.transition(userId, workspaceId, goal.id, "retry")).rejects.toThrow("automatic replay is not safe");
   });
+
+  it("does not approve an action after a concurrent disconnect changes the task state", async () => {
+    const pairingId = randomUUID();
+    const connectionId = randomUUID();
+    const taskId = randomUUID();
+    const approvalId = randomUUID();
+    const action = { taskId, requestId: "approval-race", kind: "native_click", x: 10, y: 20 };
+    await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status) values($1,$2,$3,$4,'Test','operator',$5::jsonb,'waiting_approval')", [taskId, workspaceId, userId, connectionId, JSON.stringify(["window.click"])]);
+    await db.query("insert into desktop_agent_approvals(id,task_id,connection_id,user_id,workspace_id,request_id,action,status,expires_at) values($1,$2,$3,$4,$5,$6,$7::jsonb,'pending',now()+interval '1 hour')", [approvalId, taskId, connectionId, userId, workspaceId, action.requestId, JSON.stringify(action)]);
+    await db.query("insert into agent_connector_permissions(id,workspace_id,user_id,connector_id,enabled,permissions) values($1,$2,$3,'desktop-agent',true,'[]'::jsonb) on conflict(workspace_id,user_id,connector_id) do update set enabled=true", [randomUUID(), workspaceId, userId]);
+    const sent: Array<Record<string, unknown>> = [];
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const wrappedDb = {
+      query: (sql: string, values?: unknown[]) => {
+        const operation = db.query(sql, values);
+        if (sql.includes("with target as (")) started();
+        return operation;
+      },
+    };
+    const hub = new WebsiteAssistantHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    (hub as unknown as { connections: Map<string, unknown> }).connections.set(connectionId, { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } });
+    const client = await db.connect();
+    try {
+      await client.query("begin");
+      await client.query("select id from desktop_agent_tasks where id=$1 for update", [taskId]);
+      const approval = hub.approveDesktopAction(userId, workspaceId, approvalId).then(() => true, () => false);
+      await Promise.race([entered, new Promise((_, reject) => setTimeout(() => reject(new Error("Approval query did not start")), 3_000))]);
+      await vi.waitFor(async () => {
+        const waiting = await db.query("select 1 from pg_stat_activity where pid <> pg_backend_pid() and wait_event_type='Lock' and query like '%with target as (%'");
+        expect(waiting.rowCount).toBeGreaterThan(0);
+      }, { timeout: 3_000 });
+      await client.query("update desktop_agent_tasks set status='waiting_desktop' where id=$1", [taskId]);
+      await client.query("commit");
+      expect(await approval).toBe(false);
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+    expect((await db.query("select status from desktop_agent_approvals where id=$1", [approvalId])).rows[0].status).toBe("pending");
+    expect(sent.some((message) => message.type === "desktop_agent.action")).toBe(false);
+  });
+
+  it("does not consume a receipt when the task is canceled after its initial status read", async () => {
+    const pairingId = randomUUID();
+    const connectionId = randomUUID();
+    const taskId = randomUUID();
+    const approvalId = randomUUID();
+    const action = { taskId, requestId: "late-receipt", kind: "native_click", x: 10, y: 20 };
+    await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status) values($1,$2,$3,$4,'Test','operator',$5::jsonb,'waiting_approval')", [taskId, workspaceId, userId, connectionId, JSON.stringify(["window.click"])]);
+    await db.query("insert into desktop_agent_approvals(id,task_id,connection_id,user_id,workspace_id,request_id,action,status,expires_at) values($1,$2,$3,$4,$5,$6,$7::jsonb,'pending',now()+interval '1 hour')", [approvalId, taskId, connectionId, userId, workspaceId, action.requestId, JSON.stringify(action)]);
+    await db.query("insert into agent_connector_permissions(id,workspace_id,user_id,connector_id,enabled,permissions) values($1,$2,$3,'desktop-agent',true,'[]'::jsonb) on conflict(workspace_id,user_id,connector_id) do update set enabled=true", [randomUUID(), workspaceId, userId]);
+    let cancelAfterRead = false;
+    const wrappedDb = {
+      query: async (sql: string, values?: unknown[]) => {
+        const result = await db.query(sql, values);
+        if (cancelAfterRead && sql.includes("select id,goal_id,status,workspace_id,created_by")) {
+          cancelAfterRead = false;
+          await db.query("update desktop_agent_tasks set status='canceled' where id=$1", [taskId]);
+        }
+        return result;
+      },
+    };
+    const sent: Array<Record<string, unknown>> = [];
+    const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } };
+    const hub = new WebsiteAssistantHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const internals = hub as unknown as { connections: Map<string, unknown>; handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void> };
+    internals.connections.set(connectionId, live);
+    await hub.approveDesktopAction(userId, workspaceId, approvalId);
+    const approved = sent.find((message) => message.type === "desktop_agent.action")!.action;
+    cancelAfterRead = true;
+    await internals.handleDesktopAgentEvent(live, { taskId, eventType: "progress", approvalId, action: approved });
+    expect(cancelAfterRead).toBe(false);
+    expect((await db.query("select status from desktop_agent_approvals where id=$1", [approvalId])).rows[0].status).toBe("approved");
+    expect((await db.query("select status from desktop_agent_tasks where id=$1", [taskId])).rows[0].status).toBe("canceled");
+    expect(sent.some((message) => message.type === "desktop_agent.action_recorded")).toBe(false);
+  });
+
+  it("holds recovery when an action is dispatched after the initial checkpoint read", async () => {
+    const pairingId = randomUUID();
+    const connectionId = randomUUID();
+    const taskId = randomUUID();
+    await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status) values($1,$2,$3,$4,'Test','operator',$5::jsonb,'waiting_desktop')", [taskId, workspaceId, userId, connectionId, JSON.stringify(["window.click"])]);
+    let injected = false;
+    const wrappedDb = {
+      query: async (sql: string, values?: unknown[]) => {
+        const result = await db.query(sql, values);
+        if (!injected && sql.includes("t.connection_id as old_connection_id")) {
+          injected = true;
+          await db.query("update desktop_agent_tasks set checkpoint=$2::jsonb where id=$1", [taskId, JSON.stringify({ action: { state: "dispatched" } })]);
+        }
+        return result;
+      },
+    };
+    const sent: Array<Record<string, unknown>> = [];
+    const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } };
+    const hub = new WebsiteAssistantHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    await (hub as unknown as { recoverDesktopAgentTasks(live: unknown): Promise<void> }).recoverDesktopAgentTasks(live);
+    expect(injected).toBe(true);
+    expect(sent.some((message) => message.type === "desktop_agent.stop" && message.taskId === taskId)).toBe(true);
+    expect(sent.some((message) => message.type === "desktop_agent.resume" && JSON.stringify(message).includes(taskId))).toBe(false);
+    expect((await db.query("select status from desktop_agent_tasks where id=$1", [taskId])).rows[0].status).toBe("waiting_desktop");
+  });
+
+  it("persists each planned round before dispatch and never dispatches it twice", async () => {
+    const pairingId = randomUUID();
+    const connectionId = randomUUID();
+    const taskId = randomUUID();
+    await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status) values($1,$2,$3,$4,'Test','operator',$5::jsonb,'running')", [taskId, workspaceId, userId, connectionId, JSON.stringify(["window.click"])]);
+    const sent: Array<Record<string, unknown>> = [];
+    const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } };
+    const planner = vi.fn().mockResolvedValue([{ kind: "native_click", x: 10, y: 20 }]);
+    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: ".", onDesktopAgentPlanNext: planner });
+    const internals = hub as unknown as { handleDesktopAgentObserve(live: unknown, message: unknown): Promise<void> };
+    const observation = { taskId, round: 1, windowTitle: "Test window", observation: "Visible control" };
+    await Promise.all([internals.handleDesktopAgentObserve(live, observation), internals.handleDesktopAgentObserve(live, observation)]);
+    const planned = sent.filter((message) => message.type === "desktop_agent.plan_next");
+    expect(planned).toHaveLength(1);
+    const rounds = await db.query("select round,observation_hash,actions from desktop_agent_plan_rounds where task_id=$1", [taskId]);
+    expect(rounds.rows).toHaveLength(1);
+    expect(rounds.rows[0].round).toBe(1);
+    expect(rounds.rows[0].observation_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(rounds.rows[0].actions).toEqual(planned[0]!.actions);
+    expect(rounds.rows[0].actions[0]).toMatchObject({ taskId, requestId: `${taskId}:r1:1`, kind: "native_click" });
+    const calls = planner.mock.calls.length;
+    await internals.handleDesktopAgentObserve(live, observation);
+    expect(planner).toHaveBeenCalledTimes(calls);
+    expect(sent.filter((message) => message.type === "desktop_agent.plan_next")).toHaveLength(1);
+    await internals.handleDesktopAgentObserve(live, { ...observation, observation: "A different control" });
+    expect(sent.some((message) => message.type === "desktop_agent.action_denied" && message.taskId === taskId)).toBe(true);
+    let started!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    planner.mockImplementationOnce(async () => { started(); await gate; return [{ kind: "native_click", x: 10, y: 20 }]; });
+    const interrupted = internals.handleDesktopAgentObserve(live, { ...observation, round: 2 });
+    try {
+      await entered;
+      await db.query("update desktop_agent_tasks set status='canceled' where id=$1", [taskId]);
+    } finally { release(); await interrupted; }
+    expect(sent.some((message) => message.type === "desktop_agent.plan_next" && message.round === 2)).toBe(false);
+    expect((await db.query("select 1 from desktop_agent_plan_rounds where task_id=$1 and round=2", [taskId])).rowCount).toBe(0);
+
+    await db.query("update desktop_agent_tasks set status='running' where id=$1", [taskId]);
+    await db.query("alter table desktop_agent_plan_rounds add constraint test_reject_round check (round <> 3) not valid");
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      sent.length = 0;
+      await internals.handleDesktopAgentObserve(live, { ...observation, round: 3 });
+      expect(sent.some((message) => message.type === "desktop_agent.plan_next")).toBe(false);
+      expect(sent.some((message) => message.type === "desktop_agent.action_denied")).toBe(true);
+      expect(log).toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+      await db.query("alter table desktop_agent_plan_rounds drop constraint test_reject_round");
+    }
+    const noPlanner = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    sent.length = 0;
+    await (noPlanner as unknown as { handleDesktopAgentObserve(live: unknown, message: unknown): Promise<void> }).handleDesktopAgentObserve(live, { ...observation, round: 4 });
+    expect(sent.some((message) => message.type === "desktop_agent.action_denied")).toBe(true);
+    expect(sent.some((message) => message.type === "desktop_agent.plan_next")).toBe(false);
+    const plannedAction = (rounds.rows[0].actions as Array<Record<string, unknown>>)[0];
+    sent.length = 0;
+    await (hub as unknown as { handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void> }).handleDesktopAgentEvent(live, { taskId, eventType: "approval_required", action: plannedAction });
+    expect(sent.some((message) => message.type === "desktop_agent.approval_pending")).toBe(true);
+    await db.query("update desktop_agent_tasks set status='canceled' where id=$1", [taskId]);
+  });
+
+  it("recovers a completed checkpoint only when its persisted receipt matches", async () => {
+    const pairingId = randomUUID();
+    const connectionId = randomUUID();
+    const taskId = randomUUID();
+    const approvalId = randomUUID();
+    const checkpoint = { action: { approvalId, requestId: "step-1", kind: "native_click", state: "completed" } };
+    await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,checkpoint) values($1,$2,$3,$4,'Test','operator',$5::jsonb,'waiting_desktop',$6::jsonb)", [taskId, workspaceId, userId, connectionId, JSON.stringify(["window.click"]), JSON.stringify(checkpoint)]);
+    await db.query("insert into desktop_agent_approvals(id,task_id,connection_id,user_id,workspace_id,request_id,action,status,expires_at) values($1,$2,$3,$4,$5,$6,$7::jsonb,'executed',now()+interval '1 hour')", [approvalId, taskId, connectionId, userId, workspaceId, checkpoint.action.requestId, JSON.stringify({ taskId, requestId: checkpoint.action.requestId, kind: checkpoint.action.kind })]);
+    const sent: Array<Record<string, unknown>> = [];
+    const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } };
+    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const internals = hub as unknown as { recoverDesktopAgentTasks(live: unknown): Promise<void> };
+    const isTaskResume = (message: Record<string, unknown>) => message.type === "desktop_agent.resume" && JSON.stringify(message).includes(taskId);
+    await internals.recoverDesktopAgentTasks(live);
+    expect(sent.some((message) => message.type === "desktop_agent.stop" && message.taskId === taskId)).toBe(true);
+    expect(sent.some(isTaskResume)).toBe(false);
+
+    const receipt = { ...checkpoint.action, kind: "native_type" };
+    await db.query("insert into desktop_agent_events(task_id,event_type,payload) values($1,'action_receipt',$2::jsonb)", [taskId, JSON.stringify(receipt)]);
+    sent.length = 0;
+    await internals.recoverDesktopAgentTasks(live);
+    expect(sent.some((message) => message.type === "desktop_agent.stop" && message.taskId === taskId)).toBe(true);
+    expect(sent.some(isTaskResume)).toBe(false);
+
+    await db.query("insert into desktop_agent_events(task_id,event_type,payload) values($1,'action_receipt',$2::jsonb)", [taskId, JSON.stringify(checkpoint.action)]);
+    sent.length = 0;
+    await internals.recoverDesktopAgentTasks(live);
+    expect(sent.some(isTaskResume)).toBe(true);
+    const laterApproval = randomUUID();
+    await db.query("insert into desktop_agent_approvals(id,task_id,connection_id,user_id,workspace_id,request_id,action,status,expires_at) values($1,$2,$3,$4,$5,'step-2',$6::jsonb,'approved',now()+interval '1 hour')", [laterApproval, taskId, connectionId, userId, workspaceId, JSON.stringify({ taskId, requestId: "step-2", kind: "native_click" })]);
+    await db.query("update desktop_agent_tasks set status='waiting_desktop' where id=$1", [taskId]);
+    sent.length = 0;
+    await internals.recoverDesktopAgentTasks(live);
+    expect(sent.some((message) => message.type === "desktop_agent.stop" && message.taskId === taskId)).toBe(true);
+    expect(sent.some(isTaskResume)).toBe(false);
+    await db.query("update desktop_agent_approvals set status='expired' where id=$1", [laterApproval]);
+    await db.query("update desktop_agent_tasks set status='waiting_desktop',checkpoint='{}'::jsonb where id=$1", [taskId]);
+    sent.length = 0;
+    await internals.recoverDesktopAgentTasks(live);
+    expect(sent.some((message) => message.type === "desktop_agent.stop" && message.taskId === taskId)).toBe(true);
+    expect(sent.some(isTaskResume)).toBe(false);
+  });
+
+  it.skipIf(!process.env.HELT_ELECTRON_TEST_BIN)("does not redispatch an action after a real Electron process loses the persisted receipt", async () => {
+    const pairingId = randomUUID();
+    const connectionId = randomUUID();
+    const taskId = randomUUID();
+    const approvalId = randomUUID();
+    const action = { taskId, requestId: "lost-receipt", kind: "native_click", x: 10, y: 20 };
+    await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status) values($1,$2,$3,$4,'Test','operator',$5::jsonb,'waiting_approval')", [taskId, workspaceId, userId, connectionId, JSON.stringify(["window.click"])]);
+    await db.query("insert into desktop_agent_approvals(id,task_id,connection_id,user_id,workspace_id,request_id,action,status,expires_at) values($1,$2,$3,$4,$5,$6,$7::jsonb,'pending',now()+interval '1 hour')", [approvalId, taskId, connectionId, userId, workspaceId, action.requestId, JSON.stringify(action)]);
+    await db.query("insert into agent_connector_permissions(id,workspace_id,user_id,connector_id,enabled,permissions) values($1,$2,$3,'desktop-agent',true,'[]'::jsonb) on conflict(workspace_id,user_id,connector_id) do update set enabled=true", [randomUUID(), workspaceId, userId]);
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await once(server, "listening");
+    const address = server.address();
+    if (typeof address === "string" || !address) throw new Error("Missing loopback WebSocket address");
+    const userData = await mkdtemp(path.join(tmpdir(), "loomic-electron-test-"));
+    const fixture = path.resolve(process.cwd(), "../desktop/scripts/electron-receipt-fixture.cjs");
+    const firstConnection = once(server, "connection", { signal: AbortSignal.timeout(10_000) });
+    const child = spawn(process.env.HELT_ELECTRON_TEST_BIN!, [fixture], {
+      env: { SystemRoot: process.env.SystemRoot, PATH: process.env.PATH, TEMP: process.env.TEMP, TMP: process.env.TMP, HELT_ELECTRON_TEST_USER_DATA: userData, HELT_ELECTRON_TEST_WS: `ws://127.0.0.1:${address.port}` },
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    const readMessage = async (socket: WebSocket) => {
+      const [payload] = await once(socket, "message", { signal: AbortSignal.timeout(10_000) });
+      return JSON.parse(String(payload)) as Record<string, unknown>;
+    };
+    try {
+      const [firstSocket] = await firstConnection as [WebSocket];
+      expect(await readMessage(firstSocket)).toMatchObject({ type: "fixture.ready", executions: 0 });
+      let dropped = false;
+      const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => {
+        if (JSON.parse(payload).type === "desktop_agent.action_recorded") {
+          dropped = true;
+          firstSocket.close();
+        } else firstSocket.send(payload);
+      } } };
+      const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+      const internals = hub as unknown as { connections: Map<string, unknown>; handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void>; recoverDesktopAgentTasks(live: unknown): Promise<void> };
+      internals.connections.set(connectionId, live);
+      const executed = readMessage(firstSocket);
+      await hub.approveDesktopAction(userId, workspaceId, approvalId);
+      const result = await executed;
+      expect(result).toMatchObject({ type: "fixture.executed", executions: 1 });
+      const nextConnection = once(server, "connection", { signal: AbortSignal.timeout(10_000) });
+      await internals.handleDesktopAgentEvent(live, { taskId, eventType: "progress", approvalId, action: result.action });
+      expect(dropped).toBe(true);
+      expect((await db.query("select checkpoint from desktop_agent_tasks where id=$1", [taskId])).rows[0].checkpoint.action.state).toBe("completed");
+      const [secondSocket] = await nextConnection as [WebSocket];
+      expect(await readMessage(secondSocket)).toMatchObject({ type: "fixture.ready", executions: 1 });
+      await db.query("update desktop_agent_tasks set status='waiting_desktop' where id=$1", [taskId]);
+      live.ws.send = (payload: string) => secondSocket.send(payload);
+      const resumed = readMessage(secondSocket);
+      await internals.recoverDesktopAgentTasks(live);
+      expect(await resumed).toMatchObject({ type: "fixture.resumed", executions: 1 });
+      expect((await db.query("select count(*)::int as count from desktop_agent_events where task_id=$1 and event_type='action_receipt'", [taskId])).rows[0].count).toBe(1);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, "exit");
+        child.kill();
+        await exited;
+      }
+      for (const socket of server.clients) socket.terminate();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  }, 30_000);
 
   it("requires confirmation, dispatches only once across workers, and writes outputs/chat once", async () => {
     const goal = await create();

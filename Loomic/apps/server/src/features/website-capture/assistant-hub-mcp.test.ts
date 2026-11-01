@@ -226,7 +226,7 @@ describe("desktop MCP bridge", () => {
         max_duration_seconds: 300,
         created_at: new Date().toISOString(),
       }] } as never;
-      if (sql.includes("update desktop_agent_tasks set connection_id")) return { rows: [{ id: "00000000-0000-0000-0000-000000000020" }] } as never;
+      if (sql.includes("set connection_id=$2")) return { rows: [{ id: "00000000-0000-0000-0000-000000000020" }] } as never;
       return { rows: [] } as never;
     });
 
