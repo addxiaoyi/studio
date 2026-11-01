@@ -16,6 +16,7 @@ vi.mock("../src/lib/i18n", () => ({ useLocale: () => "en-US" }));
 const goal = (id: string, canvasId = "canvas") => ({
   id, canvasId, goal: `Goal ${id}`, status: "completed", executionMode: "automatic", outputKind: "auto",
   plan: { steps: [] }, activities: [], approvals: [], tasks: [], result: { summary: `Result ${id}` },
+  updatedAt: "2026-11-01T00:00:00.000Z",
 });
 
 beforeEach(() => {
@@ -101,5 +102,37 @@ describe("Agent workspace state", () => {
     render(<AgentWorkspacePanel accessToken="test" canvasId="canvas" />);
     await userEvent.setup().click(screen.getByRole("button", { name: "Agent workspace" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Connector service unavailable"));
+  });
+
+  it("deduplicates replayed goal events and keeps the newest refresh", async () => {
+    let onEvent: ((event: { type: "agent.goal"; goalId: string; canvasId: string; eventType: string; status: string; timestamp: string; payload: Record<string, unknown>; detail: null }) => void) | undefined;
+    const ws = {
+      onEvent: (listener: typeof onEvent) => {
+        onEvent = listener;
+        return () => { onEvent = undefined; };
+      },
+    };
+    const newer = { ...goal("live"), status: "completed", updatedAt: "2026-11-01T00:00:02.000Z" };
+    api.fetchAgentGoal.mockResolvedValue(newer);
+    render(<AgentWorkspacePanel accessToken="test" canvasId="canvas" ws={ws} />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Agent workspace" }));
+    await waitFor(() => expect(onEvent).toBeTypeOf("function"));
+
+    const event = {
+      type: "agent.goal" as const,
+      goalId: "live",
+      canvasId: "canvas",
+      eventType: "goal.completed",
+      status: "completed",
+      timestamp: "2026-11-01T00:00:02.000Z",
+      payload: {},
+      detail: null,
+    };
+    onEvent?.(event);
+    onEvent?.(event);
+
+    await waitFor(() => expect(api.fetchAgentGoal).toHaveBeenCalledTimes(1));
+    expect(screen.getAllByText("Goal live").length).toBeGreaterThan(0);
+    expect(screen.getByText("Completed")).toBeInTheDocument();
   });
 });

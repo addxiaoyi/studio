@@ -19,6 +19,8 @@ type GoalEventRow = {
 
 export class AgentGoalEventPublisher {
   private timer: ReturnType<typeof setInterval> | undefined;
+  private bootstrapReady: Promise<void> | undefined;
+  private started = false;
   private lastEventId = 0;
   private polling = false;
 
@@ -31,15 +33,25 @@ export class AgentGoalEventPublisher {
 
   start() {
     if (this.timer) return;
-    void this.bootstrap();
-    this.timer = setInterval(() => void this.poll(), this.intervalMs);
+    this.started = true;
+    this.bootstrapReady = this.bootstrap();
+    void this.bootstrapReady.then(() => {
+      if (this.started) void this.poll();
+    });
+    this.timer = setInterval(() => {
+      void this.bootstrapReady?.then(() => {
+        if (this.started) void this.poll();
+      });
+    }, this.intervalMs);
     this.timer.unref?.();
   }
 
   stop() {
     if (!this.timer) return;
+    this.started = false;
     clearInterval(this.timer);
     this.timer = undefined;
+    this.bootstrapReady = undefined;
   }
 
   private async bootstrap() {

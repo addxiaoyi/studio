@@ -1,7 +1,7 @@
 "use client";
 
 import { Activity, Check, ChevronDown, Lightbulb, Pause, Play, RotateCcw, Sparkles, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import type { AgentConnector, AgentGoal, AgentGoalStatus, AgentMemory, AgentSuggestion } from "@helstera/shared";
 import { AgentDocumentResult } from "./agent-document-result";
@@ -181,6 +181,39 @@ function taskAsset(task: AgentGoal["tasks"][number], key: "screenshotAsset" | "r
   return typeof url === "string" ? url : null;
 }
 
+function goalRevision(goal: AgentGoal): number {
+  const dates = [goal.updatedAt, ...goal.activities.map((activity) => activity.createdAt), ...goal.tasks.map((task) => task.updatedAt)]
+    .map((value) => Date.parse(value))
+    .filter(Number.isFinite);
+  return Math.max(0, ...dates);
+}
+
+function shouldUseGoal(current: AgentGoal, next: AgentGoal): boolean {
+  const currentRevision = goalRevision(current);
+  const nextRevision = goalRevision(next);
+  if (nextRevision !== currentRevision) return nextRevision > currentRevision;
+  if (next.activities.length !== current.activities.length) return next.activities.length > current.activities.length;
+  if (next.tasks.length !== current.tasks.length) return next.tasks.length > current.tasks.length;
+  return true;
+}
+
+function mergeGoal(current: AgentGoal[], next: AgentGoal): AgentGoal[] {
+  const index = current.findIndex((goal) => goal.id === next.id);
+  if (index < 0) return [next, ...current].slice(0, 50);
+  const existing = current[index];
+  if (!existing || !shouldUseGoal(existing, next)) return current;
+  const merged = [...current];
+  merged[index] = next;
+  return merged;
+}
+
+function mergeGoals(current: AgentGoal[], next: AgentGoal[]): AgentGoal[] {
+  return next.map((incoming) => {
+    const existing = current.find((goal) => goal.id === incoming.id);
+    return existing && !shouldUseGoal(existing, incoming) ? existing : incoming;
+  });
+}
+
 export function AgentWorkspacePanel({ accessToken, canvasId, chatSessionId, goalId, ws }: Props) {
   const english = useLocale() === "en-US";
   const t = english ? copy["en-US"] : copy["zh-CN"];
@@ -196,6 +229,7 @@ export function AgentWorkspacePanel({ accessToken, canvasId, chatSessionId, goal
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const seenEvents = useRef(new Set<string>());
 
   const reportError = useCallback((cause: unknown) => {
     setError(cause instanceof Error ? cause.message : "Unable to update the Agent workspace.");
@@ -223,7 +257,7 @@ export function AgentWorkspacePanel({ accessToken, canvasId, chatSessionId, goal
   const refresh = useCallback(async () => {
     try {
       const next = await fetchAgentGoals(accessToken);
-      setGoals(next.filter((goal) => goal.canvasId === canvasId));
+      setGoals((current) => mergeGoals(current.filter((goal) => goal.canvasId === canvasId), next.filter((goal) => goal.canvasId === canvasId)));
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : (english ? "Unable to load goals." : "无法加载目标。"));
@@ -256,9 +290,12 @@ export function AgentWorkspacePanel({ accessToken, canvasId, chatSessionId, goal
     if (!ws) return;
     return ws.onEvent((event) => {
       if (event.type !== "agent.goal" || (event.canvasId && event.canvasId !== canvasId)) return;
+      const eventKey = [event.goalId, event.taskId ?? "", event.eventType, event.timestamp, event.detail ?? "", JSON.stringify(event.payload)].join("|");
+      if (seenEvents.current.has(eventKey)) return;
+      seenEvents.current.add(eventKey);
       void fetchAgentGoal(accessToken, event.goalId).then((next) => {
         if (next.canvasId !== canvasId) return;
-        setGoals((current) => [next, ...current.filter((goal) => goal.id !== next.id)].slice(0, 50));
+        setGoals((current) => mergeGoal(current, next));
       }).catch(reportError);
     });
   }, [accessToken, canvasId, ws, reportError]);
@@ -277,7 +314,7 @@ export function AgentWorkspacePanel({ accessToken, canvasId, chatSessionId, goal
     if (!selected || !activeStatuses.has(selected.status)) return;
     const timer = window.setInterval(() => {
       void fetchAgentGoal(accessToken, selected.id).then((next) => {
-        setGoals((current) => current.map((goal) => goal.id === next.id ? next : goal));
+        setGoals((current) => mergeGoal(current, next));
       }).catch(reportError);
     }, 5_000);
     return () => window.clearInterval(timer);
