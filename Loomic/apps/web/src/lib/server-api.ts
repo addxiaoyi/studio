@@ -2392,6 +2392,7 @@ export type DesktopAgentTaskResponse = {
   targetUrl?: string;
   canvasId?: string;
   chatSessionId?: string;
+  chatDeliveryPending?: boolean;
   executionMode?: "automatic" | "isolated_browser" | "connected_browser_tab" | "windows_ui" | "visual_ocr";
   status: "queued" | "running" | "succeeded" | "failed" | "canceled";
   result: Record<string, unknown> | null;

@@ -286,6 +286,8 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
     await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,chat_session_id) values($1,$2,$3,$4,'Test','operator','[]'::jsonb,'running',$5)", [taskId, workspaceId, userId, connectionId, sessionId]);
     await db.query("update desktop_agent_tasks set status='failed',error_message='Disconnected' where id=$1", [taskId]);
+    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    expect((await hub.listDesktopAgentTasks(userId, workspaceId, taskId))[0]?.chatDeliveryPending).toBe(true);
     await db.query(`create function reject_test_terminal_chat() returns trigger language plpgsql as $$ begin raise exception 'chat unavailable'; end; $$`);
     await db.query("create trigger reject_test_terminal_chat before insert on chat_messages for each row execute function reject_test_terminal_chat()");
     try {
@@ -300,6 +302,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     expect(messages.rows).toHaveLength(1);
     expect(messages.rows[0].content_blocks[0].output).toMatchObject({ taskId, status: "failed", summary: "Disconnected" });
     expect((await db.query("select delivered_at from desktop_agent_chat_outbox where task_id=$1", [taskId])).rows[0].delivered_at).not.toBeNull();
+    expect((await hub.listDesktopAgentTasks(userId, workspaceId, taskId))[0]?.chatDeliveryPending).toBe(false);
   });
 
   it("rolls back a desktop task update when its event cannot be recorded", async () => {

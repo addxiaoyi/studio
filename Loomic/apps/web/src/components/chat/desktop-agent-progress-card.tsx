@@ -112,19 +112,20 @@ export function DesktopAgentProgressCard({ taskId }: { taskId: string }) {
   useEffect(() => {
     const token = session?.access_token;
     if (!token) return;
+    terminalNoticeSent.current = false;
     let disposed = false;
     let timeout: number | undefined;
     const load = async () => {
       try {
         const next = await fetchDesktopAgentTask(token, taskId);
         if (disposed) return;
-        if (!terminalNoticeSent.current && next.chatSessionId && ["succeeded", "failed", "canceled"].includes(next.status)) {
+        if (!terminalNoticeSent.current && next.chatSessionId && !next.chatDeliveryPending && ["succeeded", "failed", "canceled"].includes(next.status)) {
           terminalNoticeSent.current = true;
           window.dispatchEvent(new CustomEvent("helstera:desktop-agent-result", { detail: { sessionId: next.chatSessionId } }));
         }
         setTask(next);
         setError(null);
-        if (!["succeeded", "failed", "canceled"].includes(next.status) || next.pendingApprovals.length) timeout = window.setTimeout(() => void load(), 2_000);
+        if (!["succeeded", "failed", "canceled"].includes(next.status) || next.pendingApprovals.length || next.chatDeliveryPending) timeout = window.setTimeout(() => void load(), 2_000);
       } catch (cause) {
         if (disposed) return;
         setError(cause instanceof Error ? cause.message : copy.failedToLoad);

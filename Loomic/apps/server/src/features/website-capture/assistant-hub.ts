@@ -881,6 +881,7 @@ export class WebsiteAssistantHub {
       target_url: string | null;
       canvas_id: string | null;
       chat_session_id: string | null;
+      chat_delivery_pending: boolean;
       execution_mode: DesktopAgentExecutionMode;
       status: string;
       result: Record<string, unknown> | null;
@@ -904,6 +905,7 @@ export class WebsiteAssistantHub {
       }>;
     }>(
       `select t.id,t.goal_id,t.goal,t.role,t.capabilities,t.target_url,t.canvas_id,t.chat_session_id,t.execution_mode,t.status,t.result,t.error_message,t.created_at,t.updated_at,t.completed_at,
+              exists (select 1 from desktop_agent_chat_outbox o where o.task_id=t.id and o.delivered_at is null) as chat_delivery_pending,
               coalesce((
                 select json_agg(json_build_object(
                   'eventType',event_type,
@@ -932,6 +934,7 @@ export class WebsiteAssistantHub {
       ...(row.target_url ? { targetUrl: row.target_url } : {}),
       ...(row.canvas_id ? { canvasId: row.canvas_id } : {}),
       ...(row.chat_session_id ? { chatSessionId: row.chat_session_id } : {}),
+      chatDeliveryPending: row.chat_delivery_pending,
       executionMode: row.execution_mode,
       status: row.status,
       result: row.result,

@@ -263,14 +263,24 @@ export function ChatSidebar({
     onSessionChange,
   });
 
+  const pendingAgentSessionRef = useRef<string | null>(null);
   useEffect(() => {
     const refreshAgentResult = (event: Event) => {
       const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId;
-      if (sessionId && sessionId === activeSessionIdRef.current) void reloadMessages(sessionId);
+      if (!sessionId || sessionId !== activeSessionIdRef.current) return;
+      if (streaming) pendingAgentSessionRef.current = sessionId;
+      else void reloadMessages(sessionId);
     };
     window.addEventListener("helstera:desktop-agent-result", refreshAgentResult);
     return () => window.removeEventListener("helstera:desktop-agent-result", refreshAgentResult);
-  }, [reloadMessages, activeSessionIdRef]);
+  }, [reloadMessages, activeSessionIdRef, streaming]);
+
+  useEffect(() => {
+    if (streaming || !pendingAgentSessionRef.current) return;
+    const sessionId = pendingAgentSessionRef.current;
+    pendingAgentSessionRef.current = null;
+    if (sessionId === activeSessionIdRef.current) void reloadMessages(sessionId);
+  }, [streaming, reloadMessages, activeSessionIdRef]);
 
   // ── Stream event handler (extracted hook, shared between send & reconnect) ──
   const { applyStreamEvent } = useChatStream(updateSessionMessages);
