@@ -68,6 +68,22 @@ test("desktop home opens the marketplace and MCP management", async ({ page }) =
   for (const kind of ["skill", "mcp", "plugin"]) {
     await expect(page.getByRole("heading", { name: `Test ${kind}` })).toBeVisible();
   }
+  const filters = page.locator('.agent-marketplace__filters[role="group"]');
+  const categories = [
+    { label: /Skill/i, kind: "skill" },
+    { label: /MCP/i, kind: "mcp" },
+    { label: /插件|plugin/i, kind: "plugin" },
+  ];
+  for (const category of categories) {
+    await filters.getByRole("button", { name: category.label }).click();
+    await expect(filters.getByRole("button", { name: /全部|all/i })).toContainText("3");
+    for (const other of categories) {
+      await expect(filters.getByRole("button", { name: other.label })).toContainText("1");
+      const heading = page.getByRole("heading", { name: `Test ${other.kind}` });
+      if (other.kind === category.kind) await expect(heading).toBeVisible();
+      else await expect(heading).toHaveCount(0);
+    }
+  }
   await page.goto("/desktop-app/");
   await page.locator('.desktop-extension-links a[href="/desktop-app/mcp/"]').click();
   await expect(page).toHaveURL(/\/desktop-app\/mcp\/?$/);
@@ -146,6 +162,15 @@ test("desktop marketplace works with the real Electron preload", async ({ baseUR
     for (const kind of ["skill", "mcp", "plugin"]) {
       await expect(page.getByRole("heading", { name: `Test ${kind}` })).toBeVisible();
     }
+    const filters = page.locator('.agent-marketplace__filters[role="group"]');
+    await filters.getByRole("button", { name: /MCP/i }).click();
+    await expect(filters.getByRole("button", { name: /全部|all/i })).toContainText("3");
+    for (const label of [/Skill/i, /MCP/i, /插件|plugin/i]) {
+      await expect(filters.getByRole("button", { name: label })).toContainText("1");
+    }
+    await expect(page.getByRole("heading", { name: "Test mcp" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Test skill" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Test plugin" })).toHaveCount(0);
     await page.goto(new URL("/desktop-app/mcp/", baseURL).toString());
     await expect(page.locator(".desktop-feature__content--mcp")).toBeVisible();
   } finally {

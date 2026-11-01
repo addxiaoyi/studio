@@ -102,16 +102,28 @@ describe("Agent marketplace installs", () => {
     render(<AgentMarketplacePage />);
 
     await screen.findByRole("heading", { name: "Frontend Design" });
-    await user.click(screen.getByRole("button", { name: /MCP/ }));
-
     const kindGroup = screen.getByRole("group", { name: "市场类型" });
-    expect(within(kindGroup).getByRole("button", { name: /全部/ })).toHaveTextContent("全部3");
-    expect(within(kindGroup).getByRole("button", { name: /Skill/ })).toHaveTextContent("Skill1");
-    expect(within(kindGroup).getByRole("button", { name: /MCP/ })).toHaveTextContent("MCP1");
-    expect(within(kindGroup).getByRole("button", { name: /插件/ })).toHaveTextContent("插件1");
-    expect(screen.getByRole("heading", { name: "PostgreSQL MCP" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Frontend Design" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Brand Voice" })).not.toBeInTheDocument();
+    const requestCount = vi.mocked(fetch).mock.calls.length;
+    const filters = [
+      { label: /Skill/, shown: ["Frontend Design"] },
+      { label: /MCP/, shown: ["PostgreSQL MCP"] },
+      { label: /插件/, shown: ["Brand Voice"] },
+      { label: /全部/, shown: entries.map((entry) => entry.name) },
+    ];
+
+    for (const filter of filters) {
+      await user.click(within(kindGroup).getByRole("button", { name: filter.label }));
+      expect(within(kindGroup).getByRole("button", { name: /全部/ })).toHaveTextContent("全部3");
+      expect(within(kindGroup).getByRole("button", { name: /Skill/ })).toHaveTextContent("Skill1");
+      expect(within(kindGroup).getByRole("button", { name: /MCP/ })).toHaveTextContent("MCP1");
+      expect(within(kindGroup).getByRole("button", { name: /插件/ })).toHaveTextContent("插件1");
+      for (const entry of entries) {
+        const heading = screen.queryByRole("heading", { name: entry.name });
+        if (filter.shown.includes(entry.name)) expect(heading).toBeInTheDocument();
+        else expect(heading).not.toBeInTheDocument();
+      }
+    }
+    expect(fetch).toHaveBeenCalledTimes(requestCount);
   });
 
   it("filters listings by their Chinese introduction text", async () => {
@@ -120,6 +132,26 @@ describe("Agent marketplace installs", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "搜索市场" }), { target: { value: "响应式的产品界面" } });
     expect(await screen.findByRole("heading", { name: "Frontend Design" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "PostgreSQL MCP" })).not.toBeInTheDocument();
+  });
+
+  it("keeps catalog counts when searching installed extensions", async () => {
+    const user = userEvent.setup();
+    api.fetchAgentMarketplaceInstalls.mockResolvedValue([
+      { item_id: "mcp-1", target: "desktop", installed_version: "0.6.2", status: "installed", metadata: {}, kind: "mcp", name: "PostgreSQL MCP", slug: "postgres-mcp" },
+    ]);
+    render(<AgentMarketplacePage />);
+
+    await screen.findByRole("heading", { name: "PostgreSQL MCP" });
+    await user.click(screen.getByRole("tab", { name: /已安装/ }));
+    await user.type(screen.getByRole("textbox", { name: "搜索市场" }), "PostgreSQL");
+    const kindGroup = screen.getByRole("group", { name: "市场类型" });
+    await user.click(within(kindGroup).getByRole("button", { name: /MCP/ }));
+
+    expect(screen.getByRole("heading", { name: "PostgreSQL MCP" })).toBeInTheDocument();
+    expect(within(kindGroup).getByRole("button", { name: /全部/ })).toHaveTextContent("全部3");
+    expect(within(kindGroup).getByRole("button", { name: /Skill/ })).toHaveTextContent("Skill1");
+    expect(within(kindGroup).getByRole("button", { name: /MCP/ })).toHaveTextContent("MCP1");
+    expect(within(kindGroup).getByRole("button", { name: /插件/ })).toHaveTextContent("插件1");
   });
 
   it("installs skills to the workspace and syncs their install record", async () => {
