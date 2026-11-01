@@ -149,7 +149,14 @@ export function useChatSessions({
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [messagesError, setMessagesError] = useState<string | null>(null);
   const selectionRequestRef = useRef(0);
-  const [streaming, setStreaming] = useState(false);
+  const [streaming, setStreamingState] = useState(false);
+  const streamingRef = useRef(false);
+  const streamVersionRef = useRef(0);
+  const setStreaming = useCallback((next: boolean) => {
+    if (next && !streamingRef.current) streamVersionRef.current += 1;
+    streamingRef.current = next;
+    setStreamingState(next);
+  }, []);
 
   // Refs to avoid stale closures in callbacks
   const accessTokenRef = useRef(accessToken);
@@ -395,20 +402,23 @@ export function useChatSessions({
   }, []);
 
   // ── Reload messages (for reconnection) ──
-  const reloadMessages = useCallback(async (sessionId: string) => {
+  const reloadMessages = useCallback(async (sessionId: string, canApply?: () => boolean): Promise<"applied" | "deferred" | "failed"> => {
     if (!sessionId) {
       console.warn("[chat] reloadMessages called with empty sessionId, skipping");
-      return;
+      return "failed";
     }
+    if (canApply && !canApply()) return "deferred";
     setMessagesError(null);
     setMessagesLoading(true);
     try {
       const msgRes = await fetchMessages(accessTokenRef.current, sessionId);
+      if (canApply && !canApply()) return "deferred";
       const mapped = mapServerMessages(msgRes.messages);
       msgCacheRef.current.set(sessionId, mapped);
       if (activeSessionIdRef.current === sessionId) {
         setMessages(mapped);
       }
+      return "applied";
     } catch (err) {
       console.warn("[chat] Failed to reload messages on reconnect:", err);
       if (activeSessionIdRef.current === sessionId) {
@@ -417,6 +427,7 @@ export function useChatSessions({
     } finally {
       if (activeSessionIdRef.current === sessionId) setMessagesLoading(false);
     }
+    return "failed";
   }, []);
 
   return {
@@ -431,6 +442,8 @@ export function useChatSessions({
     messagesLoading,
     messagesError,
     streaming,
+    streamingRef,
+    streamVersionRef,
     setStreaming,
     updateSessionMessages,
     handleSelectSession,

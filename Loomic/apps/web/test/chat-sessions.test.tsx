@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { createSessionMock, deleteSessionMock, fetchMessagesMock, fetchSessionsMock, updateSessionTitleMock } = vi.hoisted(() => ({
@@ -78,5 +78,30 @@ describe("useChatSessions request recovery", () => {
     render(<SessionHarness />);
 
     await waitFor(() => expect(screen.getByTestId("error")).toHaveTextContent("session history unavailable"));
+  });
+
+  it("discards a stale agent refresh if a stream starts and finishes during the request", async () => {
+    const { result } = renderHook(() => useChatSessions({ canvasId: "canvas-1", accessToken: "token-1" }));
+    await waitFor(() => expect(result.current.activeSessionId).toBe("session-home"));
+    await waitFor(() => expect(result.current.messagesLoading).toBe(false));
+    let resolveMessages!: (value: { messages: Array<{ id: string; role: "assistant"; content: string; createdAt: string }> }) => void;
+    const pending = new Promise<{ messages: Array<{ id: string; role: "assistant"; content: string; createdAt: string }> }>((resolve) => { resolveMessages = resolve; });
+    fetchMessagesMock.mockReturnValueOnce(pending);
+    const version = result.current.streamVersionRef.current;
+    let refresh!: Promise<string>;
+    act(() => {
+      refresh = result.current.reloadMessages("session-home", () => !result.current.streamingRef.current && result.current.streamVersionRef.current === version);
+      result.current.setStreaming(true);
+      result.current.updateSessionMessages("session-home", () => [{ id: "live", role: "assistant", contentBlocks: [], createdAt: "2026-10-18T00:00:00.000Z" }]);
+      result.current.setStreaming(false);
+    });
+    await act(async () => {
+      resolveMessages({ messages: [{ id: "stale", role: "assistant", content: "Old", createdAt: "2026-10-18T00:00:00.000Z" }] });
+      expect(await refresh).toBe("deferred");
+    });
+    expect(result.current.messages.map((message) => message.id)).toEqual(["live"]);
+    fetchMessagesMock.mockResolvedValueOnce({ messages: [{ id: "delivered", role: "assistant", content: "New", createdAt: "2026-10-18T00:00:00.000Z" }] });
+    await act(async () => { expect(await result.current.reloadMessages("session-home")).toBe("applied"); });
+    expect(result.current.messages.map((message) => message.id)).toEqual(["delivered"]);
   });
 });

@@ -247,6 +247,8 @@ export function ChatSidebar({
     messagesLoading,
     messagesError,
     streaming,
+    streamingRef,
+    streamVersionRef,
     setStreaming,
     updateSessionMessages,
     handleSelectSession,
@@ -263,24 +265,34 @@ export function ChatSidebar({
     onSessionChange,
   });
 
-  const pendingAgentSessionRef = useRef<string | null>(null);
+  const [pendingAgentSession, setPendingAgentSession] = useState<string | null>(null);
+  const [agentRefreshAttempt, setAgentRefreshAttempt] = useState(0);
   useEffect(() => {
     const refreshAgentResult = (event: Event) => {
       const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId;
       if (!sessionId || sessionId !== activeSessionIdRef.current) return;
-      if (streaming) pendingAgentSessionRef.current = sessionId;
-      else void reloadMessages(sessionId);
+      setPendingAgentSession(sessionId);
     };
     window.addEventListener("helstera:desktop-agent-result", refreshAgentResult);
     return () => window.removeEventListener("helstera:desktop-agent-result", refreshAgentResult);
-  }, [reloadMessages, activeSessionIdRef, streaming]);
+  }, [activeSessionIdRef]);
 
   useEffect(() => {
-    if (streaming || !pendingAgentSessionRef.current) return;
-    const sessionId = pendingAgentSessionRef.current;
-    pendingAgentSessionRef.current = null;
-    if (sessionId === activeSessionIdRef.current) void reloadMessages(sessionId);
-  }, [streaming, reloadMessages, activeSessionIdRef]);
+    if (streaming || !pendingAgentSession) return;
+    if (pendingAgentSession !== activeSessionIdRef.current) {
+      setPendingAgentSession(null);
+      return;
+    }
+    let canceled = false;
+    const version = streamVersionRef.current;
+    const canApply = () => !streamingRef.current && streamVersionRef.current === version;
+    void reloadMessages(pendingAgentSession, canApply).then((outcome) => {
+      if (canceled) return;
+      if (outcome === "deferred") setAgentRefreshAttempt((attempt) => attempt + 1);
+      else setPendingAgentSession(null);
+    });
+    return () => { canceled = true; };
+  }, [streaming, pendingAgentSession, agentRefreshAttempt, reloadMessages, activeSessionIdRef, streamingRef, streamVersionRef]);
 
   // ── Stream event handler (extracted hook, shared between send & reconnect) ──
   const { applyStreamEvent } = useChatStream(updateSessionMessages);
