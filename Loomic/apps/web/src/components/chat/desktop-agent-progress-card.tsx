@@ -18,8 +18,26 @@ const eventLabels = {
   en: { started: "Task started", plan: "Execution plan", step: "Action", evidence: "Evidence", asset_created: "Asset saved", progress: "Progress", page: "Page evidence", approval_required: "Awaiting approval", approval_expired: "Approval expired", deadline_warning: "Time limit approaching", reobserve: "Re-observing", visual_grounding: "Visual grounding", completed: "Completed", failed: "Failed", canceled: "Canceled" },
 } as const;
 
+const localizedModes = {
+  ...modes,
+  zh: { automatic: "自动选择", isolated_browser: "隔离浏览器", connected_browser_tab: "已授权浏览器标签", windows_ui: "本机控件树 / Windows UI", visual_ocr: "视觉识别 / OCR" },
+} as const;
+
+const localizedEventLabels = {
+  ...eventLabels,
+  zh: { started: "任务开始", plan: "执行计划", step: "执行动作", evidence: "采集证据", asset_created: "素材已保存", progress: "执行进度", page: "页面证据", approval_required: "等待批准", approval_expired: "批准已过期", deadline_warning: "即将超时", reobserve: "重新观察", visual_grounding: "视觉定位", completed: "已完成", failed: "失败", canceled: "已取消" },
+} as const;
+
 function eventLabel(event: Event, english: boolean) {
-  const copy = eventLabels[english ? "en" : "zh"];
+  const copy = localizedEventLabels[english ? "en" : "zh"];
+  if (!english && event.eventType === "reobserve") {
+    const round = event.detail?.match(/(?:第|round\s+)(\d+)/i)?.[1];
+    return round ? `第 ${round} 轮：重新观察并规划` : "重新观察并规划";
+  }
+  if (!english && event.eventType === "visual_grounding") {
+    const detail = event.detail ?? "";
+    return detail.includes("失败") ? "视觉定位失败" : detail.includes("成功") || detail.includes("已定位") || detail.toLowerCase().includes("grounded") ? "视觉定位完成" : "正在定位视觉目标";
+  }
   if (event.stepId === "reobserve" || event.eventType === "reobserve") {
     const match = event.detail?.match(/round\s+(\d+)|第\s*(\d+)\s*轮/i);
     const round = match?.[1] ?? match?.[2];
@@ -68,6 +86,14 @@ export function DesktopAgentProgressCard({ taskId }: { taskId: string }) {
     viewCanvas: "在画布中查看", approval: "需要审批", approvalExpired: "审批已过期，此操作未执行。",
     approve: "批准", reject: "拒绝", cancel: "取消任务", working: "处理中...", closePreview: "关闭预览",
   };
+  if (!english) Object.assign(copy, {
+    loading: "正在读取任务...", failedToLoad: "无法读取 Agent 任务", actionError: "无法完成此操作",
+    queued: "排队中", running: "执行中", succeeded: "已完成", failed: "失败", canceled: "已取消",
+    title: "桌面 Agent 任务", mode: "执行模式", capabilities: "能力", timeline: "任务时间线",
+    screenshot: "任务截图", previewScreenshot: "预览截图", recording: "录屏草稿", previewRecording: "预览录屏",
+    viewCanvas: "在画布中查看", approval: "需要批准", approvalExpired: "审批已过期，此操作未执行。",
+    approve: "批准", reject: "拒绝", cancel: "取消任务", working: "处理中...", closePreview: "关闭预览",
+  });
   const [task, setTask] = useState<DesktopAgentTaskResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -140,7 +166,7 @@ export function DesktopAgentProgressCard({ taskId }: { taskId: string }) {
 
   return <section className="desktop-agent-task-card" aria-label={copy.title}>
     <header><div><strong>Desktop Agent - {status}</strong><p>{task.goal}</p></div><span>{task.role}</span></header>
-    <div className="desktop-agent-task-card__meta"><span>{copy.mode}: {modes[english ? "en" : "zh"][task.executionMode ?? "automatic"] ?? task.executionMode}</span><span>{copy.capabilities}: {task.capabilities.join(" · ")}</span></div>
+    <div className="desktop-agent-task-card__meta"><span>{copy.mode}: {localizedModes[english ? "en" : "zh"][task.executionMode ?? "automatic"] ?? task.executionMode}</span><span>{copy.capabilities}: {task.capabilities.join(" · ")}</span></div>
     {canvasPath ? <a className="desktop-agent-task-card__canvas-link" href={canvasPath}>{copy.viewCanvas}</a> : null}
     {expiredApproval ? <p className="desktop-agent-task-card__approval-expired" role="status">{copy.approvalExpired}</p> : null}
     {task.events.length ? <ol className="desktop-agent-task-card__timeline" aria-label={copy.timeline}>{[...task.events].reverse().map((event, index) => {

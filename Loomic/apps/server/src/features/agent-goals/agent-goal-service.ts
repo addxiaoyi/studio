@@ -180,7 +180,7 @@ export class AgentGoalService {
       );
     const activities = await this.db.query(
         `select id,task_id as "taskId",event_type as "eventType",detail,payload,created_at as "createdAt"
-           from agent_goal_events where goal_id=$1 order by created_at desc limit 100`,
+           from agent_goal_events where goal_id=$1 order by created_at desc, id desc limit 100`,
         [goalId],
       );
     const approvals = await this.db.query(
