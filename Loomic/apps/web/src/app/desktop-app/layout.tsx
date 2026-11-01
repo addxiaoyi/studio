@@ -2,7 +2,9 @@
 
 import type { ReactNode } from "react";
 import { DesktopConnectionBanner } from "@/components/desktop-connection-banner";
+import { DesktopExtensionBridge } from "@/components/desktop-extension-bridge";
 import { DesktopToastProvider } from "@/components/desktop-toast";
+import { useAuth } from "@/lib/auth-context";
 
 /**
  * Desktop shell capability boundary.
@@ -14,9 +16,11 @@ import { DesktopToastProvider } from "@/components/desktop-toast";
  * under /desktop-app, including modes that do not exist yet.
  */
 export default function DesktopAppLayout({ children }: { children: ReactNode }) {
+  const { session } = useAuth();
   return (
     <DesktopToastProvider>
       <DesktopConnectionBanner />
+      <DesktopExtensionBridge accessToken={session?.access_token ?? ""} />
       {children}
     </DesktopToastProvider>
   );

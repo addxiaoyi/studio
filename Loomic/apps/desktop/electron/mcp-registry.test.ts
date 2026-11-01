@@ -1,9 +1,11 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { McpRegistry, resolveMarketplaceMcpConfig, resolveMcpStdioLaunch, validateMcpServer } from "./mcp-registry.js";
+import { McpRegistry, resolveMarketplaceMcpConfig, resolveMcpArguments, resolveMcpStdioLaunch, validateMcpServer } from "./mcp-registry.js";
 
 const temporaryRoots: string[] = [];
 const storage = {
@@ -14,11 +16,32 @@ const storage = {
 };
 
 describe("MCP stdio command resolution", () => {
-  it("runs Windows npm shims through cmd with each argument quoted", () => {
+  it("makes the legacy recommended Playwright command non-interactive without changing other commands", () => {
+    expect(resolveMcpArguments("npx", ["@playwright/mcp@latest"])).toEqual(["--yes", "@playwright/mcp@latest"]);
+    expect(resolveMcpArguments("NPX.CMD", ["@playwright/mcp@latest", "--headless"])).toEqual(["--yes", "@playwright/mcp@latest", "--headless"]);
+    expect(resolveMcpArguments("npx", ["--yes", "@playwright/mcp@latest"])).toEqual(["--yes", "@playwright/mcp@latest"]);
+    expect(resolveMcpArguments("npx", ["other-mcp"])).toEqual(["other-mcp"]);
+    expect(resolveMcpArguments("node", ["@playwright/mcp@latest"])).toEqual(["@playwright/mcp@latest"]);
+  });
+  it("runs Windows npm shims through cmd with separate arguments", () => {
     expect(resolveMcpStdioLaunch("npx", ["--yes", "@playwright/mcp@0.0.83", "C:\\Users\\A User"], "win32", "C:\\Windows\\System32\\cmd.exe")).toEqual({
       command: "C:\\Windows\\System32\\cmd.exe",
-      args: ["/d", "/s", "/c", '""npx.cmd" "--yes" "@playwright/mcp@0.0.83" "C:\\Users\\A User""'],
+      args: ["/d", "/c", "npx.cmd", "--yes", "@playwright/mcp@0.0.83", "C:\\Users\\A User"],
     });
+  });
+
+  it.skipIf(process.platform !== "win32")("resolves a Windows shim's own directory and preserves arguments", async () => {
+    const root = await mkdtemp(join(tmpdir(), "helstera mcp shim "));
+    temporaryRoots.push(root);
+    await writeFile(join(root, "npx.cmd"), '@echo off\r\necho %~dp0\r\necho %~1\r\n');
+    const launch = resolveMcpStdioLaunch("npx", ["argument with spaces"]);
+    const { stdout } = await promisify(execFile)(launch.command, launch.args, {
+      cwd: tmpdir(),
+      env: { ...process.env, PATH: `${root};${process.env.PATH ?? ""}` },
+    });
+    const lines = stdout.trim().split(/\r?\n/);
+    expect(lines[0]).toBe(`${root}\\`);
+    expect(lines[1]).toBe("argument with spaces");
   });
 
   it("does not invoke a shell for native executable commands", () => {

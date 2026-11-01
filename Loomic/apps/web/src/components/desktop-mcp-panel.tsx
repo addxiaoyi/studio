@@ -56,6 +56,7 @@ type McpInput = {
 };
 type McpApi = {
   getMcpServers: () => Promise<McpServer[]>;
+  onMcpDisconnected?: (callback: (id: string) => void) => () => void;
   addMcpServer: (input: McpInput) => Promise<{ id: string }>;
   connectMcpServer: (id: string) => Promise<McpServer[]>;
   disconnectMcpServer: (id: string) => Promise<McpServer[]>;
@@ -213,7 +214,7 @@ const recommendedMcpServers = [
   {
     name: "Playwright MCP",
     command: "npx",
-    args: ["@playwright/mcp@latest"],
+    args: ["--yes", "@playwright/mcp@latest"],
     source: "https://github.com/microsoft/playwright-mcp",
   },
 ] as const;
@@ -272,6 +273,12 @@ export function DesktopMcpPanel({ locale }: { locale?: DesktopLocale | null } = 
       ),
     );
   }, [refresh]);
+
+  useEffect(() => api?.onMcpDisconnected?.(() => {
+    void api.getMcpServers().then(setServers).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : copy.mcp.loadFailed);
+    });
+  }), [api, copy.mcp.loadFailed]);
 
   async function addServer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

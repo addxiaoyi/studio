@@ -142,6 +142,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   runWorkspaceScript: (name: string) => ipcRenderer.invoke("workspace.run-script", name),
   cancelWorkspaceScript: (runId: string) => ipcRenderer.invoke("workspace.cancel-script", runId),
   getMcpServers: () => ipcRenderer.invoke("mcp.list"),
+  onMcpDisconnected: (callback: (id: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, id: string) => callback(id);
+    ipcRenderer.on("desktop:mcp-disconnected", listener);
+    return () => ipcRenderer.removeListener("desktop:mcp-disconnected", listener);
+  },
   getDesktopExtensions: () => ipcRenderer.invoke("desktop.extensions.list"),
   syncDesktopExtensions: (input: DesktopExtensionSyncInput[]) => ipcRenderer.invoke("desktop.extensions.sync", input),
   setDesktopExtensionEnabled: (input: { itemId: string; enabled: boolean }) => ipcRenderer.invoke("desktop.extensions.set-enabled", input),
@@ -309,6 +314,7 @@ declare global {
       runWorkspaceScript: (name: string) => Promise<{ runId: string }>;
       cancelWorkspaceScript: (runId: string) => Promise<{ canceled: boolean }>;
       getMcpServers: () => Promise<McpServer[]>;
+      onMcpDisconnected: (callback: (id: string) => void) => () => void;
       getDesktopExtensions: () => Promise<DesktopExtension[]>;
       syncDesktopExtensions: (input: DesktopExtensionSyncInput[]) => Promise<DesktopExtension[]>;
       setDesktopExtensionEnabled: (input: { itemId: string; enabled: boolean }) => Promise<DesktopExtension[]>;

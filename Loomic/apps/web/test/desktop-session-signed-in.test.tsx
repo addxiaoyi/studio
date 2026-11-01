@@ -78,6 +78,8 @@ describe("desktop shell with a signed-in user and a failed refresh", () => {
     );
 
     expect(await screen.findByText("maker@example.com")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Agent 扩展市场/ })).toHaveAttribute("href", expect.stringMatching(/\/desktop-app\/marketplace\/?$/));
+    expect(screen.getByRole("link", { name: /MCP 工具/ })).toHaveAttribute("href", expect.stringMatching(/\/desktop-app\/mcp\/?$/));
     expect(screen.queryByRole("heading", { name: "无法连接工作区" })).toBeNull();
     expect(screen.queryByRole("button", { name: /登录并进入工作台/ })).toBeNull();
     expect(screen.getByText("无法确认登录状态，正在重新连接…")).toBeTruthy();

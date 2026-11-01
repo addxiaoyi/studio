@@ -5,6 +5,7 @@ import {
   render,
   screen,
   within,
+  waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +21,7 @@ import { DesktopToastProvider } from "@/components/desktop-toast";
 
 type McpApi = {
   getMcpServers: () => Promise<unknown[]>;
+  onMcpDisconnected?: (callback: (id: string) => void) => () => void;
   addMcpServer: (input: unknown) => Promise<{ id: string }>;
   connectMcpServer: (id: string) => Promise<unknown[]>;
   disconnectMcpServer: (id: string) => Promise<unknown[]>;
@@ -45,6 +47,23 @@ afterEach(() => {
 });
 
 describe("DesktopMcpPanel", () => {
+  it("refreshes the service list after an unexpected desktop disconnect", async () => {
+    let onDisconnect: ((id: string) => void) | undefined;
+    const unsubscribe = vi.fn();
+    const api: McpApi = {
+      getMcpServers: vi.fn().mockResolvedValue([]),
+      onMcpDisconnected: (callback) => { onDisconnect = callback; return unsubscribe; },
+      addMcpServer: vi.fn(), connectMcpServer: vi.fn(), disconnectMcpServer: vi.fn(),
+      removeMcpServer: vi.fn(), callMcpTool: vi.fn(),
+    };
+    setDesktopApi(api);
+    const view = render(<DesktopMcpPanel />);
+    await waitFor(() => expect(api.getMcpServers).toHaveBeenCalledTimes(1));
+    act(() => onDisconnect?.("server-1"));
+    await waitFor(() => expect(api.getMcpServers).toHaveBeenCalledTimes(2));
+    view.unmount();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
   it("keeps built-in tools collapsed while preserving the local service and install flows", async () => {
     const user = userEvent.setup();
     const api: McpApi = {
@@ -74,7 +93,7 @@ describe("DesktopMcpPanel", () => {
       name: "Playwright MCP",
       transport: "stdio",
       command: "npx",
-      args: ["@playwright/mcp@latest"],
+      args: ["--yes", "@playwright/mcp@latest"],
       env: {},
     });
   });
@@ -401,7 +420,7 @@ describe("DesktopMcpPanel", () => {
     expect(screen.getByText("权限")).toBeTruthy();
     expect(screen.getByText("依赖")).toBeTruthy();
     expect(screen.getByText("latest")).toBeTruthy();
-    expect(screen.getByText("npx @playwright/mcp@latest")).toBeTruthy();
+    expect(screen.getByText("npx --yes @playwright/mcp@latest")).toBeTruthy();
     // 权限位在推荐条目类型里没有对应字段，必须显式「未声明」而不是空白。
     expect(screen.getAllByText("未声明")).toHaveLength(1);
   });

@@ -7,7 +7,7 @@ import { Suspense, useCallback, useEffect, useRef, useState, type FormEvent, typ
 import type { WebsiteCaptureAssistantConnection, WebsiteCapturePairing } from "@helstera/shared";
 
 import { DesktopMcpPanel } from "@/components/desktop-mcp-panel";
-import { DesktopExtensionBridge } from "@/components/desktop-extension-bridge";
+import { DesktopExtensionLinks } from "@/components/desktop-extension-links";
 import { AgentMarketplacePage } from "@/components/agent-marketplace-page";
 import { DesktopSettingsPage } from "@/components/desktop-settings-page";
 import { DesktopWorkbench } from "@/components/desktop-workbench";
@@ -416,6 +416,7 @@ function DesktopAgentHome({ email, accessToken, locale }: { email: string; acces
       <div><p className="desktop-command-center__eyebrow">HELSTERA DESKTOP / AGENT</p><h1>{copy.heading}</h1><p>{copy.intro}</p></div>
       <div className="desktop-command-center__identity"><span className="desktop-command-center__status" />{email}<span>{copy.connected}</span></div>
     </header>
+    <DesktopExtensionLinks />
     <section className="desktop-agent-composer" aria-label={copy.goal}>
       <form onSubmit={startAgent}>
         <label htmlFor="desktop-agent-prompt">{copy.goal}</label>
@@ -472,10 +473,8 @@ function DesktopAdvancedPage({ initialView, locale }: { initialView: "mcp" | "de
 }
 
 function DesktopModule({ active, children }: { active: string; children: ReactNode }) {
-  const { session } = useAuth();
   return (
     <>
-      <DesktopExtensionBridge accessToken={session?.access_token ?? ""} />
       {active === "canvas"
         ? <main className="desktop-canvas-workspace">{children}</main>
         : <main className="desktop-feature"><section className={`desktop-feature__content desktop-feature__content--${active}`}>{children}</section></main>}

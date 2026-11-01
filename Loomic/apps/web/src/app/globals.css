@@ -203,6 +203,13 @@ html[data-helstera-desktop="true"] .workspace-shell > main > .absolute { display
 .desktop-agent-home__header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 26px; border-bottom: 1px solid var(--border); }
 .desktop-agent-home__header h1 { margin: 9px 0 0; font-size: 32px; line-height: 1.15; font-weight: 580; }
 .desktop-agent-home__header > div:first-child > p:last-child { margin: 10px 0 0; color: var(--muted-foreground); font-size: 13px; }
+.desktop-extension-links { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.desktop-extension-links a { display: inline-flex; align-items: center; gap: 9px; min-height: 44px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); background: var(--background); font-size: 13px; text-decoration: none; }
+.desktop-extension-links a:hover { background: var(--muted); }
+.desktop-extension-links a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.desktop-extension-links svg { width: 17px; height: 17px; flex: none; }
+.desktop-extension-links a span { display: grid; gap: 2px; }
+.desktop-extension-links small { color: var(--muted-foreground); font-size: 11px; }
 .desktop-agent-composer { margin-top: 24px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); box-shadow: 0 10px 35px color-mix(in srgb, var(--foreground) 5%, transparent); }
 .desktop-agent-composer form { padding: 16px; }
 .desktop-agent-composer label { display: block; margin-bottom: 8px; color: var(--muted-foreground); font-size: 11px; font-weight: 600; }

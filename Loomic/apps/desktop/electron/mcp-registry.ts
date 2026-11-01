@@ -7,6 +7,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname } from "node:path";
+import { Readable } from "node:stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -60,6 +61,12 @@ const MAX_RESULT_BYTES = 80_000;
 const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const WINDOWS_SCRIPT_COMMANDS = new Set(["npx", "npm", "pnpm", "npx.cmd", "npm.cmd", "pnpm.cmd"]);
 
+export function resolveMcpArguments(command: string, args: string[]) {
+  const isNpx = /^(npx|npx\.cmd)$/i.test(command);
+  if (isNpx && args[0] === "@playwright/mcp@latest") return ["--yes", ...args];
+  return args;
+}
+
 export function resolveMcpStdioLaunch(
   command: string,
   args: string[],
@@ -69,14 +76,11 @@ export function resolveMcpStdioLaunch(
   if (platform !== "win32" || !WINDOWS_SCRIPT_COMMANDS.has(command.toLowerCase())) {
     return { command, args };
   }
-  if (args.some((argument) => /[\0\r\n%!\"]/.test(argument))) {
+  if (args.some((argument) => /[\0\r\n%!"&|<>^()]/.test(argument))) {
     throw new Error("Windows package-runner arguments contain unsupported command characters.");
   }
   const executable = command.toLowerCase().endsWith(".cmd") ? command : `${command}.cmd`;
-  const commandLine = `"${[executable, ...args]
-    .map((argument) => `"${argument.replace(/"/g, '""')}"`)
-    .join(" ")}"`;
-  return { command: comspec, args: ["/d", "/s", "/c", commandLine] };
+  return { command: comspec, args: ["/d", "/c", executable, ...args] };
 }
 
 export type MarketplaceMcpConfigField = {
@@ -179,10 +183,16 @@ export function validateMcpServer(input: McpServerInput) {
 
 export class McpRegistry {
   private readonly live = new Map<string, LiveServer>();
+  private readonly connecting = new Map<string, {
+    canceled: boolean;
+    client?: Client;
+    promise?: Promise<Awaited<ReturnType<McpRegistry["list"]>>>;
+  }>();
 
   constructor(
     private readonly configPath: string,
     private readonly storage: SecureStorage,
+    private readonly onUnexpectedClose?: (id: string) => void,
   ) {}
 
   async list() {
@@ -248,8 +258,23 @@ export class McpRegistry {
 
   async connect(id: string) {
     if (this.live.has(id)) return this.list();
+    const existing = this.connecting.get(id);
+    if (existing?.promise) return existing.promise;
+    const pending: { canceled: boolean; client?: Client; promise?: Promise<Awaited<ReturnType<McpRegistry["list"]>>> } = { canceled: false };
+    const promise = this.connectServer(id, pending);
+    pending.promise = promise;
+    this.connecting.set(id, pending);
+    try {
+      return await promise;
+    } finally {
+      if (this.connecting.get(id) === pending) this.connecting.delete(id);
+    }
+  }
+
+  private async connectServer(id: string, pending: { canceled: boolean; client?: Client }) {
     const server = (await this.readServers()).find((entry) => entry.id === id);
     if (!server) throw new Error("MCP server was not found.");
+    if (pending.canceled) throw new Error("MCP connection was canceled.");
     const token = server.encryptedToken
       ? this.decrypt(server.encryptedToken)
       : undefined;
@@ -257,6 +282,14 @@ export class McpRegistry {
       { name: "helstera-desktop", version: "0.2.12" },
       { capabilities: {} },
     );
+    pending.client = client;
+    let closed = false;
+    client.onclose = () => {
+      closed = true;
+      if (this.live.get(id)?.client !== client) return;
+      this.live.delete(id);
+      this.onUnexpectedClose?.(id);
+    };
     let transport: StdioClientTransport | StreamableHTTPClientTransport;
     if (server.transport === "stdio") {
       const env = server.encryptedEnv
@@ -288,7 +321,7 @@ export class McpRegistry {
       );
       if (!server.command)
         throw new Error("The configured stdio executable is missing.");
-      const launch = resolveMcpStdioLaunch(server.command, server.args ?? []);
+      const launch = resolveMcpStdioLaunch(server.command, resolveMcpArguments(server.command, server.args ?? []));
       transport = new StdioClientTransport({
         command: launch.command,
         args: launch.args,
@@ -296,6 +329,7 @@ export class McpRegistry {
         env: { ...inherited, ...env },
         stderr: "pipe",
       });
+      if (transport.stderr instanceof Readable) transport.stderr.resume();
     } else {
       if (!server.url)
         throw new Error("The configured MCP endpoint is missing.");
@@ -308,6 +342,8 @@ export class McpRegistry {
     try {
       await client.connect(transport);
       const tools = (await client.listTools()).tools as McpTool[];
+      if (pending.canceled) throw new Error("MCP connection was canceled.");
+      if (closed) throw new Error("MCP connection closed during initialization.");
       this.live.set(id, { client, tools });
       await this.audit(server.name, "connect", "ok");
       return this.list();
@@ -340,6 +376,12 @@ export class McpRegistry {
   }
 
   async disconnect(id: string) {
+    const pending = this.connecting.get(id);
+    if (pending) {
+      pending.canceled = true;
+      await pending.client?.close();
+      await pending.promise?.catch(() => undefined);
+    }
     const active = this.live.get(id);
     if (!active) return this.list();
     this.live.delete(id);
@@ -476,9 +518,13 @@ export class McpRegistry {
   }
 
   async closeAll() {
-    const clients = [...this.live.values()].map(({ client }) => client.close());
+    const pending = [...this.connecting.values()];
+    for (const connection of pending) connection.canceled = true;
+    await Promise.allSettled(pending.flatMap((connection) => connection.client ? [connection.client.close()] : []));
+    await Promise.allSettled(pending.flatMap((connection) => connection.promise ? [connection.promise] : []));
+    const clients = [...this.live.values()].map(({ client }) => client);
     this.live.clear();
-    await Promise.allSettled(clients);
+    await Promise.allSettled(clients.map((client) => client.close()));
   }
 
   private decrypt(value: string) {

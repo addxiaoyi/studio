@@ -3604,6 +3604,13 @@ app.whenReady().then(() => {
   mcpRegistry = new McpRegistry(
     join(app.getPath("userData"), "mcp-registry.json"),
     safeStorage,
+    (id) => {
+      publishDesktopMcpTools();
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:mcp-disconnected", id);
+      void refreshDesktopExtensionMcpStates()
+        .then(publishDesktopExtensions)
+        .catch((error) => console.warn("[desktop-extensions] could not refresh MCP state", error));
+    },
   );
   desktopExtensionRegistry = new DesktopExtensionRegistry(
     join(app.getPath("userData"), "desktop-extensions.json"),
