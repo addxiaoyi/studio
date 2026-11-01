@@ -31,6 +31,7 @@ import {
 } from "./action-policy.js";
 import { decodeJpegPayload } from "./capture-payload.js";
 import { softDeleteWebsiteCaptureAssets } from "./asset-cleanup.js";
+import { deliverDesktopChatOutbox } from "./desktop-chat-outbox.js";
 import {
   type CaptureTask,
   buildWebsiteClaims,
@@ -292,6 +293,15 @@ export class WebsiteAssistantHub {
         if (upload.createdAt < cutoff) this.completedRecordingUploads.delete(uploadId);
       }
     }, 60 * 1000).unref();
+    setInterval(() => void this.deliverDesktopChat(), 5_000).unref();
+  }
+
+  private async deliverDesktopChat() {
+    try {
+      await deliverDesktopChatOutbox(this.options.db);
+    } catch (error) {
+      console.error("[desktop-agent] chat delivery failed; will retry", error);
+    }
   }
 
   setDesktopAgentPlanNextHandler(
@@ -971,9 +981,7 @@ export class WebsiteAssistantHub {
       "insert into desktop_agent_events(task_id,event_type,detail) values($1,'canceled',$2)",
       [taskId, "用户取消了任务"],
     );
-    if (row.chat_session_id) await this.appendDesktopAgentChatMessage({
-      sessionId: row.chat_session_id, userId: row.created_by, taskId, goal: row.goal, status: "canceled",
-    });
+    void this.deliverDesktopChat();
     return { taskId, status: "canceled" as const };
   }
 
@@ -1844,16 +1852,7 @@ export class WebsiteAssistantHub {
         "update desktop_agent_approvals set status='expired' where task_id=$1 and status='pending'",
         [event.taskId],
       );
-      if (task.chat_session_id) {
-        await this.appendDesktopAgentChatMessage({
-          sessionId: task.chat_session_id,
-          userId: task.created_by,
-          taskId: task.id,
-          goal: task.goal,
-          status: event.eventType === "completed" ? "succeeded" : event.eventType,
-          ...(typeof event.result?.summary === "string" ? { summary: event.result.summary.slice(0, 8_000) } : {}),
-        });
-      }
+      void this.deliverDesktopChat();
     }
   }
 
@@ -2051,10 +2050,7 @@ export class WebsiteAssistantHub {
       [taskId, message],
     );
     this.clearDesktopTaskTimer(taskId);
-    if (failed.rows[0].chat_session_id) await this.appendDesktopAgentChatMessage({
-      sessionId: failed.rows[0].chat_session_id!, userId: failed.rows[0].created_by, taskId,
-      goal: failed.rows[0].goal, status: "failed", summary: message,
-    });
+    void this.deliverDesktopChat();
   }
 
   private async appendDesktopAgentChatMessage(input: {

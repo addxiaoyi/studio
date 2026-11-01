@@ -13,6 +13,7 @@ import { AgentGoalWorker } from "./agent-goal-worker.js";
 import { acceptSuggestion } from "./agent-suggestion-service.js";
 import { ReadOnlyGoalPausedError } from "./agent-goal-interruption.js";
 import { WebsiteAssistantHub } from "../website-capture/assistant-hub.js";
+import { deliverDesktopChatOutbox } from "../website-capture/desktop-chat-outbox.js";
 
 const enabled = process.env.HELT_AGENT_DB_TEST === "1";
 
@@ -275,6 +276,30 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     expect(saved).toMatchObject({ status: "running", connection_id: newConnectionId, result: { summary: "Original evidence" } });
     expect((await db.query("select id from desktop_agent_events where task_id=$1", [taskId])).rows).toHaveLength(0);
     expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it("retries desktop terminal chat after failure and deduplicates concurrent delivery", async () => {
+    const pairingId = randomUUID();
+    const connectionId = randomUUID();
+    const taskId = randomUUID();
+    await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,chat_session_id) values($1,$2,$3,$4,'Test','operator','[]'::jsonb,'running',$5)", [taskId, workspaceId, userId, connectionId, sessionId]);
+    await db.query("update desktop_agent_tasks set status='failed',error_message='Disconnected' where id=$1", [taskId]);
+    await db.query(`create function reject_test_terminal_chat() returns trigger language plpgsql as $$ begin raise exception 'chat unavailable'; end; $$`);
+    await db.query("create trigger reject_test_terminal_chat before insert on chat_messages for each row execute function reject_test_terminal_chat()");
+    try {
+      await expect(deliverDesktopChatOutbox(db)).rejects.toThrow("chat unavailable");
+      expect((await db.query("select delivered_at from desktop_agent_chat_outbox where task_id=$1", [taskId])).rows[0].delivered_at).toBeNull();
+    } finally {
+      await db.query("drop trigger reject_test_terminal_chat on chat_messages; drop function reject_test_terminal_chat()");
+    }
+    await Promise.all([deliverDesktopChatOutbox(db), deliverDesktopChatOutbox(db)]);
+    await deliverDesktopChatOutbox(db);
+    const messages = await db.query("select content_blocks from chat_messages where session_id=$1 and client_message_id=$2", [sessionId, `desktop-agent:${taskId}:failed`]);
+    expect(messages.rows).toHaveLength(1);
+    expect(messages.rows[0].content_blocks[0].output).toMatchObject({ taskId, status: "failed", summary: "Disconnected" });
+    expect((await db.query("select delivered_at from desktop_agent_chat_outbox where task_id=$1", [taskId])).rows[0].delivered_at).not.toBeNull();
   });
 
   it("rolls back a desktop task update when its event cannot be recorded", async () => {
