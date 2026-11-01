@@ -246,6 +246,59 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     expect(sent.some((message) => message.type === "desktop_agent.action_recorded")).toBe(false);
   });
 
+  it("ignores a stale terminal event after the task reconnects", async () => {
+    const pairingId = randomUUID();
+    const oldConnectionId = randomUUID();
+    const newConnectionId = randomUUID();
+    const taskId = randomUUID();
+    await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$3,$4,$5,$6),($2,$3,$4,$5,$7)", [oldConnectionId, newConnectionId, pairingId, workspaceId, userId, randomUUID(), randomUUID()]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,result) values($1,$2,$3,$4,'Test','operator','[]'::jsonb,'running',$5::jsonb)", [taskId, workspaceId, userId, oldConnectionId, JSON.stringify({ summary: "Original evidence" })]);
+    let reconnected = false;
+    const wrappedDb = {
+      query: async (sql: string, values?: unknown[]) => {
+        const response = await db.query(sql, values);
+        if (!reconnected && sql.includes("select id,goal_id,status,workspace_id,created_by")) {
+          reconnected = true;
+          await db.query("update desktop_agent_tasks set connection_id=$2 where id=$1", [taskId, newConnectionId]);
+        }
+        return response;
+      },
+    };
+    const live = { id: oldConnectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: vi.fn() } };
+    const hub = new WebsiteAssistantHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const internals = hub as unknown as { handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void>; cleanupTaskAssets(taskId: string): Promise<void> };
+    const cleanup = vi.spyOn(internals, "cleanupTaskAssets");
+    await internals.handleDesktopAgentEvent(live, { taskId, eventType: "completed", result: { summary: "Stale result" } });
+    const saved = (await db.query("select status,connection_id,result from desktop_agent_tasks where id=$1", [taskId])).rows[0];
+    expect(reconnected).toBe(true);
+    expect(saved).toMatchObject({ status: "running", connection_id: newConnectionId, result: { summary: "Original evidence" } });
+    expect((await db.query("select id from desktop_agent_events where task_id=$1", [taskId])).rows).toHaveLength(0);
+    expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it("rolls back a desktop task update when its event cannot be recorded", async () => {
+    const pairingId = randomUUID();
+    const connectionId = randomUUID();
+    const taskId = randomUUID();
+    await db.query("insert into website_capture_pairings(id,workspace_id,created_by,code_hash,expires_at) values($1,$2,$3,$4,now()+interval '1 hour')", [pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
+    await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,result) values($1,$2,$3,$4,'Test','operator','[]'::jsonb,'running',$5::jsonb)", [taskId, workspaceId, userId, connectionId, JSON.stringify({ summary: "Original evidence" })]);
+    const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: vi.fn() } };
+    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const internals = hub as unknown as { handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void> };
+    await db.query("alter table desktop_agent_events add constraint test_reject_terminal_event check (event_type <> 'completed') not valid");
+    try {
+      await expect(internals.handleDesktopAgentEvent(live, { taskId, eventType: "completed", result: { summary: "New result" } })).rejects.toThrow();
+      expect((await db.query("select status,result,completed_at from desktop_agent_tasks where id=$1", [taskId])).rows[0]).toMatchObject({ status: "running", result: { summary: "Original evidence" }, completed_at: null });
+    } finally {
+      await db.query("alter table desktop_agent_events drop constraint test_reject_terminal_event");
+    }
+    await internals.handleDesktopAgentEvent(live, { taskId, eventType: "completed", result: { summary: "New result" } });
+    expect((await db.query("select status from desktop_agent_tasks where id=$1", [taskId])).rows[0].status).toBe("succeeded");
+    expect((await db.query("select id from desktop_agent_events where task_id=$1 and event_type='completed'", [taskId])).rows).toHaveLength(1);
+  });
+
   it("holds recovery when an action is dispatched after the initial checkpoint read", async () => {
     const pairingId = randomUUID();
     const connectionId = randomUUID();

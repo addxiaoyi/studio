@@ -1789,21 +1789,6 @@ export class WebsiteAssistantHub {
       );
       if (!consumed.rows[0]) return;
     }
-    await this.options.db.query(
-      "insert into desktop_agent_events(task_id,event_type,detail,payload) values($1,$2,$3,$4::jsonb)",
-      [
-        event.taskId,
-        event.eventType,
-        event.detail ?? null,
-        JSON.stringify({
-          progress: event.progress,
-          stepId: event.stepId,
-          result: safeResult,
-          action: safeAction,
-          approvalId: event.approvalId,
-        }),
-      ],
-    );
     const terminal = ["completed", "failed", "canceled"].includes(event.eventType);
     const checkpoint = {
       ...(event.stepId || event.progress !== undefined ? { stepId: event.stepId ?? null, progress: event.progress ?? null, eventType: event.eventType } : {}),
@@ -1811,7 +1796,13 @@ export class WebsiteAssistantHub {
     };
     const resumeToken = event.stepId ? `${event.taskId}:${event.stepId}` : `${event.taskId}:${event.eventType}`;
     const updated = await this.options.db.query<{ id: string }>(
-      `update desktop_agent_tasks set status=$2,result=case when $4::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $4::jsonb else result end,error_message=case when $2 in ('failed','canceled') then $5 else null end,checkpoint=case when $6::jsonb <> '{}'::jsonb then coalesce(checkpoint,'{}'::jsonb) || $6::jsonb else checkpoint end,resume_token=case when $7 <> '' then $7 else resume_token end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1 and status in ('queued','running','waiting_approval') returning id`,
+      `with updated as (
+        update desktop_agent_tasks set status=$2,result=case when $4::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $4::jsonb else result end,error_message=case when $2 in ('failed','canceled') then $5 else null end,checkpoint=case when $6::jsonb <> '{}'::jsonb then coalesce(checkpoint,'{}'::jsonb) || $6::jsonb else checkpoint end,resume_token=case when $7 <> '' then $7 else resume_token end,completed_at=case when $3 then now() else completed_at end,updated_at=now()
+         where id=$1 and connection_id=$8 and created_by=$9 and status in ('queued','running','waiting_approval') returning id
+       ), logged as (
+        insert into desktop_agent_events(task_id,event_type,detail,payload)
+        select id,$10,$5,$11::jsonb from updated returning task_id
+       ) select updated.id from updated join logged on logged.task_id=updated.id`,
       [
         event.taskId,
         event.eventType === "failed"
@@ -1826,12 +1817,13 @@ export class WebsiteAssistantHub {
         event.detail ?? null,
         JSON.stringify(checkpoint),
         resumeToken,
+        live.id,
+        live.userId,
+        event.eventType,
+        JSON.stringify({ progress: event.progress, stepId: event.stepId, result: safeResult, action: safeAction, approvalId: event.approvalId }),
       ],
     );
-    if (!updated.rows[0]) {
-      await this.cleanupTaskAssets(task.id);
-      return;
-    }
+    if (!updated.rows[0]) return;
     if (event.eventType === "progress" && event.approvalId && event.action?.approvalToken) {
       this.send(live, {
         type: "desktop_agent.action_recorded",
