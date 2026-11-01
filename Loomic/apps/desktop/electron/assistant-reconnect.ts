@@ -15,3 +15,21 @@ export function shouldReconnectAssistant(code: number) {
 export function interruptedApprovalRequiresReview(pendingApprovalCount: number) {
   return pendingApprovalCount > 0;
 }
+
+const resumableNativeActions = new Set(["read_page", "capture_screen"]);
+
+export function nativeResumeIsReadOnly(actions: ReadonlyArray<{ kind: string }>) {
+  return actions.every((action) => resumableNativeActions.has(action.kind));
+}
+
+export async function verifyNativeResumeAction<T>(
+  action: { kind: string },
+  expectedWindow: unknown,
+  inspect: () => Promise<T>,
+  matches: (snapshot: T, identity: unknown) => boolean,
+  isCurrent: () => boolean,
+) {
+  if (!nativeResumeIsReadOnly([action]) || !isCurrent()) return false;
+  const snapshot = await inspect();
+  return isCurrent() && matches(snapshot, expectedWindow);
+}

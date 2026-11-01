@@ -406,14 +406,22 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     const child = spawn(process.env.HELT_ELECTRON_TEST_BIN!, [fixture], {
       env: { SystemRoot: process.env.SystemRoot, PATH: process.env.PATH, TEMP: process.env.TEMP, TMP: process.env.TMP, HELT_ELECTRON_TEST_USER_DATA: userData, HELT_ELECTRON_TEST_WS: `ws://127.0.0.1:${address.port}` },
       windowsHide: true,
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let diagnostics = "";
+    for (const stream of [child.stdout, child.stderr]) {
+      stream.on("data", (chunk: Buffer) => { diagnostics = (diagnostics + chunk.toString()).slice(-8_000); });
+    }
+    const prematureExit = new Promise<never>((_resolve, reject) => {
+      child.once("error", (error) => reject(new Error("Electron fixture could not start", { cause: error })));
+      child.once("exit", (code, signal) => reject(new Error(`Electron fixture exited before connecting (code ${code}, signal ${signal}): ${diagnostics}`)));
     });
     const readMessage = async (socket: WebSocket) => {
       const [payload] = await once(socket, "message", { signal: AbortSignal.timeout(10_000) });
       return JSON.parse(String(payload)) as Record<string, unknown>;
     };
     try {
-      const [firstSocket] = await firstConnection as [WebSocket];
+      const [firstSocket] = await Promise.race([firstConnection, prematureExit]) as [WebSocket];
       expect(await readMessage(firstSocket)).toMatchObject({ type: "fixture.ready", executions: 0 });
       let dropped = false;
       const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => {

@@ -70,7 +70,7 @@ import { RecorderLock } from "./recorder-lock.js";
 import { parseMarketplaceInstallSlug } from "./desktop-marketplace-link.js";
 import { formatDesktopPlanReview } from "./desktop-plan-review.js";
 import { DesktopActionReceipts } from "./desktop-action-receipts.js";
-import { assistantReconnectDelay, interruptedApprovalRequiresReview, shouldReconnectAssistant } from "./assistant-reconnect.js";
+import { assistantReconnectDelay, interruptedApprovalRequiresReview, nativeResumeIsReadOnly, shouldReconnectAssistant, verifyNativeResumeAction } from "./assistant-reconnect.js";
 import { checkDesktopUpdate, installDesktopUpdate } from "./update-actions.js";
 import { getDesktopUpdatePolicy } from "./update-policy.js";
 import {
@@ -112,6 +112,7 @@ const desktopActionApprovals = new DesktopActionApprovals();
 const desktopAgentRounds = new Map<string, number>();
 const desktopAgentDeadlineWarnings = new Set<string>();
 const desktopAgentInterruptedTasks = new Set<string>();
+const resumedNativeWindowIdentities = new Map<string, unknown>();
 const locallyCachedDesktopEvents = new WeakSet<object>();
 const MAX_ACTIVE_DESKTOP_AGENT_TASKS = 8;
 const desktopLocalAssetPaths = new WeakMap<object, string>();
@@ -2248,6 +2249,7 @@ function isNativeDesktopTask(task: DesktopAgentTask) {
 }
 
 function finishDesktopAgentTask(taskId: string) {
+  resumedNativeWindowIdentities.delete(taskId);
   pendingDesktopActionReceipts.clear(taskId);
   desktopActionApprovals.clearTask(taskId);
   desktopAgentPlans.delete(taskId);
@@ -2585,16 +2587,49 @@ async function resumeDesktopAgentTasks(rawTasks: unknown) {
     }
     if (isNativeDesktopTask(task)) {
       const taskRecord = resume.task as { checkpoint?: { windowIdentity?: unknown } };
+      const resumeSocket = assistantSocket;
       let sameWindow = false;
       if (process.platform === "win32" && taskRecord.checkpoint?.windowIdentity) {
         try { sameWindow = matchesUiaWindow(await inspectWindowsUia(), taskRecord.checkpoint.windowIdentity); }
         catch (error) { console.warn("[desktop-agent] window identity verification failed", error instanceof Error ? error.message : "unknown error"); }
       }
-      const detail = sameWindow
-        ? "The original window and process were verified, but the interrupted action still requires review. Pending approvals cannot be reused."
-        : "The original window and process could not be verified. Review the saved evidence before retrying; pending approvals cannot be reused.";
-      sendAssistant({ type: "desktop_agent.event", taskId: task.taskId, eventType: "failed", detail });
-      finishDesktopAgentTask(task.taskId);
+      if (desktopAgentTasks.get(task.taskId) !== task || assistantSocket !== resumeSocket || resumeSocket?.readyState !== WebSocket.OPEN) continue;
+      if (!sameWindow) {
+        sendAssistant({
+          type: "desktop_agent.event",
+          taskId: task.taskId,
+          eventType: "failed",
+          detail: "The original window and process could not be verified. Review the saved evidence before retrying; pending approvals cannot be reused.",
+        });
+        finishDesktopAgentTask(task.taskId);
+        continue;
+      }
+      if (!nativeResumeIsReadOnly(task.plannedActions)) {
+        sendAssistant({
+          type: "desktop_agent.event",
+          taskId: task.taskId,
+          eventType: "failed",
+          detail: "The original window was verified, but an unfinished action has side effects. Review the saved evidence and request a new approval before continuing.",
+        });
+        finishDesktopAgentTask(task.taskId);
+        continue;
+      }
+      desktopTaskTabs.set(task.taskId, null);
+      desktopAgentInterruptedTasks.add(task.taskId);
+      resumedNativeWindowIdentities.set(task.taskId, taskRecord.checkpoint?.windowIdentity);
+      desktopAgentRounds.set(task.taskId, MAX_NATIVE_AGENT_ROUNDS);
+      desktopAgentPlans.set(task.taskId, [...task.plannedActions]);
+      sendAssistant({
+        type: "desktop_agent.event",
+        taskId: task.taskId,
+        eventType: "progress",
+        progress: task.plannedActions.length ? 10 : 100,
+        detail: task.plannedActions.length
+          ? "The original window was verified. Resuming the remaining read-only desktop steps."
+          : "The original window was verified. No unfinished desktop steps remain.",
+      });
+      if (task.plannedActions.length) await continueDesktopAgentPlan(task.taskId);
+      else await completeDesktopAgentTask(task.taskId);
       continue;
     } else {
       const browser = embeddedBrowserWindow && !embeddedBrowserWindow.isDestroyed()
@@ -2674,6 +2709,16 @@ async function executeDesktopAgentAction(rawAction: unknown) {
   }
   try {
     if (isNativeDesktopTask(task)) {
+      if (resumedNativeWindowIdentities.has(action.taskId)) {
+        const identity = resumedNativeWindowIdentities.get(action.taskId);
+        const resumeSocket = assistantSocket;
+        const verified = await verifyNativeResumeAction(action, identity, inspectWindowsUia, matchesUiaWindow,
+          () => desktopAgentTasks.get(action.taskId) === task && resumedNativeWindowIdentities.get(action.taskId) === identity && assistantSocket === resumeSocket && resumeSocket?.readyState === WebSocket.OPEN);
+        if (!verified) {
+          if (desktopAgentTasks.get(action.taskId) !== task || assistantSocket !== resumeSocket || resumeSocket?.readyState !== WebSocket.OPEN) return;
+          throw new Error("The original window changed or the resumed action is not read-only. Review the task before continuing.");
+        }
+      }
       if (action.kind === "native_click" || action.kind === "native_double_click" || action.kind === "native_right_click") {
         const button = action.kind === "native_right_click" ? "right" : "left";
         const double = action.kind === "native_double_click";
