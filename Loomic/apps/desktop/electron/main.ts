@@ -2673,6 +2673,13 @@ async function executeDesktopAgentAction(rawAction: unknown) {
   const action = parsed.data;
   const task = desktopAgentTasks.get(action.taskId);
   const browser = desktopTaskTabs.get(action.taskId);
+  const resumedIdentity = resumedNativeWindowIdentities.get(action.taskId);
+  const resumedSocket = resumedIdentity ? assistantSocket : null;
+  const resumedExecutionIsCurrent = () => !resumedIdentity || (
+    desktopAgentTasks.get(action.taskId) === task &&
+    resumedNativeWindowIdentities.get(action.taskId) === resumedIdentity &&
+    assistantSocket === resumedSocket && resumedSocket?.readyState === WebSocket.OPEN
+  );
   const capability = desktopCapabilityForAction(action);
   if (
     !task ||
@@ -2791,6 +2798,7 @@ async function executeDesktopAgentAction(rawAction: unknown) {
           sessionType: process.env.XDG_SESSION_TYPE,
           preferVision: task.executionMode === "visual_ocr",
         });
+        if (!resumedExecutionIsCurrent()) return;
         sendAssistant({
           type: "desktop_agent.event",
           taskId: action.taskId,
@@ -2858,6 +2866,7 @@ async function executeDesktopAgentAction(rawAction: unknown) {
       throw new Error("该桌面动作暂未实现。");
     }
     }
+    if (!resumedExecutionIsCurrent()) return;
     if (action.approvalId) {
       pendingDesktopActionReceipts.register(action.taskId, action.approvalId, action.requestId);
     }
@@ -2875,6 +2884,7 @@ async function executeDesktopAgentAction(rawAction: unknown) {
     if (pending?.[0]?.requestId === action.requestId) pending.shift();
     await continueDesktopAgentPlan(action.taskId);
   } catch (error) {
+    if (!resumedExecutionIsCurrent()) return;
     if (desktopAgentDeadlineWarnings.has(action.taskId)) {
       await completeDesktopAgentTask(action.taskId);
       return;
