@@ -120,6 +120,22 @@ export function extractGoalUrl(goal: string): string | undefined {
   }
 }
 
+function desktopResultAssets(result: Record<string, unknown>) {
+  const assets = Array.isArray(result.assets)
+    ? result.assets.filter((asset): asset is Record<string, unknown> => Boolean(asset) && typeof asset === "object" && !Array.isArray(asset))
+    : [];
+  const ids = new Set(assets.map((asset) => asset.id).filter((id): id is string => typeof id === "string"));
+  for (const [key, mediaType] of [["screenshotAsset", "image"], ["recordingAsset", "video"]] as const) {
+    const value = result[key];
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const asset = value as Record<string, unknown>;
+    if (typeof asset.assetId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(asset.assetId) || ids.has(asset.assetId)) continue;
+    ids.add(asset.assetId);
+    assets.push({ ...asset, id: asset.assetId, mediaType });
+  }
+  return assets;
+}
+
 export function buildGoalTaskRequest(goal: GoalRow): DesktopAgentTaskRequest {
   const capabilities = goal.capabilities.length
     ? [...goal.capabilities]
@@ -412,8 +428,10 @@ class GoalExecution {
 
     if (task.status === "succeeded") {
       const completedAt = new Date().toISOString();
+      const assets = desktopResultAssets(task.result ?? {});
       const result = {
         ...(task.result ?? {}),
+        ...(assets.length ? { assets } : {}),
         executionMode: goal.execution_mode,
         completedAt,
       };

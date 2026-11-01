@@ -1811,7 +1811,7 @@ export class WebsiteAssistantHub {
     };
     const resumeToken = event.stepId ? `${event.taskId}:${event.stepId}` : `${event.taskId}:${event.eventType}`;
     const updated = await this.options.db.query<{ id: string }>(
-      `update desktop_agent_tasks set status=$2,result=case when $3 then $4::jsonb when $6::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $6::jsonb else result end,error_message=case when $2 in ('failed','canceled') then $5 else null end,checkpoint=case when $7::jsonb <> '{}'::jsonb then coalesce(checkpoint,'{}'::jsonb) || $7::jsonb else checkpoint end,resume_token=case when $8 <> '' then $8 else resume_token end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1 and status in ('queued','running','waiting_approval') returning id`,
+      `update desktop_agent_tasks set status=$2,result=case when $4::jsonb <> '{}'::jsonb then coalesce(result,'{}'::jsonb) || $4::jsonb else result end,error_message=case when $2 in ('failed','canceled') then $5 else null end,checkpoint=case when $6::jsonb <> '{}'::jsonb then coalesce(checkpoint,'{}'::jsonb) || $6::jsonb else checkpoint end,resume_token=case when $7 <> '' then $7 else resume_token end,completed_at=case when $3 then now() else completed_at end,updated_at=now() where id=$1 and status in ('queued','running','waiting_approval') returning id`,
       [
         event.taskId,
         event.eventType === "failed"
@@ -1824,7 +1824,6 @@ export class WebsiteAssistantHub {
         terminal,
         JSON.stringify(safeResult),
         event.detail ?? null,
-        JSON.stringify(safeResult),
         JSON.stringify(checkpoint),
         resumeToken,
       ],
