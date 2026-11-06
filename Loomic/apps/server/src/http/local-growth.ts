@@ -183,13 +183,13 @@ export function registerLocalGrowthRoutes(
         );
       }
       const deletedUploads = await client.query<{ id: string }>(
-        `delete from asset_objects ao
-         where ao.workspace_id=$1 and ao.id=any($2::uuid[]) and ao.created_by=$3
-           and not exists (
-             select 1 from generated_assets ga
-             where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path and ga.deleted_at is null
-           )
-         returning ao.id`,
+        `with marked as (
+          insert into generated_assets(workspace_id,created_by,object_path,mime_type,media_type,title,deleted_at,retention_state,retention_until,purge_after)
+          select ao.workspace_id,ao.created_by,ao.object_path,ao.mime_type,case when ao.mime_type like 'video/%' then 'video' else 'image' end,'Uploaded media',now(),'soft_deleted',now(),now()+interval '7 days'
+          from asset_objects ao where ao.workspace_id=$1 and ao.id=any($2::uuid[]) and ao.created_by=$3
+            and not exists(select 1 from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path)
+          on conflict(workspace_id,object_path) do nothing returning workspace_id,object_path
+        ) select ao.id from asset_objects ao join marked m on m.workspace_id=ao.workspace_id and m.object_path=ao.object_path`,
         [session.viewer.workspace.id, assetIds, session.user.id],
       );
       await client.query("commit");

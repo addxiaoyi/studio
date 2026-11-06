@@ -63,6 +63,14 @@ describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("private media lifecycle", 
       expect((await stat(privatePhoto.absolute)).isFile()).toBe(true);
       expect((await stat(shared.absolute)).isFile()).toBe(true);
       expect(await cleanExpiredGeneratedAssets({ db, storage })).toEqual({ purged: 0, failed: 0 });
+      const batch = await app.inject({ method: "POST", url: "/api/assets/batch-delete", payload: { assetIds: [recentPhoto.objectId] } });
+      expect(batch.statusCode).toBe(200);
+      expect(batch.json().data.deletedIds).toContain(recentPhoto.objectId);
+      expect((await list("owner")).data.some((row: { asset_object_id: string }) => row.asset_object_id === recentPhoto.objectId)).toBe(false);
+      expect((await stat(recentPhoto.absolute)).isFile()).toBe(true);
+      await db.query("update generated_assets set purge_after=now()-interval '1 second' where object_path=$1",[recentPhoto.path]);
+      expect(await cleanExpiredGeneratedAssets({db,storage})).toEqual({purged:1,failed:0});
+      await expect(stat(recentPhoto.absolute)).rejects.toMatchObject({code:"ENOENT"});
     } finally {
       await app.close(); await db.end(); await admin.query(`drop schema ${schema} cascade`); await admin.end();
       await rm(folder, { recursive: true, force: true });
