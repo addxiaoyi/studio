@@ -38,6 +38,9 @@ export function patchStudioSource(file: string, source: string) {
   const replace = (before: string, after: string) => {
     text = replaceRequired(text, before, after, file);
   };
+  if (file === "components/Menu/portals.ts") {
+    replace("export const getPortal = (i: number) => {", "export const getPortal = (i: number) => {\n\tconst modal = document.querySelector<HTMLDialogElement>('dialog[open]');\n\tif (modal?.matches(':modal')) {\n\t\tlet layer = modal.querySelector<HTMLDivElement>(`[data-studio-portal=\"${i}\"]`);\n\t\tif (!layer) { layer = document.createElement('div'); layer.dataset.studioPortal = String(i); modal.append(layer); }\n\t\treturn layer;\n\t}");
+  }
   if (file === "helpers/use-breakpoint.ts") {
     replace("export function useBreakpoint", "const workspaceWidth = () => document.querySelector('.visualforge-native-root')?.getBoundingClientRect().width || window.innerWidth;\nexport function useBreakpoint");
     replace("window.innerWidth < breakpoint", "workspaceWidth() < breakpoint");

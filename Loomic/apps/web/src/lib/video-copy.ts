@@ -15,5 +15,12 @@ const english: Record<string, string> = {
   "素材保存失败，本机导出文件仍保留，可重试上传。": "Upload failed. Your local export is preserved; retry uploading.", "素材保存响应无效，请重试原上传。": "Invalid save response. Retry the same upload.", "保存失败，请重试。": "Save failed. Retry.", "无法加载素材库，请重试。": "Could not load the library. Retry.", "本机素材导入失败。": "Local media import failed.", "导入失败，请重试。": "Import failed. Retry.", "素材缺少文件标识，请刷新素材库后重试。": "File identity is missing. Refresh the library and retry.", "请选择非空图片、音频或视频，每个文件不超过 250 MB。": "Choose nonempty image, audio or video files, up to 250 MB each.",
   "无法加载聊天会话，请重试。": "Could not load chats. Retry.", "聊天会话数据无效。": "Invalid chat response.", "无法加载聊天会话。": "Could not load chats.", "发送失败，素材或会话可能已不可用，请重试。": "Media or chat is unavailable. Refresh and retry.", "发送失败，请重试。": "Sending failed. Retry.",
 };
-export function videoText(locale: Locale, text: string): string { return locale === "en-US" ? english[text] ?? text : text; }
+export function videoText(locale: Locale, text: string): string {
+  if (locale !== "en-US") return text;
+  if (english[text]) return english[text];
+  if (text.startsWith("成片已保存：")) return "Video saved: " + text.slice(6);
+  if (text.startsWith("无法读取本机导出记录：")) return "Could not load local exports: " + text.slice(11);
+  if (text.startsWith("工程保存失败：")) return "Project save failed: " + text.slice(7);
+  return text;
+}
 export function useVideoText() { const locale = useLocale(); return (text: string) => videoText(locale, text); }

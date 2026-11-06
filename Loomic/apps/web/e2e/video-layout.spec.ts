@@ -30,6 +30,10 @@ test("editor keeps a usable canvas, top-layer export and one locale across scree
   expect(await modal.evaluate(dialog => dialog.matches(":modal"))).toBe(true);
   await expect(modal.getByRole("button", { name: "画面", exact: true })).toBeVisible();
   await expect(modal.getByLabel("输出名称", { exact: true })).toBeVisible();
+  await modal.getByRole("button", { name: "容器", exact: true }).click();
+  await expect(modal.getByText("WebM", { exact: true })).toBeVisible();
+  await modal.getByText("WebM", { exact: true }).click();
+  await expect(modal.getByRole("button", { name: "容器", exact: true })).toContainText("WebM");
   await page.keyboard.press("Tab");
   expect(await modal.evaluate(dialog => dialog.contains(document.activeElement))).toBe(true);
   await page.screenshot({ path: info.outputPath("export-dialog.png") });

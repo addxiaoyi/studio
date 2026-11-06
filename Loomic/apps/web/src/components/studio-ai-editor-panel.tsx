@@ -11,11 +11,13 @@ import { saveStudioPlan, type StudioExport } from "@/lib/visualforge-storage";
 import { readRecoveredStudioSession, type StudioAiSession } from "@/lib/studio-ai-session";
 import type { VideoEditorPlanRequest, VideoEditorExportReceipt } from "@helstera/shared";
 import { useVideoText } from "@/lib/video-copy";
+import { useLocale } from "@/lib/i18n";
 
 type Props = { runtime: StudioRuntime | null; mediaRevision: number; userId: string; token: string; exported(output: StudioExport): void };
 
 export function StudioAiEditorPanel({ runtime, mediaRevision, userId, token, exported }: Props) {
   const copy = useVideoText();
+  const english = useLocale() === "en-US";
   const [prompt, setPrompt] = useState("");
   const [plan, setPlan] = useState<StudioAiPlan | null>(null);
   const [confirmed, setConfirmed] = useState<Set<number>>(new Set());
@@ -159,8 +161,12 @@ export function StudioAiEditorPanel({ runtime, mediaRevision, userId, token, exp
       {!runtime && <p className="text-xs text-muted-foreground">{copy("正在等待编辑器连接。")}</p>}
       {plan && <div className="space-y-3 rounded-lg border bg-background p-3" data-testid="studio-ai-plan">
         <h3 className="text-xs font-semibold">{copy("计划预览 · 模型生成")}</h3><p className="text-xs leading-5 text-muted-foreground">{plan.summary}</p>
-        <ol className="space-y-2 text-xs">{plan.actions.map((action, index) => <li key={`${action.type}:${action.label}`}><label className="flex items-start gap-2"><input type="checkbox" value={index} checked={confirmed.has(index)} onChange={toggleAction} disabled={busy || Boolean(applied)} /><span className="min-w-0 break-words">{action.label}</span></label></li>)}</ol>
-        {plan.notices.map(item => <p key={item} className="text-xs leading-5 text-muted-foreground">{item}</p>)}
+        <ol className="space-y-2 text-xs">{plan.actions.map((action, index) => {
+          const command = plan.commands?.actions[index];
+          const label = !english || !command ? action.label : command.type === "cut" ? `Replace visuals (${command.format}): ${command.clips.map(clip => `${clip.name} ${clip.start}–${clip.end}s`).join("; ")}` : command.type === "caption" ? `Caption ${command.startMs / 1000}–${command.endMs / 1000}s: ${command.text}` : command.type === "audio" ? `Music: ${command.assetName}, start ${command.startMs / 1000}s, volume ${Math.round(command.volume * 100)}% (0 credits)` : "Export MP4 locally (0 credits)";
+          return <li key={`${action.type}:${index}`}><label className="flex items-start gap-2"><input type="checkbox" value={index} checked={confirmed.has(index)} onChange={toggleAction} disabled={busy || Boolean(applied)} /><span className="min-w-0 break-words">{label}</span></label></li>;
+        })}</ol>
+        {plan.notices.map(item => <p key={item} className="text-xs leading-5 text-muted-foreground">{english ? "Captions are model-written, not transcribed speech. Existing music and local export cost 0 credits. Planning uses your Agent model configuration." : item}</p>)}
         <Button className="w-full" disabled={busy || Boolean(applied) || confirmed.size !== plan.actions.length} onClick={applyPlan}>{copy(applied ? "已应用到当前合成" : "确认并修改当前合成")}</Button>
         {receiptPending && <Button className="w-full" variant="outline" disabled={busy} onClick={retryReceipt}>{copy("重试同步回执")}</Button>}
         {plan.exportFormat && <Button className="w-full" variant="outline" disabled={busy || !applied || exportedOnce || receiptPending} onClick={exportPlan}>{copy(exportedOnce ? "成片已保存" : "导出已确认的合成")}</Button>}

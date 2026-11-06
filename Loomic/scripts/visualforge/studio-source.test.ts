@@ -47,6 +47,7 @@ describe("pinned Studio typography adapter", () => {
       "components/RenderButton.tsx", "i18n/locales/zh-CN.ts",
       "components/ModalContainer.tsx", "i18n/index.tsx",
       "helpers/use-breakpoint.ts",
+      "components/Menu/portals.ts",
     ]) {
       const lf = read(file).replaceAll("\r\n", "\n");
       const patched = patchStudioSource(file, lf);
