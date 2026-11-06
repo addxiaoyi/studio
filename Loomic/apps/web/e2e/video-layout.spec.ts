@@ -1,18 +1,32 @@
 import { expect, test } from "@playwright/test";
 import { loadEnvFile } from "node:process";
 import { resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { createEditorBrowserFixture } from "../../server/src/features/video-editor/browser-fixture";
 
 loadEnvFile(resolve("../../.env.local"));
 let fixture: Awaited<ReturnType<typeof createEditorBrowserFixture>>;
+let mediaFolder: string;
 test.beforeAll(async () => { fixture = await createEditorBrowserFixture(process.env.DATABASE_URL!, "http://localhost:3219", "{}"); });
-test.afterAll(async () => { await fixture?.close(); });
+test.afterAll(async () => { await fixture?.close(); if(mediaFolder)await rm(mediaFolder,{recursive:true,force:true}); });
 test("editor keeps a usable canvas, top-layer export and one locale across screen sizes", async ({ page, context }, info) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   expect((await context.request.post("http://localhost:3311/api/local-auth/password", { data: { email: fixture.email, password: fixture.password } })).status()).toBe(200);
   await page.goto("/video/?/MyComp");
   await expect(page.getByLabel("导入本机素材", { exact: true })).toBeEnabled({ timeout: 90_000 });
+  mediaFolder=await mkdtemp(resolve(tmpdir(),"loomic-layout-"));
+  const video=resolve(mediaFolder,"layout.mp4");
+  execFileSync(process.platform==='win32'?resolve('../desktop/resources/ffmpeg/win-x64/ffmpeg.exe'):'ffmpeg',['-v','error','-f','lavfi','-i','testsrc2=size=640x360:rate=30','-t','2','-c:v','libx264','-pix_fmt','yuv420p',video]);
+  await page.getByLabel("导入本机素材",{exact:true}).setInputFiles(video);
+  await page.getByText("素材已导入编辑器，请在“素材”面板添加到时间线",{exact:true}).waitFor();
+  await page.evaluate(async()=>{
+    const studio=(window as any).remotion_browserStudio;
+    const snapshot=await studio.loomicSnapshot('MyComp');
+    await studio.loomicApplyEdit({id:crypto.randomUUID(),compositionId:'MyComp',revision:snapshot.revision,replaceVideo:true,cut:{format:'landscape',clips:[{id:'layout',name:'layout.mp4',start:0,end:2,duration:2}],captions:[],audio:[]}});
+  });
   await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
   await expect(page.getByLabel("描述视频编辑目标")).toBeVisible();
   await page.getByRole("button", { name: "关闭 AI 编辑", exact: true }).click();
