@@ -215,7 +215,7 @@ const copy: Record<string, string> = {
   "Install skill": "安装技能",
   "Remove skill": "移除技能",
   "Upgrade skill": "升级技能",
-  Still: "静帧", Video: "视频", Picture: "画面", Other: "其他", Info: "信息", "Output name": "输出名称",
+  Still: "静帧", Video: "视频", video: "视频", still: "静帧", Picture: "画面", Other: "其他", Info: "信息", "Output name": "输出名称",
   "Mute video": "静音", "Unmute video": "取消静音", "Frame rate": "帧率", Duration: "时长",
   "Collapse left sidebar": "收起左侧栏", "Collapse right sidebar": "收起右侧栏", "Expand left sidebar": "展开左侧栏", "Expand right sidebar": "展开右侧栏",
   "Open compositions": "打开合成列表", "Enter fullscreen preview": "全屏预览", "Show transparency as checkerboard": "显示透明棋盘格", "Select render type": "选择导出类型", "Drag to trim start": "拖动裁剪起点",

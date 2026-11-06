@@ -27,6 +27,17 @@ test("editor keeps a usable canvas, top-layer export and one locale across scree
     const snapshot=await studio.loomicSnapshot('MyComp');
     await studio.loomicApplyEdit({id:crypto.randomUUID(),compositionId:'MyComp',revision:snapshot.revision,replaceVideo:true,cut:{format:'landscape',clips:[{id:'layout',name:'layout.mp4',start:0,end:2,duration:2}],captions:[],audio:[]}});
   });
+  const hasFootage = () => page.getByTestId('video-studio').locator('canvas').evaluateAll(canvases => canvases.some(element => {
+    const canvas=element as HTMLCanvasElement;
+    if(canvas.width<320||canvas.height<180)return false;
+    const pixels=canvas.getContext('2d')?.getImageData(0,0,canvas.width,canvas.height).data;
+    if(!pixels)return false;
+    let colored=0;
+    for(let i=0;i<pixels.length;i+=400){const red=pixels[i]!,green=pixels[i+1]!,blue=pixels[i+2]!;if(Math.max(red,green,blue)-Math.min(red,green,blue)>100)colored++;}
+    return colored>100;
+  }));
+  await expect.poll(hasFootage,{timeout:30000}).toBe(true);
+  await expect(page.getByText('layout.mp4',{exact:true}).first()).toBeVisible();
   await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
   await expect(page.getByLabel("描述视频编辑目标")).toBeVisible();
   await page.getByRole("button", { name: "关闭 AI 编辑", exact: true }).click();
@@ -34,6 +45,7 @@ test("editor keeps a usable canvas, top-layer export and one locale across scree
     await page.setViewportSize({ width, height: 900 });
     await expect.poll(() => page.getByTestId("video-studio").evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(350);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await expect.poll(hasFootage).toBe(true);
     await page.screenshot({ path: info.outputPath(`video-${width}.png`) });
   }
   await page.setViewportSize({ width: 1024, height: 900 });
