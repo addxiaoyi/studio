@@ -41,6 +41,8 @@
 [`docs/onetake-integration-20261106.md`](docs/onetake-integration-20261106.md) 与
 [`docs/video-ai-editor-acceptance-20261106.md`](docs/video-ai-editor-acceptance-20261106.md)。下列通用 UX 数量保留自较早验收，不代表本次新增功能的覆盖率。
 
+2026-11-06 已部署到生产 `/video/`，通过真实转写、确认导出、当前合成替换、刷新恢复和聊天视频播放验收。生产模型 `grok-4.6` 返回结构化剪辑计划。开发分支 `codex/agent-workspace-ci` 的代码提交 `5816df0` 已通过 Windows/macOS/Linux 候选 CI；安装过程与各平台原生导出边界见验收记录。
+
 The current GitHub snapshot includes the creator-workspace UX pass and the
 reliability work that is present in this checkout. The detailed 100-item
 acceptance matrix is tracked in

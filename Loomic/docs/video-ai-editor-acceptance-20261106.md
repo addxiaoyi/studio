@@ -49,6 +49,13 @@ node node_modules/@playwright/test/cli.js test --config playwright.onetake.confi
 
 - 增量迁移：`20261106000000_video_editor_plans.sql`、`20261106000001_video_editor_receipts.sql`、`20261106000002_onetake_jobs.sql`。
 - 最新 68 页 Web 候选：`release-candidates/full-web-lmHRHn`；归档 `loomic-onetake-20261106-final.zip` SHA-256：`a7f3ec449e03e5a3dbb70da504fc023a7c9536ae999d2b5ad226a3802214f568`。
-- 生产已准备独立 Python 环境、tiny/base 模型与 Noto CJK 字体；正在进行备份恢复演练，尚未记录生产验收完成。
+- 2026-11-06 生产部署完成。已验证新数据库备份 SHA-256、隔离 PostgreSQL 完整恢复及三项增量迁移；线上 3808 个候选文件哈希一致，Nginx 配置检查与 Server/Worker 健康检查通过。
+- 首次切换因运行时共享包仍为旧版而回退。修复 `dist/dist` 嵌套复制，并在切换前实际导入完整 Server；候选打包现直接采用本次 Shared 构建，覆盖旧 runtime 副本。复制回归先失败后通过，部署脚本 28 项（Linux 专用 2 项本机跳过）、候选打包 4 项通过。
+- 生产真实转写获得 23 个词；删词、改词后导出 H.264 MP4，850742 字节、8.798 秒。审批指纹篡改返回 409，重复上传、确认、私有保存和聊天发送均未重复创建结果，未认证素材访问为 401、认证 Range 为 206。
+- 生产 Chromium 实际播放成片，将结果替换当前 `MyComp`（8.8 秒），刷新后恢复文字工程，在画布聊天内再次播放；`pageErrors=[]`。生产 `openai:grok-4.6` 返回有效 `cut` 命令及待确认计划。验收账号密码和登录会话已清除，成片证据保留在私有验收工作区。
+- 本地证据：`.creative-test-results/onetake-production-evidence.json`、`onetake-browser.log`、`onetake-production-browser.png`、`onetake-production-chat.png`、`onetake-final-health.json`。真实服务部署与模型调用不以单测代替。
+- 已推送 `ae889fb`（AI 编辑与 OneTake）、`107732c`（私有成片聊天播放）、`5816df0`（macOS 真实路径测试）。独立检出的聊天预览 6 项、Web 类型检查，以及桌面路径 7 项均通过。未将其他试穿、录制、认证改动与缓存、安装包纳入这些提交。
+- GitHub `5816df0` 的 [Desktop Candidate CI 42205129353](https://github.com/addxiaoyi/studio/actions/runs/42205129353) 全部通过：固定源码 Windows FFmpeg 编译、Windows x64、macOS arm64、Linux x64。macOS 首轮 `/var` 与 `/private/var` 断言差异已修复，越界拒绝断言仍保留。`ae889fb` 的 [Chromium 回归 42202269754](https://github.com/addxiaoyi/studio/actions/runs/42202269754) 通过。
+- 已下载该次 Windows CI 安装包，文件与产品版本均为 `0.2.21`，本地 SHA-256 为 `61D4B4F1905B8BC93AECE75F6BCF62F29A7E106FB8DA81199D791D30B6EDBEF1`。它与先前本机构建的候选包分别记录，不能混用哈希或运行证据。
 - 桌面 NSIS 安装、macOS/Linux 原生导出未验收。打包 exe 的隔离页面验收也不等于完整首次登录安装流程。
 - 客户端成片回执不能证明远端本机磁盘长期可用；写入文件后、持久化回执前崩溃时仍须核验本地导出历史。
