@@ -48,7 +48,14 @@ export class GoalStepWorker {
         const expired = await client.query("select id from agent_goal_steps where id=$1 and lease_until<now()", [step.id]);
         if (!expired.rows.length) { await client.query("commit"); return null; }
         if (step.approval === "consumed") {
-          await client.query("update agent_goal_steps set state='review',error='执行回执不确定，需要人工核验。',updated_at=now() where id=$1", [step.id]);
+          let evidence = step.output;
+          if (!evidence && step.executor === "web.capture") evidence = (await client.query("select result from website_capture_tasks where id=$1 and created_by=$2 and workspace_id=$3 and status='succeeded'", [step.id,goal.created_by,goal.workspace_id])).rows[0]?.result ?? null;
+          if (!evidence && step.executor === "media.trim") {
+            const asset = (await client.query(`select ao.id from generated_assets ga join asset_objects ao on ao.workspace_id=ga.workspace_id and ao.object_path=ga.object_path
+              where ga.metadata->>'videoExportUploadId'=$1 and ao.created_by=$2 and ao.workspace_id=$3 and ga.retention_until>now() and ga.deleted_at is null and ga.retention_state='active'`, [step.id,goal.created_by,goal.workspace_id])).rows[0];
+            if (asset) evidence = { recordingAssetId: asset.id, assets: [{ id: asset.id, mediaType: "video", url: `/api/uploads/${asset.id}/file` }], recoveredReceipt: true };
+          }
+          await client.query("update agent_goal_steps set state='review',output=$2::jsonb,error='执行回执不确定，需要人工核验。',updated_at=now() where id=$1", [step.id,evidence ? JSON.stringify(evidence) : null]);
           await client.query("update agent_goals set status='paused',error_message='已批准动作中断，请核验后继续。',updated_at=now() where id=$1", [goal.id]);
           await stepEvent(client, goal.id, "goal.step_uncertain", step.title, { stepId: step.step_id, command: step.command });
           await client.query("commit"); return null;

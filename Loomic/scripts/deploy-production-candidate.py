@@ -505,6 +505,7 @@ def deploy(args: argparse.Namespace) -> None:
             )
         print("BACKUP", backup, flush=True)
         print("LOCAL_SHA256", local_hash, flush=True)
+        print("STAGING", staging, flush=True)
 
         if not args.resume_staging:
             with target.open_sftp() as sftp:
