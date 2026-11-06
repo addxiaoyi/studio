@@ -1,0 +1,180 @@
+"use client";
+
+import { StudioAssetPicker } from "@/components/studio-asset-picker";
+import { StudioAiEditorPanel } from "@/components/studio-ai-editor-panel";
+import { StudioExportCard } from "@/components/studio-export-card";
+import { OneTakeWorkspace } from "@/components/onetake/workspace";
+import { useLocale } from "@/lib/i18n";
+import { oneTakeCopy } from "@/lib/onetake-copy";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/lib/auth-context";
+import { type StudioRuntime, loadVisualForge } from "@/lib/visualforge-runtime";
+import {
+  type StudioExport,
+  listStudioExports,
+} from "@/lib/visualforge-storage";
+import { Film, RefreshCw } from "lucide-react";
+import { useTheme } from "next-themes";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+export function VisualForgeWorkspace() {
+  const { session } = useAuth();
+  const { resolvedTheme } = useTheme();
+  const container = useRef<HTMLDivElement>(null);
+  const runtime = useRef<StudioRuntime | null>(null);
+  const [status, setStatus] = useState("正在加载视频创作工作台…");
+  const [error, setError] = useState("");
+  const [outputs, setOutputs] = useState<StudioExport[]>([]);
+  const [ready, setReady] = useState(false);
+  const [mountedRuntime, setMountedRuntime] = useState<StudioRuntime | null>(null);
+  const [mediaRevision, setMediaRevision] = useState(0);
+  const [retry, setRetry] = useState(0);
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [transcriptDirty, setTranscriptDirty] = useState(false);
+  const transcriptCopy = oneTakeCopy(useLocale());
+  const exported = useCallback((output: StudioExport) => setOutputs(current => [output, ...current.filter(item => item.id !== output.id)]), []);
+  const theme = useRef(resolvedTheme || "dark");
+  theme.current = resolvedTheme || "dark";
+  const userId = session?.user.id;
+  const token = session?.access_token;
+
+  useEffect(() => {
+    runtime.current?.setTheme(resolvedTheme || "dark");
+  }, [resolvedTheme]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retry releases and reacquires the editor after a load or lock failure.
+  useEffect(() => {
+    setOutputs([]);
+    setError("");
+    setReady(false);
+    setMountedRuntime(null);
+    setStatus("正在加载视频工程…");
+    if (!userId || !container.current) return;
+    const abort = new AbortController();
+    let mounted: StudioRuntime | null = null;
+    void listStudioExports(userId)
+      .then((saved) => {
+        if (!abort.signal.aborted)
+          setOutputs(saved.sort((a, b) => b.createdAt - a.createdAt));
+      })
+      .catch((cause) => {
+        if (!abort.signal.aborted)
+          setError(`无法读取本机导出记录：${cause.message}`);
+      });
+    void loadVisualForge()
+      .then(async (module) => {
+        if (abort.signal.aborted || !container.current) return;
+        mounted = await module.mountVisualForge(container.current, {
+          userId,
+          theme: theme.current,
+          signal: abort.signal,
+          status: (message) => {
+            if (!abort.signal.aborted) setStatus(message);
+          },
+          ready: () => {
+            if (!abort.signal.aborted) setReady(true);
+          },
+          error: (message) => {
+            if (!abort.signal.aborted) setError(message);
+          },
+          exported: (output) => {
+            if (!abort.signal.aborted)
+              setOutputs((current) => [
+                output,
+                ...current.filter((item) => item.id !== output.id),
+              ]);
+          },
+        });
+        if (abort.signal.aborted) mounted.dispose();
+        else {
+          runtime.current = mounted;
+          setMountedRuntime(mounted);
+          setMediaRevision((value) => value + 1);
+        }
+      })
+      .catch((cause) => {
+        if (abort.signal.aborted) return;
+        setStatus("编辑器暂不可用");
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "视频编辑器加载失败，请重试。",
+        );
+      });
+    return () => {
+      abort.abort();
+      mounted?.dispose();
+      setMountedRuntime(null);
+      if (runtime.current === mounted) runtime.current = null;
+    };
+  }, [userId, retry]);
+
+  const importAsset = useCallback(async (file: File, assetId?: string) => {
+    if (!runtime.current) throw new Error("请等待编辑器就绪后导入素材。");
+    await runtime.current.importAsset(file, assetId);
+    setMediaRevision((value) => value + 1);
+  }, []);
+  const reopen = () => setRetry((value) => value + 1);
+
+  return (
+    <section aria-label="视频创作工作台" className="min-w-0 bg-background">
+      <div className="flex min-h-[680px] flex-col md:h-[100dvh] md:min-h-[540px]">
+        <header className="flex min-h-16 flex-wrap items-center gap-3 border-b px-4 py-3 sm:px-5">
+          <div className="min-w-0">
+            <h1 className="flex items-center gap-2 text-base font-semibold">
+              <Film className="size-4" aria-hidden="true" />
+              视频创作
+            </h1>
+            <p className="mt-1 text-xs text-muted-foreground">
+              导入素材，在同一工程里剪辑、预览和导出
+            </p>
+          </div>
+        </header>
+        <div className="flex min-h-10 flex-wrap items-center justify-between gap-2 border-b bg-muted/20 px-4 py-2 sm:px-5">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            {token && (
+              <StudioAssetPicker
+                token={token}
+                importAsset={importAsset}
+                disabled={!ready}
+              />
+            )}
+            <Button size="sm" variant="outline" aria-expanded={transcriptOpen} disabled={transcriptDirty} onClick={() => setTranscriptOpen(!transcriptOpen)}>{transcriptOpen ? transcriptCopy.close : transcriptCopy.open}</Button>
+            <output className="min-w-0 text-xs text-muted-foreground">
+              {status}
+            </output>
+          </div>
+        </div>
+        {error && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center justify-between gap-3 border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+          >
+            <span className="min-w-0 flex-1 break-words">{error}</span>
+            <Button variant="outline" size="sm" onClick={reopen}>
+              <RefreshCw className="size-3" aria-hidden="true" />
+              重新打开编辑器
+            </Button>
+          </div>
+        )}
+        <div className={`min-h-0 flex-1 flex-col md:flex-row ${transcriptOpen ? "hidden" : "flex"}`}>
+          <div ref={container} data-testid="video-studio" className="relative min-h-[420px] min-w-0 flex-1 overflow-hidden md:min-h-0" />
+          {userId && token && <StudioAiEditorPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={(output) => setOutputs((current) => [output, ...current.filter((item) => item.id !== output.id)])} />}
+        </div>
+        {transcriptOpen && token && userId && <div className="min-h-0 flex-1 overflow-y-auto"><OneTakeWorkspace token={token} userId={userId} runtime={ready ? mountedRuntime : null} onExport={exported} onDirty={setTranscriptDirty} /></div>}
+      </div>
+      {outputs.length > 0 && userId && session?.access_token && (
+        <section className="space-y-4 border-t p-4" aria-label="本机导出记录">
+          <h2 className="text-sm font-semibold">成片与导出</h2>
+          {outputs.map((output) => (
+            <StudioExportCard
+              key={output.id}
+              output={output}
+              userId={userId}
+              token={session.access_token}
+            />
+          ))}
+        </section>
+      )}
+    </section>
+  );
+}

@@ -31,6 +31,7 @@ import { createStorageProvider } from "./storage/index.js";
 import { syncDueTrendSources } from "./features/feed/trend-sync.js";
 import { processDuePublishingPlans } from "./features/feed/publishing-scheduler.js";
 import { processDueSyncJobs } from "./features/jobs/sync-service.js";
+import { startOneTakeWorker } from "./features/onetake/worker.js";
 
 // Import executors to trigger registration via side effects
 import "./features/jobs/executors/image-generation.js";
@@ -95,6 +96,7 @@ async function main() {
   const creditService = createLocalCreditService(localDb);
   const storage = createStorageProvider({ provider: "local", root: env.storageRoot ?? "/www/helstera/uploads", baseUrl: env.webOrigin });
   const maintenanceDb = localDb;
+  const stopOneTake = process.env.HELSTERA_ONETAKE_PYTHON ? startOneTakeWorker(localDb, env.storageRoot ?? "/www/helstera/uploads") : async () => {};
   const getAdminClient = () => {
     throw new Error("Supabase runtime support has been removed; use local PostgreSQL services.");
   };
@@ -247,6 +249,7 @@ async function main() {
     if (allTasks.length > 0) {
       await Promise.allSettled(allTasks);
     }
+    await stopOneTake();
     await maintenanceDb.end();
     await pgmq.shutdown();
     console.log(`${tag} Shutdown complete.`);

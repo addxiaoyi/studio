@@ -37,6 +37,10 @@
 
 ## Current implementation status
 
+视频工作区已接入当前合成 AI 编辑与 OneTake 文字剪辑。功能对照、真实模型/浏览器/Windows 候选程序证据和部署边界见
+[`docs/onetake-integration-20261106.md`](docs/onetake-integration-20261106.md) 与
+[`docs/video-ai-editor-acceptance-20261106.md`](docs/video-ai-editor-acceptance-20261106.md)。下列通用 UX 数量保留自较早验收，不代表本次新增功能的覆盖率。
+
 The current GitHub snapshot includes the creator-workspace UX pass and the
 reliability work that is present in this checkout. The detailed 100-item
 acceptance matrix is tracked in

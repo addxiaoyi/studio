@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, isAbsolute, join, relative, resolve, sep } from "path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import {
   type DesktopAgentAction,
   type DesktopAgentTask,
@@ -73,17 +73,32 @@ import { DesktopActionReceipts } from "./desktop-action-receipts.js";
 import { assistantReconnectDelay, interruptedApprovalRequiresReview, nativeResumeIsReadOnly, readCurrentEvidence, shouldReconnectAssistant, verifyNativeResumeAction } from "./assistant-reconnect.js";
 import { checkDesktopUpdate, installDesktopUpdate } from "./update-actions.js";
 import { getDesktopUpdatePolicy } from "./update-policy.js";
+import { assertVideoTools, resolveFfmpegPath, runFfmpeg } from "./media-renderer.js";
+import { createVideoExportHandler } from "./video-export-handler.js";
+import { renderVideoCaptions } from "./video-caption-images.js";
+import { probeVideo } from "./video-probe.js";
+import { VideoExportPreviews } from "./video-export-preview.js";
+import { videoExportConfirmation } from "./video-export-confirmation.js";
+import { isolatedTestDirectory } from "./isolated-test-mode.js";
 import {
   decideMainWindowNavigation,
   observeMainWindowLifecycle,
   registerWindowControlHandlers,
 } from "./window-controls.js";
 
+const testUserData = isolatedTestDirectory(process.env);
+if (testUserData) app.setPath("userData", testUserData);
+
 let mainWindow: BrowserWindow | null = null;
 let mainWindowReady = false;
 let tray: Tray | null = null;
 let embeddedBrowserWindow: BrowserWindow | null = null;
 let recorderWindow: BrowserWindow | null = null;
+const videoExportPreviews = new VideoExportPreviews(join(app.getPath("userData"), "video-export-history"), async () => {
+  const folder = await readAssetFolderStatus(join(app.getPath("userData"), "asset-storage.json"));
+  if (folder.permission !== "granted" || !folder.path) throw new Error("Choose an available local asset folder first.");
+  return folder.path;
+});
 const recorderLock = new RecorderLock();
 let assistantSocket: WebSocket | null = null;
 let assistantSessionToken = "";
@@ -596,6 +611,7 @@ ipcMain.handle("desktop.browser-login-status", (event) => {
 });
 ipcMain.handle("desktop.start-browser-login", async (event) => {
   requireMainWindow(event);
+  if (testUserData) return { ok: false, message: "Browser login is disabled in isolated testing." };
   if (!app.isPackaged)
     return { ok: false, message: "请在正式桌面版中使用浏览器登录。" };
   app.setAsDefaultProtocolClient("helstera");
@@ -723,6 +739,40 @@ ipcMain.handle("assets.write-local", async (event, input: unknown) => {
   await writeFile(target, Buffer.from(value.bytes), { flag: "wx" });
   await writeFile(join(app.getPath("userData"), "asset-storage.json"), JSON.stringify({ directory: savedDirectory, lastWriteAt: new Date().toISOString() }), "utf8");
   return { path: target, name: safeName };
+});
+const runVideoExport = createVideoExportHandler({
+  renderCaptions: renderVideoCaptions,
+  assetDirectory: async () => {
+    const folder = await readAssetFolderStatus(join(app.getPath("userData"), "asset-storage.json"));
+    if (folder.permission !== "granted" || !folder.path) throw new Error("Choose an available local asset folder first.");
+    return folder.path;
+  },
+  checkTools: async () => {
+    const ffmpeg = resolveFfmpegPath(process.resourcesPath);
+    const ffprobe = join(dirname(ffmpeg), process.platform === "win32" ? "ffprobe.exe" : "ffprobe");
+    await assertVideoTools(ffmpeg, ffprobe);
+  },
+  confirm: async (request, directory) => {
+    const choice = await dialog.showMessageBox(mainWindow!, videoExportConfirmation(request, directory));
+    return choice.response === 1;
+  },
+  inspect: (path, format) => probeVideo(join(dirname(resolveFfmpegPath(process.resourcesPath)), process.platform === "win32" ? "ffprobe.exe" : "ffprobe"), path, format),
+  render: (args, signal) => runFfmpeg(args, { signal }),
+});
+ipcMain.handle("video.export", async (event, input: unknown) => {
+  requireMainWindow(event);
+  const output = await runVideoExport(input);
+  if (!output) return null;
+  try { return { ...output, previewId: await videoExportPreviews.register(output.path) }; }
+  catch { return { ...output, previewWarning: true }; }
+});
+ipcMain.handle("video.read-export-preview", async (event, id: unknown) => {
+  requireMainWindow(event);
+  return videoExportPreviews.read(id);
+});
+ipcMain.handle("video.list-export-previews", async (event) => {
+  requireMainWindow(event);
+  return videoExportPreviews.list();
 });
 ipcMain.handle("workspace.tree", async (event) =>
   requireLocalWorkspace(event).tree(),
@@ -3615,7 +3665,7 @@ app.whenReady().then(() => {
   desktopExtensionRegistry = new DesktopExtensionRegistry(
     join(app.getPath("userData"), "desktop-extensions.json"),
   );
-  app.setAsDefaultProtocolClient("helstera");
+  if (!testUserData) app.setAsDefaultProtocolClient("helstera");
   configureAutoUpdates();
   const startupMarketplaceUrl = process.argv.find((argument) => parseMarketplaceInstallSlug(argument));
   if (startupMarketplaceUrl) pendingMarketplaceInstallSlug = parseMarketplaceInstallSlug(startupMarketplaceUrl);

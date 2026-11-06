@@ -1,0 +1,121 @@
+import { expect, test, type Page } from "@playwright/test";
+import { loadEnvFile } from "node:process";
+import { resolve } from "node:path";
+import { createOneTakeBrowserFixture } from "../../server/src/features/onetake/browser-fixture";
+
+loadEnvFile(resolve("../../.env.local"));
+test.skip(!process.env.HELSTERA_ONETAKE_PYTHON || !process.env.HELT_ONETAKE_TEST_SOURCE, "Requires the real speech runtime and a local test video.");
+let fixture: Awaited<ReturnType<typeof createOneTakeBrowserFixture>>;
+test.beforeAll(async () => { fixture = await createOneTakeBrowserFixture(process.env.DATABASE_URL!, "http://localhost:3217"); });
+test.afterAll(async () => { await fixture?.close(); });
+async function savedEdits(page: Page) {
+  return page.evaluate(async userId => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const open = indexedDB.open("loomic-visualforge-projects", 3); open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error); });
+    try {
+      return await new Promise<string[]>((resolve, reject) => { const read = db.transaction("projects").objectStore("projects").get(userId); read.onsuccess = () => resolve(read.result?.loomicAppliedEdits ?? []); read.onerror = () => reject(read.error); });
+    } finally { db.close(); }
+  }, fixture.userId);
+}
+
+test("transcribes, edits, approves, exports and restores OneTake inside the current composition", async ({ page, context }, info) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const login = await context.request.post("http://localhost:3312/api/local-auth/password", { data: { email: fixture.email, password: fixture.password } });
+  expect(login.status()).toBe(200);
+  await page.goto("/video/?/MyComp");
+  await expect(page.getByLabel("导入本机素材", { exact: true })).toBeEnabled({ timeout: 90_000 });
+  await page.getByRole("button", { name: "打开文字剪辑", exact: true }).click();
+  const workspace = page.getByRole("region", { name: "文字剪辑", exact: true });
+  await workspace.getByLabel("选择音视频", { exact: true }).setInputFiles(process.env.HELT_ONETAKE_TEST_SOURCE!);
+  await workspace.getByRole("combobox", { name: /^转写模型/ }).selectOption("tiny", { timeout: 15_000 });
+  await workspace.getByRole("combobox", { name: /^语言/ }).selectOption("en", { timeout: 15_000 });
+  const start = workspace.getByRole("button", { name: "上传并开始转写", exact: true });
+  await expect(start).toBeDisabled();
+  await workspace.getByRole("checkbox", { name: /我同意将所选素材/ }).check();
+  await expect(start).toBeEnabled({ timeout: 30_000 });
+  await start.click();
+  await expect(workspace.getByRole("button", { name: "保存文本", exact: true })).toBeVisible({ timeout: 180_000 });
+  const row = (await fixture.db.query("select * from video_transcripts where user_id=$1", [fixture.userId])).rows[0];
+  expect(row.transcript.words.length).toBeGreaterThan(10);
+  const preview = workspace.getByRole("group", { name: "原素材预览", exact: true });
+  await expect.poll(() => preview.locator("video").evaluate(video => {
+    const media = video as HTMLVideoElement;
+    return media.readyState >= HTMLMediaElement.HAVE_METADATA && media.duration > 5;
+  })).toBe(true);
+  await preview.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => preview.locator("video").evaluate(video => (video as HTMLVideoElement).currentTime)).toBe(5);
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(() => preview.locator("video").evaluate(video => (video as HTMLVideoElement).currentTime)).toBe(0);
+  await page.keyboard.press("Space");
+  await expect(workspace.getByRole("button", { name: "暂停", exact: true })).toBeVisible();
+  await page.keyboard.press("Space");
+  await expect(workspace.getByRole("button", { name: "播放", exact: true })).toBeVisible();
+  const firstWord = workspace.locator('button[data-word="0"]');
+  await firstWord.dblclick();
+  const correction = workspace.getByRole("textbox", { name: "修改选中文字", exact: true });
+  await expect(correction).toBeFocused();
+  await correction.fill("Welcome");
+  await workspace.getByRole("button", { name: "应用文字", exact: true }).click();
+  await workspace.getByRole("checkbox", { name: /^已选择 1:/ }).check();
+  await workspace.getByRole("button", { name: "删除选中", exact: true }).click();
+  await expect(page.getByRole("button", { name: "返回时间线", exact: true })).toBeDisabled();
+  await workspace.getByRole("button", { name: "撤销", exact: true }).click();
+  await workspace.getByRole("button", { name: "重做", exact: true }).click();
+  await workspace.getByRole("button", { name: "保存文本", exact: true }).click();
+  await expect(workspace.getByText("文本已保存", { exact: true })).toBeVisible();
+  await workspace.getByRole("combobox", { name: /^字体/ }).selectOption("Microsoft YaHei", { timeout: 15_000 });
+  await workspace.getByRole("button", { name: "预览导出计划", exact: true }).click();
+  const confirm = workspace.getByRole("button", { name: "确认并导出（0 积分）", exact: true });
+  await expect(confirm).toBeDisabled();
+  expect((await fixture.db.query("select state from video_transcript_exports")).rows.map(item => item.state)).toEqual(["pending"]);
+  await workspace.getByRole("checkbox", { name: /我确认使用这里显示/ }).check();
+  await confirm.click();
+  const output = workspace.getByLabel("下载成片", { exact: true });
+  await expect(output).toBeVisible({ timeout: 60_000 });
+  await expect.poll(() => output.evaluate((video: HTMLVideoElement) => Number.isFinite(video.duration) && video.duration > 0)).toBe(true);
+  await workspace.getByRole("button", { name: "保存到私有素材库", exact: true }).click();
+  await expect(workspace.getByRole("button", { name: "已保存到私有素材库", exact: true })).toBeVisible();
+  expect(Number((await fixture.db.query("select count(*) from generated_assets")).rows[0].count)).toBe(1);
+  await workspace.getByRole("button", { name: "发送到聊天", exact: true }).click();
+  await workspace.getByRole("combobox", { name: /^聊天会话/ }).selectOption(fixture.sessionId);
+  await workspace.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(workspace.getByRole("link", { name: "打开聊天", exact: true })).toBeVisible();
+  await workspace.getByRole("button", { name: "发送", exact: true }).click();
+  await expect.poll(async () => Number((await fixture.db.query("select count(*) from chat_messages where session_id=$1", [fixture.sessionId])).rows[0].count)).toBe(1);
+  const delivered = (await fixture.db.query("select content_blocks from chat_messages where session_id=$1", [fixture.sessionId])).rows[0].content_blocks;
+  expect(delivered[0].toolName).toBe("video_export");
+  await workspace.getByRole("button", { name: "预览替换当前合成", exact: true }).click();
+  await workspace.getByRole("button", { name: "确认替换当前合成画面", exact: true }).click();
+  await expect(workspace.getByRole("button", { name: "已应用到当前合成", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "返回时间线", exact: true }).click();
+  const applied = await page.evaluate(async () => (window as any).remotion_browserStudio.loomicSnapshot("MyComp"));
+  expect(applied.compositionId).toBe("MyComp");
+  const appliedIds = await savedEdits(page);
+  expect(appliedIds).toHaveLength(1);
+  expect(applied.duration).toBeCloseTo((await fixture.db.query("select compiled from video_transcript_exports")).rows[0].compiled.duration, 1);
+  await page.reload();
+  await expect(page.getByLabel("导入本机素材", { exact: true })).toBeEnabled({ timeout: 90_000 });
+  await page.getByRole("button", { name: "打开文字剪辑", exact: true }).click();
+  await expect(workspace.getByRole("button", { name: "保存文本", exact: true })).toBeVisible({ timeout: 30_000 });
+  expect((await fixture.db.query("select revision from video_transcripts")).rows[0].revision).toBe(1);
+  await workspace.getByRole("button", { name: "预览替换当前合成", exact: true }).click();
+  await expect(workspace.getByRole("button", { name: "已应用到当前合成", exact: true })).toBeVisible();
+  expect(await savedEdits(page)).toEqual(appliedIds);
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate(theme => { document.documentElement.classList.toggle("dark", theme === "dark"); }, theme);
+    await page.screenshot({ path: info.outputPath(`onetake-${theme}.png`), fullPage: true });
+  }
+  await page.setViewportSize({ width: 540, height: 760 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.keyboard.press("Tab");
+  await page.screenshot({ path: info.outputPath("onetake-narrow.png"), fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await workspace.getByRole("combobox", { name: /^格式/ }).focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(workspace.getByRole("combobox", { name: /^格式/ })).toHaveValue("mov");
+  await page.screenshot({ path: info.outputPath("onetake-200-percent.png"), fullPage: true });
+  expect(errors).toEqual([]);
+});

@@ -123,11 +123,15 @@ import { registerVideoModelRoutes } from "./http/video-models.js";
 import { registerProjectRoutes } from "./http/projects.js";
 import { registerStoryboardRoutes } from "./http/storyboard.js";
 import { registerRunRoutes } from "./http/runs.js";
+import { registerVideoEditorRoutes } from "./http/video-editor.js";
+import { registerOneTakeRoutes } from "./http/onetake.js";
+import { createEditorPlanStore } from "./features/video-editor/plan-store.js";
 import { registerAgentWorkflowRoutes } from "./http/agent-workflows.js";
 import { registerSettingsRoutes } from "./http/settings.js";
 import { registerAdminProviderRoutes } from "./http/admin-providers.js";
 import { createProviderConfigService } from "./local-db/provider-config-service.js";
 import { registerUploadRoutes } from "./http/uploads.js";
+import { registerPrivateVideoRoutes } from "./http/private-video.js";
 import { registerSkillRoutes } from "./http/skills.js";
 import { registerLocalSkillRoutes } from "./http/local-skills.js";
 import { registerMarketplaceRoutes } from "./http/skills-marketplace.js";
@@ -472,6 +476,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     threadService,
     viewerService,
   });
+  registerVideoEditorRoutes(app, { auth, env, settingsService, viewerService, planStore: createEditorPlanStore(localDb) });
+  registerOneTakeRoutes(app, { auth, viewerService, db: localDb, storage: storageProvider, storageRoot: env.storageRoot ?? "/www/helstera/uploads" });
   registerAgentWorkflowRoutes(app, {
     db: localDb,
     auth,
@@ -533,6 +539,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     uploadService,
     viewerService,
   });
+  registerPrivateVideoRoutes(app, { auth, viewerService, db: localDb, storage: storageProvider });
   void registerGenerateRoutes(app, {
     auth,
     creditService,

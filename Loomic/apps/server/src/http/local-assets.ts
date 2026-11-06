@@ -90,7 +90,13 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
   app.get<{ Params: { assetId: string }; Querystring: { preview?: string } }>("/api/uploads/:assetId/file", async (request, reply) => {
     const user = await options.auth.authenticate(request);
     if (!user) return reply.code(401).send({ error: { code: "unauthorized", message: "Unauthorized" } });
-    const { rows } = await options.db.query("select bucket, object_path, mime_type from asset_objects where id = $1 and exists (select 1 from workspace_members wm where wm.workspace_id = asset_objects.workspace_id and wm.user_id = $2)", [request.params.assetId, user.id]);
+    const { rows } = await options.db.query(`select ao.bucket, ao.object_path, ao.mime_type from asset_objects ao
+      where ao.id = $1 and exists (select 1 from workspace_members wm where wm.workspace_id = ao.workspace_id and wm.user_id = $2)
+      and (ao.bucket not in ('private-video','private-try-on') or (ao.created_by=$2
+        and not exists (select 1 from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path
+          and (ga.deleted_at is not null or ga.retention_state<>'active' or ga.retention_until<=now()))
+        and (exists (select 1 from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path and ga.retention_until>now())
+          or ao.created_at > now() - interval '3 days')))`, [request.params.assetId, user.id]);
     const asset = rows[0];
     if (!asset) return reply.code(404).send({ error: { code: "asset_not_found", message: "Asset not found." } });
     try {
@@ -115,7 +121,7 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
           .toBuffer();
         reply.type("image/webp");
         reply.header("Content-Length", String(preview.length));
-        reply.header("Cache-Control", "private, max-age=86400");
+        reply.header("Cache-Control", asset.bucket === "private-video" || asset.bucket === "private-try-on" ? "private, no-store" : "private, max-age=86400");
         return reply.send(preview);
       }
       if (wantsPreview && String(asset.mime_type).startsWith("video/")) {
@@ -125,18 +131,49 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
         ], { encoding: "buffer", maxBuffer: 8 * 1024 * 1024 });
         reply.type("image/jpeg");
         reply.header("Content-Length", String(stdout.length));
-        reply.header("Cache-Control", "private, max-age=86400");
+        reply.header("Cache-Control", asset.bucket === "private-video" || asset.bucket === "private-try-on" ? "private, no-store" : "private, max-age=86400");
         return reply.send(stdout);
       }
       const fileInfo = await stat(filePath);
       reply.type(asset.mime_type ?? "application/octet-stream");
+      reply.header("X-Content-Type-Options", "nosniff");
+      reply.header("Cache-Control", asset.bucket === "private-video" || asset.bucket === "private-try-on" ? "private, no-store" : "private, max-age=300");
+      if (String(asset.mime_type).startsWith("video/")) {
+        reply.header("Accept-Ranges", "bytes");
+        // Without a validator we cannot satisfy If-Range safely; return the full file.
+        const range = request.headers["if-range"] ? undefined : request.headers.range;
+        if (range) {
+          const selected = parseByteRange(range, fileInfo.size);
+          if (!selected) {
+            reply.header("Content-Range", `bytes */${fileInfo.size}`);
+            return reply.code(416).send();
+          }
+          reply.code(206);
+          reply.header("Content-Range", `bytes ${selected.start}-${selected.end}/${fileInfo.size}`);
+          reply.header("Content-Length", String(selected.end - selected.start + 1));
+          return reply.send(createReadStream(filePath, selected));
+        }
+      }
       reply.header("Content-Length", String(fileInfo.size));
-      reply.header("Cache-Control", "private, max-age=300");
       return reply.send(createReadStream(filePath));
     } catch {
       return reply.code(404).send({ error: { code: "asset_not_found", message: "Asset file not found." } });
     }
   });
+}
+
+function parseByteRange(value: string, size: number): { start: number; end: number } | null {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value);
+  if (!match || !size || (!match[1] && !match[2])) return null;
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return null;
+    return { start: Math.max(0, size - suffix), end: size - 1 };
+  }
+  const start = Number(match[1]);
+  const end = match[2] ? Number(match[2]) : size - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= size || end < start) return null;
+  return { start, end: Math.min(end, size - 1) };
 }
 
 function isWithin(root: string, filePath: string) {

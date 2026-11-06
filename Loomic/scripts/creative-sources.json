@@ -1,0 +1,20 @@
+{
+  "fashion": {
+    "repository": "https://github.com/addxiaoyi/nv-zhuang-AI.git",
+    "commit": "fd4fe6dfc9c3938969243a0733960b222a7c57c5",
+    "directory": "vendor/fashion-source",
+    "license": "MIT"
+  },
+  "onetake": {
+    "repository": "https://github.com/leejersey/OneTake.git",
+    "commit": "3a49104e2dfb9f2c7833e0ca7e1adfc4a07826d8",
+    "directory": "vendor/onetake",
+    "license": "MIT (full text in README.md)"
+  },
+  "video": {
+    "repository": "https://github.com/addxiaoyi/remotion-add.git",
+    "commit": "4f17f140a9679195566932f4824cb6c0e22a2acf",
+    "directory": "vendor/visualforge",
+    "license": "Remotion License"
+  }
+}

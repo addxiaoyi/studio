@@ -132,6 +132,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   clearAssetFolder: () => ipcRenderer.invoke("assets.clear-folder"),
   writeAssetToLocal: (input: { directory: string; fileName: string; bytes: ArrayBuffer }) =>
     ipcRenderer.invoke("assets.write-local", input),
+  exportVideo: (input: { format: "portrait" | "landscape"; clips: Array<{ name: string; mimeType: string; bytes: ArrayBuffer; startMs: number; endMs: number }>; captions?: Array<{ text: string; startMs: number; endMs: number }>; audio?: Array<{ name: string; mimeType: string; bytes: ArrayBuffer; startMs: number; volume: number }> }) => ipcRenderer.invoke("video.export", input),
+  readExportPreview: (id: string) => ipcRenderer.invoke("video.read-export-preview", id),
+  listExportPreviews: () => ipcRenderer.invoke("video.list-export-previews"),
   getWorkspaceTree: () => ipcRenderer.invoke("workspace.tree"),
   readWorkspaceFile: (path: string) => ipcRenderer.invoke("workspace.read", path),
   writeWorkspaceFile: (input: { path: string; content: string }) => ipcRenderer.invoke("workspace.write", input),

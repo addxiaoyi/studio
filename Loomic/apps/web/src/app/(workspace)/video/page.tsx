@@ -1,5 +1,7 @@
-import { CreationWorkspace } from "@/components/creation-workspace";
+"use client";
+
+import { VisualForgeWorkspace } from "@/components/visualforge-workspace";
 
 export default function VideoPage() {
-  return <CreationWorkspace mode="video" />;
+  return <VisualForgeWorkspace />;
 }

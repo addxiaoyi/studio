@@ -204,7 +204,7 @@ export function createStreamingChatModel(
   specifier: string,
   env: Pick<ServerEnv, "openAIApiBase" | "openAIApiKey">,
   promptCacheKey = "helstera-agent-v2",
-  overrides: { baseUrl?: string | undefined; apiKey?: string | undefined } = {},
+  overrides: { baseUrl?: string | undefined; apiKey?: string | undefined; maxRetries?: number; streaming?: boolean; maxTokens?: number } = {},
 ): BaseLanguageModel {
   const colonIdx = specifier.indexOf(":");
   const provider = colonIdx > 0 ? specifier.slice(0, colonIdx) : "openai";
@@ -241,16 +241,18 @@ export function createStreamingChatModel(
           `[model] Using Vertex AI for: ${modelName} (project=${vertexProject}, location=${vertexLocation})`,
         );
         return new ChatVertexAI({
+          ...(overrides.maxRetries !== undefined ? { maxRetries: overrides.maxRetries } : {}),
           model: modelName,
           location: vertexLocation,
           authOptions: { projectId: vertexProject },
-          streaming: true,
+          streaming: overrides.streaming ?? true,
         });
       }
       return new ChatGoogleGenerativeAI({
+        ...(overrides.maxRetries !== undefined ? { maxRetries: overrides.maxRetries } : {}),
         model: modelName,
         apiKey: process.env.GOOGLE_API_KEY!,
-        streaming: true,
+        streaming: overrides.streaming ?? true,
         thinkingConfig: {
           includeThoughts: true,
           thinkingBudget: -1, // dynamic — let the model decide
@@ -265,12 +267,14 @@ export function createStreamingChatModel(
       const isOfficialOpenAI =
         !baseUrl || /(^|:)\/\/api\.openai\.com(\/|$)/i.test(baseUrl);
       return new ChatOpenAI({
+        ...(overrides.maxRetries !== undefined ? { maxRetries: overrides.maxRetries } : {}),
         model: modelName,
         ...((overrides.apiKey ?? env.openAIApiKey)
           ? { apiKey: overrides.apiKey ?? env.openAIApiKey }
           : {}),
         ...(baseUrl ? { configuration: { baseURL: baseUrl } } : {}),
-        streaming: true,
+        streaming: overrides.streaming ?? true,
+        ...(overrides.maxTokens !== undefined ? { maxTokens: overrides.maxTokens } : {}),
         // Some OpenAI-compatible gateways reject OpenAI-only cache fields and
         // stream usage metadata. Keep their tool-call wire format unchanged.
         streamUsage: isOfficialOpenAI,

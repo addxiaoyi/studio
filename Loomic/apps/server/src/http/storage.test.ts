@@ -23,6 +23,18 @@ async function createApp(root: string) {
 }
 
 describe("local storage routes", () => {
+  it("never exposes private videos through the anonymous storage route", async () => {
+    const root = await mkdtemp(join(tmpdir(), "helstera-private-video-"));
+    await mkdir(join(root, "private-video"));
+    await writeFile(join(root, "private-video", "movie.mp4"), "private video");
+    const app = await createApp(root);
+
+    for (const suffix of ["", `?expires=${Date.now() + 60_000}`]) {
+      const response = await app.inject({ method: "GET", url: `/api/storage/private-video/movie.mp4${suffix}` });
+      expect(response.statusCode).toBe(404);
+      expect(response.body).not.toContain("private video");
+    }
+  });
   it("serves safe images with hardened headers", async () => {
     const root = await mkdtemp(join(tmpdir(), "helstera-storage-"));
     await mkdir(join(root, "assets"));

@@ -1,6 +1,7 @@
 appId: com.helstera.desktop
 productName: Helstera
 copyright: Copyright © 2025 Helstera
+beforePack: scripts/check-video-before-pack.cjs
 
 directories:
   output: release
@@ -27,6 +28,17 @@ win:
   extraResources:
     - from: resources/native/helstera-uia.exe
       to: native/helstera-uia.exe
+    - from: resources/ffmpeg/win-x64
+      to: ffmpeg/win-x64
+      filter:
+        - ffmpeg.exe
+        - ffprobe.exe
+        - LICENSE.txt
+        - SOURCE.txt
+        - ffmpeg-source.tar
+        - x264-source.tar
+        - ffmpeg-config.mak
+        - x264-config.mak
   icon: resources/icon.ico
   target:
     - target: nsis

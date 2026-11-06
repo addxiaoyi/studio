@@ -12,8 +12,25 @@ permissions:
   contents: read
 
 jobs:
+  video-tools:
+    name: Windows video tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross compiler
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nasm pkg-config make
+      - name: Build pinned FFmpeg and x264
+        run: bash Loomic/scripts/build-windows-video-tools.sh "$RUNNER_TEMP/video-tools"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-video-tools
+          path: ${{ runner.temp }}/video-tools/
+          if-no-files-found: error
+          retention-days: 7
   desktop:
     name: Desktop ${{ matrix.platform }}
+    needs: video-tools
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -44,6 +61,14 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build shared contracts
         run: pnpm --filter @helstera/shared build
+      - uses: actions/download-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: windows-video-tools
+          path: Loomic/apps/desktop/resources/ffmpeg/win-x64
+      - name: Verify video tool resources
+        if: runner.os == 'Windows'
+        run: node apps/desktop/scripts/check-video-resources.mjs
       - name: Typecheck and test desktop
         run: |
           pnpm --filter @helstera/desktop typecheck

@@ -21,3 +21,5 @@ export * from "./agent-goals.js";
 export * from "./agent-connectors.js";
 export * from "./marketplace-extension-contracts.js";
 export * from "./media-project.js";
+export * from "./video-editor-contracts.js";
+export * from "./onetake.js";

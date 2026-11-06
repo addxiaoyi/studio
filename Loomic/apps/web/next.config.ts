@@ -31,6 +31,10 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   async headers() {
     return [
+      ...["/video/:path*", "/creative/visualforge/:path*"].map(source => ({ source, headers: [
+        { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+        { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
+      ] })),
       { source: "/sw.js", headers: [{ key: "Cache-Control", value: "public, max-age=0, must-revalidate" }, { key: "Service-Worker-Allowed", value: "/" }] },
       { source: "/manifest.json", headers: [{ key: "Cache-Control", value: "public, max-age=86400, immutable" }] },
       { source: "/logo-helstera.png", headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] },

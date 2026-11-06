@@ -7,6 +7,11 @@ import type { ReactNode } from "react";
 export function PageTransition({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
+  // Filters create a containing block for the editors' fixed panels.
+  if (/^\/video\/?$/.test(pathname)) {
+    return <div className="h-full">{children}</div>;
+  }
+
   return (
     <AnimatePresence mode="wait">
       <motion.div

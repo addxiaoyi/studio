@@ -12,7 +12,10 @@
     "test": "pnpm run test:workspace && pnpm run test:packages",
     "seed": "node scripts/seed-test-accounts.mjs",
     "typecheck": "turbo run typecheck",
-    "deploy:sync-shared": "node scripts/deploy/sync-shared-dist.mjs"
+    "deploy:sync-shared": "node scripts/deploy/sync-shared-dist.mjs",
+    "video:prepare": "node scripts/prepare-creative-sources.mjs video && node scripts/prepare-creative-sources.mjs onetake",
+    "video:build": "bun scripts/build-visualforge-runtime.ts",
+    "test:visualforge": "bun scripts/test-visualforge.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
