@@ -28,7 +28,8 @@ export function createLocalUploadService(db: Pool, root = "/www/helstera/uploads
     },
     async deleteAsset(user, assetId) {
       const row = await findAsset(db, user.id, assetId);
-      await unlink(join(root, row.bucket, row.object_path)).catch(() => undefined);
+      try { await unlink(join(root, row.bucket, row.object_path)); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
       await db.query("delete from asset_objects where id = $1", [row.id]);
     },
   };

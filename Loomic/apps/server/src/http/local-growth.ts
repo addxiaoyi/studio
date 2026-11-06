@@ -87,10 +87,9 @@ export function registerLocalGrowthRoutes(
     const query = typeof request.query?.q === "string" ? request.query.q.trim() : "";
     const mediaType = request.query?.mediaType === "image" || request.query?.mediaType === "video" ? request.query.mediaType : null;
     const includeDeleted = request.query?.includeDeleted === "1";
-    const generatedJoin = includeDeleted ? "" : " and ga.deleted_at is null";
     const retentionWindow = includeDeleted
       ? "and ((coalesce(ga.retention_until, ao.created_at + interval '3 days') > now() and coalesce(ga.retention_state, 'active') = 'active') or (ga.retention_state = 'soft_deleted' and ga.purge_after > now()))"
-      : "and coalesce(ga.retention_until, ao.created_at + interval '3 days') > now() and coalesce(ga.retention_state, 'active') = 'active'";
+      : "and ga.deleted_at is null and coalesce(ga.retention_until, ao.created_at + interval '3 days') > now() and coalesce(ga.retention_state, 'active') = 'active'";
     const { rows } = await options.db.query(`select coalesce(ga.id, ao.id) as id, ao.project_id,
       ga.source_job_id, ga.retention_state, ga.retention_until, ga.purge_after, ga.deleted_at, case when ao.mime_type like 'video/%' then 'video' else 'image' end as media_type,
       exists(select 1 from gallery_items gi where gi.asset_id=ga.id and gi.status='published' and gi.deleted_at is null) as published,
@@ -98,21 +97,23 @@ export function registerLocalGrowthRoutes(
       ao.created_at, ao.id as asset_object_id
       from asset_objects ao
       left join generated_assets ga on ga.workspace_id=ao.workspace_id
-        and ga.object_path=ao.object_path${generatedJoin}
+        and ga.object_path=ao.object_path
       where ao.workspace_id=$1
+        and (ao.bucket not in ('private-video','private-try-on') or ao.created_by=$6)
         and (ao.mime_type like 'image/%' or ao.mime_type like 'video/%')
         ${retentionWindow}
         -- Canvas snapshots are implementation details, not user assets.
         and ao.object_path not like '%/gen-canvas-screenshot-%'
         and ($2::text is null or case when ao.mime_type like 'video/%' then 'video' else 'image' end=$2)
         and ($3::text = '' or coalesce(ga.title,'') ilike '%' || $3 || '%' or coalesce(ga.prompt,'') ilike '%' || $3 || '%')
-      order by ao.created_at desc limit $4 offset $5`, [session.viewer.workspace.id, mediaType, query, pageSize, offset]);
+      order by ao.created_at desc limit $4 offset $5`, [session.viewer.workspace.id, mediaType, query, pageSize, offset, session.user.id]);
     const count = await options.db.query(`select count(*)::int as total from asset_objects ao
-      left join generated_assets ga on ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path${generatedJoin}
+      left join generated_assets ga on ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path
       where ao.workspace_id=$1 and (ao.mime_type like 'image/%' or ao.mime_type like 'video/%')
+        and (ao.bucket not in ('private-video','private-try-on') or ao.created_by=$4)
         ${retentionWindow} and ao.object_path not like '%/gen-canvas-screenshot-%'
         and ($2::text is null or case when ao.mime_type like 'video/%' then 'video' else 'image' end=$2)
-        and ($3::text = '' or coalesce(ga.title,'') ilike '%' || $3 || '%' or coalesce(ga.prompt,'') ilike '%' || $3 || '%')`, [session.viewer.workspace.id, mediaType, query]);
+        and ($3::text = '' or coalesce(ga.title,'') ilike '%' || $3 || '%' or coalesce(ga.prompt,'') ilike '%' || $3 || '%')`, [session.viewer.workspace.id, mediaType, query, session.user.id]);
     return { ok: true, data: rows, pagination: { page, pageSize, total: count.rows[0]?.total ?? 0, hasMore: offset + rows.length < (count.rows[0]?.total ?? 0) } };
   });
   app.get("/api/assets/:assetId/retention", async (request: any, reply: any) => {
@@ -120,7 +121,9 @@ export function registerLocalGrowthRoutes(
     const { rows } = await options.db.query(
       `select ga.id as asset_id, ga.retention_state, ga.retention_until, ga.purge_after,
               exists(select 1 from asset_favorites af where af.asset_id=ga.id and af.user_id=$3) as favorited
-       from generated_assets ga where ga.id=$1 and ga.workspace_id=$2`,
+       from generated_assets ga where ga.id=$1 and ga.workspace_id=$2
+         and (ga.created_by=$3 or not exists (select 1 from asset_objects ao
+           where ao.workspace_id=ga.workspace_id and ao.object_path=ga.object_path and ao.bucket in ('private-video','private-try-on')))`,
       [request.params.assetId, session.viewer.workspace.id, session.user.id],
     );
     if (!rows[0]) return reply.code(404).send({ ok: false, error: { code: "asset_not_found", message: "Asset not found" } });
@@ -130,7 +133,9 @@ export function registerLocalGrowthRoutes(
     const session = await requireSession(request, reply); if (!session) return;
     const { rows } = await options.db.query(
       `update generated_assets set deleted_at=null, retention_state='active', retention_until=now() + interval '3 days', purge_after=null, updated_at=now()
-       where id=$1 and workspace_id=$2 and created_by=$3 and retention_state='soft_deleted' returning id,retention_state,retention_until,purge_after`,
+        where id=$1 and workspace_id=$2 and created_by=$3 and retention_state='soft_deleted' and purge_after>now()
+          and exists(select 1 from asset_objects ao where ao.workspace_id=generated_assets.workspace_id and ao.object_path=generated_assets.object_path)
+        returning id,retention_state,retention_until,purge_after`,
       [request.params.assetId, session.viewer.workspace.id, session.user.id],
     );
     if (!rows[0]) return reply.code(409).send({ ok: false, error: { code: "asset_not_restorable", message: "Asset is not in the recovery period." } });

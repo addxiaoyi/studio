@@ -1,0 +1,71 @@
+import { randomUUID } from "node:crypto";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import Fastify from "fastify";
+import { Pool } from "pg";
+import { describe, expect, it, vi } from "vitest";
+import { registerLocalGrowthRoutes } from "../../http/local-growth.js";
+import { createLocalStorageProvider } from "../../storage/local-storage-provider.js";
+import { cleanExpiredGeneratedAssets } from "./asset-retention.js";
+
+describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("private media lifecycle", () => {
+  it("hides private metadata, never revives deleted assets, and cleans original photos with retries", async () => {
+    const url = new URL(process.env.HELT_TEST_DATABASE_URL!);
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("Use local PostgreSQL only.");
+    const admin = new Pool({ connectionString: url.href });
+    const schema = `private_lifecycle_${randomUUID().replaceAll("-", "")}`;
+    await admin.query(`create schema ${schema}`);
+    const db = new Pool({ connectionString: url.href, options: `-c search_path=${schema},public` });
+    const folder = await mkdtemp(join(tmpdir(), "private-lifecycle-"));
+    const app = Fastify();
+    try {
+      await db.query(await readFile(new URL("../../local-db/schema.sql", import.meta.url), "utf8"));
+      const owner = randomUUID(), peer = randomUUID(), workspace = randomUUID();
+      await db.query("insert into app_users(id,email) values($1,'owner@test.invalid'),($2,'peer@test.invalid')", [owner, peer]);
+      await db.query("insert into workspaces(id,owner_user_id,name) values($1,$2,'private test')", [workspace, owner]);
+      await db.query("insert into workspace_members(workspace_id,user_id) values($1,$2),($1,$3)", [workspace, owner, peer]);
+      const auth = { authenticate: async (request: { headers: { authorization?: string } }) => ({ id: request.headers.authorization === "peer" ? peer : owner }) };
+      registerLocalGrowthRoutes(app, { db, auth, viewerService: { ensureViewer: async () => ({ workspace: { id: workspace } }) } } as never);
+      const storage = createLocalStorageProvider({ rootDir: folder });
+      const makeAsset = async (bucket: string, generated = true, days = 0) => {
+        const objectId = randomUUID();
+        const path = `${workspace}/${objectId}.png`;
+        await mkdir(join(folder, bucket, workspace), { recursive: true });
+        await writeFile(join(folder, bucket, path), "photo");
+        await db.query("insert into asset_objects(id,workspace_id,created_by,bucket,object_path,mime_type,created_at) values($1,$2,$3,$4,$5,'image/png',now()-($6*interval '1 day'))", [objectId, workspace, owner, bucket, path, days]);
+        let assetId: string | undefined;
+        if (generated) assetId = (await db.query("insert into generated_assets(workspace_id,created_by,object_path,mime_type,media_type,title) values($1,$2,$3,'image/png','image','private photo') returning id", [workspace, owner, path])).rows[0].id;
+        return { objectId, assetId, path, absolute: join(folder, bucket, path) };
+      };
+      const privatePhoto = await makeAsset("private-try-on");
+      const shared = await makeAsset("project-assets");
+      const list = async (actor: string, query = "") => (await app.inject({ url: "/api/assets/history" + query, headers: { authorization: actor } })).json();
+      const peerList = await list("peer");
+      expect(peerList.data.map((asset: { id: string }) => asset.id)).toEqual([shared.assetId]);
+      expect(peerList.pagination.total).toBe(1);
+      expect((await app.inject({ url: `/api/assets/${privatePhoto.assetId}/retention`, headers: { authorization: "peer" } })).statusCode).toBe(404);
+      expect((await list("owner")).pagination.total).toBe(2);
+      await app.inject({ method: "DELETE", url: `/api/assets/${privatePhoto.assetId}` });
+      expect((await list("owner")).data.map((asset: { id: string }) => asset.id)).toEqual([shared.assetId]);
+      expect((await list("owner", "?includeDeleted=1")).pagination.total).toBe(2);
+      await app.inject({ method: "POST", url: `/api/assets/${privatePhoto.assetId}/restore` });
+      expect((await list("owner")).pagination.total).toBe(2);
+      const oldPhoto = await makeAsset("private-try-on", false, 4);
+      const recentPhoto = await makeAsset("private-try-on", false, 1);
+      const failures = { ...storage, remove: vi.fn(async () => ({ error: new Error("disk unavailable") })) };
+      expect(await cleanExpiredGeneratedAssets({ db, storage: failures, log: { error: vi.fn(), info: vi.fn() } })).toMatchObject({ failed: 1, purged: 0 });
+      expect((await stat(oldPhoto.absolute)).isFile()).toBe(true);
+      expect((await db.query("select id from asset_objects where id=$1", [oldPhoto.objectId])).rows).toHaveLength(1);
+      expect(await cleanExpiredGeneratedAssets({ db, storage })).toMatchObject({ purged: 1, failed: 0 });
+      await expect(stat(oldPhoto.absolute)).rejects.toMatchObject({ code: "ENOENT" });
+      expect((await stat(recentPhoto.absolute)).isFile()).toBe(true);
+      expect((await stat(privatePhoto.absolute)).isFile()).toBe(true);
+      expect((await stat(shared.absolute)).isFile()).toBe(true);
+      expect(await cleanExpiredGeneratedAssets({ db, storage })).toEqual({ purged: 0, failed: 0 });
+    } finally {
+      await app.close(); await db.end(); await admin.query(`drop schema ${schema} cascade`); await admin.end();
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+});

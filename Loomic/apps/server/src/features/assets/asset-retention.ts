@@ -7,7 +7,7 @@ export const ASSET_RETENTION_BATCH_SIZE = 100;
 
 type ExpiredAsset = {
   object_id: string;
-  generated_asset_id: string;
+  generated_asset_id: string | null;
   workspace_id: string;
   bucket: string;
   object_path: string;
@@ -36,12 +36,13 @@ export async function cleanExpiredGeneratedAssets({
   const { rows } = await db.query<ExpiredAsset>(
     `select ao.id as object_id, ga.id as generated_asset_id, ao.workspace_id, ao.bucket, ao.object_path, ga.retention_state, ga.created_by
      from asset_objects ao
-     join generated_assets ga
+     left join generated_assets ga
        on ga.workspace_id = ao.workspace_id
       and ga.object_path = ao.object_path
-      and ((ga.retention_state = 'active' and ga.retention_until <= now())
-        or (ga.retention_state = 'soft_deleted' and ga.purge_after <= now()))
      where (ao.mime_type like 'image/%' or ao.mime_type like 'video/%')
+        and ((ga.retention_state = 'active' and ga.retention_until <= now())
+          or (ga.retention_state = 'soft_deleted' and ga.purge_after <= now())
+          or (ga.id is null and ao.bucket in ('private-try-on','private-video') and ao.created_at <= now() - interval '3 days'))
        -- Keep implementation screenshots out of this lifecycle task.
        and ao.object_path not like '%/gen-canvas-screenshot-%'
      order by ao.created_at asc
@@ -53,17 +54,20 @@ export async function cleanExpiredGeneratedAssets({
   let failed = 0;
 
   for (const asset of rows) {
-    const { error } = await storage.remove(asset.bucket, [asset.object_path]);
-    if (error) {
-      failed += 1;
-      log.error(`[asset-retention] could not remove ${asset.object_path}:`, error);
-      continue;
-    }
-
     const client = await db.connect();
     try {
       await client.query("begin");
-      if (asset.created_by) {
+      const locked = await client.query<{ id: string }>("select id from asset_objects where id=$1 for update skip locked", [asset.object_id]);
+      if (!locked.rows.length) { await client.query("rollback"); continue; }
+      // Lock retention metadata before deleting bytes so a concurrent restore cannot succeed.
+      const current = await client.query<{ expired: boolean }>(`select
+        ((retention_state='active' and retention_until<=now()) or (retention_state='soft_deleted' and purge_after<=now())) as expired
+        from generated_assets where workspace_id=$1 and object_path=$2 for update`, [asset.workspace_id, asset.object_path]);
+      if (current.rows.length && !current.rows.every(row => row.expired)) { await client.query("rollback"); continue; }
+      if (!current.rows.length && asset.generated_asset_id) { await client.query("rollback"); continue; }
+      const { error } = await storage.remove(asset.bucket, [asset.object_path]);
+      if (error) throw error;
+      if (asset.created_by && asset.generated_asset_id) {
         await client.query(
           `insert into notifications(workspace_id,user_id,type,title,body,metadata)
            values($1,$2,'asset_purged',$3,$4,$5::jsonb)`,
@@ -92,7 +96,7 @@ export async function cleanExpiredGeneratedAssets({
     } catch (error) {
       await client.query("rollback");
       failed += 1;
-      log.error(`[asset-retention] could not remove metadata for ${asset.object_path}:`, error);
+      log.error(`[asset-retention] cleanup will retry ${asset.object_path}:`, error);
     } finally {
       client.release();
     }
