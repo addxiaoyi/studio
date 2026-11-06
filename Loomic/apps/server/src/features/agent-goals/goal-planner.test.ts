@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { goalExecutionPlanSchema } from "@helstera/shared";
-import { executableGoalPlan } from "./goal-planner.js";
+import { executableGoalPlan, parseGoalPlan } from "./goal-planner.js";
 
 const plan = { summary: "查看网址", steps: [
   { id: "browse", title: "浏览", dependsOn: [], command: { executor: "web.capture" as const, url: "https://example.com", pageLimit: 1, record: false }, completion: "截图证据" },
   { id: "deliver", title: "交付", dependsOn: ["browse"], command: { executor: "result.deliver" as const, sources: ["browse"] }, completion: "保存结果" },
 ] };
 describe("structured goal planner", () => {
+  it("reports invalid model JSON and unsupported identifiers without leaking a validator dump", () => {
+    expect(() => parseGoalPlan("not json")).toThrow("有效的 JSON");
+    expect(() => parseGoalPlan(JSON.stringify({ ...plan, steps: [{ ...plan.steps[0], id: "step_1" }, plan.steps[1]] }))).toThrow("步骤标识");
+    expect(parseGoalPlan("  ```json\n" + JSON.stringify(plan) + "\n```  ")).toEqual(plan);
+    expect(() => parseGoalPlan('{"error":"需要提供网址"}')).toThrow("需要提供网址");
+  });
   it("retains explicit mode choices and refuses a server plan for native work", () => {
     expect(() => executableGoalPlan(plan, { goal: "目标", idempotencyKey: "test", executionMode: "windows_ui" })).toThrow("明确选择");
     expect(executableGoalPlan(plan, { goal: "目标", idempotencyKey: "test", executionMode: "automatic" }).version).toBe(2);
