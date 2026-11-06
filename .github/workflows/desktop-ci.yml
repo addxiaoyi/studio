@@ -81,7 +81,12 @@ jobs:
         run: node apps/desktop/scripts/run-renderer-health.mjs
       - name: Sandbox preload and renderer recovery (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a node apps/desktop/scripts/run-renderer-health.mjs
+        run: |
+          electron_sandbox=$(node -e 'const {createRequire}=require("node:module"); const {dirname,join}=require("node:path"); process.stdout.write(join(dirname(createRequire(process.cwd()+"/apps/desktop/package.json")("electron")),"chrome-sandbox"))')
+          test -f "$electron_sandbox" && test ! -L "$electron_sandbox"
+          sudo chown root:root "$electron_sandbox"
+          sudo chmod 4755 "$electron_sandbox"
+          xvfb-run -a node apps/desktop/scripts/run-renderer-health.mjs
       - name: Disable macOS signing auto-discovery
         if: runner.os == 'macOS'
         run: echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
