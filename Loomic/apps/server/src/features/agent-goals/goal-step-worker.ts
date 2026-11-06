@@ -143,8 +143,12 @@ export class GoalStepWorker {
     const remaining = await db.query("select id from agent_goal_steps where goal_id=$1 and state<>'succeeded' limit 1", [goal.id]);
     if (remaining.rows.length) throw new Error("仍有未完成步骤，不能报告目标完成。");
     await db.query("update agent_goals set status='completed',result=$2::jsonb,completed_at=now(),updated_at=now() where id=$1", [goal.id, JSON.stringify(output)]);
-    if (goal.chat_session_id) await db.query(`insert into chat_messages(session_id,role,content,client_message_id) select id,'assistant',$2,$3 from chat_sessions where id=$1 and created_by=$4 on conflict(session_id,client_message_id) do nothing`, [goal.chat_session_id, String(output.summary ?? "目标已完成。"), `agent-goal:${goal.id}:completed`, goal.created_by]);
     const assets = Array.isArray(output.assets) ? output.assets as Array<Record<string, unknown>> : [];
+    const videos = assets.filter(asset => asset.mediaType === "video" && typeof asset.id === "string");
+    const objects = videos.length ? (await db.query<{ id: string }>(`select distinct ao.id from asset_objects ao left join generated_assets ga on ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path
+      where (ao.id=any($1::uuid[]) or ga.id=any($1::uuid[])) and ao.workspace_id=$2 and ao.created_by=$3`, [videos.map(asset=>asset.id),goal.workspace_id,goal.created_by])).rows : [];
+    const blocks = objects.map(asset => ({ type: "tool", toolCallId: `goal-video:${goal.id}:${asset.id}`, toolName: "video_export", status: "completed", output: { assetId: asset.id }, outputSummary: "目标成片" }));
+    if (goal.chat_session_id) await db.query(`insert into chat_messages(session_id,role,content,content_blocks,client_message_id) select id,'assistant',$2,$5::jsonb,$3 from chat_sessions where id=$1 and created_by=$4 on conflict(session_id,client_message_id) do nothing`, [goal.chat_session_id, String(output.summary ?? "目标已完成。").slice(0,12000), `agent-goal:${goal.id}:completed`, goal.created_by,JSON.stringify(blocks)]);
     const documents = Array.isArray(output.documents) ? output.documents as Array<Record<string, unknown>> : [];
     for (const document of documents) {
       await db.query(`insert into agent_goal_outputs(id,goal_id,kind,status,metadata)

@@ -98,7 +98,14 @@ export function createGoalStepExecutor(options: Options): StepExecutor {
         assets.push(...capture.pages.map(page => ({ id: page.assetId, url: page.screenshotUrl, mediaType: "image" })));
         if (capture.recordingAssetId) assets.push({ id: capture.recordingAssetId, url: capture.recordingUrl, mediaType: "video" });
         if (goal.canvas_id) canvasElementIds.push(...await writeCaptureToCanvas({ db: options.db, storage: options.storage, writer: { insertImage: insertLocalImageElement, insertVideo: insertLocalVideoElement }, canvasId: goal.canvas_id, taskId: source.id, workspaceId: goal.workspace_id, pages: capture.pages, recordingAssetId: capture.recordingAssetId, recordingUrl: capture.recordingUrl, beforeWrite: assertActive }));
-      } else if (Array.isArray(output.assets)) assets.push(...output.assets as typeof assets);
+      } else if (Array.isArray(output.assets)) {
+        assets.push(...output.assets as typeof assets);
+        if (goal.canvas_id && source.executor === "media.trim" && typeof output.recordingAssetId === "string") {
+          await assertActive();
+          const inserted = await insertLocalVideoElement(options.db, { canvasId: goal.canvas_id, signedUrl: `/api/uploads/${output.recordingAssetId}/file`, width: source.command.executor === "media.trim" && source.command.aspect === "portrait" ? 720 : 1280, height: source.command.executor === "media.trim" && source.command.aspect === "portrait" ? 1280 : 720, mimeType: "video/mp4", title: "目标剪辑成片", assetId: output.recordingAssetId, jobId: `${source.id}:trim-output` });
+          canvasElementIds.push(inserted.elementId);
+        }
+      }
     }
     await assertActive();
     return { summary: documents.map(document => document.content).join("\n\n") || "所有已确认步骤已完成，结果已保存。", documents, assets, canvasElementIds, saveState: assets.length ? "cloud" : "pending", localSaveVerified: false };
