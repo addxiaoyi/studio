@@ -80,3 +80,15 @@ it("preserves multiline indentation and cancels an old queued send when adding c
   expect(input).toHaveValue("已有草稿\n\n>   第一行\n>     第二行\n\n");
   expect(send).not.toHaveBeenCalled();
 });
+
+it("restores the quoted draft when a responsive layout remounts the composer", () => {
+  const draftStore = { current: "" };
+  const inputRef = createRef<ChatInputHandle>();
+  const mounted = render(<ChatInput draftStore={draftStore} ref={inputRef} onSend={send} />);
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "保留我的问题" } });
+  act(() => inputRef.current?.addQuote("引用片段"));
+  mounted.unmount();
+  render(<ChatInput draftStore={draftStore} onSend={send} />);
+  expect(screen.getByRole("textbox")).toHaveValue("保留我的问题\n\n> 引用片段\n\n");
+  expect(send).not.toHaveBeenCalled();
+});

@@ -7,6 +7,7 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -50,6 +51,7 @@ export function deriveMentionQuery(text: string): string | null {
 }
 
 type ChatInputProps = {
+  draftStore?: { current: string };
   /** 返回值/抛错用于判断发送是否成功：#8 成功才清空，失败回填草稿并重新聚焦 */
   onSend: (message: string, videoModel?: string) => void | Promise<unknown>;
   disabled?: boolean;
@@ -72,6 +74,7 @@ export type ChatInputHandle = {
 };
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
+  draftStore,
   onSend,
   disabled,
   attachments,
@@ -86,7 +89,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onCancel,
 }, ref) {
   const router = useRouter();
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(() => draftStore?.current ?? "");
+  const previousDraftStore = useRef(draftStore);
+  useLayoutEffect(() => {
+    if (previousDraftStore.current !== draftStore) {
+      previousDraftStore.current = draftStore;
+      setValue(draftStore?.current ?? "");
+      return;
+    }
+    if (draftStore) draftStore.current = value;
+  }, [draftStore, value]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);

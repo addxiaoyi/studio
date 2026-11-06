@@ -326,6 +326,18 @@ export function ChatSidebar({
   const sendInFlightRef = useRef(false);
   const chatInputRef = useRef<import("./chat-input").ChatInputHandle>(null);
   const addSelectionToChat = useCallback((text: string) => chatInputRef.current?.addQuote(text) ?? false, []);
+  // Switching between inline and overlay layouts remounts the composer.
+  const sessionDrafts = useRef(new Map<string, { current: string }>());
+  const composerDraft = useMemo(() => {
+    const key = activeSessionId ?? canvasId;
+    let draft = sessionDrafts.current.get(key);
+    if (!draft) {
+      draft = activeSessionId ? sessionDrafts.current.get(canvasId) ?? { current: "" } : { current: "" };
+      if (activeSessionId) sessionDrafts.current.delete(canvasId);
+      sessionDrafts.current.set(key, draft);
+    }
+    return draft;
+  }, [activeSessionId, canvasId]);
 
   const initialPromptSent = useRef(false);
   // waiting = 目标已暂存但 ws/会话还没就绪，sending = 正在发送，failed = 发送失败（保留目标）
@@ -1828,6 +1840,7 @@ export function ChatSidebar({
           />
         )}
         <ChatInput
+          draftStore={composerDraft}
           ref={chatInputRef}
           onSend={sendFromInput}
           disabled={streaming || sessionsLoading}
