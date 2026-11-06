@@ -6,7 +6,7 @@ import { cleanExpiredGeneratedAssets } from "./asset-retention.js";
 describe("generated asset retention", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  const lockQueries = () => vi.fn(async (sql: string) => ({ rows:
+  const lockQueries = () => vi.fn(async (sql: string, _params?: unknown[]) => ({ rows:
     sql.startsWith("select id from asset_objects") ? [{ id: "object-1" }]
       : sql.includes(" as expired") ? [{ expired: true }] : [],
   }));
