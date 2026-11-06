@@ -1,4 +1,4 @@
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,10 +26,11 @@ describe("video export asset authorization", () => {
     const root = await temporaryDirectory();
     const path = join(root, "video.mp4");
     await writeFile(path, "test video");
+    const canonicalPath = await realpath(path);
     const inspect = vi.fn().mockResolvedValue({ durationMs: 2000, hasAudio: true });
     const clips = await resolveVideoExportClips(project(path), root, inspect);
-    expect(clips).toEqual([{ sourcePath: path, inputFormat: "mov", startMs: 100, endMs: 1000, hasAudio: true }]);
-    expect(inspect).toHaveBeenCalledExactlyOnceWith(path, "mov");
+    expect(clips).toEqual([{ sourcePath: canonicalPath, inputFormat: "mov", startMs: 100, endMs: 1000, hasAudio: true }]);
+    expect(inspect).toHaveBeenCalledExactlyOnceWith(canonicalPath, "mov");
   });
 
   it("rejects paths outside the selected folder and clips beyond actual duration", async () => {

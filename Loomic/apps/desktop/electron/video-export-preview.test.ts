@@ -1,4 +1,4 @@
-import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -40,7 +40,7 @@ describe("export preview access", () => {
     const first = new VideoExportPreviews(store, async () => directory);
     const id = await first.register(path);
     const restarted = new VideoExportPreviews(store, async () => directory);
-    expect(await restarted.list()).toEqual([expect.objectContaining({ id, path })]);
+    expect(await restarted.list()).toEqual([expect.objectContaining({ id, path: await realpath(path) })]);
     expect(Buffer.from(await restarted.read(id)).toString()).toBe("restorable");
     const other = await mkdtemp(join(tmpdir(), "helstera-preview-other-"));
     directories.push(other);
