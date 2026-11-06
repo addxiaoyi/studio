@@ -36,7 +36,8 @@ export function StudioAssetPicker({ token, importAsset, disabled = false }: { to
     if (!asset || busy || disabled) return;
     setBusy(true); setError("");
     try {
-      await importAsset(await readStudioAsset(token, asset.id), asset.id);
+      if (!asset.assetObjectId) throw new Error("素材缺少文件标识，请刷新素材库后重试。");
+      await importAsset(await readStudioAsset(token, asset.assetObjectId), asset.id);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "导入失败，请重试。"); }
     finally { setBusy(false); }
   }

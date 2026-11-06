@@ -1558,6 +1558,7 @@ export type GenerateImageResponse = {
 
 export type GeneratedAsset = {
   id: string;
+  assetObjectId?: string | null;
   mediaType: "image" | "video";
   title: string | null;
   description: string | null;
@@ -1619,6 +1620,7 @@ export async function fetchGeneratedAssets(
   };
   const assets: GeneratedAsset[] = (payload.data ?? []).map((asset) => ({
     id: asset.id,
+    assetObjectId: asset.asset_object_id,
     mediaType: (asset.mime_type?.startsWith("video/") ? "video" : "image") as
       | "video"
       | "image",

@@ -8,6 +8,7 @@ import type { Pool } from "pg";
 import sharp from "sharp";
 import type { RequestAuthenticator } from "../auth/types.js";
 import { verifyProviderAssetSignature } from "../features/uploads/provider-asset-url.js";
+import { parseByteRange } from "./media-byte-range.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -160,20 +161,6 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
       return reply.code(404).send({ error: { code: "asset_not_found", message: "Asset file not found." } });
     }
   });
-}
-
-function parseByteRange(value: string, size: number): { start: number; end: number } | null {
-  const match = /^bytes=(\d*)-(\d*)$/.exec(value);
-  if (!match || !size || (!match[1] && !match[2])) return null;
-  if (!match[1]) {
-    const suffix = Number(match[2]);
-    if (!Number.isSafeInteger(suffix) || suffix <= 0) return null;
-    return { start: Math.max(0, size - suffix), end: size - 1 };
-  }
-  const start = Number(match[1]);
-  const end = match[2] ? Number(match[2]) : size - 1;
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= size || end < start) return null;
-  return { start, end: Math.min(end, size - 1) };
 }
 
 function isWithin(root: string, filePath: string) {

@@ -35,7 +35,10 @@ export function createLocalUploadService(db: Pool, root = "/www/helstera/uploads
 }
 
 async function findAsset(db: Pool, userId: string, assetId: string) {
-  const { rows } = await db.query("select ao.id, ao.object_path, ao.bucket from asset_objects ao join workspace_members wm on wm.workspace_id = ao.workspace_id where ao.id = $1 and wm.user_id = $2", [assetId, userId]);
+  const { rows } = await db.query(`select ao.id, ao.object_path, ao.bucket from asset_objects ao
+    join workspace_members wm on wm.workspace_id = ao.workspace_id
+    where ao.id = $1 and wm.user_id = $2
+      and (ao.bucket not in ('private-video','private-try-on') or ao.created_by = $2)`, [assetId, userId]);
   if (!rows[0]) throw new UploadServiceError("asset_not_found", "Asset not found.", 404);
   return rows[0];
 }

@@ -14,6 +14,7 @@ import { savePrivateVideo } from "../features/assets/private-video.js";
 import { createTranscriptStore, publicExport, publicTranscript, publicTranscriptSummary, TranscriptError } from "../features/onetake/store.js";
 import { oneTakeModels, probeOneTake } from "../features/onetake/runner.js";
 import type { StorageProvider } from "../storage/storage-provider.js";
+import { parseByteRange } from "./media-byte-range.js";
 
 const LIMIT_BYTES = 500 * 1024 * 1024;
 const types: Record<string, string> = { "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov", "video/x-msvideo": "avi", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav", "audio/mp4": "m4a", "audio/ogg": "ogg", "audio/flac": "flac" };
@@ -22,14 +23,13 @@ const revision = z.number().int().nonnegative();
 
 async function streamMedia(request: FastifyRequest, reply: FastifyReply, path: string, mime: string, name: string, attachment = false) {
   const info = await stat(path);
-  const range = request.headers.range;
+  const range = request.headers["if-range"] ? undefined : request.headers.range;
   reply.header("Cache-Control", "private, no-store").header("Accept-Ranges", "bytes").header("Content-Type", mime);
   reply.header("Content-Disposition", `${attachment ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(basename(name))}`);
   if (!range) return reply.header("Content-Length", info.size).send(createReadStream(path));
-  const match = /^bytes=(\d+)-(\d*)$/.exec(range);
-  const start = match ? Number(match[1]) : NaN;
-  const end = match?.[2] ? Number(match[2]) : info.size - 1;
-  if (!Number.isSafeInteger(start) || start < 0 || start >= info.size || !Number.isSafeInteger(end) || end < start || end >= info.size) return reply.code(416).header("Content-Range", `bytes */${info.size}`).send();
+  const selected = parseByteRange(range, info.size);
+  if (!selected) return reply.code(416).header("Content-Range", `bytes */${info.size}`).send();
+  const { start, end } = selected;
   return reply.code(206).header("Content-Range", `bytes ${start}-${end}/${info.size}`).header("Content-Length", end - start + 1).send(createReadStream(path, { start, end }));
 }
 
