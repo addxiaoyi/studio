@@ -13,6 +13,7 @@ import { DesktopAgentProgressCard as DesktopAgentTaskCard } from "./desktop-agen
 import { DesktopMcpToolCard } from "./desktop-mcp-tool-card";
 import { AgentWorkflowCard } from "./agent-workflow-card";
 import { GenerationApprovalCard } from "./generation-approval-card";
+import { AuthenticatedRecording } from "./authenticated-recording";
 import { formatWebsiteCaptureEventTime, formatWebsiteCaptureStage } from "./website-capture-progress";
 import {
   formatModelDisplayName,
@@ -308,6 +309,8 @@ export const ToolBlockView = React.memo(function ToolBlockView({
   const isImageTool = block.toolName === "generate_image";
   const isVideoTool = block.toolName === "generate_video";
   const isWebsiteTool = block.toolName === "website_capture";
+  const isVideoExport = block.toolName === "video_export";
+  const exportedAssetId = isVideoExport && typeof block.output?.assetId === "string" ? block.output.assetId : undefined;
   const isDesktopAgentTool = block.toolName === "desktop_control";
   const isDesktopMcpTool = block.toolName.startsWith("screen_");
   const websiteTaskId = typeof (block.output as Record<string, unknown> | undefined)?.taskId === "string"
@@ -442,7 +445,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
         <span className="font-medium text-muted-foreground truncate">
           {isMediaTool && actualModelName
             ? formatModelDisplayName(actualModelName)
-            : config.label}
+            : isVideoExport ? "视频成片" : config.label}
         </span>
       </div>
 
@@ -461,6 +464,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
       )}
 
       {isWebsiteTool && websiteTaskId ? <WebsiteCaptureProgressCard taskId={websiteTaskId} /> : null}
+      {exportedAssetId && session?.access_token ? <AuthenticatedRecording assetId={exportedAssetId} accessToken={session.access_token} maxBytes={250 * 1024 * 1024} label="视频成片" /> : null}
       {isDesktopAgentTool && desktopTaskId ? <DesktopAgentTaskCard taskId={desktopTaskId} /> : null}
 
       {/* Layer 2b-err: Media generation failed */}

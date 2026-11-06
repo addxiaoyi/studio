@@ -1,0 +1,46 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { boundedResponseBlob } from "@/lib/bounded-response-blob";
+import { getServerBaseUrl } from "@/lib/env";
+
+const MAX_RECORDING_BYTES = 40 * 1024 * 1024;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function AuthenticatedRecording({ assetId, accessToken, maxBytes = MAX_RECORDING_BYTES, label = "网站浏览录屏", kind = "video" }: { assetId: string; accessToken: string; maxBytes?: number; label?: string; kind?: "image" | "video" }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    setUrl(null);
+    setError(null);
+    const load = async () => {
+      if (!UUID.test(assetId)) throw new Error("录屏素材标识无效。");
+      const response = await fetch(`${getServerBaseUrl()}/api/uploads/${assetId}/file`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: controller.signal,
+        redirect: "error",
+      });
+      if (!response.ok) throw new Error("无法读取录屏，请检查登录状态或素材权限。");
+      const blob = await boundedResponseBlob(response, maxBytes);
+      if (!blob.type.startsWith(kind + "/") || !blob.size) throw new Error("素材文件无效。");
+      if (controller.signal.aborted) return;
+      objectUrl = URL.createObjectURL(blob);
+      setUrl(objectUrl);
+    };
+    void load().catch((cause: unknown) => {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "录屏加载失败。");
+    });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [assetId, accessToken, maxBytes, kind]);
+
+  if (error) return <p role="alert" className="text-xs text-destructive">{error}</p>;
+  if (!url) return <p role="status" className="text-xs text-muted-foreground">{kind === "image" ? "正在加载试穿图像…" : "正在加载网站录屏..."}</p>;
+  if (kind === "image") return <img src={url} alt={label} className="max-h-96 w-full rounded-lg object-contain" />;
+  return <video controls preload="metadata" src={url} className="w-full rounded-lg border border-border/40" aria-label={label} />;
+}
