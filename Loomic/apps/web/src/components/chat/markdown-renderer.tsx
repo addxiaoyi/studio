@@ -73,7 +73,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   const safeText = text || "";
 
   return (
-    <div className="markdown-content cursor-text select-text text-sm leading-[1.6] text-foreground">
+    <div data-chat-text className="markdown-content cursor-text select-text text-sm leading-[1.6] text-foreground">
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         components={markdownComponents}

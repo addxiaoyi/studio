@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChatSelectionActions } from "./chat/selection-actions";
 
 import { useBreakpoint } from "../hooks/use-breakpoint";
 import type {
@@ -324,6 +325,7 @@ export function ChatSidebar({
   const [retryingAssistantId, setRetryingAssistantId] = useState<string | null>(null);
   const sendInFlightRef = useRef(false);
   const chatInputRef = useRef<import("./chat-input").ChatInputHandle>(null);
+  const addSelectionToChat = useCallback((text: string) => chatInputRef.current?.addQuote(text) ?? false, []);
 
   const initialPromptSent = useRef(false);
   // waiting = 目标已暂存但 ws/会话还没就绪，sending = 正在发送，failed = 发送失败（保留目标）
@@ -1811,6 +1813,7 @@ export function ChatSidebar({
       )}
 
       {/* Input */}
+      <ChatSelectionActions key={activeSessionId ?? canvasId} rootRef={messagesViewportRef} onQuote={addSelectionToChat} />
       <div className="relative">
         {atQuery !== null && mentionPickerItems.length > 0 && (
           <MessageMentionPicker

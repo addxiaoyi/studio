@@ -68,6 +68,7 @@ type ChatInputProps = {
 export type ChatInputHandle = {
   /** Remove the @query text from input after picker selection */
   clearAtQuery: () => void;
+  addQuote: (text: string) => boolean;
 };
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
@@ -179,6 +180,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   );
 
   useImperativeHandle(ref, () => ({
+    addQuote(text) {
+      const selected = text.replace(/\r\n?/g, "\n");
+      if (!selected.trim()) return false;
+      const quote = selected.split("\n").map(line => `> ${line}`).join("\n");
+      const draft = valueRef.current;
+      const next = `${draft}${draft ? "\n\n" : ""}${quote}\n\n`;
+      if (next.length > MAX_INPUT_LENGTH) {
+        setDropMessage(`引用后超过 ${MAX_INPUT_LENGTH} 字，请缩短选区或草稿。`);
+        return false;
+      }
+      // Adding context is a draft edit, so it must not trigger a queued attachment send.
+      pendingSendRef.current = null;
+      valueRef.current = next;
+      restoreCaretRef.current = { text: next, selectionStart: next.length, selectionEnd: next.length };
+      setValue(next);
+      setDropMessage(null);
+      return true;
+    },
     clearAtQuery() {
       setValue((prev) => {
         const lastAtIdx = prev.lastIndexOf("@");

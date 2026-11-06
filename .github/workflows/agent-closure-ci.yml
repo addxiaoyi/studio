@@ -46,7 +46,7 @@ jobs:
       - name: Structured model planning deadlines
         run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/goal-planner.test.ts src/features/agent-goals/goal-plan-timeout.test.ts src/features/video-editor/planner.test.ts
       - name: Chat copy and reconnect recovery
-        run: pnpm --filter @helstera/web exec vitest run test/chat-copy.test.tsx test/chat-sessions.test.tsx test/chat-sidebar.test.tsx test/chat-stream.test.ts
+        run: pnpm --filter @helstera/web exec vitest run test/chat-copy.test.tsx test/chat-selection.test.tsx test/chat-input.test.tsx test/chat-sessions.test.tsx test/chat-sidebar.test.tsx test/chat-stream.test.ts
       - name: Video workspace regressions
         run: pnpm --filter @helstera/web exec vitest run test/video-locale.test.tsx test/generated-asset-identity.test.ts test/studio-asset-picker.test.tsx test/onetake-history.test.tsx test/onetake-export-options.test.tsx test/send-video-to-chat.test.tsx test/agent-workspace-panel.test.tsx test/agent-goal-timeout.test.ts
       - name: Deployment recovery gates on Linux

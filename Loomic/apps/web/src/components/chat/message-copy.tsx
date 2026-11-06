@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ClipboardEvent, type PointerEvent } f
 import type { ContentBlock } from "@helstera/shared";
 import { useLocale } from "@/lib/i18n";
 
-async function writeMessage(text: string) {
+export async function copyChatText(text: string) {
   try {
     if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return; }
   } catch { /* Embedded browsers can reject the async API while native copy still works. */ }
@@ -45,7 +45,7 @@ export function MessageCopy({ blocks }: { blocks: ContentBlock[] }) {
   const label = state === "copied" ? english ? "Copied" : "已复制" : english ? "Copy message" : "复制消息";
   async function copy() {
     clearTimeout(reset.current);setState("copying");
-    try { await writeMessage(text);setState("copied");reset.current = setTimeout(() => setState("idle"), 2000); }
+    try { await copyChatText(text);setState("copied");reset.current = setTimeout(() => setState("idle"), 2000); }
     catch { setState("failed"); }
   }
   return <div className="flex flex-wrap items-center gap-2">

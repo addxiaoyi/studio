@@ -139,7 +139,7 @@ const UserMessage = React.memo(function UserMessage({
     >
       {text && (
         <div className="inline-block rounded-xl bg-muted px-3 py-2.5 whitespace-pre-wrap break-words text-sm font-medium leading-6 text-foreground">
-          <span className="cursor-text select-text [word-break:break-word]">
+          <span data-chat-text className="cursor-text select-text [word-break:break-word]">
             {text}
           </span>
           {mentionBlocks.length > 0 && (
