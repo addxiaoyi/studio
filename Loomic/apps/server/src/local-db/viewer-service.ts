@@ -16,13 +16,13 @@ export function createLocalViewerService(
           await client.query("select pg_advisory_xact_lock(hashtext($1))", [user.id]);
           await client.query(
             `insert into app_users (id, email) values ($1, $2)
-             on conflict (id) do update set email = excluded.email, updated_at = now()
-             returning id`,
+             on conflict (id) do nothing`,
             [user.id, user.email],
           );
+          await client.query("update app_users set email=$2,updated_at=now() where id=$1 and email is distinct from $2", [user.id,user.email]);
           if (systemAdminEmails.includes(user.email.toLowerCase())) {
             await client.query(
-              "update app_users set system_role = 'admin', updated_at = now() where id = $1",
+              "update app_users set system_role = 'admin', updated_at = now() where id = $1 and system_role is distinct from 'admin'",
               [user.id],
             );
           }
@@ -30,12 +30,13 @@ export function createLocalViewerService(
             "select id, email, display_name, avatar_url, system_role from app_users where id = $1",
             [user.id],
           );
-          const workspaceRow = (await client.query(
+          // Repeated reads must not update identity keys held by media foreign-key checks.
+          await client.query(
             `insert into workspaces (owner_user_id, name) values ($1, $2)
-             on conflict (owner_user_id) do update set owner_user_id = excluded.owner_user_id
-             returning id, name`,
+             on conflict (owner_user_id) do nothing`,
             [user.id, "Personal Workspace"],
-          )).rows[0];
+          );
+          const workspaceRow = (await client.query("select id,name from workspaces where owner_user_id=$1", [user.id])).rows[0];
           if (!workspaceRow) throw new Error("personal workspace was not created");
           await client.query(
             `insert into workspace_members (workspace_id, user_id, role)
