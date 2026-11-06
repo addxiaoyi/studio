@@ -40,7 +40,7 @@
 - `67766a0` 的Agent Closure `42229512518`、Website Capture `42229512438`、Desktop Candidate `42229513298`全部通过，桌面包含Windows、macOS arm64和Linux x64。
 - 线上验收发现规划60秒截止与网页30秒截止不匹配；本轮新增慢响应、取消及迟到响应回归，Server规划相关7项、Web接口17项通过，Server/Web独立类型检查退出0。后续模型ID协议修复的5项回归及Server类型检查再次通过。
 - 生产日志定位到`asset_objects`插入与`workspaces`身份upsert死锁；真实本机PostgreSQL回归先因锁等待超时失败，修复后与步骤恢复、私有生命周期共3项通过。`b476f15`的Agent Closure CI `42235025417`与Website Capture CI `42235025620`已通过。
-- 含规划截止时间及协议补修的`1db74f6`三平台Desktop Candidate CI `42233886347`已全部通过。最终`b476f15`只变更Server身份初始化及数据库回归/CI，自动触发的Desktop CI `42235025399`截至22:44仍在安装交叉编译器，不把进行中写成通过。
+- 含规划截止时间及协议补修的`1db74f6`三平台Desktop Candidate CI `42233886347`已全部通过。最终功能代码`b476f15`的Desktop CI `42235025399`第二次运行也全部通过（Windows/Linux/macOS）。第一次因Ubuntu镜像下载反复中断，取消后在新Runner重跑成功；不是忽略构建失败。
 
 本地测试报告和截图位于 `.creative-test-results/video-layout*`、部署日志位于 `.creative-test-results/closure-deploy.log`。这些包含临时测试路径，不作为功能源码提交。
 
