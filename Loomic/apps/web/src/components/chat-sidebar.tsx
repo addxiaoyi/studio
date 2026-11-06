@@ -1410,7 +1410,8 @@ export function ChatSidebar({
 
     void (async () => {
       // Reload messages from DB (server may have persisted while disconnected)
-      await reloadMessages(sessionId);
+      const refreshed = await reloadMessages(sessionId);
+      if (refreshed !== "applied" || streamingRef.current || activeSessionIdRef.current !== sessionId) return;
 
       // Resume canvas binding (after DB messages are set)
       ws.resumeCanvas(canvasId, (ack) => {

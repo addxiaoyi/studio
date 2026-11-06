@@ -11,6 +11,7 @@ import { collapseDuplicateImageReferences } from "./chat/utils";
 import LatticeLoader from "./ui/LatticeLoader";
 import { ToolBlockView } from "./chat/tool-block-view";
 import { ThinkingBlockView } from "./chat/thinking-block-view";
+import { MessageCopy, focusMessage, copyMessageSelection } from "./chat/message-copy";
 
 // Re-export types for backward compatibility with existing consumers
 export type { ContentBlock, ToolArtifact };
@@ -130,7 +131,11 @@ const UserMessage = React.memo(function UserMessage({
       initial={{ opacity: 0, x: 12 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
-      className="flex w-full flex-col items-end gap-2 pl-10"
+      className="flex w-full flex-col items-end gap-2 pl-10 select-text"
+      tabIndex={0}
+      data-chat-message="user"
+      onPointerDown={focusMessage}
+      onCopy={copyMessageSelection}
     >
       {text && (
         <div className="inline-block rounded-xl bg-muted px-3 py-2.5 whitespace-pre-wrap break-words text-sm font-medium leading-6 text-foreground">
@@ -201,6 +206,7 @@ const UserMessage = React.memo(function UserMessage({
           )}
         </div>
       )}
+      <MessageCopy blocks={contentBlocks} />
     </motion.div>
   );
 });
@@ -250,7 +256,11 @@ const AssistantMessage = React.memo(function AssistantMessage({
       initial={{ opacity: 0, x: -12 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
-      className="flex w-full flex-col gap-2 pr-10"
+      className="flex w-full flex-col gap-2 pr-10 select-text"
+      tabIndex={0}
+      data-chat-message="assistant"
+      onPointerDown={focusMessage}
+      onCopy={copyMessageSelection}
     >
       {showThinking && (
         <LatticeLoader
@@ -298,6 +308,7 @@ const AssistantMessage = React.memo(function AssistantMessage({
         // ImageBlock -- skip in assistant messages (user-side only)
         return null;
       })}
+      {!isStreaming && <MessageCopy blocks={contentBlocks} />}
       {onRetry && !isStreaming && contentBlocks.length > 0 && (
         <button
           type="button"

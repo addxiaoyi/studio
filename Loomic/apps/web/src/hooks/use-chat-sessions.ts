@@ -407,12 +407,14 @@ export function useChatSessions({
       console.warn("[chat] reloadMessages called with empty sessionId, skipping");
       return "failed";
     }
-    if (canApply && !canApply()) return "deferred";
+    const version = streamVersionRef.current;
+    const acceptsSnapshot = () => !streamingRef.current && streamVersionRef.current === version && (!canApply || canApply());
+    if (!acceptsSnapshot()) return "deferred";
     setMessagesError(null);
     setMessagesLoading(true);
     try {
       const msgRes = await fetchMessages(accessTokenRef.current, sessionId);
-      if (canApply && !canApply()) return "deferred";
+      if (!acceptsSnapshot()) return "deferred";
       const mapped = mapServerMessages(msgRes.messages);
       msgCacheRef.current.set(sessionId, mapped);
       if (activeSessionIdRef.current === sessionId) {

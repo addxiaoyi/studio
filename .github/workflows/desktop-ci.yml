@@ -76,6 +76,12 @@ jobs:
           pnpm --filter @helstera/desktop exec vitest run --config vitest.config.ts electron/extension-sync.test.ts
       - name: Build native helper
         run: pnpm --filter @helstera/desktop build:native
+      - name: Sandbox preload and renderer recovery (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: node apps/desktop/scripts/run-renderer-health.mjs
+      - name: Sandbox preload and renderer recovery (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node apps/desktop/scripts/run-renderer-health.mjs
       - name: Disable macOS signing auto-discovery
         if: runner.os == 'macOS'
         run: echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"

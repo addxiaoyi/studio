@@ -48,6 +48,22 @@ describe("useChatSessions request recovery", () => {
 
   afterEach(() => cleanup());
 
+  it("does not replace a live answer with a stale reconnect snapshot", async () => {
+    const { result } = renderHook(() => useChatSessions({ canvasId: "canvas-1", accessToken: "token-1" }));
+    await waitFor(() => expect(result.current.sessionsLoading).toBe(false));
+    let finish!: (value: { messages: [] }) => void;
+    fetchMessagesMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    let pending!: ReturnType<typeof result.current.reloadMessages>;
+    act(() => { pending = result.current.reloadMessages("session-home"); });
+    act(() => {
+      result.current.setStreaming(true);
+      result.current.updateSessionMessages("session-home", () => [{ id: "live", role: "assistant", contentBlocks: [{ type: "text", text: "正在显示的回答" }], createdAt: "2026-11-06T15:00:00.000Z" }]);
+      result.current.setStreaming(false);
+    });
+    await act(async () => { finish({ messages: [] }); expect(await pending).toBe("deferred"); });
+    expect(result.current.messages[0]?.id).toBe("live");
+  });
+
   it("does not let a slow session response overwrite the most recently selected session", async () => {
     let resolveA!: (value: { messages: Array<{ id: string; role: "assistant"; content: string; createdAt: string }> }) => void;
     const slowA = new Promise<{ messages: Array<{ id: string; role: "assistant"; content: string; createdAt: string }> }>((resolve) => { resolveA = resolve; });
