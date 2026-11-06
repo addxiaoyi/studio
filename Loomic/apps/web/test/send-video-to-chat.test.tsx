@@ -4,6 +4,7 @@ import { SendVideoToChat } from "../src/components/send-video-to-chat";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it("preserves cookie authentication while listing and delivering to chat", async () => {
+  document.documentElement.lang = "zh-CN";
   const request = vi.fn(async () => new Response(JSON.stringify({ sessions: [{ id: "session", title: "Review", canvasName: "Results", canvasId: "canvas" }] }), { headers: { "content-type": "application/json" } }));
   vi.stubGlobal("fetch", request);
   render(<SendVideoToChat assetId="video" token="local-cookie" />);

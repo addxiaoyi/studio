@@ -45,6 +45,8 @@ describe("pinned Studio typography adapter", () => {
       "components/InspectorPanel/CollapsibleInspectorSectionHeader.tsx",
       "components/Timeline/TimelineFieldLabel.tsx", "components/InspectorPanel/common.tsx",
       "components/RenderButton.tsx", "i18n/locales/zh-CN.ts",
+      "components/ModalContainer.tsx", "i18n/index.tsx",
+      "helpers/use-breakpoint.ts",
     ]) {
       const lf = read(file).replaceAll("\r\n", "\n");
       const patched = patchStudioSource(file, lf);

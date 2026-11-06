@@ -16,8 +16,11 @@ import {
 import { Film, RefreshCw } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useRef, useState } from "react";
+import styles from "./visualforge-workspace.module.css";
+import { useVideoText } from "@/lib/video-copy";
 
 export function VisualForgeWorkspace() {
+  const copy = useVideoText();
   const { session } = useAuth();
   const { resolvedTheme } = useTheme();
   const container = useRef<HTMLDivElement>(null);
@@ -31,6 +34,7 @@ export function VisualForgeWorkspace() {
   const [retry, setRetry] = useState(0);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [transcriptDirty, setTranscriptDirty] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const transcriptCopy = oneTakeCopy(useLocale());
   const exported = useCallback((output: StudioExport) => setOutputs(current => [output, ...current.filter(item => item.id !== output.id)]), []);
   const theme = useRef(resolvedTheme || "dark");
@@ -117,15 +121,15 @@ export function VisualForgeWorkspace() {
 
   return (
     <section aria-label="视频创作工作台" className="min-w-0 bg-background">
-      <div className="flex min-h-[680px] flex-col md:h-[100dvh] md:min-h-[540px]">
+      <div className={styles.frame}>
         <header className="flex min-h-16 flex-wrap items-center gap-3 border-b px-4 py-3 sm:px-5">
           <div className="min-w-0">
             <h1 className="flex items-center gap-2 text-base font-semibold">
               <Film className="size-4" aria-hidden="true" />
-              视频创作
+              {copy("视频创作")}
             </h1>
             <p className="mt-1 text-xs text-muted-foreground">
-              导入素材，在同一工程里剪辑、预览和导出
+              {copy("导入素材，在同一工程里剪辑、预览和导出")}
             </p>
           </div>
         </header>
@@ -139,8 +143,9 @@ export function VisualForgeWorkspace() {
               />
             )}
             <Button size="sm" variant="outline" aria-expanded={transcriptOpen} disabled={transcriptDirty} onClick={() => setTranscriptOpen(!transcriptOpen)}>{transcriptOpen ? transcriptCopy.close : transcriptCopy.open}</Button>
+            {!transcriptOpen && <Button size="sm" variant={aiOpen ? "secondary" : "outline"} aria-expanded={aiOpen} aria-controls="video-ai-panel" onClick={() => setAiOpen(!aiOpen)}>{copy(aiOpen ? "关闭 AI 编辑" : "AI 编辑")}</Button>}
             <output className="min-w-0 text-xs text-muted-foreground">
-              {status}
+              {copy(status)}
             </output>
           </div>
         </div>
@@ -152,19 +157,19 @@ export function VisualForgeWorkspace() {
             <span className="min-w-0 flex-1 break-words">{error}</span>
             <Button variant="outline" size="sm" onClick={reopen}>
               <RefreshCw className="size-3" aria-hidden="true" />
-              重新打开编辑器
+              {copy("重新打开编辑器")}
             </Button>
           </div>
         )}
-        <div className={`min-h-0 flex-1 flex-col md:flex-row ${transcriptOpen ? "hidden" : "flex"}`}>
-          <div ref={container} data-testid="video-studio" className="relative min-h-[420px] min-w-0 flex-1 overflow-hidden md:min-h-0" />
-          {userId && token && <StudioAiEditorPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={(output) => setOutputs((current) => [output, ...current.filter((item) => item.id !== output.id)])} />}
+        <div className={styles.body} hidden={transcriptOpen}>
+          <div ref={container} data-testid="video-studio" className={styles.studio} />
+          <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioAiEditorPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={exported} />}</div>
         </div>
-        {transcriptOpen && token && userId && <div className="min-h-0 flex-1 overflow-y-auto"><OneTakeWorkspace token={token} userId={userId} runtime={ready ? mountedRuntime : null} onExport={exported} onDirty={setTranscriptDirty} /></div>}
+        {transcriptOpen && token && userId && <div className={styles.transcript}><OneTakeWorkspace token={token} userId={userId} runtime={ready ? mountedRuntime : null} onExport={exported} onDirty={setTranscriptDirty} /></div>}
       </div>
       {outputs.length > 0 && userId && session?.access_token && (
         <section className="space-y-4 border-t p-4" aria-label="本机导出记录">
-          <h2 className="text-sm font-semibold">成片与导出</h2>
+          <h2 className="text-sm font-semibold">{copy("成片与导出")}</h2>
           {outputs.map((output) => (
             <StudioExportCard
               key={output.id}

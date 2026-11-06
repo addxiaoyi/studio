@@ -139,7 +139,6 @@ const copy: Record<string, string> = {
   Width: "宽度",
   Height: "高度",
   FPS: "帧率",
-  "New folder": "新建文件夹",
   "Go back 1 frame": "后退 1 帧",
   "Go forward 1 frame": "前进 1 帧",
   "Audio asset": "音频素材",
@@ -216,44 +215,71 @@ const copy: Record<string, string> = {
   "Install skill": "安装技能",
   "Remove skill": "移除技能",
   "Upgrade skill": "升级技能",
+  Still: "静帧", Video: "视频", Picture: "画面", Other: "其他", Info: "信息", "Output name": "输出名称",
+  "Mute video": "静音", "Unmute video": "取消静音", "Frame rate": "帧率", Duration: "时长",
+  "Collapse left sidebar": "收起左侧栏", "Collapse right sidebar": "收起右侧栏", "Expand left sidebar": "展开左侧栏", "Expand right sidebar": "展开右侧栏",
+  "Open compositions": "打开合成列表", "Enter fullscreen preview": "全屏预览", "Show transparency as checkerboard": "显示透明棋盘格", "Select render type": "选择导出类型", "Drag to trim start": "拖动裁剪起点",
 };
 
 const ignored = "input, textarea, select, pre, code, [contenteditable=\"true\"]";
 
-function translateValue(value: string) {
+export function translateStudioValue(value: string) {
   const exact = copy[value.trim()];
-  return exact === undefined ? value : value.replace(value.trim(), exact);
+  if (exact !== undefined) return value.replace(value.trim(), exact);
+  return value.replace(/^Close (.+) tab$/, "关闭 $1 标签").replace(/^Timeline zoom (.+)$/, "时间线缩放 $1").replace(/^(Render|渲染) video/, "渲染视频");
 }
 
-function translateElement(element: Element) {
-  if (element.matches(ignored) || element.closest(ignored)) return;
+const originals = new WeakMap<Node, { original: string; translated: string }>();
+const originalAttributes = new WeakMap<Element, Map<string, { original: string; translated: string }>>();
+function translateText(node: Node, chinese: boolean) {
+  const value = node.nodeValue;
+  if (!value?.trim() || node.parentElement?.closest(ignored)) return;
+  const saved = originals.get(node);
+  const original = saved && saved.translated === value ? saved.original : value;
+  const translated = chinese ? translateStudioValue(original) : original;
+  originals.set(node, { original, translated });
+  if (translated !== value) node.nodeValue = translated;
+}
+function translateElement(element: Element, chinese: boolean) {
+  if (element.closest('pre, code, [contenteditable="true"]')) return;
+  const attributes = originalAttributes.get(element) ?? new Map();
   for (const attribute of ["aria-label", "title", "placeholder"]) {
     const value = element.getAttribute(attribute);
-    if (value) element.setAttribute(attribute, translateValue(value));
+    if (!value) continue;
+    const saved = attributes.get(attribute);
+    const original = saved?.translated === value ? saved.original : value;
+    const translated = chinese ? translateStudioValue(original) : original;
+    attributes.set(attribute, { original, translated });
+    if (value !== translated) element.setAttribute(attribute, translated);
   }
+  originalAttributes.set(element, attributes);
+  if (element.matches(ignored)) return;
   for (const node of element.childNodes) {
     if (node.nodeType === Node.TEXT_NODE) {
-      const value = node.nodeValue;
-      if (value?.trim()) node.nodeValue = translateValue(value);
+      translateText(node, chinese);
     } else if (node.nodeType === Node.ELEMENT_NODE) {
-      translateElement(node as Element);
+      translateElement(node as Element, chinese);
     }
   }
 }
 
 export function installStudioChinese(root: HTMLElement) {
-  translateElement(root);
+  let chinese = localStorage.getItem("helstera.locale") !== "en-US";
+  translateElement(root, chinese);
+  const sync = () => { chinese = localStorage.getItem("helstera.locale") !== "en-US"; translateElement(root, chinese); };
+  window.addEventListener("helstera:locale-changed", sync);
   const observer = new MutationObserver((records) => {
     for (const record of records) {
+      if (record.type === "characterData") translateText(record.target, chinese);
+      if (record.type === "attributes") translateElement(record.target as Element, chinese);
       for (const node of record.addedNodes) {
-        if (node.nodeType === Node.ELEMENT_NODE) translateElement(node as Element);
+        if (node.nodeType === Node.ELEMENT_NODE) translateElement(node as Element, chinese);
         else if (node.nodeType === Node.TEXT_NODE && node.parentElement) {
-          const value = node.nodeValue;
-          if (value?.trim()) node.nodeValue = translateValue(value);
+          translateText(node, chinese);
         }
       }
     }
   });
-  observer.observe(root, {childList: true, subtree: true});
-  return () => observer.disconnect();
+  observer.observe(root, {childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["aria-label", "title", "placeholder"]});
+  return () => { observer.disconnect(); window.removeEventListener("helstera:locale-changed", sync); };
 }

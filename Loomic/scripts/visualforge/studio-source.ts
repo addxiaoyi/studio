@@ -38,6 +38,24 @@ export function patchStudioSource(file: string, source: string) {
   const replace = (before: string, after: string) => {
     text = replaceRequired(text, before, after, file);
   };
+  if (file === "helpers/use-breakpoint.ts") {
+    replace("export function useBreakpoint", "const workspaceWidth = () => document.querySelector('.visualforge-native-root')?.getBoundingClientRect().width || window.innerWidth;\nexport function useBreakpoint");
+    replace("window.innerWidth < breakpoint", "workspaceWidth() < breakpoint");
+    replace("window.addEventListener('resize', handleResize);", "const root = document.querySelector('.visualforge-native-root'); const observer = new ResizeObserver(handleResize); if (root) observer.observe(root);\n\t\twindow.addEventListener('resize', handleResize);");
+    replace("window.removeEventListener('resize', handleResize);", "observer.disconnect(); window.removeEventListener('resize', handleResize);");
+  }
+  if (file === "components/ModalContainer.tsx") {
+    replace("import React, {useCallback}", "import React, {useCallback, useLayoutEffect, useRef}");
+    replace("const onPointerDown = useCallback", "const dialog = useRef<HTMLDialogElement>(null);\n\tuseLayoutEffect(() => { const node = dialog.current; if (!node) return; node.showModal(); return () => node.close(); }, []);\n\tconst onPointerDown = useCallback");
+    replace("\t\t<div\n\t\t\taria-label", "\t\t<dialog\n\t\t\tref={dialog}\n\t\t\tonCancel={event => { event.preventDefault(); onEscape(); }}\n\t\t\taria-label");
+    replace("style={backgroundOverlay}", "style={{...backgroundOverlay, inset: 0, margin: 0, border: 0, maxWidth: 'none', maxHeight: 'none', width: '100vw', height: '100dvh'}}");
+    replace("\t\t</div>\n\t);", "\t\t</dialog>\n\t);");
+  }
+  if (file === "i18n/index.tsx") {
+    replace("useMemo, useState", "useMemo, useState, useEffect");
+    replace("\tconst value = useMemo(() => ({locale, setLocale}), [locale, setLocale]);", "\tuseEffect(() => { const sync = () => setLocaleState(localStorage.getItem('helstera.locale') === 'en-US' ? 'en' : 'zh-CN'); sync(); window.addEventListener('helstera:locale-changed', sync); return () => window.removeEventListener('helstera:locale-changed', sync); }, []);\n\tconst value = useMemo(() => ({locale, setLocale}), [locale, setLocale]);");
+    replace("localStorage.setItem('remotion.locale', next);", "localStorage.setItem('remotion.locale', next); localStorage.setItem('helstera.locale', next === 'en' ? 'en-US' : 'zh-CN'); window.dispatchEvent(new Event('helstera:locale-changed'));");
+  }
   text = text.replaceAll("'Arial, Helvetica, sans-serif'", JSON.stringify(UI_FONT))
     .replaceAll("'SF Pro, Arial, Helvetica, sans-serif'", JSON.stringify(UI_FONT));
   if (file === "i18n/locales/zh-CN.ts") {

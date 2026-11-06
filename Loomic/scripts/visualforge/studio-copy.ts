@@ -102,7 +102,6 @@ export const studioChinese: Record<string, string> = {
   "Delete...": "删除...",
   "More asset actions": "更多素材操作",
   "More composition actions": "更多合成操作",
-  "New composition": "新建合成",
   "New folder": "新建文件夹",
   "Import assets...": "导入素材...",
   "Copy asset path": "复制素材路径",

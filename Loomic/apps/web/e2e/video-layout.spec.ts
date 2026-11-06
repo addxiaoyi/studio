@@ -1,0 +1,46 @@
+import { expect, test } from "@playwright/test";
+import { loadEnvFile } from "node:process";
+import { resolve } from "node:path";
+import { createEditorBrowserFixture } from "../../server/src/features/video-editor/browser-fixture";
+
+loadEnvFile(resolve("../../.env.local"));
+let fixture: Awaited<ReturnType<typeof createEditorBrowserFixture>>;
+test.beforeAll(async () => { fixture = await createEditorBrowserFixture(process.env.DATABASE_URL!, "http://localhost:3219", "{}"); });
+test.afterAll(async () => { await fixture?.close(); });
+test("editor keeps a usable canvas, top-layer export and one locale across screen sizes", async ({ page, context }, info) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  expect((await context.request.post("http://localhost:3311/api/local-auth/password", { data: { email: fixture.email, password: fixture.password } })).status()).toBe(200);
+  await page.goto("/video/?/MyComp");
+  await expect(page.getByLabel("导入本机素材", { exact: true })).toBeEnabled({ timeout: 90_000 });
+  await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
+  await expect(page.getByLabel("描述视频编辑目标")).toBeVisible();
+  await page.getByRole("button", { name: "关闭 AI 编辑", exact: true }).click();
+  for (const width of [1440, 1024, 540, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(() => page.getByTestId("video-studio").evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(350);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.screenshot({ path: info.outputPath(`video-${width}.png`) });
+  }
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
+  await page.getByRole("button", { name: "导出当前合成 (R)", exact: true }).click();
+  const modal = page.locator("dialog[open]");
+  await expect(modal).toBeVisible();
+  expect(await modal.evaluate(dialog => dialog.matches(":modal"))).toBe(true);
+  await expect(modal.getByRole("button", { name: "画面", exact: true })).toBeVisible();
+  await expect(modal.getByLabel("输出名称", { exact: true })).toBeVisible();
+  await page.keyboard.press("Tab");
+  expect(await modal.evaluate(dialog => dialog.contains(document.activeElement))).toBe(true);
+  await page.screenshot({ path: info.outputPath("export-dialog.png") });
+  await page.keyboard.press("Escape");
+  await expect(modal).toHaveCount(0);
+  await page.evaluate(() => { localStorage.setItem("helstera.locale", "en-US"); window.dispatchEvent(new Event("helstera:locale-changed")); });
+  await expect(page.getByLabel("Describe your video edit")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Import from Loomic library", exact: true })).toBeVisible();
+  await page.screenshot({ path: info.outputPath("video-en.png") });
+  await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: info.outputPath("video-200.png") });
+  expect(errors).toEqual([]);
+});

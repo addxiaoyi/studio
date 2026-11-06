@@ -1,12 +1,13 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { StudioAssetPicker } from "@/components/studio-asset-picker";
 
 const api = vi.hoisted(() => ({ fetchGeneratedAssets: vi.fn(), readStudioAsset: vi.fn() }));
 vi.mock("@/lib/server-api", () => ({ fetchGeneratedAssets: api.fetchGeneratedAssets }));
 vi.mock("@/lib/studio-media", () => ({ readStudioAsset: api.readStudioAsset, MAX_STUDIO_MEDIA_BYTES: 250 * 1024 * 1024 }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
+beforeEach(() => { document.documentElement.lang = "zh-CN"; });
 
 it("downloads the file identifier while preserving the library identifier for import deduplication", async () => {
   const id = "123e4567-e89b-42d3-a456-426614174000";

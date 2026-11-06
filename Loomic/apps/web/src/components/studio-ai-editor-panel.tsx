@@ -10,10 +10,12 @@ import type { StudioRuntime } from "@/lib/visualforge-runtime";
 import { saveStudioPlan, type StudioExport } from "@/lib/visualforge-storage";
 import { readRecoveredStudioSession, type StudioAiSession } from "@/lib/studio-ai-session";
 import type { VideoEditorPlanRequest, VideoEditorExportReceipt } from "@helstera/shared";
+import { useVideoText } from "@/lib/video-copy";
 
 type Props = { runtime: StudioRuntime | null; mediaRevision: number; userId: string; token: string; exported(output: StudioExport): void };
 
 export function StudioAiEditorPanel({ runtime, mediaRevision, userId, token, exported }: Props) {
+  const copy = useVideoText();
   const [prompt, setPrompt] = useState("");
   const [plan, setPlan] = useState<StudioAiPlan | null>(null);
   const [confirmed, setConfirmed] = useState<Set<number>>(new Set());
@@ -145,27 +147,27 @@ export function StudioAiEditorPanel({ runtime, mediaRevision, userId, token, exp
     });
   }
 
-  return <aside aria-label="AI 编辑当前合成" className="flex w-full shrink-0 flex-col border-b bg-card text-card-foreground md:w-80 md:border-b-0 md:border-l">
-    <div className="border-b px-4 py-3"><h2 className="flex items-center gap-2 text-sm font-semibold"><Bot className="size-4" aria-hidden="true" />AI 编辑当前合成</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">模型生成计划，逐项确认后修改当前时间线。</p></div>
+  return <aside aria-label={copy("AI 编辑当前合成")} className="flex min-h-0 w-full shrink-0 flex-col bg-card text-card-foreground">
+    <div className="border-b px-4 py-3"><h2 className="flex items-center gap-2 text-sm font-semibold"><Bot className="size-4" aria-hidden="true" />{copy("AI 编辑当前合成")}</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">{copy("模型生成计划，逐项确认后修改当前时间线。")}</p></div>
     <div className="space-y-3 overflow-y-auto p-4">
-      <textarea aria-label="描述视频编辑目标" value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="例如：剪成 30 秒竖屏视频，加标题字幕和已导入的音乐" rows={4} disabled={!runtime || busy} className="w-full resize-y rounded-lg border bg-background p-3 text-sm" />
-      <label className="block space-y-1 text-xs">背景音乐素材<select aria-label="背景音乐素材" className="w-full rounded border bg-background p-2" value={music} onChange={event => setMusic(event.target.value)} disabled={busy || !audio.length}><option value="">由计划选择现有素材</option>{audio.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
-      <label className="block text-xs">音乐音量 {volume}%<input aria-label="音乐音量" type="range" min={0} max={100} value={volume} onChange={event => setVolume(Number(event.target.value))} disabled={busy} className="w-full" /></label>
-      <label className="block space-y-1 text-xs">音乐起播（秒）<input aria-label="音乐起播（秒）" type="number" min={0} max={7200} step={0.1} value={musicStart} onChange={event => setMusicStart(Number(event.target.value))} disabled={busy || !music} className="w-full rounded border bg-background p-2" /></label>
-      {!audio.length && <p className="text-xs text-muted-foreground">导入 MP3、WAV、OGG 或 M4A 后可选配乐。使用已有素材：0 积分。</p>}
-      <Button className="w-full" variant="outline" disabled={!runtime || !prompt.trim() || busy || restoring || receiptPending} onClick={previewPlan}><Sparkles className="size-4" aria-hidden="true" />{restoring ? "正在恢复编辑记录…" : busy ? "正在处理…" : "生成 AI 编辑计划"}</Button>
-      {!runtime && <p className="text-xs text-muted-foreground">正在等待编辑器连接。</p>}
+      <textarea aria-label={copy("描述视频编辑目标")} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={copy("例如：剪成 30 秒竖屏视频，加标题字幕和已导入的音乐")} rows={4} disabled={!runtime || busy} className="w-full resize-y rounded-lg border bg-background p-3 text-base sm:text-sm" />
+      <label className="block space-y-1 text-xs">{copy("背景音乐素材")}<select aria-label={copy("背景音乐素材")} className="w-full rounded border bg-background p-2 text-base sm:text-sm" value={music} onChange={event => setMusic(event.target.value)} disabled={busy || !audio.length}><option value="">{copy("由计划选择现有素材")}</option>{audio.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
+      <label className="block text-xs">{copy("音乐音量")} {volume}%<input aria-label={copy("音乐音量")} type="range" min={0} max={100} value={volume} onChange={event => setVolume(Number(event.target.value))} disabled={busy} className="w-full" /></label>
+      <label className="block space-y-1 text-xs">{copy("音乐起播（秒）")}<input aria-label={copy("音乐起播（秒）")} type="number" min={0} max={7200} step={0.1} value={musicStart} onChange={event => setMusicStart(Number(event.target.value))} disabled={busy || !music} className="w-full rounded border bg-background p-2 text-base sm:text-sm" /></label>
+      {!audio.length && <p className="text-xs text-muted-foreground">{copy("导入 MP3、WAV、OGG 或 M4A 后可选配乐。使用已有素材：0 积分。")}</p>}
+      <Button className="w-full" variant="outline" disabled={!runtime || !prompt.trim() || busy || restoring || receiptPending} onClick={previewPlan}><Sparkles className="size-4" aria-hidden="true" />{copy(restoring ? "正在恢复编辑记录…" : busy ? "正在处理…" : "生成 AI 编辑计划")}</Button>
+      {!runtime && <p className="text-xs text-muted-foreground">{copy("正在等待编辑器连接。")}</p>}
       {plan && <div className="space-y-3 rounded-lg border bg-background p-3" data-testid="studio-ai-plan">
-        <h3 className="text-xs font-semibold">计划预览 · 模型生成</h3><p className="text-xs leading-5 text-muted-foreground">{plan.summary}</p>
+        <h3 className="text-xs font-semibold">{copy("计划预览 · 模型生成")}</h3><p className="text-xs leading-5 text-muted-foreground">{plan.summary}</p>
         <ol className="space-y-2 text-xs">{plan.actions.map((action, index) => <li key={`${action.type}:${action.label}`}><label className="flex items-start gap-2"><input type="checkbox" value={index} checked={confirmed.has(index)} onChange={toggleAction} disabled={busy || Boolean(applied)} /><span className="min-w-0 break-words">{action.label}</span></label></li>)}</ol>
         {plan.notices.map(item => <p key={item} className="text-xs leading-5 text-muted-foreground">{item}</p>)}
-        <Button className="w-full" disabled={busy || Boolean(applied) || confirmed.size !== plan.actions.length} onClick={applyPlan}>{applied ? "已应用到当前合成" : "确认并修改当前合成"}</Button>
-        {receiptPending && <Button className="w-full" variant="outline" disabled={busy} onClick={retryReceipt}>重试同步回执</Button>}
-        {plan.exportFormat && <Button className="w-full" variant="outline" disabled={busy || !applied || exportedOnce || receiptPending} onClick={exportPlan}>{exportedOnce ? "成片已保存" : "导出已确认的合成"}</Button>}
+        <Button className="w-full" disabled={busy || Boolean(applied) || confirmed.size !== plan.actions.length} onClick={applyPlan}>{copy(applied ? "已应用到当前合成" : "确认并修改当前合成")}</Button>
+        {receiptPending && <Button className="w-full" variant="outline" disabled={busy} onClick={retryReceipt}>{copy("重试同步回执")}</Button>}
+        {plan.exportFormat && <Button className="w-full" variant="outline" disabled={busy || !applied || exportedOnce || receiptPending} onClick={exportPlan}>{copy(exportedOnce ? "成片已保存" : "导出已确认的合成")}</Button>}
       </div>}
-      {notice && <output aria-live="polite" className="block break-words text-xs leading-5 text-emerald-700 dark:text-emerald-300">{notice}</output>}
-      {error && <p role="alert" className="text-xs leading-5 text-destructive">{error}</p>}
-      <span className="sr-only">素材列表版本 {mediaRevision}</span>
+      {notice && <output aria-live="polite" className="block break-words text-xs leading-5 text-emerald-700 dark:text-emerald-300">{copy(notice)}</output>}
+      {error && <p role="alert" className="text-xs leading-5 text-destructive">{copy(error)}</p>}
+      <span className="sr-only">{copy("素材列表版本")} {mediaRevision}</span>
     </div>
   </aside>;
 }

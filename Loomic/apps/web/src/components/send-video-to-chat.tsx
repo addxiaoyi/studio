@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { getServerBaseUrl } from "@/lib/env";
+import { useVideoText } from "@/lib/video-copy";
 
 type Session = { id: string; title: string; canvasName: string; canvasId: string };
 
 export function SendVideoToChat({ assetId, token, media = "video" }: { assetId: string; token: string; media?: "image" | "video" }) {
+  const copy = useVideoText();
   const endpoint = media === "image" ? "private-try-on" : "private-video";
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [selected, setSelected] = useState("");
@@ -42,11 +44,11 @@ export function SendVideoToChat({ assetId, token, media = "video" }: { assetId: 
 
   const target = sessions?.find((item) => item.id === selected);
   return <div className="flex flex-wrap items-center gap-2">
-    {sessions === null ? <button type="button" onClick={loadSessions} disabled={busy} className="rounded border px-3 py-2 text-sm disabled:opacity-50">{busy ? "正在加载会话" : "发送到聊天"}</button> : <>
-      <label className="text-sm">聊天会话 <select value={selected} onChange={(event) => { setSelected(event.currentTarget.value); setDelivered(false); }} disabled={busy} className="max-w-64 rounded border bg-background p-2"><option value="">{sessions.length ? "选择会话" : "没有可用会话"}</option>{sessions.map((item) => <option key={item.id} value={item.id}>{item.canvasName} / {item.title}</option>)}</select></label>
-      <button type="button" onClick={send} disabled={!selected || busy} className="rounded border px-3 py-2 text-sm disabled:opacity-50">发送</button>
+    {sessions === null ? <button type="button" onClick={loadSessions} disabled={busy} className="rounded border px-3 py-2 text-sm disabled:opacity-50">{copy(busy ? "正在加载会话" : "发送到聊天")}</button> : <>
+      <label className="text-sm">{copy("聊天会话")} <select value={selected} onChange={(event) => { setSelected(event.currentTarget.value); setDelivered(false); }} disabled={busy} className="max-w-64 rounded border bg-background p-2"><option value="">{copy(sessions.length ? "选择会话" : "没有可用会话")}</option>{sessions.map((item) => <option key={item.id} value={item.id}>{item.canvasName} / {item.title}</option>)}</select></label>
+      <button type="button" onClick={send} disabled={!selected || busy} className="rounded border px-3 py-2 text-sm disabled:opacity-50">{copy("发送")}</button>
     </>}
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {delivered && target && <p role="status" className="text-sm">已发送。<a className="underline" href={`/canvas/?${new URLSearchParams({ id: target.canvasId, session: target.id })}`}>打开聊天</a></p>}
+    {error && <p role="alert" className="text-sm text-destructive">{copy(error)}</p>}
+    {delivered && target && <p role="status" className="text-sm">{copy("已发送。")}<a className="underline" href={`/canvas/?${new URLSearchParams({ id: target.canvasId, session: target.id })}`}>{copy("打开聊天")}</a></p>}
   </div>;
 }
