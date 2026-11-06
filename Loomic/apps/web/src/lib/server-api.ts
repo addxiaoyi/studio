@@ -42,6 +42,7 @@ import type {
   AgentConnector,
 } from "@helstera/shared";
 import {
+  GOAL_PLAN_TIMEOUT_MS,
   agentConnectorSchema,
   agentGoalSchema,
   agentGoalActivitySchema,
@@ -66,13 +67,14 @@ export const API_REQUEST_TIMEOUT_MS = 30_000;
 function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
+  timeoutMs = API_REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
   const controller = new AbortController();
   let timedOut = false;
   const timeout = window.setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, API_REQUEST_TIMEOUT_MS);
+  }, timeoutMs);
   const callerSignal = init?.signal;
   const abortFromCaller = () => controller.abort(callerSignal?.reason);
   if (callerSignal) {
@@ -85,6 +87,7 @@ function apiFetch(
       throw toTransportError(cause, {
         timedOut,
         callerAborted: callerSignal?.aborted === true,
+        timeoutMs,
       });
     })
     .finally(() => {
@@ -102,13 +105,15 @@ function apiFetch(
  */
 function toTransportError(
   cause: unknown,
-  state: { timedOut: boolean; callerAborted: boolean },
+  state: { timedOut: boolean; callerAborted: boolean; timeoutMs?: number },
 ): unknown {
   if (cause instanceof ApiRequestError) return cause;
   if (state.callerAborted && !state.timedOut) return cause;
   const kind = state.timedOut ? "timeout" : classifyApiError(cause);
   const locale = resolveApiErrorLocale();
-  const message = localizedApiErrorMessage(kind, locale);
+  const message = kind === "timeout" && state.timeoutMs && state.timeoutMs !== API_REQUEST_TIMEOUT_MS
+    ? locale === "zh-CN" ? "生成目标计划的等待时间已用完，请稍后重试。目标尚未确认执行。" : "Goal planning timed out. Try again shortly; the goal has not been confirmed for execution."
+    : localizedApiErrorMessage(kind, locale);
   if (kind === "timeout") return new ApiTimeoutError(message, cause);
   if (kind === "network") return new ApiNetworkError(message, cause);
   return new ApiRequestError(kind, message, cause);
@@ -2465,7 +2470,7 @@ export async function createAgentGoal(accessToken: string, input: AgentGoalCreat
     method: "POST",
     headers: authJsonHeaders(accessToken),
     body: JSON.stringify(input),
-  });
+  }, GOAL_PLAN_TIMEOUT_MS + 10_000);
   if (!response.ok) return handleErrorResponse(response);
   return readAgentResponse(response, agentGoalSchema);
 }

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { desktopAgentTaskRequestSchema } from "./desktop-control.js";
 
+export const GOAL_PLAN_TIMEOUT_MS = 120_000;
+
 const url = z.string().url().max(2048).refine(value => /^https?:\/\//i.test(value) && !value.match(/^https?:\/\/([^/?#]*)/i)?.[1]?.includes("@"));
 export const goalCommandSchema = z.discriminatedUnion("executor", [
   z.strictObject({ executor: z.literal("web.search"), query: z.string().trim().min(1).max(500) }),

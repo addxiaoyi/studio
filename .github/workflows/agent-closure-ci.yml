@@ -43,7 +43,9 @@ jobs:
           pnpm --filter @helstera/desktop typecheck
       - name: Approval, recovery and private asset database gates
         run: node scripts/test-local-postgres.mjs src/features/agent-goals/goal-steps.postgres.test.ts src/features/assets/private-lifecycle.postgres.test.ts src/local-db/private-upload-ownership.postgres.test.ts src/features/onetake/onetake.postgres.test.ts src/features/video-editor/plan-store.postgres.test.ts
+      - name: Structured model planning deadlines
+        run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/goal-planner.test.ts src/features/agent-goals/goal-plan-timeout.test.ts src/features/video-editor/planner.test.ts
       - name: Video workspace regressions
-        run: pnpm --filter @helstera/web exec vitest run test/video-locale.test.tsx test/generated-asset-identity.test.ts test/studio-asset-picker.test.tsx test/onetake-history.test.tsx test/onetake-export-options.test.tsx test/send-video-to-chat.test.tsx test/agent-workspace-panel.test.tsx
+        run: pnpm --filter @helstera/web exec vitest run test/video-locale.test.tsx test/generated-asset-identity.test.ts test/studio-asset-picker.test.tsx test/onetake-history.test.tsx test/onetake-export-options.test.tsx test/send-video-to-chat.test.tsx test/agent-workspace-panel.test.tsx test/agent-goal-timeout.test.ts
       - name: Deployment recovery gates on Linux
         run: python3 -m unittest scripts.test_deploy_production_candidate scripts.test_prepare_production_candidate scripts.test_isolated_pg_rehearsal scripts.test_apply_studio_nginx scripts.test_validate_studio_nginx -q
