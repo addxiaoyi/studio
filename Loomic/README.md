@@ -43,6 +43,8 @@
 
 2026-11-06 已部署到生产 `/video/`，通过真实转写、确认导出、当前合成替换、刷新恢复和聊天视频播放验收。生产模型 `grok-4.6` 返回结构化剪辑计划。开发分支 `codex/agent-workspace-ci` 的代码提交 `5816df0` 已通过 Windows/macOS/Linux 候选 CI；安装过程与各平台原生导出边界见验收记录。
 
+2026-11-06 后续闭环修复已发布：私有素材权限/删除/到期清理，视频窄屏与弹窗/语言，以及受约束目标计划、逐步审批和恢复。真实生产目标完成网站录制→MP4剪辑→素材库/聊天回写；核验重试没有重复录制，刷新后视频可播放。发布中发现并补修了模型等待时间不一致和身份初始化与媒体保存的数据库死锁。具体提交、验证及未验收边界见[`docs/audit/closure-fixes-20261106.md`](docs/audit/closure-fixes-20261106.md)；不是全部100项审计已完成。
+
 The current GitHub snapshot includes the creator-workspace UX pass and the
 reliability work that is present in this checkout. The detailed 100-item
 acceptance matrix is tracked in
