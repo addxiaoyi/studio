@@ -91,11 +91,15 @@ export async function captureIsolatedWebsite(options: {
   webOrigin: string;
   task: CaptureTask;
   onProgress: CaptureProgress;
+  signal?: AbortSignal;
 }): Promise<WebsiteCaptureResult> {
   const startUrl = await validatePublicHttpUrl(options.task.start_url);
   const tempDir = await mkdtemp(join(tmpdir(), `helstera-capture-${options.task.id}-`));
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
   let videoPath: string | undefined;
+  const abort = () => { void browser?.close().catch(error => console.error("[capture] cancellation close failed", error)); };
+  options.signal?.throwIfAborted();
+  options.signal?.addEventListener("abort", abort, { once: true });
 
   try {
     await options.onProgress(5, "browser_starting", "Starting a temporary browser");
@@ -105,6 +109,7 @@ export async function captureIsolatedWebsite(options: {
       args: ["--disable-background-networking", "--disable-component-update", "--disable-sync"],
       ...(executablePath ? { executablePath } : {}),
     });
+    options.signal?.throwIfAborted();
     const context = await browser.newContext({
       acceptDownloads: false,
       ignoreHTTPSErrors: false,
@@ -262,6 +267,7 @@ export async function captureIsolatedWebsite(options: {
       completedAt: new Date().toISOString(),
     };
   } finally {
+    options.signal?.removeEventListener("abort", abort);
     await browser?.close().catch(() => undefined);
     await rm(tempDir, { recursive: true, force: true });
   }

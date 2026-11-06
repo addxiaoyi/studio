@@ -764,6 +764,7 @@ export class WebsiteAssistantHub {
     input: DesktopAgentTaskRequest,
     chatSessionId?: string,
     goalIdOverride?: string,
+    taskIdOverride?: string,
   ) {
     await assertConnectorEnabled(this.options.db, workspaceId, userId, "desktop-agent");
     const { rows: connections } = await this.options.db.query<{ id: string }>(
@@ -779,7 +780,7 @@ export class WebsiteAssistantHub {
     const connectionId = live?.id;
     if (!connectionId || !live || live.ws.readyState !== 1)
       throw new Error("本地桌面助手未连接。");
-    const taskId = randomUUID();
+    const taskId = taskIdOverride ?? randomUUID();
     const goalId = goalIdOverride ?? randomUUID();
     const goalPlan = buildAgentGoalPlan(input.goal, input.executionMode);
     const plannedActions = input.plannedActions.map((action, index) => ({

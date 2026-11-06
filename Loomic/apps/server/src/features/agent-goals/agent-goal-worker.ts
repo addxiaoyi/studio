@@ -193,13 +193,13 @@ export class AgentGoalWorker {
       const { rows } = await this.db.query<GoalRow>(
         `select id,workspace_id,created_by,canvas_id,chat_session_id,goal,status,plan,execution_mode,output_kind,execution_policy,capabilities,next_attempt_at
            from agent_goals
-          where status = 'running'
+          where coalesce(plan->>'version','1') <> '2' and (status = 'running'
              or (status='waiting_desktop'
                  and (next_attempt_at is null or next_attempt_at <= now()))
              or (status='waiting_approval' and (
                select t.status from desktop_agent_tasks t
                 where t.goal_id=agent_goals.id order by t.created_at desc limit 1
-             )='succeeded')
+              )='succeeded'))
           order by updated_at asc
           limit 20`,
       );
@@ -644,7 +644,7 @@ class GoalExecution {
       }
     }
     for (const localPath of localPaths) {
-      outputs.push({ kind: "local_file", localPath, cloudAssetId: null, status: "saved_local", metadata: {} });
+      outputs.push({ kind: "local_file", localPath, cloudAssetId: null, status: "pending", metadata: { saveState: "pending_verification", reason: "本地路径尚无文件摘要与保存回执" } });
     }
     const assets = Array.isArray(result.assets)
       ? result.assets.filter((asset): asset is Record<string, unknown> => Boolean(asset) && typeof asset === "object" && !Array.isArray(asset))
@@ -658,8 +658,8 @@ class GoalExecution {
         kind: typeof asset.mediaType === "string" ? asset.mediaType : "asset",
         localPath,
         cloudAssetId: assetId,
-        status: localPath && assetId ? "saved_both" : localPath ? "saved_local" : assetId ? "saved_cloud" : "pending",
-        metadata: asset,
+        status: assetId ? "saved_cloud" : "pending",
+        metadata: { ...asset, ...(localPath ? { localSaveState: "pending_verification" } : {}) },
       });
     }
     for (const output of outputs) {

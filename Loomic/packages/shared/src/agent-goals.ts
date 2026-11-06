@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { goalCommandSchema, goalStepReceiptSchema } from "./goal-execution.js";
 
 import {
   desktopAgentActionSchema,
@@ -43,9 +44,15 @@ export const agentGoalPlanStepSchema = z.object({
   requiresDesktop: z.boolean().default(false),
   requiresApproval: z.boolean().default(false),
   estimatedCost: z.number().finite().nonnegative().optional(),
+  executor: z.string().optional(),
+  command: goalCommandSchema.optional(),
+  dependsOn: z.array(z.string()).optional(),
+  completion: z.string().optional(),
 });
 
 export const agentGoalPlanSchema = z.object({
+  version: z.literal(2).optional(),
+  summary: z.string().optional(),
   steps: z.array(agentGoalPlanStepSchema).max(32),
   generatedAt: z.string().datetime({ offset: true }),
 });
@@ -168,6 +175,7 @@ export const agentGoalSchema = z.object({
   activities: z.array(agentGoalActivitySchema).default([]),
   approvals: z.array(agentGoalApprovalSchema).default([]),
   outputs: z.array(agentGoalOutputSchema).default([]),
+  executionSteps: z.array(goalStepReceiptSchema).optional(),
   result: agentGoalResultSchema.nullable().optional(),
   error: z.string().nullable().optional(),
   createdAt: z.string().datetime({ offset: true }),

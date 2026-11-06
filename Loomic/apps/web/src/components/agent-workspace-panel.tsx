@@ -1,4 +1,5 @@
 "use client";
+import { AgentStepReceipts } from "./agent-step-receipts";
 
 import { Activity, Check, ChevronDown, Lightbulb, Pause, Play, RotateCcw, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -492,6 +493,7 @@ export function AgentWorkspacePanel({ accessToken, canvasId, chatSessionId, goal
         {selected.result?.summary || selected.result?.documents?.length ? <section className="agent-workspace-section"><h3>{t.assets}</h3><p>{selected.result.summary}</p>{selected.result.documents?.map((report) => <AgentDocumentResult key={report.id} report={report} english={english} />)}</section> : null}
         <div className="agent-workspace-status"><strong>{statusLabel(selected.status, t)}</strong><span>{modeLabel(selected.executionMode, english)} · {outputLabel(selected.outputKind, english)}</span></div>
         <AgentActionReview goal={selected} english={english} busy={busy} onReview={(approvalId, outcome) => void reviewAction(approvalId, outcome)} />
+        <AgentStepReceipts goal={selected} token={accessToken} refresh={async () => { const next = await fetchAgentGoal(accessToken, selected.id); setGoals(current => mergeGoal(current, next)); }} />
         {selected.status === "draft" ? <section className="agent-workspace-confirm"><strong>{t.planReady}</strong><p>{t.confirmHint}</p><button type="button" disabled={busy} onClick={() => void confirmGoal()}><Check size={14} aria-hidden="true" />{t.confirm}</button></section> : null}
         <div className="agent-workspace-actions">
           {selected.status === "paused" ? <button type="button" disabled={busy} onClick={() => void updateGoal("resume")}><Play size={14} aria-hidden="true" />{t.resume}</button> : null}

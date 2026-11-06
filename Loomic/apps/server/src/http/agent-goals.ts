@@ -6,6 +6,11 @@ import type { RequestAuthenticator } from "../auth/types.js";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
 import { AgentGoalService } from "../features/agent-goals/agent-goal-service.js";
 import { WebsiteAssistantHub } from "../features/website-capture/assistant-hub.js";
+import { createGoalPlanner } from "../features/agent-goals/goal-planner.js";
+import { decideGoalStep, reviewGoalStep } from "../features/agent-goals/goal-step-store.js";
+import type { ServerEnv } from "../config/env.js";
+import type { SettingsService } from "../features/settings/settings-service.js";
+import { z } from "zod";
 
 type GoalRouteOptions = {
   db: Pool;
@@ -13,6 +18,8 @@ type GoalRouteOptions = {
   viewerService: ViewerService;
   goalService?: AgentGoalService;
   assistantHub: WebsiteAssistantHub;
+  env?: ServerEnv;
+  settingsService?: SettingsService;
 };
 
 function unauthorized(reply: FastifyReply) {
@@ -35,11 +42,30 @@ export function registerAgentGoalRoutes(app: FastifyInstance, options: GoalRoute
     if (!user) return unauthorized(reply);
     try {
       const viewer = await options.viewerService.ensureViewer(user);
-      const goal = await service.create(user.id, viewer.workspace.id, agentGoalCreateRequestSchema.parse(request.body));
+      const planner = options.env && options.settingsService && process.env.HELSTERA_GOAL_STEPS === "1" ? createGoalPlanner(options.env, options.settingsService, user) : undefined;
+      const plannedService = planner ? new AgentGoalService(options.db, planner) : service;
+      const goal = await plannedService.create(user.id, viewer.workspace.id, agentGoalCreateRequestSchema.parse(request.body));
       return reply.code(202).send({ ok: true, data: goal });
     } catch (error) {
       return sendGoalError(error, reply);
     }
+  });
+
+  app.post<{ Params: { goalId: string; stepId: string } }>("/api/agent/goals/:goalId/steps/:stepId/decision", async (request, reply) => {
+    const user = await options.auth.authenticate(request); if (!user) return unauthorized(reply);
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      const body = z.strictObject({ decision: z.enum(["approve", "reject"]), fingerprint: z.string().regex(/^[a-f0-9]{64}$/) }).parse(request.body);
+      return await decideGoalStep(options.db, user.id, viewer.workspace.id, request.params.goalId, request.params.stepId, body.fingerprint, body.decision);
+    } catch (error) { return sendGoalError(error, reply); }
+  });
+  app.post<{ Params: { goalId: string; stepId: string } }>("/api/agent/goals/:goalId/steps/:stepId/review", async (request, reply) => {
+    const user = await options.auth.authenticate(request); if (!user) return unauthorized(reply);
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      const body = z.strictObject({ outcome: z.enum(["observed_completed", "observed_not_completed"]) }).parse(request.body);
+      return await reviewGoalStep(options.db, user.id, viewer.workspace.id, request.params.goalId, request.params.stepId, body.outcome);
+    } catch (error) { return sendGoalError(error, reply); }
   });
 
   app.get("/api/agent/goals", async (request, reply) => {

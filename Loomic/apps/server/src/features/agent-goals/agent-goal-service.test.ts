@@ -39,11 +39,12 @@ describe("Agent goal confirmation boundaries", () => {
       .mockResolvedValueOnce({ rows: [{ status: "canceled" }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ status: "canceled" }] });
     const service = new AgentGoalService({ query } as never);
 
     await expect(service.transition("user", "workspace", "goal", "retry")).rejects.toBeInstanceOf(AgentGoalTransitionError);
-    expect(query.mock.calls[2]?.[0]).toContain("confirmed_at is not null");
+    expect(query.mock.calls[3]?.[0]).toContain("confirmed_at is not null");
   });
 
   it("confirms and records the event atomically, and returns the current goal on repeated confirmation", async () => {
@@ -52,12 +53,12 @@ describe("Agent goal confirmation boundaries", () => {
     const get = vi.spyOn(service, "get").mockResolvedValue({ id: "goal", status: "running" } as never);
 
     await service.confirm("user", "workspace", "goal");
-    expect(query).toHaveBeenCalledOnce();
-    expect(query.mock.calls[0]?.[0]).toContain("with confirmed as");
-    expect(query.mock.calls[0]?.[0]).toContain("execution_policy='approval_required'");
-    expect(query.mock.calls[0]?.[0]).toContain("insert into agent_goal_events");
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[1]?.[0]).toContain("with confirmed as");
+    expect(query.mock.calls[1]?.[0]).toContain("execution_policy='approval_required'");
+    expect(query.mock.calls[1]?.[0]).toContain("insert into agent_goal_events");
 
-    query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ status: "running" }] });
+    query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ status: "running" }] });
     await service.confirm("user", "workspace", "goal");
     expect(get).toHaveBeenCalledTimes(2);
   });

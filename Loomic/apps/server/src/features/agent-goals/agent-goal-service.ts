@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
+import { initializeGoalSteps } from "./goal-step-store.js";
 
 import {
   agentGoalCreateRequestSchema,
@@ -105,12 +106,14 @@ function iso(value: string | Date) {
 }
 
 export class AgentGoalService {
-  constructor(private readonly db: Pick<Pool, "query">) {}
+  constructor(private readonly db: Pick<Pool, "query">, private readonly planner?: (workspaceId: string, input: AgentGoalCreateRequest) => Promise<AgentGoalPlan>) {}
 
   async create(userId: string, workspaceId: string, rawInput: AgentGoalCreateRequest): Promise<AgentGoal> {
     const input = agentGoalCreateRequestSchema.parse(rawInput);
     await this.assertContext(userId, workspaceId, input);
-    const plan = buildAgentGoalPlan(input.goal, input.executionMode, input.outputKind);
+    const existing = this.planner ? (await this.db.query<{ id: string }>("select id from agent_goals where workspace_id=$1 and created_by=$2 and idempotency_key=$3", [workspaceId, userId, input.idempotencyKey])).rows[0] : null;
+    if (existing) return this.get(userId, workspaceId, existing.id);
+    const plan = this.planner ? await this.planner(workspaceId, input) : buildAgentGoalPlan(input.goal, input.executionMode, input.outputKind);
     const goalId = randomUUID();
     const inserted = await this.db.query<{ id: string }>(
       `insert into agent_goals
@@ -194,6 +197,7 @@ export class AgentGoalService {
            from agent_goal_outputs where goal_id=$1 order by created_at asc`,
         [goalId],
       );
+    const executionSteps = row.plan.version === 2 ? (await this.db.query(`select id,step_id as "stepId",title,executor,state,attempt,command,output,error,fingerprint,approval,approval_expires_at as "expiresAt" from agent_goal_steps where goal_id=$1 order by ordinal`, [goalId])).rows.map(step => ({ ...step, expiresAt: step.expiresAt ? iso(step.expiresAt) : null })) : undefined;
     return {
       id: row.id,
       workspaceId: row.workspace_id,
@@ -203,6 +207,7 @@ export class AgentGoalService {
       goal: row.goal,
       status: row.status,
       plan: row.plan,
+      ...(executionSteps ? { executionSteps } : {}),
       executionMode: row.execution_mode,
       outputKind: row.output_kind,
       source: row.source,
@@ -253,6 +258,8 @@ export class AgentGoalService {
   }
 
   async confirm(userId: string, workspaceId: string, goalId: string) {
+    const planned = (await this.db.query<{ plan: AgentGoalPlan }>("select plan from agent_goals where id=$1 and created_by=$2 and workspace_id=$3", [goalId, userId, workspaceId])).rows[0]?.plan;
+    if (planned?.version === 2) await initializeGoalSteps(this.db, goalId, planned);
     const updated = await this.db.query<{ id: string }>(
       `with confirmed as (update agent_goals
           set status='running', confirmed_at=coalesce(confirmed_at, now()), updated_at=now(), error_message=null
@@ -301,6 +308,8 @@ export class AgentGoalService {
     }
 
     if (transition === "resume") {
+      const review = await this.db.query("select id from agent_goal_steps where goal_id=$1 and state='review' limit 1", [goalId]);
+      if (review.rows.length) throw new AgentGoalTransitionError("有结果不确定的步骤，请先核验，不能自动重放。");
       const unresolved = await this.db.query(
         `select 1 from desktop_agent_tasks where goal_id=$1 and status in ('paused','waiting_desktop')
           and checkpoint->'action'->>'state' in ('dispatched','uncertain') limit 1`,
@@ -310,6 +319,8 @@ export class AgentGoalService {
     }
 
     if (transition === "retry") {
+      const unresolvedSteps = await this.db.query("select id from agent_goal_steps where goal_id=$1 and state='review' limit 1", [goalId]);
+      if (unresolvedSteps.rows.length) throw new AgentGoalTransitionError("中断副作用必须先人工核验。");
       const unsafe = await this.db.query(
         `select 1 from desktop_agent_tasks t where t.goal_id=$1 and t.execution_mode in ('windows_ui','visual_ocr')
           and (t.checkpoint ? 'action' or exists (select 1 from desktop_agent_approvals a where a.task_id=t.id and a.status in ('approved','executed'))) limit 1`,
@@ -353,9 +364,13 @@ export class AgentGoalService {
     if (status === "paused") {
       await this.db.query("update desktop_agent_tasks set status='paused',updated_at=now() where goal_id=$1 and status in ('queued','running','waiting_approval','waiting_desktop')", [goalId]);
     } else if (status === "canceled") {
+      await this.db.query("update agent_goal_steps set state='canceled',updated_at=now() where goal_id=$1 and state in ('queued','waiting_approval','waiting_desktop')", [goalId]);
       await this.db.query("update desktop_agent_tasks set status='canceled',completed_at=now(),updated_at=now() where goal_id=$1 and status in ('queued','running','waiting_approval','waiting_desktop','paused')", [goalId]);
       await this.db.query("update desktop_agent_approvals set status='expired' where task_id in (select id from desktop_agent_tasks where goal_id=$1) and status='pending'", [goalId]);
     } else if (status === "running") {
+      if (transition === "retry") {
+        await this.db.query("update agent_goal_steps set state='queued',error=null,approval=case when approval in ('rejected','expired','consumed') then 'pending' else approval end,updated_at=now() where goal_id=$1 and state in ('failed','canceled')", [goalId]);
+      }
       await this.db.query("update desktop_agent_tasks set status='running',wait_reason=null,updated_at=now() where goal_id=$1 and status in ('paused','waiting_desktop')", [goalId]);
     }
     await this.db.query("insert into agent_goal_events(goal_id,event_type,detail) values($1,$2,$3)", [goalId, `goal.${transition}`, `目标已执行${transition}操作，当前状态为 ${status}`]);

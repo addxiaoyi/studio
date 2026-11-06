@@ -103,7 +103,7 @@ describe("agent goal worker planning", () => {
   it("recreates a task after a failed goal retry transitions back to running", async () => {
     let latestTaskReads = 0;
     const query = vi.fn(async (sql: string, _values?: unknown[]) => {
-      if (sql.includes("from agent_goals") && sql.includes("where status = 'running'")) {
+      if (sql.includes("from agent_goals") && sql.includes("status = 'running'") && sql.includes("coalesce(plan->>'version'")) {
         return { rows: [{ ...goal, status: "running" }] };
       }
       if (sql.includes("from desktop_agent_tasks") && sql.includes("order by created_at desc")) {

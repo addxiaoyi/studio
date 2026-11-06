@@ -150,6 +150,8 @@ import { WebsiteAssistantHub, registerWebsiteAssistantWsRoute } from "./features
 import { AgentGoalEventPublisher } from "./features/agent-goals/agent-goal-events.js";
 import { AgentGoalWorker } from "./features/agent-goals/agent-goal-worker.js";
 import { createBackgroundGoalExecutor } from "./features/agent-goals/agent-goal-background.js";
+import { GoalStepWorker } from "./features/agent-goals/goal-step-worker.js";
+import { createGoalStepExecutor } from "./features/agent-goals/goal-step-executors.js";
 import { CanvasEventBuffer } from "./ws/event-buffer.js";
 import { ConnectionManager } from "./ws/connection-manager.js";
 import { registerWsRoute } from "./ws/handler.js";
@@ -281,13 +283,16 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     }),
   );
   const agentGoalEvents = new AgentGoalEventPublisher(localDb, connectionManager, eventBuffer);
+  const goalSteps = new GoalStepWorker(localDb, createGoalStepExecutor({ db: localDb, storage: storageProvider, storageRoot: env.storageRoot ?? "/www/helstera/uploads", webOrigin: env.webOrigin, desktop: websiteAssistantHub }));
   if (process.env.NODE_ENV !== "test") {
     agentGoalWorker.start();
     agentGoalEvents.start();
+    if (process.env.HELSTERA_GOAL_STEPS === "1") goalSteps.start();
   }
   app.addHook("onClose", async () => {
     agentGoalWorker.stop();
     agentGoalEvents.stop();
+    goalSteps.stop();
     eventBuffer.dispose();
   });
   if (localDb) {
@@ -577,6 +582,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     tierGuard,
   });
   registerAgentGoalRoutes(app, {
+    env, settingsService,
     auth,
     db: localDb,
     viewerService,
