@@ -63,6 +63,17 @@ describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("goal execution journal", (
       expect((await db.query("select status from agent_goals where id=$1", [goalId])).rows[0].status).toBe("completed");
       expect((await db.query("select state from agent_goal_steps where goal_id=$1", [goalId])).rows.every(row=>row.state==='succeeded')).toBe(true);
       await first.tick(); expect(execute).toHaveBeenCalledTimes(3);
+      const rejectedId=randomUUID();
+      const rejectedPlan=executableGoalPlan({summary:'拒绝验收',steps:[
+        {id:'record',title:'录制',dependsOn:[],command:{executor:'web.capture',url:'https://example.com/',record:true,pageLimit:1},completion:'WebM'},
+        {id:'deliver',title:'交付',dependsOn:['record'],command:{executor:'result.deliver',sources:['record']},completion:'保存'},
+      ]},{goal:'拒绝验收',idempotencyKey:rejectedId,executionMode:'automatic'});
+      await db.query("insert into agent_goals(id,workspace_id,created_by,goal,plan,idempotency_key,status,confirmed_at) values($1,$2,$3,'拒绝验收',$4::jsonb,$5,'running',now())",[rejectedId,workspaceId,userId,JSON.stringify(rejectedPlan),rejectedId]);
+      await initializeGoalSteps(db,rejectedId,rejectedPlan);await first.tick();
+      const refused=(await db.query("select * from agent_goal_steps where goal_id=$1 and step_id='record'",[rejectedId])).rows[0];
+      await decideGoalStep(db,userId,workspaceId,rejectedId,refused.id,refused.fingerprint,'reject');
+      await first.tick();expect(execute).toHaveBeenCalledTimes(3);
+      expect((await db.query('select status from agent_goals where id=$1',[rejectedId])).rows[0].status).toBe('canceled');
       if (process.env.HELT_GOAL_LIVE_CAPTURE === "1") {
         const root = await mkdtemp(join(tmpdir(), "goal-live-"));
         try {
