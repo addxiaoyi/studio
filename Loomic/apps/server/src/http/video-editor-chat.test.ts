@@ -19,13 +19,28 @@ it("answers questions without saving or executing a plan",async()=>{
 });
 it("uses provider JSON output when the configured model supports it",async()=>{
   const {app,model,save}=setup({message:"unused"});
-  const structured=vi.fn(()=>({invoke:vi.fn().mockResolvedValue({message:"当前视频2秒。"})}));
+  const structured=vi.fn(()=>({invoke:vi.fn().mockResolvedValue({parsed:{message:"当前视频2秒。"},raw:{content:"unused"}})}));
   Object.assign(model,{withStructuredOutput:structured});
   try{
     const response=await app.inject({method:"POST",url:"/api/video/editor/chat",payload:input});
     expect(response.statusCode).toBe(200);expect(response.json().reply.message).toBe("当前视频2秒。");
-    expect(structured).toHaveBeenCalledWith(expect.anything(),{name:"video_reply",method:"jsonMode"});expect(model.invoke).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled();
+    expect(structured).toHaveBeenCalledWith(expect.anything(),{name:"video_reply",method:"jsonMode",includeRaw:true});expect(model.invoke).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled();
   }finally{await app.close();}
+});
+it("validates text-block content from compatible Responses providers",async()=>{
+  const {app,model,save}=setup({message:"unused"});
+  Object.assign(model,{withStructuredOutput:()=>({invoke:async()=>({parsed:null,raw:{content:[{type:"text",text:'{"message":"当前合成2秒。"}',annotations:[]}]}})})});
+  try{const response=await app.inject({method:"POST",url:"/api/video/editor/chat",payload:input});expect(response.statusCode).toBe(200);expect(response.json().reply.message).toBe("当前合成2秒。");expect(save).not.toHaveBeenCalled();}finally{await app.close();}
+});
+it("uses actual source durations while rejecting an out-of-range cut",async()=>{
+  const plan={summary:"剪辑",actions:[{type:"cut",format:"portrait",clips:[{name:"first.mp4",duration:1.5,start:0.5,end:2}]}]};
+  const {app}=setup({message:"裁剪",plan});
+  try{
+    const response=await app.inject({method:"POST",url:"/api/video/editor/chat",payload:{...input,media:[{name:"first.mp4",mimeType:"video/mp4",duration:3}]}});
+    expect(response.statusCode).toBe(200);expect(response.json().reply.plan.actions[0].clips[0]).toEqual({name:"first.mp4",duration:3,start:0.5,end:2});
+  }finally{await app.close();}
+  const invalid=setup({message:"裁剪",plan:{...plan,actions:[{...plan.actions[0],clips:[{name:"first.mp4",duration:5,start:0,end:4}]}]}});
+  try{expect((await invalid.app.inject({method:"POST",url:"/api/video/editor/chat",payload:{...input,media:[{name:"first.mp4",mimeType:"video/mp4",duration:3}]}})).statusCode).toBe(422);}finally{await invalid.app.close();}
 });
 it.each([
   {message:"执行代码",control:{type:"shell",command:"bad"}},
