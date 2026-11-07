@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import { errors, type Page } from "playwright";
 
 export type PresentationLayer = {
   x: number;
@@ -63,6 +63,13 @@ export const PRESENTATION_SNAPSHOT_SCRIPT = String.raw`(() => {
 export async function capturePresentationScene(
   page: Page,
 ): Promise<PresentationScene> {
+  // Async application scripts may still be hiding content after DOMContentLoaded.
+  try {
+    await page.waitForLoadState("load", { timeout: 8000 });
+  } catch (error) {
+    if (!(error instanceof errors.TimeoutError)) throw error;
+    console.warn("[presentation-snapshot] Page load exceeded 8 seconds; capturing the available public content.");
+  }
   await page.evaluate("Promise.race([document.fonts.ready, new Promise(resolve=>setTimeout(resolve,2000))]).then(()=>undefined)");
   const maxScroll=await page.evaluate("Math.min(Math.max(document.documentElement.scrollHeight,document.body.scrollHeight)-innerHeight,1440)") as number;
   const offsets=Array.from({length:Math.ceil(Math.max(0,maxScroll)/480)+1},(_,index)=>Math.min(index*480,Math.max(0,maxScroll)));

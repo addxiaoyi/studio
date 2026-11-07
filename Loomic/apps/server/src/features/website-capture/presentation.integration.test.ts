@@ -23,6 +23,37 @@ it("reveals lazy sections before selecting the presentation layers",async()=>{
   }finally{await browser.close();}
 },15000);
 
+it("waits for delayed page initialization before taking the visual snapshot", async () => {
+  const { browser } = await launchAgentBrowser();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    await page.route("https://presentation.example/", route => route.fulfill({contentType:"text/html",body:'<!doctype html><header>Site navigation</header><main style="opacity:0"><h1>Ready to introduce</h1></main><script async src="/initialize.js"></script>'}));
+    await page.route("https://presentation.example/initialize.js", async route => {
+      await delay(3500);
+      await route.fulfill({contentType:"application/javascript",body:'document.querySelector("main").style.opacity="1";'});
+    });
+    await page.goto("https://presentation.example/", { waitUntil: "domcontentloaded" });
+    const scene = await capturePresentationScene(page);
+    expect(scene.layers.some(layer => layer.text === "Ready to introduce")).toBe(true);
+  } finally { await browser.close(); }
+}, 15000);
+
+it("keeps active content in view while rebuilding a page with large vertical gaps", async () => {
+  const { browser } = await launchAgentBrowser();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    await page.setContent('<!doctype html><body style="margin:0;font:20px sans-serif"><main>'+Array.from({length:20},(_,i)=>'<p style="margin:0;height:20px">Step '+i+'</p>').join('')+'<section style="position:absolute;top:1900px">Last section</section></main></body>');
+    const scene = await capturePresentationScene(page);
+    await preparePresentationPage(page, [scene], {style:"cursor-rebuild",durationSeconds:12,cursorCount:4});
+    await page.evaluate("window.__loomicPresentation.seek(4)");
+    const visibleText = await page.evaluate(`Array.from(document.querySelectorAll('div')).filter(el => {
+      const rect=el.getBoundingClientRect();
+      return el.childElementCount===0 && el.textContent?.startsWith('Step ') && Number(getComputedStyle(el).opacity)>0 && rect.top>=62 && rect.bottom<=670;
+    }).length`);
+    expect(visibleText).toBeGreaterThan(0);
+  } finally { await browser.close(); }
+}, 15000);
+
 const html = `<!doctype html><html><head><title>Website introduction</title><style>body{margin:0;background:#f4f5f9;font:20px system-ui;color:#19233c}header{padding:24px 50px;background:white}main{padding:40px 60px}h1{font-size:54px;max-width:650px}article{padding:24px;background:white;border:1px solid #ddd;border-radius:14px;width:320px;display:inline-block;margin:20px}input{padding:14px;border:1px solid #bbb}</style></head><body><header>Loomic · Explore · Create</header><main><h1>From a website to a visual story</h1><p>Multiple cursors build layouts, type words and reveal images.</p><article><h2>Collect ideas</h2><p>Choose a source page</p></article><article><h2>Make it move</h2><p>Record a clear introduction</p></article><input aria-label="Private" value="secret-a"><input type="password" value="password-a"></main></body></html>`;
 
 it("rebuilds the real page with multiple cursors and records a playable WebM", async () => {

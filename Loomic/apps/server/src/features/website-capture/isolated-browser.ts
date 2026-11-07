@@ -124,6 +124,7 @@ export async function captureIsolatedWebsite(options: {
       ignoreHTTPSErrors: false,
       permissions: [],
       serviceWorkers: "block",
+      ...(presentation ? { reducedMotion: "reduce" as const } : {}),
       ...(options.task.record_video && !presentation
         ? { recordVideo: { dir: tempDir, size: { width: 1280, height: 720 } } }
         : {}),

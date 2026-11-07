@@ -36,6 +36,14 @@ export const PRESENTATION_PLAYER = String.raw`(async ({scenes,config})=>{
     const sorted=[...scene.layers].sort((a,b)=>a.y-b.y||a.x-b.x);
     const lastRow=Math.max(1,Math.ceil(sorted.length/config.cursorCount));
     const slot=(sceneDuration*.76)/lastRow;
+    for(let row=0;row<lastRow;row++){
+      const group=sorted.slice(row*config.cursorCount,(row+1)*config.cursorCount);
+      const content=group.filter(layer=>layer.kind!=='box');
+      const focus=(content.length?content:group).map(layer=>layer.y+Math.min(layer.height,90)/2).sort((a,b)=>a-b);
+      const center=focus[Math.floor(focus.length/2)];
+      const scroll=Math.min(Math.max(0,scene.height*scale-608),Math.max(0,center*scale-608*.45));
+      timeline.to(camera,{y:-scroll,duration:Math.min(.5,slot*.8),ease:'power2.inOut'},start+.3+row*slot);
+    }
     sorted.forEach((layer,index)=>{
       const lane=index%config.cursorCount,row=Math.floor(index/config.cursorCount),time=start+.3+row*slot;
       const {cursor,badge}=cursors[lane],color=palette[lane];
@@ -63,7 +71,6 @@ export const PRESENTATION_PLAYER = String.raw`(async ({scenes,config})=>{
       if(index%12===0){timeline.set(guide,{x,opacity:.7},time).to(guide,{opacity:0,duration:.4},time+duration);}
     });
     timeline.set(viewport,{opacity:1},start).call(()=>{address.textContent=scene.url;pageCounter.textContent=(sceneIndex+1)+' / '+scenes.length;caption.textContent='重建页面布局 · '+scene.title;},[],start);
-    if(scene.height*scale>608)timeline.to(camera,{y:-(scene.height*scale-608),duration:sceneDuration*.67,ease:'none'},start+sceneDuration*.15);
     timeline.to(full,{opacity:1,duration:.35},start+sceneDuration*.84);
     timeline.to(camera,{y:0,duration:sceneDuration*.08,ease:'power2.inOut'},start+sceneDuration*.87);
     timeline.to(cursors.map(item=>item.cursor),{opacity:0,duration:.2},start+sceneDuration*.86);
