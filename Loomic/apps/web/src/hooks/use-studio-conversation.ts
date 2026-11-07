@@ -8,6 +8,7 @@ import { normalizeModelPlan } from "@/lib/studio-ai-edit";
 import { studioVideoDuration } from "@/lib/studio-video-metadata";
 import { useLocale } from "@/lib/i18n";
 import type { VideoChatRequest } from "@helstera/shared";
+import { studioDirectControl } from "@/lib/studio-direct-control";
 
 export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(panel:"assets"|"transcript"|"timeline"):void}) {
   const {onBusyChange:_busyChange,...workflowProps}=props;
@@ -60,6 +61,13 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
         append({role:"assistant",content:"已按你明确确认的方案修改当前视频。可以继续对话调整或导出。",compositionId});return;
       }
       const snapshot=await runtime.snapshot();compositionId=snapshot.compositionId;
+      const direct=studioDirectControl(prompt);
+      if(direct){
+        if(direct.type==="undo"&&!flow.actionUndoAvailable)throw new Error("最近修改已无法自动撤销，请查看当前方案状态。");
+        append({role:"user",content:prompt,compositionId});setDraft("");
+        const turn=append({role:"assistant",content:locale==="en-US"?"Executing your editor command.":"正在执行你的编辑器指令。",compositionId,control:direct,revision:snapshot.revision,status:"pending"});
+        await executeControl(turn,true);return;
+      }
       const studio=await runtime.studioState();
       const undoable=flow.plan&&flow.actionUndoAvailable?flow.plan.actions.flatMap((action,index)=>action.type!=="export"&&!flow.undoneActions.includes(index)?[index]:[]):[];
       studio.undoable=undoable;if(undoable.length)studio.controls.push("undo");

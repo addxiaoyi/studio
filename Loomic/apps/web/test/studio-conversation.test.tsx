@@ -32,14 +32,18 @@ it("keeps multi-turn context and accepts only the explicit chat confirmation for
 });
 it("executes requested playback controls and records their observed result",async()=>{
   vi.mocked(requestStudioChat).mockResolvedValue({source:"model",model:"test",reply:{message:"准备定位。",control:{type:"seek",seconds:1}}});
-  const {runtime}=mount();await send("定位到1秒");await screen.findByText("已定位到 1 秒。");
+  const {runtime}=mount();await send("请把预览定位到1秒");await screen.findByText("已定位到 1 秒。");
   expect(runtime.control).toHaveBeenCalledOnce();expect(runtime.applyEdit).not.toHaveBeenCalled();
   expect(screen.getByRole("button",{name:"已完成"})).toBeDisabled();expect(screen.queryByRole("button",{name:"定位到 1 秒"})).not.toBeInTheDocument();
 });
 it("does not run a reply against a project changed while the model was thinking",async()=>{
   let reply!:(value:Awaited<ReturnType<typeof requestStudioChat>>)=>void;
   vi.mocked(requestStudioChat).mockReturnValue(new Promise(resolve=>{reply=resolve;}));
-  const {runtime,change}=mount();await send("定位到1秒");await waitFor(()=>expect(requestStudioChat).toHaveBeenCalledOnce());change();
+  const {runtime,change}=mount();await send("请把预览定位到1秒");await waitFor(()=>expect(requestStudioChat).toHaveBeenCalledOnce());change();
   reply({source:"model",model:"test",reply:{message:"定位",control:{type:"seek",seconds:1}}});
   expect(await screen.findByRole("alert")).toHaveTextContent("工程已改变");expect(runtime.control).not.toHaveBeenCalled();
+});
+it("handles an exact playback request immediately without another model call",async()=>{
+  const {runtime}=mount();await send("定位到1秒");await screen.findByText("已定位到 1 秒。");
+  expect(requestStudioChat).not.toHaveBeenCalled();expect(runtime.control).toHaveBeenCalledWith({type:"seek",seconds:1},"MyComp");
 });

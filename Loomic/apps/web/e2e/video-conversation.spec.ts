@@ -32,12 +32,23 @@ test("conversation reads context, edits existing layers, controls playback and r
   const before=await snapshot();
   const replies:unknown[]=[];
   async function send(prompt:string){
+    const revision=(await snapshot()).revision;
+    for(let attempt=0;attempt<(real?2:1);attempt++){
     await page.getByLabel("与视频 AI 对话",{exact:true}).fill(prompt);
     const response=page.waitForResponse(response=>response.url().endsWith("/api/video/editor/chat"),{timeout:110000});
     await page.getByRole("button",{name:"发送",exact:true}).click();
-    const reply=await response;expect(reply.status(),await reply.text()).toBe(200);replies.push(await reply.json());
+    const reply=await response,payload=await reply.json();
+    if(real&&attempt===0&&reply.status()===503&&payload.error?.code==="video_plan_timeout"){
+      await expect(page.getByRole("button",{name:"停止",exact:true})).toHaveCount(0);
+      expect((await snapshot()).revision).toBe(revision);
+      await expect(page.getByLabel("与视频 AI 对话",{exact:true})).toHaveValue(prompt);
+      info.annotations.push({type:"provider-timeout",description:"One explicit retry from the preserved draft; project unchanged."});continue;
+    }
+    expect(reply.status(),JSON.stringify(payload)).toBe(200);replies.push(payload);
     await mkdir(info.outputDir,{recursive:true});await writeFile(info.outputPath("replies.json"),JSON.stringify(replies,null,2));
     await expect(page.getByRole("button",{name:"停止",exact:true})).toHaveCount(0);
+    return;
+    }
   }
   async function apply(inChat=false){
     const card=page.getByTestId("studio-ai-plan");
@@ -47,6 +58,7 @@ test("conversation reads context, edits existing layers, controls playback and r
     await expect(card.getByRole("heading",{name:"修改已应用",exact:true})).toBeVisible();
     await expect(card.getByRole("button",{name:"撤销本次修改",exact:true})).toBeEnabled();
   }
+  async function command(prompt:string){await page.getByLabel("与视频 AI 对话",{exact:true}).fill(prompt);await page.getByRole("button",{name:"发送",exact:true}).click();}
   await send("先介绍当前工程的真实时长和你能做的事，只回答，不要修改方案。");
   expect((await snapshot()).revision).toBe(before.revision);
   await send("在0至1秒添加文字为‘欢迎’的字幕，同时把画幅改成720×1280。只要caption和resize这两个动作，保留现有画面。");
@@ -55,11 +67,11 @@ test("conversation reads context, edits existing layers, controls playback and r
   await send("把已有的‘欢迎’文字图层改成‘新品’，字号60，颜色#ff0000。只用一个layer动作，不添加字幕，不更改时间。");
   expect((await snapshot()).captions).toHaveLength(1);await apply(true);
   expect((await snapshot()).captions.map((item:{text:string})=>item.text)).toEqual(["新品"]);
-  await send("定位到1秒，只返回seek控制。");
+  await command("定位到1秒");
   await expect(page.getByText("已定位到 1 秒。",{exact:true})).toBeVisible();
-  await send("播放当前视频，只返回play控制。");
+  await command("播放当前视频");
   await expect(page.getByText("正在播放当前视频。",{exact:true})).toBeVisible();
-  await send("暂停预览，只返回pause控制。");
+  await command("暂停预览");
   await expect(page.getByText("预览已暂停。",{exact:true})).toBeVisible();
   await page.reload();await expect(page.getByLabel("导入本机素材",{exact:true})).toBeEnabled({timeout:90000});
   await expect(page.getByRole("log")).toContainText("字号60");
