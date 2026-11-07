@@ -37,9 +37,19 @@ export function VisualForgeWorkspace() {
   const [transcriptDirty, setTranscriptDirty] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiContext, setAiContext] = useState<StudioAiContext | null>(null);
+  const aiBusy = useRef(false);
+  const exportsRef = useRef<HTMLElement>(null);
+  const exportStartedAt = useRef(Date.now());
+  const updateAiBusy = useCallback((value: boolean) => { aiBusy.current = value; }, []);
+  const viewTimeline = useCallback(() => setAiOpen(false), []);
   const receiveAi = useRef<(context: StudioAiContext) => boolean>(() => false);
   receiveAi.current = context => {
+    if (aiBusy.current) { setError(copy("正在处理当前修改，请完成后再切换修改对象。"));return false; }
     if (transcriptDirty) { setError(copy("请先保存或放弃文字剪辑修改，再打开 AI 编辑。"));return false; }
+    if (runtime.current && runtime.current.projectId() !== context.compositionId) {
+      try { runtime.current.selectComposition(context.compositionId); }
+      catch (cause) { setError(cause instanceof Error ? cause.message : "无法选择目标视频。");return false; }
+    }
     setAiContext(context);setAiOpen(true);setTranscriptOpen(false);return true;
   };
   const transcriptCopy = oneTakeCopy(useLocale());
@@ -48,6 +58,10 @@ export function VisualForgeWorkspace() {
   theme.current = resolvedTheme || "dark";
   const userId = session?.user.id;
   const token = session?.access_token;
+
+  useEffect(() => {
+    if (outputs[0] && outputs[0].createdAt >= exportStartedAt.current) exportsRef.current?.scrollIntoView({ block: "start" });
+  }, [outputs]);
 
   useEffect(() => {
     runtime.current?.setTheme(resolvedTheme || "dark");
@@ -127,6 +141,10 @@ export function VisualForgeWorkspace() {
     setMediaRevision((value) => value + 1);
   }, []);
   const reopen = () => setRetry((value) => value + 1);
+  const openExport = () => {
+    try { runtime.current?.openExport(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "无法打开导出设置。"); }
+  };
 
   return (
     <section aria-label="视频创作工作台" className="min-w-0 bg-background">
@@ -153,6 +171,7 @@ export function VisualForgeWorkspace() {
             )}
             <Button size="sm" variant="outline" aria-expanded={transcriptOpen} disabled={transcriptDirty} onClick={() => setTranscriptOpen(!transcriptOpen)}>{transcriptOpen ? transcriptCopy.close : transcriptCopy.open}</Button>
             {!transcriptOpen && <Button size="sm" variant={aiOpen ? "secondary" : "outline"} aria-expanded={aiOpen} aria-controls="video-ai-panel" onClick={() => setAiOpen(!aiOpen)}>{copy(aiOpen ? "关闭 AI 编辑" : "AI 编辑")}</Button>}
+            {!transcriptOpen && <Button size="sm" variant="outline" disabled={!ready} onClick={openExport}>{copy("导出视频")}</Button>}
             <output className="min-w-0 text-xs text-muted-foreground">
               {copy(status)}
             </output>
@@ -172,12 +191,12 @@ export function VisualForgeWorkspace() {
         )}
         <div className={styles.body} hidden={transcriptOpen}>
           <div ref={container} data-testid="video-studio" className={styles.studio} />
-          <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioAiEditorPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={exported} contextRequest={aiContext} />}</div>
+          <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioAiEditorPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={exported} contextRequest={aiContext} active={aiOpen} onBusyChange={updateAiBusy} onViewTimeline={viewTimeline} />}</div>
         </div>
         {transcriptOpen && token && userId && <div className={styles.transcript}><OneTakeWorkspace token={token} userId={userId} runtime={ready ? mountedRuntime : null} onExport={exported} onDirty={setTranscriptDirty} /></div>}
       </div>
       {outputs.length > 0 && userId && session?.access_token && (
-        <section className="space-y-4 border-t p-4" aria-label="本机导出记录">
+        <section ref={exportsRef} className="space-y-4 border-t p-4" aria-label="本机导出记录">
           <h2 className="text-sm font-semibold">{copy("成片与导出")}</h2>
           {outputs.map((output) => (
             <StudioExportCard

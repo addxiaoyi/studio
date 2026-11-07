@@ -17,6 +17,9 @@ export type StudioRuntime = {
   snapshot(): Promise<StudioSnapshot>;
   applyEdit(edit: StudioEdit): Promise<void>;
   applyCut(cut: StudioCut): Promise<void>;
+  openExport(): void;
+  selectComposition(id: string): void;
+  undoEdit(input: { id: string; compositionId: string; appliedRevision: string; originalRevision: string }): Promise<void>;
 };
 export type StudioHost = {
   userId: string;

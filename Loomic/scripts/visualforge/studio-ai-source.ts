@@ -10,6 +10,11 @@ export function patchStudioAiSource(file: string, source: string) {
   };
   const addBridge = () => { text = `import {sendStudioContext} from ${bridge};\n${text}`; };
   if (file === "helpers/use-menu-structure.tsx") {
+    text = `import {openStudioExport} from ${bridge};\n${text}`;
+    const start = text.indexOf("export const getRenderMenuItems = (");
+    const end = text.indexOf("export const useCurrentCompositionMenuData =");
+    if (start < 0 || end < start) throw new Error("Pinned export menu boundary changed.");
+    text = text.slice(0, start) + `export const getRenderMenuItems = ({t,closeMenu,compositionSelected,renderShortcut}: {t:(key:string)=>string;closeMenu:()=>void;compositionSelected:boolean;renderShortcut:string;previewServerState:string;readOnlyStudio:boolean}): ComboboxValue[] => [{id:'render-on-web',value:'render-on-web',label:t('Export video...'),onClick:()=>{closeMenu();try{openStudioExport();}catch(error){showNotification((error as Error).message,3000);}},type:'item',keyHint:renderShortcut||null,leftItem:null,subMenu:null,quickSwitcherLabel:t('Export video...'),disabled:!compositionSelected},{type:'divider',id:'render-divider'}];\n\n` + text.slice(end);
     replace("\t\tif (mobileLayout) {\n\t\t\tstruct = [", "\t\tstruct = struct.filter(menu => menu.id !== 'remotion');\n\t\tif (mobileLayout) {\n\t\t\tstruct = [");
     replace("\t\t\t\t\t...struct[0],", "\t\t\t\t\t...struct[0],\n\t\t\t\t\tlabel: t('Menu'),");
   }
@@ -25,6 +30,29 @@ export function patchStudioAiSource(file: string, source: string) {
     addBridge();
     replace("copyText(contextForAgents)", file === "components/composition-menu-items.ts" ? "sendStudioContext(contextForAgents, composition?.id)" : "sendStudioContext(contextForAgents)");
     text = text.replaceAll("Could not copy to clipboard:", "Could not open Loomic AI:");
+  }
+  if (file === "components/composition-menu-items.ts") {
+    text = `import {creatorCompositionMenu} from ${bridge};\n${text}`;
+    const suffix = "].filter(NoReactInternals.truthy);\n};\n\nexport const getCompositionContextMenuItems";
+    replace(suffix, "].filter(NoReactInternals.truthy);\n\treturn creatorCompositionMenu(items);\n};\n\nexport const getCompositionContextMenuItems");
+    const start = text.indexOf("export const getCompositionMenuItems");
+    const body = text.indexOf("\n\treturn [", start);
+    if (body < 0) throw new Error("Pinned composition menu body changed.");
+    text = text.slice(0, body) + text.slice(body).replace("\n\treturn [", "\n\tconst items = [");
+  }
+  if (file === "components/InspectorLocationCopy.tsx") {
+    text = `import {getStaticT} from '../i18n';\n${text}`;
+    replace('<div style={content}>{children}</div>', "<div style={content}>{name || getStaticT()('Selected item')}</div>");
+    if (!/<InspectorOpenInEditor[\s\S]*?\/>/.test(text)) throw new Error("Pinned inspector link changed.");
+    text = text.replace(/<InspectorOpenInEditor[\s\S]*?\/>/, "");
+  }
+  if (file === "components/MenuBuildIndicator.tsx") {
+    text = `import {useTranslation} from '../i18n';\n${text}`;
+    replace("const [isBuilding, setIsBuilding]", "const {t}=useTranslation();\n\tconst [isBuilding, setIsBuilding]");
+    replace("aria-label={window.remotion_cwd}", "aria-label={t('Current project')}");
+    replace("{window.remotion_projectName}", "{window.remotion_projectName === 'template-blank' ? t('Current project') : window.remotion_projectName}");
+    if (!/<InspectorOpenInEditor[\s\S]*?\/>/.test(text)) throw new Error("Pinned project link changed.");
+    text = text.replace(/<InspectorOpenInEditor[\s\S]*?\/>/, "");
   }
   if (file === "components/Timeline/get-copy-context-for-agents-menu-item.ts") {
     addBridge();replace("copyText(\n", "sendStudioContext(\n");

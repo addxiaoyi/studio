@@ -48,6 +48,6 @@ jobs:
       - name: Chat copy and reconnect recovery
         run: pnpm --filter @helstera/web exec vitest run test/chat-copy.test.tsx test/chat-selection.test.tsx test/chat-input.test.tsx test/chat-sessions.test.tsx test/chat-sidebar.test.tsx test/chat-stream.test.ts
       - name: Video workspace regressions
-        run: pnpm --filter @helstera/web exec vitest run test/video-locale.test.tsx test/studio-ai-context.test.tsx test/studio-ai-edit.test.ts test/generated-asset-identity.test.ts test/studio-asset-picker.test.tsx test/onetake-history.test.tsx test/onetake-export-options.test.tsx test/send-video-to-chat.test.tsx test/agent-workspace-panel.test.tsx test/agent-goal-timeout.test.ts
+        run: pnpm --filter @helstera/web exec vitest run test/video-locale.test.tsx test/studio-ai-context.test.tsx test/studio-ai-workflow.test.tsx test/studio-creator-menu.test.ts test/studio-ai-edit.test.ts test/generated-asset-identity.test.ts test/studio-asset-picker.test.tsx test/onetake-history.test.tsx test/onetake-export-options.test.tsx test/send-video-to-chat.test.tsx test/agent-workspace-panel.test.tsx test/agent-goal-timeout.test.ts
       - name: Deployment recovery gates on Linux
         run: python3 -m unittest scripts.test_deploy_production_candidate scripts.test_prepare_production_candidate scripts.test_isolated_pg_rehearsal scripts.test_apply_studio_nginx scripts.test_validate_studio_nginx -q

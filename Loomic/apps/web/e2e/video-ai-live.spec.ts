@@ -66,8 +66,10 @@ test("real auth, approval and current-composition edits survive a lost receipt a
   await page.goto(`${process.env.E2E_BASE_URL ?? "http://localhost:3216"}/video/?/MyComp`);
   await expect(page.getByLabel("导入本机素材")).toBeEnabled({ timeout: 90_000 });
   await page.getByLabel("导入本机素材").setInputFiles([join(folder, "clip.mp4"), join(folder, "music.wav")]);
+  await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
   const goal = page.getByLabel("描述视频编辑目标");
   await goal.fill("使用 clip.mp4 的第0至1.5秒替换当前合成为横屏，在0至1秒插入字幕‘编辑器真实验收’，添加 music.wav 从0.2秒开始以30%音量播放，最后导出MP4。严格执行这些参数。");
+  await page.getByText("背景音乐（可选）", { exact: true }).click();
   await page.getByLabel("背景音乐素材", { exact: true }).selectOption("music.wav");
   await page.getByLabel("音乐起播（秒）", { exact: true }).fill("0.2");
   const snapshotCheck = await page.evaluate(async () => {
@@ -76,21 +78,21 @@ test("real auth, approval and current-composition edits survive a lost receipt a
   });
   expect(snapshotCheck.error, snapshotCheck.error).toBeUndefined();
   const planned = page.waitForResponse(response => response.url().endsWith("/api/video/editor/plan"), { timeout: 80_000 }).catch(async error => { console.log("AI panel:", await page.getByLabel("AI 编辑当前合成", { exact: true }).innerText()); throw error; });
-  await page.getByRole("button", { name: "生成 AI 编辑计划", exact: true }).click();
+  await page.getByRole("button", { name: "预览修改方案", exact: true }).click();
   const response = await planned;
   expect(response.status(), await response.text()).toBe(200);
   const payload = await response.json();
   expect(payload.source).toBe("model");
   expect(payload.plan.actions.map((action: { type: string }) => action.type)).toEqual(expect.arrayContaining(["cut", "caption", "audio", "export"]));
   expect((await fixture.db.query("select status from video_editor_plans where id=$1", [payload.approval.id])).rows[0].status).toBe("pending");
-  const confirm = page.getByRole("button", { name: "确认并修改当前合成", exact: true });
+  const confirm = page.getByRole("button", { name: "确认并应用修改", exact: true });
   await expect(confirm).toBeDisabled();
   const plan = page.getByTestId("studio-ai-plan");
   for (const checkbox of await plan.getByRole("checkbox").all()) await checkbox.check();
   await page.route("**/api/video/editor/plans/*/complete", route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "测试：回执连接中断" } }) }), { times: 1 });
   await confirm.click();
-  await expect(page.getByRole("button", { name: "已应用到当前合成", exact: true })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("button", { name: "重试同步回执", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "修改已应用", exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "重试同步记录", exact: true })).toBeVisible();
   expect((await fixture.db.query("select status from video_editor_plans where id=$1", [payload.approval.id])).rows[0].status).toBe("approved");
   const applied = await page.evaluate(async userId => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("loomic-visualforge-projects", 3); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
@@ -102,9 +104,10 @@ test("real auth, approval and current-composition edits survive a lost receipt a
   await captureEditor(page, info, "ai-edit-applied.png");
   await page.reload();
   await expect(page.getByLabel("导入本机素材")).toBeEnabled({ timeout: 90_000 });
+  await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
   await expect.poll(async () => (await fixture.db.query("select editor_applied_at is not null as applied from video_editor_plans where id=$1", [payload.approval.id])).rows[0].applied).toBe(true);
   expect((await fixture.db.query("select status from video_editor_plans where id=$1", [payload.approval.id])).rows[0].status).toBe("approved");
-  await expect(page.getByRole("button", { name: "已应用到当前合成", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "修改已应用", exact: true })).toBeVisible();
   const restored = await page.evaluate(async () => (window as any).remotion_browserStudio.loomicSnapshot("MyComp"));
   expect(restored.captions).toEqual([{ text: "编辑器真实验收", startMs: 0, endMs: 1000 }]);
   expect(restored.duration).toBe(1.5);
@@ -121,7 +124,7 @@ test("real auth, approval and current-composition edits survive a lost receipt a
       const savedFolder = await page.evaluate(() => (window as any).electronAPI.getAssetFolderStatus());
       expect(savedFolder).toMatchObject({ path: join(folder, "assets"), permission: "granted" });
     }
-    const exportButton = page.getByRole("button", { name: "导出已确认的合成", exact: true });
+    const exportButton = page.getByTestId("studio-ai-plan").getByRole("button", { name: "导出视频", exact: true });
     if (candidatePath) console.log("NATIVE_DECLINE_READY");
     await exportButton.click();
     await expect(page.getByText("已取消导出，没有生成文件。", { exact: true })).toBeVisible({ timeout: candidatePath ? 120_000 : 5_000 });
@@ -139,9 +142,10 @@ test("real auth, approval and current-composition edits survive a lost receipt a
     expect((await stat(output)).size).toBeGreaterThan(1000);
     const probe = JSON.parse(execFileSync(resolve("../desktop/resources/ffmpeg/win-x64/ffprobe.exe"), ["-v", "error", "-show_streams", "-of", "json", output], { encoding: "utf8" }));
     expect(probe.streams.map((stream: { codec_type: string }) => stream.codec_type)).toEqual(expect.arrayContaining(["audio", "video"]));
-    await expect(page.getByRole("button", { name: "重试同步回执", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "重试同步记录", exact: true })).toBeVisible();
     expect((await fixture.db.query("select status from video_editor_plans where id=$1", [payload.approval.id])).rows[0].status).toBe("approved");
     await page.reload();
+    await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
     await expect(page.getByRole("button", { name: "成片已保存", exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByLabel("本机导出记录").locator("video")).toBeVisible();
     await expect.poll(async () => (await fixture.db.query("select status from video_editor_plans where id=$1", [payload.approval.id])).rows[0].status).toBe("completed");

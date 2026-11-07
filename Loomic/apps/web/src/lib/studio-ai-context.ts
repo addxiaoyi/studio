@@ -8,6 +8,22 @@ export type StudioAiContext = {
 };
 
 type ContextInput = { compositionId?: string | undefined; intent: StudioAiContext["intent"]; context?: string | undefined; comment?: string | undefined; label?: string | undefined };
+const CREATOR_ACTIONS = new Set(["copy-context-for-agents", "rename", "duplicate", "delete", "show-in-editor-divider"]);
+
+export function creatorCompositionMenu<T extends { id: string; type: string }>(items: T[]): T[] {
+  return items.filter(item => CREATOR_ACTIONS.has(item.id));
+}
+
+export function openStudioExport() {
+  const button = document.getElementById("render-modal-button-client");
+  if (!(button instanceof HTMLButtonElement) || button.disabled) throw new Error("请先选择可导出的视频，再打开导出设置。");
+  button.click();
+}
+
+export function studioTargetLabel(context: Pick<StudioAiContext, "compositionId" | "label" | "context">) {
+  const label = context.label !== context.compositionId ? context.label : context.context.split(" in ")[0]?.trim() ?? "";
+  return label !== context.compositionId && label.length <= 80 && !/[\\/{}]|\.tsx?[:\s]/.test(label) ? label : "";
+}
 declare global {
   interface Window { loomicStudioAi?: ((input: ContextInput) => boolean) | undefined }
 }

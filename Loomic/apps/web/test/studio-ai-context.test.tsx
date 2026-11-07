@@ -6,7 +6,7 @@ import { installStudioAiContext, requestStudioAnnotation, sendStudioContext, stu
 import { StudioAiEditorPanel } from "@/components/studio-ai-editor-panel";
 import { normalizeModelPlan, requestStudioAiPlan } from "@/lib/studio-ai-edit";
 
-vi.mock("@/lib/visualforge-storage", () => ({ saveStudioPlan: async () => undefined }));
+vi.mock("@/lib/visualforge-storage", () => ({ saveStudioPlan: async () => undefined, clearStudioPlan: async () => undefined }));
 vi.mock("@/lib/studio-ai-session", () => ({ readRecoveredStudioSession: async () => null }));
 vi.mock("@/lib/studio-ai-edit", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/studio-ai-edit")>(), requestStudioAiPlan: vi.fn() }));
 vi.mock("@/lib/i18n", () => ({ useLocale: () => "zh-CN" }));
@@ -44,19 +44,19 @@ it("does not deliver a late selection to a newly mounted project", async () => {
 });
 
 it("keeps the user's draft, sends context to planning only on request, and does not apply edits", async () => {
-  const runtime = { listMedia: () => [], snapshot: vi.fn().mockResolvedValue(snapshot), projectId: () => "project", applyEdit: vi.fn() };
+  const runtime = { listMedia: () => [], snapshot: vi.fn().mockResolvedValue(snapshot), projectId: () => "MyComp", applyEdit: vi.fn() };
   const props = { runtime: runtime as never, userId: "user", token: "test", mediaRevision: 1, exported: vi.fn() };
   const rendered = render(<StudioAiEditorPanel {...props} />);
   const input = screen.getByLabelText("描述视频编辑目标");
   fireEvent.change(input, { target: { value: "给开头加标题" } });
   rendered.rerender(<StudioAiEditorPanel {...props} contextRequest={{ ...context, comment: "来自批注" }} />);
-  await waitFor(() => expect(screen.getByLabelText("来自编辑器的上下文")).toBeVisible());
+  await waitFor(() => expect(screen.getByLabelText("修改对象")).toHaveTextContent("MyComp"));
   expect(input).toHaveValue("给开头加标题");expect(input).toHaveFocus();
   expect(requestStudioAiPlan).not.toHaveBeenCalled();expect(runtime.applyEdit).not.toHaveBeenCalled();
   vi.mocked(requestStudioAiPlan).mockResolvedValue(normalizeModelPlan({ summary: "添加标题", actions: [{ type: "caption", text: "标题", startMs: 0, endMs: 1000 }] }, snapshot));
-  await waitFor(() => expect(screen.getByRole("button", { name: "生成 AI 编辑计划" })).toBeEnabled());
-  fireEvent.click(screen.getByRole("button", { name: "生成 AI 编辑计划" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "预览修改方案" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "预览修改方案" }));
   await waitFor(() => expect(requestStudioAiPlan).toHaveBeenCalledWith("test", expect.objectContaining({ compositionId: "MyComp", revision: snapshot.revision, prompt: expect.stringContaining(context.context) }), snapshot));
   expect(runtime.applyEdit).not.toHaveBeenCalled();
-  expect(await screen.findByRole("button", { name: "确认并修改当前合成" })).toBeDisabled();
+  expect(await screen.findByRole("button", { name: "确认并应用修改" })).toBeDisabled();
 });

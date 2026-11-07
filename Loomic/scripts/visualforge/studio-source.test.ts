@@ -22,6 +22,17 @@ describe("pinned Studio typography adapter", () => {
     expect(ask).not.toContain("<iframe");
     expect(ask).toContain("sendStudioContext");
   });
+
+  test("exposes one AI action and one working export instead of developer handoffs", () => {
+    const source = patchStudioSource("components/composition-menu-items.ts", read("components/composition-menu-items.ts"));
+    expect(source).toContain("creatorCompositionMenu");
+    const menu = patchStudioSource("helpers/use-menu-structure.tsx", read("helpers/use-menu-structure.tsx"));
+    expect(menu).toContain("openStudioExport()");
+    expect(menu).not.toContain("renderButton.click()");
+    const inspector = patchStudioSource("components/InspectorLocationCopy.tsx", read("components/InspectorLocationCopy.tsx"));
+    expect(inspector).not.toContain("{children}");
+    expect(inspector).not.toContain("<InspectorOpenInEditor");
+  });
   test("leaves generic menu labels and user enum values untouched", () => {
     const file = "components/NewComposition/MenuContent.tsx";
     const source = read(file);
@@ -65,6 +76,7 @@ describe("pinned Studio typography adapter", () => {
       "components/composition-menu-items.ts", "components/folder-menu-items.ts", "components/InspectorLocationCopy.tsx",
       "components/Timeline/get-copy-context-for-agents-menu-item.ts", "components/get-annotate-with-chatgpt-menu-item.ts",
       "helpers/get-codex-annotation.ts", "components/AskAiModal.tsx",
+      "components/MenuBuildIndicator.tsx",
     ]) {
       const lf = read(file).replaceAll("\r\n", "\n");
       const patched = patchStudioSource(file, lf);

@@ -9,7 +9,7 @@ import type { StudioHost, StudioSnapshot, StudioEdit } from "../../apps/web/src/
 import type { StudioCut } from "../../apps/web/src/lib/studio-cut";
 import { applyStudioCut, currentCompositionId, listStudioMedia, readStudioMedia } from "./cut";
 import { installStudioChinese } from "./studio-i18n";
-import { installStudioAiContext } from "../../apps/web/src/lib/studio-ai-context";
+import { installStudioAiContext, openStudioExport } from "../../apps/web/src/lib/studio-ai-context";
 declare global {
   interface Window {
     loomicSaveStudioExport?: ((output: StudioExport) => Promise<void>) | undefined;
@@ -75,6 +75,27 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
     },
     readCut: () => currentCut,
     projectId: () => currentCompositionId() ?? "current-project",
+    openExport: openStudioExport,
+    selectComposition(id: string) {
+      if (!window.remotion_browserStudio?.getCompositionFile(id)) throw new Error("目标视频已不存在，请重新选择。");
+      if (currentCompositionId() === id) return;
+      const url = new URL(location.href);url.search = `/${encodeURIComponent(id)}`;
+      history.pushState({}, "Studio", url);window.dispatchEvent(new Event("remotion-pending-composition-selection"));
+    },
+    async undoEdit(input: { id: string; compositionId: string; appliedRevision: string; originalRevision: string }) {
+      host.signal.throwIfAborted();
+      if (currentCompositionId() !== input.compositionId) throw new Error("请切回应用方案的视频后再撤销。");
+      const operations = window.remotion_browserStudio as typeof window.remotion_browserStudio & { loomicSnapshot(id: string): Promise<StudioSnapshot> };
+      const snapshot = await operations.loomicSnapshot(input.compositionId);
+      const edits = (currentProject as typeof currentProject & { loomicAppliedEdits?: string[] }).loomicAppliedEdits ?? [];
+      if (snapshot.revision !== input.appliedRevision || edits.at(-1) !== input.id) throw new Error("视频已有后续修改，请使用时间线撤销，避免覆盖新内容。");
+      const undone = await operations.undo();
+      if (!undone.success) throw new Error("本次修改已不在撤销记录中。");
+      await queue;
+      if (saveFailure) throw saveFailure;
+      if ((await operations.loomicSnapshot(input.compositionId)).revision !== input.originalRevision) throw new Error("撤销结果与原视频不一致，请检查时间线。");
+      await saveStudioProject(host.userId, currentProject);
+    },
     async snapshot(): Promise<StudioSnapshot> {
       const operations = window.remotion_browserStudio as typeof window.remotion_browserStudio & {
         loomicSnapshot(id: string): Promise<Omit<StudioSnapshot, "cut">>;

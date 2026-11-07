@@ -1,193 +1,91 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Bot, Sparkles } from "lucide-react";
+import { useRef, useState } from "react";
+import { Bot, Sparkles, Upload, Undo2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { completeStudioPlan, confirmStudioPlan, requestStudioAiPlan, type StudioAiPlan } from "@/lib/studio-ai-edit";
-import { desktopVideoBridge, exportStudioCut, recoverDesktopExport } from "@/lib/studio-desktop-export";
-import { studioVideoDuration } from "@/lib/studio-video-metadata";
-import type { StudioRuntime } from "@/lib/visualforge-runtime";
-import { saveStudioPlan, type StudioExport } from "@/lib/visualforge-storage";
-import { readRecoveredStudioSession, type StudioAiSession } from "@/lib/studio-ai-session";
-import type { VideoEditorPlanRequest, VideoEditorExportReceipt } from "@helstera/shared";
+import { useStudioAiWorkflow, type StudioWorkflowProps } from "@/hooks/use-studio-ai-workflow";
+import { studioTargetLabel } from "@/lib/studio-ai-context";
 import { useVideoText } from "@/lib/video-copy";
 import { useLocale } from "@/lib/i18n";
-import { studioContextPrompt, type StudioAiContext } from "@/lib/studio-ai-context";
 
-type Props = { runtime: StudioRuntime | null; mediaRevision: number; userId: string; token: string; exported(output: StudioExport): void; contextRequest?: StudioAiContext | null };
+type Props = StudioWorkflowProps & { onViewTimeline?: () => void };
 
-export function StudioAiEditorPanel({ runtime, mediaRevision, userId, token, exported, contextRequest }: Props) {
+export function StudioAiEditorPanel(props: Props) {
+  const flow = useStudioAiWorkflow(props);
   const copy = useVideoText();
   const english = useLocale() === "en-US";
-  const [prompt, setPrompt] = useState("");
-  const [context, setContext] = useState<StudioAiContext | null>(null);
-  const promptRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    if (!contextRequest) return;
-    setContext(contextRequest);
-    if (contextRequest.comment) setPrompt(current => current.trim() ? current : contextRequest.comment);
-    promptRef.current?.focus({ preventScroll: true });
-  }, [contextRequest]);
-  const [plan, setPlan] = useState<StudioAiPlan | null>(null);
-  const [confirmed, setConfirmed] = useState<Set<number>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [applied, setApplied] = useState<string | null>(null);
-  const [receiptPending, setReceiptPending] = useState(false);
-  const [exportedOnce, setExportedOnce] = useState(false);
-  const [exportReceipt, setExportReceipt] = useState<VideoEditorExportReceipt>();
-  const [music, setMusic] = useState("");
-  const [volume, setVolume] = useState(30);
-  const [musicStart, setMusicStart] = useState(0);
-  const [restoring, setRestoring] = useState(true);
-  const lock = useRef(false);
-  const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const [musicOpen, setMusicOpen] = useState(false);
+  const musicInput = useRef<HTMLInputElement>(null);
+  const locked = flow.busy || flow.restoring || flow.receiptPending;
+  const selectedLabel = flow.context ? studioTargetLabel(flow.context) : "";
+  const currentStage = flow.applied ? 3 : flow.plan ? 2 : 1;
 
-  async function restoreSession(session: StudioAiSession | null, active: () => boolean) {
-    if (!active() || !session) return;
-    setPlan(session.plan);
-    setApplied(session.appliedRevision ?? null);
-    setExportedOnce(Boolean(session.exportedOnce));
-    setExportReceipt(session.exportReceipt);
-    if (!session.appliedRevision) return;
-    setConfirmed(new Set(session.plan.actions.map((_, index) => index)));
-    setReceiptPending(!session.receiptSynced);
-    if (session.receiptSynced) return;
-    await completeStudioPlan(token, session.plan, session.exportReceipt);
-    await saveStudioPlan(userId, { ...session, receiptSynced: true });
-    if (active()) { setReceiptPending(false); setNotice("已恢复编辑记录并补回服务端回执，未重复修改时间线。"); }
-  }
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: recovery runs once per connected editor and authenticated user, never on local action-state changes.
-  useEffect(() => {
-    if (!runtime) return;
-    let active = true;
-    setRestoring(true);
-    void readRecoveredStudioSession(userId, runtime)
-      .then(session => restoreSession(session, () => active))
-      .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "编辑记录恢复失败，请重试。"); })
-      .finally(() => { if (active) setRestoring(false); });
-    return () => { active = false; };
-  }, [runtime, userId, token]);
-  const audio = runtime?.listMedia().filter(item => item.mimeType.startsWith("audio/")) ?? [];
-
-  async function run(work: () => Promise<void>) {
-    if (lock.current) return;
-    lock.current = true;
-    setBusy(true); setError("");
-    try { await work(); }
-    catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : "视频编辑失败，请重试。"); }
-    finally { lock.current = false; if (mounted.current) setBusy(false); }
-  }
-
-  async function previewPlan() {
-    if (!runtime) return;
-    await run(async () => {
-      setPlan(null); setApplied(null); setReceiptPending(false); setExportedOnce(false); setExportReceipt(undefined); setNotice(""); setConfirmed(new Set());
-      const snapshot = await runtime.snapshot();
-      const media: VideoEditorPlanRequest["media"] = [];
-      for (const item of runtime.listMedia()) {
-        const duration = await studioVideoDuration(await runtime.readMedia(item.name));
-        media.push({ name: item.name, mimeType: item.mimeType as VideoEditorPlanRequest["media"][number]["mimeType"], duration });
-      }
-      const next = await requestStudioAiPlan(token, { prompt: studioContextPrompt(prompt, context, snapshot.compositionId), projectId: runtime.projectId(), compositionId: snapshot.compositionId, revision: snapshot.revision, compositionDuration: snapshot.duration, captions: snapshot.captions, media,
-        ...(music ? { music: { assetName: music, volume: volume / 100, startMs: Math.round(musicStart * 1000) } } : {}) }, snapshot);
-      await saveStudioPlan(userId, { plan: next });
-      if (mounted.current) setPlan(next);
-    });
-  }
-
-  function toggleAction(event: React.ChangeEvent<HTMLInputElement>) {
-    const index = Number(event.currentTarget.value);
-    const checked = event.currentTarget.checked;
-    setConfirmed(current => { const next = new Set(current); if (checked) next.add(index); else next.delete(index); return next; });
-  }
-
-  async function applyPlan() {
-    if (!runtime || !plan || applied) return;
-    await run(async () => {
-      const snapshot = await runtime.snapshot();
-      if (snapshot.compositionId !== plan.snapshot?.compositionId || snapshot.revision !== plan.snapshot.revision) throw new Error("当前合成或素材已改变，请重新生成计划。");
-      const edit = await confirmStudioPlan(token, plan, confirmed);
-      if (plan.actions.some(action => action.type !== "export")) await runtime.applyEdit(edit);
-      const saved = await runtime.snapshot();
-      setApplied(saved.revision);
-      setNotice(plan.exportFormat ? "剪辑已保存在当前合成，导出尚未执行。" : "计划已应用并保存在当前合成，可使用撤销恢复。");
-      setReceiptPending(true);
-      await saveStudioPlan(userId, { plan, appliedRevision: saved.revision, receiptSynced: false });
-      await completeStudioPlan(token, plan);
-      await saveStudioPlan(userId, { plan, appliedRevision: saved.revision, receiptSynced: true });
-      setReceiptPending(false);
-    });
-  }
-
-  async function retryReceipt() {
-    if (!plan) return;
-    await run(async () => { await completeStudioPlan(token, plan, exportReceipt); await saveStudioPlan(userId, { plan, appliedRevision: applied, receiptSynced: true, exportedOnce, exportReceipt }); setReceiptPending(false); setNotice("服务端已收到回执，未重复修改时间线或导出。"); });
-  }
-
-  async function exportPlan() {
-    if (!runtime || !plan || !applied || exportedOnce) return;
-    await run(async () => {
-      const snapshot = await runtime.snapshot();
-      if (snapshot.revision !== applied || snapshot.compositionId !== plan.snapshot?.compositionId) throw new Error("合成已改变，请重新预览导出计划。");
-      if (!snapshot.cut) throw new Error("当前合成包含自由编辑内容，请使用编辑器“渲染”导出完整画面；本机快剪导出只适用于仍与已确认计划一致的时间线。");
-      const bridge = desktopVideoBridge();
-      if (!bridge) throw new Error("请在桌面客户端执行本机 FFmpeg 导出，或使用编辑器的渲染功能。");
-      const saved = await exportStudioCut(runtime, snapshot.cut);
-      if (!saved) { setNotice("已取消导出，没有生成文件。"); return; }
-      setExportedOnce(true);
-      setNotice(`成片已保存：${saved.path}`);
-      const name = saved.path.split(/[\\/]/).pop();
-      if (!saved.previewId || !name) {
-        await saveStudioPlan(userId, { plan, appliedRevision: applied, receiptSynced: true, exportedOnce: true });
-        throw new Error("成片已保存，但预览未登记。请从本地素材目录打开，勿重复导出。");
-      }
-      const receipt = { previewId: saved.previewId, name };
-      setExportReceipt(receipt);
-      setReceiptPending(true);
-      await saveStudioPlan(userId, { plan, appliedRevision: applied, receiptSynced: false, exportedOnce: true, exportReceipt: receipt });
-      const entry = (await bridge.listExportPreviews()).find(item => item.id === saved.previewId);
-      if (!entry) throw new Error("成片已保存，但预览记录尚不可用。请从本地素材目录恢复。");
-      exported(await recoverDesktopExport(userId, entry));
-      await completeStudioPlan(token, plan, receipt);
-      await saveStudioPlan(userId, { plan, appliedRevision: applied, receiptSynced: true, exportedOnce: true, exportReceipt: receipt });
-      setReceiptPending(false);
-    });
-  }
+  function chooseMusic() { setMusicOpen(true);if (!flow.audio.length) musicInput.current?.click(); }
+  function importMusic() { musicInput.current?.click(); }
+  function addTitle() { flow.addRequest(copy("在视频开头添加简短标题，保留现有画面。")); }
+  function addCaption() { flow.addRequest(copy("根据当前画面添加简短说明字幕，保留现有画面。")); }
+  function trimVideo() { flow.addRequest(copy("用已导入的视频素材整理剪辑节奏，先给出剪辑方案。")); }
 
   return <aside aria-label={copy("AI 编辑当前合成")} className="flex min-h-0 w-full shrink-0 flex-col bg-card text-card-foreground">
-    <div className="border-b px-4 py-3"><h2 className="flex items-center gap-2 text-sm font-semibold"><Bot className="size-4" aria-hidden="true" />{copy("AI 编辑当前合成")}</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">{copy("模型生成计划，逐项确认后修改当前时间线。")}</p></div>
-    <div className="space-y-3 overflow-y-auto p-4">
-      {context && <section aria-label={copy("来自编辑器的上下文")} className="space-y-2 rounded-lg border bg-background p-3 text-xs">
-        <div className="flex items-start justify-between gap-2"><strong className="min-w-0 break-all">{copy("合成")} · {context.compositionId}</strong><button type="button" onClick={() => setContext(null)} className="shrink-0 rounded px-1 hover:bg-muted">{copy("移除")}</button></div>
-        <p className="text-muted-foreground">{copy("已连接本站 AI。补充编辑要求，生成计划后逐项确认。")}</p>
-        {context.context && <details><summary className="cursor-pointer">{copy("查看选中内容")}</summary><pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all font-sans">{context.context}</pre></details>}
-      </section>}
-      <textarea ref={promptRef} aria-label={copy("描述视频编辑目标")} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={copy("例如：剪成 30 秒竖屏视频，加标题字幕和已导入的音乐")} rows={4} maxLength={4000} disabled={!runtime || busy} className="w-full resize-y rounded-lg border bg-background p-3 text-base sm:text-sm" />
-      <label className="block space-y-1 text-xs">{copy("背景音乐素材")}<select aria-label={copy("背景音乐素材")} className="w-full rounded border bg-background p-2 text-base sm:text-sm" value={music} onChange={event => setMusic(event.target.value)} disabled={busy || !audio.length}><option value="">{copy("由计划选择现有素材")}</option>{audio.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
-      <label className="block text-xs">{copy("音乐音量")} {volume}%<input aria-label={copy("音乐音量")} type="range" min={0} max={100} value={volume} onChange={event => setVolume(Number(event.target.value))} disabled={busy} className="w-full" /></label>
-      <label className="block space-y-1 text-xs">{copy("音乐起播（秒）")}<input aria-label={copy("音乐起播（秒）")} type="number" min={0} max={7200} step={0.1} value={musicStart} onChange={event => setMusicStart(Number(event.target.value))} disabled={busy || !music} className="w-full rounded border bg-background p-2 text-base sm:text-sm" /></label>
-      {!audio.length && <p className="text-xs text-muted-foreground">{copy("导入 MP3、WAV、OGG 或 M4A 后可选配乐。使用已有素材：0 积分。")}</p>}
-      <Button className="w-full" variant="outline" disabled={!runtime || !prompt.trim() || busy || restoring || receiptPending} onClick={previewPlan}><Sparkles className="size-4" aria-hidden="true" />{copy(restoring ? "正在恢复编辑记录…" : busy ? "正在处理…" : "生成 AI 编辑计划")}</Button>
-      {!runtime && <p className="text-xs text-muted-foreground">{copy("正在等待编辑器连接。")}</p>}
-      {plan && <div className="space-y-3 rounded-lg border bg-background p-3" data-testid="studio-ai-plan">
-        <h3 className="text-xs font-semibold">{copy("计划预览 · 模型生成")}</h3><p className="text-xs leading-5 text-muted-foreground">{plan.summary}</p>
-        <ol className="space-y-2 text-xs">{plan.actions.map((action, index) => {
-          const command = plan.commands?.actions[index];
-          const label = !english || !command ? action.label : command.type === "cut" ? `Replace visuals (${command.format}): ${command.clips.map(clip => `${clip.name} ${clip.start}–${clip.end}s`).join("; ")}` : command.type === "caption" ? `Caption ${command.startMs / 1000}–${command.endMs / 1000}s: ${command.text}` : command.type === "audio" ? `Music: ${command.assetName}, start ${command.startMs / 1000}s, volume ${Math.round(command.volume * 100)}% (0 credits)` : "Export MP4 locally (0 credits)";
-          return <li key={`${action.type}:${index}`}><label className="flex items-start gap-2"><input type="checkbox" value={index} checked={confirmed.has(index)} onChange={toggleAction} disabled={busy || Boolean(applied)} /><span className="min-w-0 break-words">{label}</span></label></li>;
+    <header className="border-b px-4 py-3">
+      <h2 className="flex items-center gap-2 text-sm font-semibold"><Bot className="size-4" aria-hidden="true" />{copy("AI 修改")}</h2>
+      <ol aria-label={copy("修改流程")} className="mt-3 flex items-center gap-2 text-xs">
+        {["描述要求", "确认方案", "预览与导出"].map((label, index) => <li key={label} aria-current={currentStage === index + 1 ? "step" : undefined} className={currentStage === index + 1 ? "font-semibold text-foreground" : "text-muted-foreground"}>{index + 1} {copy(label)}</li>)}
+      </ol>
+    </header>
+    <div className="space-y-4 overflow-y-auto p-4">
+      <section aria-label={copy("修改对象")} className="rounded-lg border bg-background p-3 text-xs">
+        <p className="text-muted-foreground">{copy("修改对象")}</p>
+        <p className="mt-1 break-all text-sm font-medium">{flow.target?.compositionId ?? copy("正在读取当前视频…")}</p>
+        {flow.target && <p className="mt-1 text-muted-foreground">{flow.target.duration.toFixed(1)} {copy("秒")} · {copy(flow.target.format === "portrait" ? "竖屏" : "横屏")} · {copy("当前视频")}</p>}
+        {selectedLabel && <div className="mt-2 flex items-start gap-2 border-t pt-2"><span className="min-w-0 flex-1 break-words">{copy("参考选中内容")}：{selectedLabel}</span><button type="button" disabled={locked} onClick={flow.removeContext} className="shrink-0 underline">{copy("移除")}</button></div>}
+      </section>
+
+      <div className="space-y-2">
+        <label htmlFor="studio-edit-request" className="block text-sm font-medium">{copy("想怎样修改？")}</label>
+        <textarea id="studio-edit-request" ref={flow.promptRef} aria-label={copy("描述视频编辑目标")} value={flow.prompt} onChange={event => flow.setPrompt(event.target.value)} placeholder={copy("例如：保留当前画面，在前两秒加上标题“新品上市”。")} rows={3} maxLength={4000} disabled={!props.runtime || flow.busy} className="w-full resize-y rounded-lg border bg-background p-3 text-base sm:text-sm" />
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" disabled={locked || !flow.target} onClick={addTitle}>{copy("添加标题")}</Button>
+          <Button size="sm" variant="outline" disabled={locked || !flow.target} onClick={addCaption}>{copy("添加字幕")}</Button>
+          <Button size="sm" variant="outline" disabled={locked || !flow.target} onClick={chooseMusic}>{copy("添加配乐")}</Button>
+          {flow.hasVideo && <Button size="sm" variant="outline" disabled={locked} onClick={trimVideo}>{copy("剪辑素材")}</Button>}
+        </div>
+        <p className="text-xs leading-5 text-muted-foreground">{copy("先预览修改方案，确认后才改变时间线。字幕文案由模型生成。")}</p>
+      </div>
+
+      <input ref={musicInput} type="file" accept="audio/mpeg,audio/wav,audio/ogg,audio/mp4,.mp3,.wav,.ogg,.m4a" aria-label={copy("导入背景音乐")} className="sr-only" onChange={event => { const file = event.target.files?.[0];event.target.value = "";if (file) void flow.importMusic(file); }} />
+      <details open={musicOpen} onToggle={event => setMusicOpen(event.currentTarget.open)} className="rounded-lg border bg-background p-3">
+        <summary className="cursor-pointer text-xs font-medium">{copy("背景音乐（可选）")}</summary>
+        <div className="mt-3 space-y-3">
+          {!flow.audio.length ? <div className="space-y-2"><p className="text-xs text-muted-foreground">{copy("当前工程还没有音乐，导入后即可设置起播时间和音量。")}</p><Button size="sm" variant="outline" disabled={locked} onClick={importMusic}><Upload className="size-3" />{copy("导入音乐")}</Button></div> : <>
+            <label className="block text-xs">{copy("背景音乐素材")}<select aria-label={copy("背景音乐素材")} value={flow.music} onChange={event => flow.setMusic(event.target.value)} disabled={locked} className="mt-1 w-full rounded border bg-background p-2 text-base sm:text-sm"><option value="">{copy("不添加音乐")}</option>{flow.audio.map(item => <option key={item.name}>{item.name}</option>)}</select></label>
+            {flow.music && <><label className="block text-xs">{copy("音乐音量")} {flow.volume}%<input aria-label={copy("音乐音量")} type="range" min={0} max={100} value={flow.volume} onChange={event => flow.setVolume(Number(event.target.value))} disabled={locked} className="w-full" /></label><label className="block text-xs">{copy("音乐起播（秒）")}<input aria-label={copy("音乐起播（秒）")} type="number" min={0} max={Math.max(0, (flow.target?.duration ?? 7200) - 0.1)} step={0.1} value={flow.musicStart} onChange={event => flow.setMusicStart(Number(event.target.value))} disabled={locked} className="mt-1 w-full rounded border bg-background p-2 text-base sm:text-sm" /></label></>}
+          </>}
+        </div>
+      </details>
+
+      <Button className="w-full" disabled={!props.runtime || !flow.target || !flow.prompt.trim() || locked} onClick={flow.previewPlan}><Sparkles className="size-4" aria-hidden="true" />{copy(flow.restoring ? "正在恢复编辑记录…" : flow.busy ? "正在处理…" : "预览修改方案")}</Button>
+      {!flow.prompt.trim() && !flow.restoring && <p className="text-xs text-muted-foreground">{copy("输入修改要求，或选择上方的常用操作。")}</p>}
+
+      {flow.plan && <section className="space-y-3 rounded-lg border bg-background p-3" data-testid="studio-ai-plan">
+        <h3 className="text-sm font-semibold">{copy(flow.applied ? "修改已应用" : "确认这些修改")}</h3>
+        <p className="text-xs text-muted-foreground">{flow.plan.snapshot?.compositionId}</p>
+        <p className="text-xs leading-5 text-muted-foreground">{flow.plan.summary}</p>
+        <ol className="space-y-2 text-xs">{flow.plan.actions.map((action, index) => {
+          const command = flow.plan?.commands?.actions[index];
+          const label = !english || !command ? action.label : command.type === "caption" ? `Caption ${command.startMs / 1000}–${command.endMs / 1000}s: ${command.text}` : command.type === "cut" ? `Replace visuals: ${command.clips.map(clip => `${clip.name} ${clip.start}–${clip.end}s`).join("; ")}` : command.type === "audio" ? `Music: ${command.assetName}, ${command.startMs / 1000}s, ${Math.round(command.volume * 100)}%` : "Export MP4";
+          return <li key={`${action.type}:${index}`}><label className="flex items-start gap-2"><input type="checkbox" checked={flow.confirmed.has(index)} onChange={event => flow.toggleAction(index, event.target.checked)} disabled={flow.busy || Boolean(flow.applied)} /><span>{label}</span></label></li>;
         })}</ol>
-        {plan.notices.map(item => <p key={item} className="text-xs leading-5 text-muted-foreground">{english ? "Captions are model-written, not transcribed speech. Existing music and local export cost 0 credits. Planning uses your Agent model configuration." : item}</p>)}
-        <Button className="w-full" disabled={busy || Boolean(applied) || confirmed.size !== plan.actions.length} onClick={applyPlan}>{copy(applied ? "已应用到当前合成" : "确认并修改当前合成")}</Button>
-        {receiptPending && <Button className="w-full" variant="outline" disabled={busy} onClick={retryReceipt}>{copy("重试同步回执")}</Button>}
-        {plan.exportFormat && <Button className="w-full" variant="outline" disabled={busy || !applied || exportedOnce || receiptPending} onClick={exportPlan}>{copy(exportedOnce ? "成片已保存" : "导出已确认的合成")}</Button>}
-      </div>}
-      {notice && <output aria-live="polite" className="block break-words text-xs leading-5 text-emerald-700 dark:text-emerald-300">{copy(notice)}</output>}
-      {error && <p role="alert" className="text-xs leading-5 text-destructive">{copy(error)}</p>}
-      <span className="sr-only">{copy("素材列表版本")} {mediaRevision}</span>
+        {!flow.applied ? <><p className="text-xs text-muted-foreground">{copy("已确认")} {flow.confirmed.size}/{flow.plan.actions.length}</p><Button className="w-full" disabled={flow.busy || flow.confirmed.size !== flow.plan.actions.length} onClick={flow.applyPlan}>{copy("确认并应用修改")}</Button><Button variant="ghost" className="w-full" disabled={flow.busy} onClick={flow.discardPlan}>{copy("放弃方案，继续编辑要求")}</Button></> : <>
+          {props.onViewTimeline && <Button variant="outline" className="w-full" onClick={props.onViewTimeline}>{copy("查看时间线")}</Button>}
+          <Button className="w-full" disabled={locked || flow.exportedOnce} onClick={flow.exportVideo}><Download className="size-4" />{copy(flow.exportedOnce ? "成片已保存" : "导出视频")}</Button>
+          {flow.canUndo && <Button variant="ghost" className="w-full" disabled={locked} onClick={flow.undoPlan}><Undo2 className="size-3" />{copy("撤销本次修改")}</Button>}
+          {!flow.canUndo && flow.plan.actions.some(action => action.type !== "export") && <p className="text-xs text-muted-foreground">{copy("已恢复保存的修改，可继续预览和导出；本次打开没有可用的撤销记录。")}</p>}
+        </>}
+        {flow.receiptPending && <Button variant="outline" className="w-full" disabled={flow.busy} onClick={flow.retryReceipt}>{copy("重试同步记录")}</Button>}
+      </section>}
+      {flow.notice && <output aria-live="polite" className="block text-xs leading-5 text-muted-foreground">{copy(flow.notice)}</output>}
+      {flow.error && <p role="alert" className="text-xs leading-5 text-destructive">{copy(flow.error)}</p>}
     </div>
   </aside>;
 }

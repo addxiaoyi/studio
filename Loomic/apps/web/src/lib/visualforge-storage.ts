@@ -33,3 +33,4 @@ export const listStudioExports = (userId: string) => transaction<StudioExport[]>
 
 export const readStudioPlan = <T>(userId: string) => transaction<T | undefined>("editorPlans", "readonly", store => store.get(userId));
 export const saveStudioPlan = (userId: string, plan: unknown) => transaction("editorPlans", "readwrite", store => store.put(plan, userId));
+export const clearStudioPlan = (userId: string) => transaction("editorPlans", "readwrite", store => store.delete(userId));
