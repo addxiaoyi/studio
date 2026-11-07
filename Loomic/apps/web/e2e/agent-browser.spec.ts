@@ -117,6 +117,12 @@ test("shows real browser actions, persists the view across refresh and respects 
   await page.screenshot({ path: info.outputPath("browser-narrow.png") });
   await page.keyboard.press("Escape");
   await expect(panel).not.toBeVisible();
+  if(desktop){
+    await page.goto("http://localhost:3226/desktop-app/mcp/");
+    await page.getByRole("button",{name:"展开 Agent 浏览器",exact:true}).click();
+    await expect(panel).toBeVisible();await expect(frame).toBeVisible();
+    await page.screenshot({path:info.outputPath("desktop-browser-entry.png")});
+  }
   await info.attach("engine", {
     body: JSON.stringify({
       engine: fixture.engine,

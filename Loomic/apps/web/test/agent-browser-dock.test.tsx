@@ -3,6 +3,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AgentBrowserDock } from "@/components/agent-browser/dock";
+import { AgentBrowserButton } from "@/components/agent-browser/open-button";
 import { AgentBrowserAccessError } from "@/lib/agent-browser-api";
 
 const api = vi.hoisted(() => ({
@@ -66,7 +67,7 @@ afterEach(() => {
 });
 it("opens the live session from a task, pauses explicitly, and closes without canceling", async () => {
   const user = userEvent.setup();
-  render(<AgentBrowserDock />);
+  render(<><AgentBrowserButton/><AgentBrowserDock /></>);
   act(() =>
     window.dispatchEvent(
       new CustomEvent("loomic:show-agent-browser", {
@@ -90,7 +91,7 @@ it("opens the live session from a task, pauses explicitly, and closes without ca
   expect(api.controlAgentBrowser).toHaveBeenCalledTimes(1);
 });
 it("clears private frames when access is revoked", async () => {
-  render(<AgentBrowserDock />);
+  render(<><AgentBrowserButton/><AgentBrowserDock /></>);
   await userEvent
     .setup()
     .click(screen.getByRole("button", { name: "展开 Agent 浏览器" }));
@@ -109,7 +110,7 @@ it("clears private frames when access is revoked", async () => {
   expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:preview");
 });
 it("does not display an unrelated browser when the requested task has not started", async () => {
-  render(<AgentBrowserDock />);
+  render(<><AgentBrowserButton/><AgentBrowserDock /></>);
   act(() =>
     window.dispatchEvent(
       new CustomEvent("loomic:show-agent-browser", {
@@ -125,7 +126,7 @@ it("lets a slow frame finish while newer frame metadata arrives",async()=>{
   let revision=1,deliver:(blob:Blob)=>void=()=>{};
   api.listAgentBrowsers.mockImplementation(async()=>({enabled:true,sessions:[{...session,frameRevision:revision++}]}));
   api.readAgentBrowserFrame.mockImplementation(()=>new Promise<Blob>(resolve=>{deliver=resolve;}));
-  render(<AgentBrowserDock/>);await userEvent.setup().click(screen.getByRole("button",{name:"展开 Agent 浏览器"}));
+  render(<><AgentBrowserButton/><AgentBrowserDock/></>);await userEvent.setup().click(screen.getByRole("button",{name:"展开 Agent 浏览器"}));
   await waitFor(()=>expect(api.readAgentBrowserFrame).toHaveBeenCalled());
   const signal=api.readAgentBrowserFrame.mock.calls[0]![2] as AbortSignal;
   const reads=api.listAgentBrowsers.mock.calls.length;

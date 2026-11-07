@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useDesktopCopy } from "@/lib/desktop-copy";
 import { openVideoWorkspace } from "@/lib/video-navigation";
+import { AgentBrowserButton } from "./agent-browser/open-button";
 
 /** `mode` 同时是路由段和文案键：标签一律从 desktop-copy 取，避免壳层硬编码中文。 */
 const advanced = [
@@ -27,7 +28,8 @@ export function DesktopWorkspaceSidebar() {
   const containerRef = useRef<HTMLElement>(null);
   // roving tabindex：同一时刻只有一项能被 Tab 命中，其余为 -1。
   const [activeIndex, setActiveIndex] = useState(0);
-  const settingsIndex = 4 + (advancedOpen ? advanced.length : 0);
+  const browserIndex = 4 + (advancedOpen ? advanced.length : 0);
+  const settingsIndex = browserIndex + 1;
   const itemCount = settingsIndex + 1;
   // 折叠进阶项后索引可能越界，这里收敛到最后一个可见项，避免整组都没有 tabindex=0。
   const rovingIndex = Math.min(activeIndex, itemCount - 1);
@@ -129,6 +131,7 @@ export function DesktopWorkspaceSidebar() {
             </button>
           );
         }) : null}
+        <AgentBrowserButton tabIndex={rovingIndex === browserIndex ? 0 : -1} className="desktop-workspace-sidebar__item"/>
       </div>
       <button type="button" tabIndex={rovingIndex === settingsIndex ? 0 : -1} className="desktop-workspace-sidebar__settings" title={label.settings} onClick={() => router.replace("/settings/")}>
         <Settings aria-hidden="true" /><span>{label.settings}</span>

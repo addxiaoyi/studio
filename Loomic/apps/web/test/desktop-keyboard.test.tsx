@@ -145,6 +145,8 @@ describe("DesktopWorkspaceSidebar 键盘导航", () => {
     expect(document.activeElement).toBe(item("本地开发"));
 
     await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(item("展开 Agent 浏览器"));
+    await user.keyboard("{ArrowDown}");
     expect(document.activeElement).toBe(item("设置"));
     expect(tabbableItems()).toHaveLength(1);
   });

@@ -28,6 +28,7 @@ import { CanvasTimelinePanel } from "../../components/canvas-timeline-panel";
 import { CreditHeaderButton } from "../../components/credits/credit-header-button";
 import type { DesktopExecutionContext } from "@helstera/shared";
 import { AgentWorkspacePanel } from "../../components/agent-workspace-panel";
+import { AgentBrowserButton } from "../../components/agent-browser/open-button";
 
 function isBlankCanvasContent(content: {
   elements: Record<string, unknown>[];
@@ -554,6 +555,7 @@ function CanvasPageContent() {
           currentBrandKitId={brandKitId}
           onBrandKitChange={(kitId) => setBrandKitId(kitId)}
         />
+        <AgentBrowserButton compact/>
       </div>
       {/* Canvas always takes full width; on mobile/tablet, ChatSidebar overlays instead of side-by-side */}
       <div className="flex-1 relative min-w-0 overflow-hidden">

@@ -83,20 +83,19 @@ export function AgentBrowserDock() {
         waiting: "等待第一帧画面",
         history: "任务记录",
       };
-  function show() {
-    trigger.current = document.activeElement as HTMLElement;
-    setOpen(true);
-  }
   function close() {
     setOpen(false);
     setExpanded(false);
-    trigger.current?.focus();
+    const visibleTrigger=trigger.current?.isConnected&&trigger.current.getClientRects().length?trigger.current:
+      [...document.querySelectorAll<HTMLElement>('button[aria-controls="agent-browser-panel"]')].find(node=>node.getClientRects().length);
+    visibleTrigger?.focus();
   }
   useEffect(() => {
     function reveal(event: Event) {
       const requested = (event as CustomEvent<{ taskId?: string }>).detail
         ?.taskId;
       setWanted(requested);
+      view.select("");
       trigger.current = document.activeElement as HTMLElement;
       setOpen(true);
     }
@@ -130,20 +129,6 @@ export function AgentBrowserDock() {
     ["completed", "failed", "interrupted"].includes(displayState);
   return (
     <>
-      {!open && (
-        <button
-          type="button"
-          className="agent-browser-launcher"
-          aria-label={labels.open}
-          aria-expanded={false}
-          aria-controls="agent-browser-panel"
-          onClick={show}
-        >
-          <Monitor aria-hidden="true" />
-          <span>{labels.title}</span>
-          {active > 0 && <strong>{active}</strong>}
-        </button>
-      )}
       {open && (
         <aside
           id="agent-browser-panel"
@@ -155,6 +140,7 @@ export function AgentBrowserDock() {
               <h2>
                 <Monitor aria-hidden="true" />
                 {labels.title}
+                {active>0&&<small className="text-xs font-normal text-muted-foreground">{active} {english?"active":"执行中"}</small>}
               </h2>
               <p>{labels.subtitle}</p>
             </div>
