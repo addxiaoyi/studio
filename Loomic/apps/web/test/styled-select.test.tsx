@@ -30,7 +30,7 @@ describe("StyledSelect", () => {
 
     const trigger = screen.getByRole("combobox", { name: "热点排序" });
     await user.click(trigger);
-    expect(screen.getByRole("listbox", { name: "热点排序" })).toBeVisible();
+    expect(await screen.findByRole("listbox", { name: "热点排序" })).toBeVisible();
     await waitFor(()=>expect(screen.getByRole("option",{name:"热度排行"})).toHaveAttribute("data-highlighted"));
 
     await user.keyboard("{ArrowDown}");
@@ -58,6 +58,7 @@ describe("StyledSelect", () => {
 
     const trigger = screen.getByRole("combobox", { name: "热点排序" });
     await user.click(trigger);
+    await screen.findByRole("listbox", { name: "热点排序" });
     await user.keyboard("{ArrowDown}");
     await user.keyboard("{Escape}");
 
