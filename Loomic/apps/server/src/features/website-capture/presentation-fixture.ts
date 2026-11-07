@@ -217,7 +217,7 @@ export async function createPresentationFixture(
           },
           checkpoint: async () => {
             await assertActive();
-            await observer?.beforeAction("正在录制网站演示", null);
+            return await observer?.beforeAction("正在录制网站演示", null);
           },
           onProgress: async (progress) => {
             await db.query(

@@ -2,6 +2,7 @@
 export const PRESENTATION_PLAYER = String.raw`(async ({scenes,config})=>{
   const gsap=window.gsap;
   if(!gsap)throw new Error('演示动画引擎未加载');
+  gsap.ticker.lagSmoothing(0);
   document.title='网站介绍演示';
   document.documentElement.style.cssText='background:#edf0f5;overflow:hidden';
   document.body.replaceChildren();document.body.style.cssText='margin:0;font-family:system-ui,"Microsoft YaHei",sans-serif;overflow:hidden';

@@ -229,7 +229,7 @@ export async function captureIsolatedWebsite(options: {
             name:"网站介绍演示",sourceUrl:startUrl.toString(),assertActive:()=>assertTaskIsRunning(options.db,options.task.id),
             ...(options.signal?{signal:options.signal}:{}),});
         },
-        checkpoint:async()=>{options.signal?.throwIfAborted();await assertTaskIsRunning(options.db,options.task.id);await view?.beforeAction("多光标网页重建 · 正在录制",null);},
+        checkpoint:async()=>{options.signal?.throwIfAborted();await assertTaskIsRunning(options.db,options.task.id);return await view?.beforeAction("多光标网页重建 · 正在录制",null);},
         onProgress:async progress=>{await options.onProgress(74+Math.round(progress*.18),"presentation_recording",`多光标网页重建演示 ${progress}%`);},
       });
       await closeView("completed","网站演示录制完成，视频正在保存。");

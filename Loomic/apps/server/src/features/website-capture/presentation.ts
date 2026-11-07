@@ -29,7 +29,7 @@ export async function recordWebsitePresentation(options: {
   scenes: PresentationScene[];
   config: WebsitePresentation;
   onPage(page: Page): Promise<void>;
-  checkpoint(): Promise<void>;
+  checkpoint(): Promise<number|void>;
   onProgress(progress: number): Promise<void>;
 }): Promise<string> {
   const context = await options.browser.newContext({
@@ -44,21 +44,21 @@ export async function recordWebsitePresentation(options: {
     await preparePresentationPage(page, options.scenes, options.config);
     await options.onPage(page);
     await page.evaluate("window.__loomicPresentation.play()");
+    const recordStarted=Date.now();let pausedMs=0;
     const deadline = Date.now() + 17 * 60_000;
     let lastProgress = -1;
     while (Date.now() < deadline) {
       // Pause the authored timeline while checking task/connector state; explicit user pauses are recorded as holds.
       await page.evaluate("window.__loomicPresentation.pause()");
-      await options.checkpoint();
-      const status = (await page.evaluate(
-        "({done:window.__loomicPresentation.done,progress:window.__loomicPresentation.progress()})",
-      )) as { done: boolean; progress: number };
-      const progress = Math.round(status.progress * 100);
+      pausedMs+=(await options.checkpoint())??0;
+      const seconds=Math.min(options.config.durationSeconds,(Date.now()-recordStarted-pausedMs)/1000);
+      await page.evaluate(`window.__loomicPresentation.seek(${seconds})`);
+      const progress = Math.min(100,Math.floor(seconds/options.config.durationSeconds*100));
       if (progress !== lastProgress) {
         lastProgress = progress;
         await options.onProgress(progress);
       }
-      if (status.done || status.progress >= 1) break;
+      if (seconds >= options.config.durationSeconds) break;
       await page.evaluate("window.__loomicPresentation.play()");
       await delay(350);
     }

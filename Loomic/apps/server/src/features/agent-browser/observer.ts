@@ -81,10 +81,12 @@ export async function observeAgentBrowser(options: {
     id,
     async beforeAction(detail: string, cursor?: AgentBrowserCursor | null) {
       const started = Date.now();
+      let paused=false;
       while (true) {
         options.signal?.throwIfAborted();
         await options.assertActive();
         if ((await store.checkpoint(id)) === "agent") break;
+        paused=true;
         if (Date.now() - started > MAX_PAUSE_MS)
           throw new Error("浏览器暂停超过 15 分钟，请重新发起任务。");
         await delay(
@@ -95,6 +97,7 @@ export async function observeAgentBrowser(options: {
       }
       if (cursor !== undefined) lastCursor = cursor;
       await store.activity(id, lastCursor, detail);
+      return paused?Date.now()-started:0;
     },
     async pointAt(
       selector: string,

@@ -1,7 +1,8 @@
 import { mkdtemp, mkdir, readFile, rm, copyFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
 import { launchAgentBrowser } from "../agent-browser/engine.js";
@@ -84,6 +85,7 @@ it("rebuilds the real page with multiple cursors and records a playable WebM", a
       onPage: async () => {},
       checkpoint: async () => {
         checks++;
+        await delay(150);
       },
       onProgress: async (value) => {
         progress.push(value);
@@ -98,11 +100,17 @@ it("rebuilds the real page with multiple cursors and records a playable WebM", a
       process.platform === "win32"
         ? resolve("../desktop/resources/ffmpeg/win-x64/ffmpeg.exe")
         : "ffmpeg";
-    execFileSync(
+    const decode=spawnSync(
       ffmpeg,
-      ["-v", "error", "-xerror", "-i", file, "-f", "null", "-"],
-      { timeout: 30000, windowsHide: true },
+      ["-hide_banner", "-xerror", "-i", file, "-f", "null", "-"],
+      { timeout: 30000, windowsHide: true,encoding:"utf8" },
     );
+    expect(decode.status,decode.stderr.slice(-1000)).toBe(0);
+    const match=decode.stderr.match(/Duration: (\d+):(\d+):([\d.]+)/);
+    expect(match).not.toBeNull();
+    const seconds=Number(match![1])*3600+Number(match![2])*60+Number(match![3]);
+    expect(seconds).toBeGreaterThanOrEqual(config.durationSeconds);
+    expect(seconds).toBeLessThan(config.durationSeconds+5);
     await copyFile(file, join(evidence, "website-introduction.webm"));
   } finally {
     await browser.close();
