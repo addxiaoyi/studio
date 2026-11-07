@@ -31,6 +31,8 @@ export function useAgentBrowsers(
         : ["running", "starting", "paused"].includes(item.state),
     ) ??
     (!wantedTaskId ? sessions[0] : undefined);
+  const latestSelected = useRef(selected);
+  latestSelected.current = selected;
 
   useEffect(() => {
     setSelectedId("");
@@ -89,26 +91,31 @@ export function useAgentBrowsers(
     };
   }, [selected?.id, token]);
   useEffect(() => {
-    if (!token || !open || !selected?.frameRevision) return;
+    if (!token || !open || !selected?.id) return;
     const abort = new AbortController();
-    void readAgentBrowserFrame(token, selected, abort.signal)
-      .then((blob) => {
-        if (abort.signal.aborted) return;
-        const url = URL.createObjectURL(blob),
-          previous = ownedUrl.current;
-        ownedUrl.current = url;
-        setFrame(url);
-        setFrameError("");
-        if (previous) URL.revokeObjectURL(previous);
-      })
-      .catch((cause) => {
-        if (!abort.signal.aborted)
-          setFrameError(
-            cause instanceof Error ? cause.message : "画面读取失败。",
-          );
-      });
-    return () => abort.abort();
-  }, [token, open, selected?.id, selected?.frameRevision, refresh]);
+    const sessionId=selected.id;
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    let deliveredRevision=-1;
+    async function nextFrame(){
+      const current=latestSelected.current;
+      try{
+        if(!current||current.id!==sessionId||!current.frameRevision||current.frameRevision===deliveredRevision||document.hidden)return;
+        // Metadata may advance faster than the network; never starve an in-flight frame.
+        const blob=await readAgentBrowserFrame(token!,current,abort.signal);
+        if(abort.signal.aborted)return;
+        const url=URL.createObjectURL(blob),previous=ownedUrl.current;
+        ownedUrl.current=url;deliveredRevision=current.frameRevision;
+        setFrame(url);setFrameError("");if(previous)URL.revokeObjectURL(previous);
+      }catch(cause){
+        if(!abort.signal.aborted){
+          setFrameError(cause instanceof Error?cause.message:"画面读取失败。");
+          if(cause instanceof AgentBrowserAccessError)setSessions([]);
+        }
+      }finally{if(!abort.signal.aborted)timer=setTimeout(nextFrame,500);}
+    }
+    void nextFrame();
+    return()=>{abort.abort();clearTimeout(timer);};
+  }, [token, open, selected?.id, refresh]);
   async function setControl() {
     if (!token || !selected || busy) return;
     setBusy(true);

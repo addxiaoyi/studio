@@ -14,13 +14,15 @@ export function AgentCursor({
   useEffect(() => {
     const node = canvas.current;
     if (!node) return;
-    const resize = () =>
-      setScale(width / Math.max(1, node.getBoundingClientRect().width));
+    const resize = () => {
+      const rect=node.getBoundingClientRect();
+      setScale(width / Math.max(1,Math.min(rect.width,rect.height*width/height)));
+    };
     resize();
     const observer = new ResizeObserver(resize);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [width, cursor?.visible]);
+  }, [width,height, cursor?.visible]);
   useEffect(() => {
     if (!marker.current || !cursor) return;
     const reduce = window.matchMedia(

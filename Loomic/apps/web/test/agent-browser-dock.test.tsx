@@ -120,3 +120,17 @@ it("does not display an unrelated browser when the requested task has not starte
   expect(await screen.findByText("还没有浏览器会话")).toBeVisible();
   expect(api.readAgentBrowserFrame).not.toHaveBeenCalled();
 });
+
+it("lets a slow frame finish while newer frame metadata arrives",async()=>{
+  let revision=1,deliver:(blob:Blob)=>void=()=>{};
+  api.listAgentBrowsers.mockImplementation(async()=>({enabled:true,sessions:[{...session,frameRevision:revision++}]}));
+  api.readAgentBrowserFrame.mockImplementation(()=>new Promise<Blob>(resolve=>{deliver=resolve;}));
+  render(<AgentBrowserDock/>);await userEvent.setup().click(screen.getByRole("button",{name:"展开 Agent 浏览器"}));
+  await waitFor(()=>expect(api.readAgentBrowserFrame).toHaveBeenCalled());
+  const signal=api.readAgentBrowserFrame.mock.calls[0]![2] as AbortSignal;
+  const reads=api.listAgentBrowsers.mock.calls.length;
+  await waitFor(()=>expect(api.listAgentBrowsers.mock.calls.length).toBeGreaterThan(reads),{timeout:3000});
+  expect(signal.aborted).toBe(false);
+  await act(async()=>deliver(new Blob(["frame"],{type:"image/jpeg"})));
+  expect(await screen.findByAltText("浏览器画面：Example")).toBeVisible();
+});
