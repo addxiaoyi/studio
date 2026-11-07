@@ -42,7 +42,9 @@ jobs:
           pnpm --filter @helstera/web typecheck
           pnpm --filter @helstera/desktop typecheck
       - name: Approval, recovery and private asset database gates
-        run: node scripts/test-local-postgres.mjs src/features/agent-goals/goal-steps.postgres.test.ts src/features/assets/private-lifecycle.postgres.test.ts src/local-db/private-upload-ownership.postgres.test.ts src/local-db/viewer-locks.postgres.test.ts src/features/onetake/onetake.postgres.test.ts src/features/video-editor/plan-store.postgres.test.ts
+        run: |
+          psql "$HELT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;'
+          node scripts/test-local-postgres.mjs src/features/agent-goals/goal-steps.postgres.test.ts src/features/assets/private-lifecycle.postgres.test.ts src/local-db/private-upload-ownership.postgres.test.ts src/local-db/viewer-locks.postgres.test.ts src/features/onetake/onetake.postgres.test.ts src/features/video-editor/plan-store.postgres.test.ts
       - name: Structured model planning deadlines
         run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/goal-planner.test.ts src/features/agent-goals/goal-plan-timeout.test.ts src/features/video-editor/planner.test.ts
       - name: Video conversation contracts and model gates
