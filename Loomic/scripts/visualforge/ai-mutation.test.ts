@@ -74,6 +74,16 @@ describe("current composition AI mutation", () => {
     const reverted=await prepareStudioUndo(applied,compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(applied,"MyComp"),actionIndex:1});
     expect(inspectComposition(reverted,compositionFile,"MyComp").duration).toBe(4);
   });
+  it("isolates a duplicated composition before editing its shared source",async()=>{
+    const project=createBlankTemplateProject();
+    project.files[compositionFile]=project.files[compositionFile]!.replace("return null;",'return <div>原始图片标题</div>;').replace("<Composition","<><Composition").replace("    />","    /><Composition id=\"Copy\" component={MyComponent} durationInFrames={60} fps={30} width={1280} height={720}/></>");
+    const revision=await projectFingerprint(project,"Copy");
+    const changed=await prepareStudioEdit(project,compositionFile,{id,compositionId:"Copy",revision,cut,replaceVideo:false,commands:[{type:"layer",layerId:"layer-0",changes:{text:"副本修改"}}]});
+    expect(inspectComposition(changed,compositionFile,"MyComp").layers[0]?.text).toBe("原始图片标题");
+    expect(inspectComposition(changed,compositionFile,"Copy").layers[0]?.text).toBe("副本修改");
+    const undone=await prepareStudioUndo(changed,compositionFile,{id,compositionId:"Copy",revision:await projectFingerprint(changed,"Copy")});
+    expect(await projectFingerprint(undone,"Copy")).toBe(revision);
+  });
   it("reads native BasicCaptions under nested sequences and clips to their visible range", () => {
     const project = createBlankTemplateProject();
     project.files[compositionFile] = 'import {BasicCaptions as Subtitles} from "./basic-captions.element";\n' + project.files[compositionFile]!.replace("return null;", 'return <Sequence from={15} durationInFrames={30}><Subtitles from={15} captions={[{text:"原生字幕",startMs:0,endMs:1500,timestampMs:null,confidence:null}]} /></Sequence>;');

@@ -7,9 +7,10 @@ import { ApiApplicationError } from "@/lib/server-api";
 
 const api = vi.hoisted(() => ({ submit: vi.fn(), status: vi.fn(), confirm: vi.fn(), job: vi.fn() }));
 vi.mock("@/lib/server-api", async importOriginal => ({
-  ...await importOriginal<typeof import("@/lib/server-api")>(), submitVideoGeneration: api.submit,
+  ...await importOriginal<typeof import("@/lib/server-api")>(),
   fetchGenerationApprovalStatus: api.status, confirmGenerationApproval: api.confirm, fetchJob: api.job,
 }));
+vi.mock("@/lib/studio-material-api",()=>({submitMaterialVideo:api.submit}));
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const draft = { prompt: "镜头缓慢推进", model: "test-video", duration: 5, resolution: "720p", aspectRatio: "16:9" };
 const approval = { approvalId: id(1), model: draft.model, estimatedCredits: 12, expiresAt: "2030-01-01T00:00:00Z" };

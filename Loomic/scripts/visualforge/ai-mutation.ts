@@ -10,6 +10,7 @@ import { nativeCaptions } from "./native-captions";
 import { actionCut } from "../../apps/web/src/lib/studio-action-cut";
 import { inspectLayers, changeLayers } from "./native-layers";
 import { animateLayers, motionFiles } from "./native-motion";
+import {isolateSharedComposition} from "./isolate-composition";
 import type { StudioEdit, StudioUndo, StudioEditReceipt } from "../../apps/web/src/lib/visualforge-runtime";
 export type { StudioEdit } from "../../apps/web/src/lib/visualforge-runtime";
 
@@ -138,6 +139,7 @@ async function applyStudioEdit(project: EditedProject, compositionFile: string, 
   if(!edit.commands)return applyLegacyEdit(project,compositionFile,edit);
   if(project.loomicAppliedEdits?.includes(edit.id))return project;
   if(await projectFingerprint(project,edit.compositionId)!==edit.revision)throw new Error("合成或素材已改变，请重新预览。");
+  project=isolateSharedComposition(project,compositionFile,edit.compositionId,edit.id);
   const before=inspectComposition(project,compositionFile,edit.compositionId);
   const changes=edit.commands.filter(action=>action.type==="layer");
   const motion=edit.commands.filter(action=>action.type==="keyframes");

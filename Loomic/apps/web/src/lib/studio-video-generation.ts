@@ -1,6 +1,6 @@
 import {
   ApiApplicationError, confirmGenerationApproval, fetchGenerationApprovalStatus,
-  fetchJob, submitVideoGeneration,
+  fetchJob,
 } from "./server-api";
 import {submitMaterialVideo} from "./studio-material-api";
 
@@ -65,8 +65,7 @@ export async function submitStudioVideo(userId: string, token: string, request: 
   if (request.jobId || request.approval) return request;
   let saved: StudioVideoRequest;
   try {
-    const { prompt, ...options } = request.draft;
-    const { job } = request.draft.requireConfirmation?await submitMaterialVideo(token,request):await submitVideoGeneration(token, prompt, { ...options, idempotencyKey: request.key });
+    const { job } = await submitMaterialVideo(token,request);
     if (!UUID.test(job.id)) throw new Error("服务端未返回有效任务，请恢复原请求。");
     saved = { ...request, jobId: job.id };
   } catch (cause) {
