@@ -11,6 +11,17 @@ import {
   recordWebsitePresentation,
 } from "./presentation.js";
 
+it("reveals lazy sections before selecting the presentation layers",async()=>{
+  const {browser}=await launchAgentBrowser();
+  try{
+    const page=await browser.newPage({viewport:{width:1280,height:720}});
+    await page.route("https://presentation.example/",route=>route.fulfill({contentType:"text/html",body:'<body><h1>Visible heading</h1><div style="height:800px"></div><section style="height:300px;opacity:0"><h2>Lazy feature section</h2></section><script>new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting)entry.target.style.opacity="1"})).observe(document.querySelector("section"))</script></body>'}));
+    await page.goto("https://presentation.example/");
+    const scene=await capturePresentationScene(page);
+    expect(scene.layers.some(layer=>layer.text==="Lazy feature section")).toBe(true);
+  }finally{await browser.close();}
+},15000);
+
 const html = `<!doctype html><html><head><title>Website introduction</title><style>body{margin:0;background:#f4f5f9;font:20px system-ui;color:#19233c}header{padding:24px 50px;background:white}main{padding:40px 60px}h1{font-size:54px;max-width:650px}article{padding:24px;background:white;border:1px solid #ddd;border-radius:14px;width:320px;display:inline-block;margin:20px}input{padding:14px;border:1px solid #bbb}</style></head><body><header>Loomic · Explore · Create</header><main><h1>From a website to a visual story</h1><p>Multiple cursors build layouts, type words and reveal images.</p><article><h2>Collect ideas</h2><p>Choose a source page</p></article><article><h2>Make it move</h2><p>Record a clear introduction</p></article><input aria-label="Private" value="secret-a"><input type="password" value="password-a"></main></body></html>`;
 
 it("rebuilds the real page with multiple cursors and records a playable WebM", async () => {

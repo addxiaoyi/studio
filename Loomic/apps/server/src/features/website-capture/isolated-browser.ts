@@ -171,6 +171,7 @@ export async function captureIsolatedWebsite(options: {
         await view?.beforeAction(`正在打开 ${new URL(nextUrl).hostname}`,null);
         await page.goto(nextUrl, { waitUntil: "domcontentloaded" });
         await page.waitForTimeout(PAGE_SETTLE_MS);
+        const scene=presentation?await capturePresentationScene(page):null;
         await view?.beforeAction("正在读取页面内容");
         await view?.pointAt("h1, h2, main, body", "读取页面内容");
         const facts = pageFactsSchema.parse(
@@ -181,7 +182,6 @@ export async function captureIsolatedWebsite(options: {
         await view?.beforeAction("正在保存页面证据");
         const screenshot = await page.screenshot({ type: "jpeg", quality: 76, fullPage: false });
         await view?.capture();
-        if(presentation)scenes.push(await capturePresentationScene(page));
         captured.push({
           url: responseUrl.toString(),
           title: facts.title,
@@ -192,6 +192,7 @@ export async function captureIsolatedWebsite(options: {
           width: 1280,
           height: 720,
         });
+        if(scene)scenes.push(scene);
 
         for (const link of facts.links) {
           if (pending.length + captured.length >= options.task.page_limit * 3) break;

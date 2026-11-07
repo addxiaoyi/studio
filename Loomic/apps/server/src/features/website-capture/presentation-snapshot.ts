@@ -29,7 +29,7 @@ export type PresentationScene = {
 
 // Only visual values are exported. No page markup, scripts, input values or event handlers.
 export const PRESENTATION_SNAPSHOT_SCRIPT = String.raw`(() => {
-  const width=innerWidth,height=Math.min(Math.max(document.documentElement.scrollHeight,innerHeight),2160);
+  const width=innerWidth,height=Math.min(Math.max(document.documentElement.scrollHeight,document.body.scrollHeight,innerHeight),2160);
   const layers=[];let inspected=0;
   const hidden=el=>{const css=getComputedStyle(el);return css.display==='none'||css.visibility==='hidden'||Number(css.opacity)===0;};
   const geometry=el=>{const r=el.getBoundingClientRect();return {x:r.x+scrollX,y:r.y+scrollY,width:r.width,height:r.height};};
@@ -55,13 +55,22 @@ export const PRESENTATION_SNAPSHOT_SCRIPT = String.raw`(() => {
   };
   walk(document.body);
   const bg=getComputedStyle(document.body).backgroundColor;
-  return {width,height,background:['transparent','rgba(0, 0, 0, 0)'].includes(bg)?'#ffffff':bg,layers};
+  const contentBottom=Math.max(innerHeight,...layers.filter(layer=>layer.kind!=='box').map(layer=>layer.y+layer.height+64));
+  const captureHeight=Math.min(height,Math.ceil(contentBottom));
+  return {width,height:captureHeight,background:['transparent','rgba(0, 0, 0, 0)'].includes(bg)?'#ffffff':bg,layers:layers.map(layer=>({...layer,height:Math.min(layer.height,captureHeight-layer.y)})).filter(layer=>layer.height>0)};
 })()`;
 
 export async function capturePresentationScene(
   page: Page,
 ): Promise<PresentationScene> {
+  await page.evaluate("Promise.race([document.fonts.ready, new Promise(resolve=>setTimeout(resolve,2000))]).then(()=>undefined)");
+  const maxScroll=await page.evaluate("Math.min(Math.max(document.documentElement.scrollHeight,document.body.scrollHeight)-innerHeight,1440)") as number;
+  const offsets=Array.from({length:Math.ceil(Math.max(0,maxScroll)/480)+1},(_,index)=>Math.min(index*480,Math.max(0,maxScroll)));
+  for(const offset of offsets){
+    await page.evaluate(`window.scrollTo(0,${offset})`);await page.waitForTimeout(550);
+  }
   await page.evaluate("window.scrollTo(0,0)");
+  await page.waitForTimeout(550);
   const snapshot = (await page.evaluate(PRESENTATION_SNAPSHOT_SCRIPT)) as Omit<
     PresentationScene,
     "url" | "title" | "image"

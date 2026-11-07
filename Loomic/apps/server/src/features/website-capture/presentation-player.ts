@@ -64,6 +64,7 @@ export const PRESENTATION_PLAYER = String.raw`(async ({scenes,config})=>{
     timeline.set(viewport,{opacity:1},start).call(()=>{address.textContent=scene.url;pageCounter.textContent=(sceneIndex+1)+' / '+scenes.length;caption.textContent='重建页面布局 · '+scene.title;},[],start);
     if(scene.height*scale>608)timeline.to(camera,{y:-(scene.height*scale-608),duration:sceneDuration*.67,ease:'none'},start+sceneDuration*.15);
     timeline.to(full,{opacity:1,duration:.35},start+sceneDuration*.84);
+    timeline.to(camera,{y:0,duration:sceneDuration*.08,ease:'power2.inOut'},start+sceneDuration*.87);
     timeline.to(cursors.map(item=>item.cursor),{opacity:0,duration:.2},start+sceneDuration*.86);
     if(sceneIndex<scenes.length-1)timeline.to(viewport,{opacity:0,duration:.25},start+sceneDuration-.25);
     await Promise.all([full.decode().catch(()=>{throw new Error('网页快照无法解码');})]);
