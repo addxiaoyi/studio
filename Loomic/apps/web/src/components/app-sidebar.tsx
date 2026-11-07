@@ -1,4 +1,5 @@
 "use client";
+import { AgentBrowserButton } from "./agent-browser/open-button";
 
 import { motion } from "framer-motion";
 import {
@@ -245,6 +246,7 @@ export function AppSidebar() {
       </Link>
       <div className="space-y-1">{primaryItems.map((item) => <NavLink key={item.href} item={{ ...item, label: item.href === "/home" ? labels.home : item.label }} active={isPathActive(pathname, item.href)} collapsed={labelsHidden} />)}</div>
       <div className="my-3 border-t border-border/40" />
+      <AgentBrowserButton compact={labelsHidden}/>
       <div className="space-y-1">{allNavGroups.map((group) => <GroupLinks key={group.id} group={group} pathname={pathname} open={Boolean(openGroups[group.id])} collapsed={labelsHidden} onToggle={() => setOpenGroups((current) => ({ ...current, [group.id]: !current[group.id] }))} />)}</div>
       {isAdmin && <div className="mt-1"><NavLink item={adminItem} active={isPathActive(pathname, adminItem.href)} collapsed={labelsHidden} /></div>}
       <div className="mt-auto space-y-1">{!labelsHidden && <CreditBalance />}<NavLink item={{ ...settingsItem, label: labels.settings }} active={isPathActive(pathname, settingsItem.href)} collapsed={labelsHidden} /><button type="button" onClick={() => void handleSignOut()} title="退出登录" className={cn("flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground", labelsHidden && "w-10 justify-center px-0")}><LogOut className="size-[18px]" strokeWidth={1.8} />{!labelsHidden && <span>退出登录</span>}</button></div>

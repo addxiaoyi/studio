@@ -143,6 +143,7 @@ import { registerDouyinOAuthRoutes } from "./http/douyin-oauth.js";
 import { DouyinCredentialManager } from "./features/douyin/douyin-credentials.js";
 import { registerStorageRoutes } from "./http/storage.js";
 import { registerWebsiteCaptureRoutes } from "./http/website-capture.js";
+import { registerAgentBrowserRoutes } from "./http/agent-browser.js";
 import { registerAgentGoalRoutes } from "./http/agent-goals.js";
 import { registerAgentMemoryRoutes } from "./http/agent-memory.js";
 import { registerAgentConnectorRoutes } from "./http/agent-connectors.js";
@@ -571,6 +572,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       storage: storageProvider,
     });
   }
+  registerAgentBrowserRoutes(app, { db: localDb, auth, viewerService, storageRoot: env.storageRoot ?? "/www/helstera/uploads", enabled: process.env.HELSTERA_BROWSER_VIEW_ENABLED === "1" });
   registerWebsiteCaptureRoutes(app, {
     auth,
     db: localDb,

@@ -1,4 +1,5 @@
 "use client";
+import { AgentBrowserButton } from "../agent-browser/open-button";
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
@@ -166,6 +167,7 @@ export function DesktopAgentProgressCard({ taskId }: { taskId: string }) {
     : null;
 
   return <section className="desktop-agent-task-card" aria-label={copy.title}>
+    {task.executionMode === "isolated_browser" && <AgentBrowserButton taskId={taskId}/>}
     <header><div><strong>Desktop Agent - {status}</strong><p>{task.goal}</p></div><span>{task.role}</span></header>
     <div className="desktop-agent-task-card__meta"><span>{copy.mode}: {localizedModes[english ? "en" : "zh"][task.executionMode ?? "automatic"] ?? task.executionMode}</span><span>{copy.capabilities}: {task.capabilities.join(" · ")}</span></div>
     {canvasPath ? <a className="desktop-agent-task-card__canvas-link" href={canvasPath}>{copy.viewCanvas}</a> : null}

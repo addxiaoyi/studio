@@ -1,0 +1,32 @@
+.agent-browser-launcher { position: fixed; z-index: 45; inset-inline-end: 0; top: 45%; display: flex; align-items: center; gap: 8px; max-width: 180px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-inline-end: 0; border-radius: 12px 0 0 12px; background: var(--card); color: var(--foreground); box-shadow: 0 4px 18px rgb(0 0 0/.12); font-size: 12px; cursor: pointer; }
+.agent-browser-launcher svg { width: 18px; height: 18px; }
+.agent-browser-launcher strong { display: inline-grid; place-items: center; min-width: 20px; height: 20px; border-radius: 5px; background: var(--primary); color: var(--primary-foreground); }
+.agent-browser-launcher:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.agent-browser-panel { position: fixed; z-index: 60; inset-block: 0; inset-inline-end: 0; width: min(520px,100vw); display: flex; flex-direction: column; background: var(--background); color: var(--foreground); border-inline-start: 1px solid var(--border); box-shadow: -12px 0 36px rgb(0 0 0/.14); }
+.agent-browser-panel-expanded { width: min(1100px,calc(100vw - 48px)); }
+html[data-helstera-desktop="true"] .agent-browser-panel { inset-block-start: 46px; }
+.agent-browser-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--border); }
+.agent-browser-header h2 { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; }
+.agent-browser-header h2 svg { width: 18px; height: 18px; }
+.agent-browser-header p { margin-top: 4px; color: var(--muted-foreground); font-size: 12px; }
+.agent-browser-content { flex: 1; min-height: 0; overflow-y: auto; padding: 18px; }
+.agent-browser-state { display: flex; justify-content: space-between; gap: 12px; margin-top: 16px; font-size: 12px; color: var(--muted-foreground); }
+.agent-browser-state [data-state="running"] { color: var(--foreground); font-weight: 650; }
+.agent-browser-state [data-state="paused"], .agent-browser-state [data-state="interrupted"] { color: var(--destructive); }
+.agent-browser-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted-foreground); margin: 8px 0 12px; }
+.agent-browser-viewport { position: relative; width: 100%; aspect-ratio: 16/9; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.agent-browser-viewport img { width: 100%; height: 100%; object-fit: contain; }
+.agent-browser-viewport > p { padding: 20px; font-size: 13px; text-align: center; }
+.agent-browser-cursor { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.agent-browser-detail { margin-top: 14px; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.agent-browser-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.agent-browser-meta { font-size: 11px; color: var(--muted-foreground); margin-top: 12px; }
+.agent-browser-error { border: 1px solid var(--destructive); border-radius: 8px; padding: 12px; font-size: 13px; margin-bottom: 12px; color: var(--destructive); }
+.agent-browser-error button { margin-top: 8px; }
+.agent-browser-empty { display: grid; justify-items: center; align-content: center; min-height: 280px; gap: 12px; font-size: 14px; text-align: center; line-height: 1.65; }
+.agent-browser-empty > svg { width: 36px; height: 36px; color: var(--muted-foreground); }
+.agent-browser-empty p { color: var(--muted-foreground); max-width: 300px; }
+.agent-browser-footer { border-top: 1px solid var(--border); padding: 14px 18px max(14px,env(safe-area-inset-bottom)); font-size: 12px; color: var(--muted-foreground); line-height: 1.6; }
+.agent-browser-footer a { display: inline-flex; gap: 4px; align-items: center; margin-top: 7px; color: var(--foreground); text-decoration: underline; }
+.agent-browser-footer svg { width: 14px; height: 14px; }
+@media(max-width:640px) { .agent-browser-launcher { top: auto; bottom: calc(68px + env(safe-area-inset-bottom)); } .agent-browser-panel-expanded { width: 100vw; } .agent-browser-content { padding: 14px; } }

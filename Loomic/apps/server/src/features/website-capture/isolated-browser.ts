@@ -7,6 +7,9 @@ import { randomUUID } from "node:crypto";
 import { Agent, request as httpRequest } from "undici";
 import { chromium, type Route, type WebSocketRoute } from "playwright";
 import { z } from "zod";
+import { launchAgentBrowser } from "../agent-browser/engine.js";
+import { browserViewStore } from "../agent-browser/store.js";
+import { observeAgentBrowser } from "../agent-browser/observer.js";
 import type { Pool, PoolClient } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import type { WebsiteCaptureClaim, WebsiteCaptureEvidence, WebsiteCapturePage, WebsiteCaptureResult } from "@helstera/shared";
@@ -97,18 +100,16 @@ export async function captureIsolatedWebsite(options: {
   const tempDir = await mkdtemp(join(tmpdir(), `helstera-capture-${options.task.id}-`));
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
   let videoPath: string | undefined;
+  let view: Awaited<ReturnType<typeof observeAgentBrowser>> | undefined;
+  let capturedSuccessfully = false;
   const abort = () => { void browser?.close().catch(error => console.error("[capture] cancellation close failed", error)); };
   options.signal?.throwIfAborted();
   options.signal?.addEventListener("abort", abort, { once: true });
 
   try {
     await options.onProgress(5, "browser_starting", "Starting a temporary browser");
-    const executablePath = process.env.HELSTERA_PLAYWRIGHT_EXECUTABLE_PATH?.trim();
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--disable-background-networking", "--disable-component-update", "--disable-sync"],
-      ...(executablePath ? { executablePath } : {}),
-    });
+    const launched = await launchAgentBrowser();
+    browser = launched.browser;
     options.signal?.throwIfAborted();
     const context = await browser.newContext({
       acceptDownloads: false,
@@ -121,20 +122,16 @@ export async function captureIsolatedWebsite(options: {
       viewport: { width: 1280, height: 720 },
     });
     await context.routeWebSocket("**/*", blockIsolatedWebSocket);
-    let transferredBytes = 0;
+    const budget = createCaptureByteBudget(MAX_TOTAL_BYTES);
     let requestCount = 0;
 
     await context.route("**/*", async (route) => {
       requestCount += 1;
-      if (requestCount > 180) {
+      if (requestCount > 180 || budget.exhausted()) {
         await route.abort("blockedbyclient");
         return;
       }
-      const responseBytes = await fulfillPublicReadOnlyRequest(route);
-      transferredBytes += responseBytes;
-      if (transferredBytes > MAX_TOTAL_BYTES) {
-        await route.abort("blockedbyclient");
-      }
+      await fulfillPublicReadOnlyRequest(route, budget);
     });
     context.on("page", (page) => {
       if (page !== context.pages()[0]) void page.close();
@@ -142,6 +139,14 @@ export async function captureIsolatedWebsite(options: {
     const page = await context.newPage();
     page.setDefaultNavigationTimeout(PAGE_TIMEOUT_MS);
     page.setDefaultTimeout(PAGE_TIMEOUT_MS);
+    if (process.env.HELSTERA_BROWSER_VIEW_ENABLED === "1") {
+      view = await observeAgentBrowser({ page, engine: launched.engine,
+        store: browserViewStore(options.db,options.storageRoot), taskId: options.task.id,
+        workspaceId: options.task.workspace_id, userId: options.task.created_by,
+        assertActive: () => assertTaskIsRunning(options.db,options.task.id),
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+    }
 
     const pending = [startUrl.toString()];
     const visited = new Set<string>();
@@ -155,14 +160,19 @@ export async function captureIsolatedWebsite(options: {
       await options.onProgress(percent, "page_loading", `Opening ${new URL(nextUrl).hostname}`);
 
       try {
+        await view?.beforeAction(`正在打开 ${new URL(nextUrl).hostname}`,null);
         await page.goto(nextUrl, { waitUntil: "domcontentloaded" });
         await page.waitForTimeout(PAGE_SETTLE_MS);
+        await view?.beforeAction("正在读取页面内容");
+        await view?.pointAt("h1, h2, main, body", "读取页面内容");
         const facts = pageFactsSchema.parse(
           await page.evaluate(`(${PAGE_FACTS_SCRIPT})(${MAX_HEADINGS})`),
         );
 
         const responseUrl = await validatePublicHttpUrl(facts.url);
+        await view?.beforeAction("正在保存页面证据");
         const screenshot = await page.screenshot({ type: "jpeg", quality: 76, fullPage: false });
+        await view?.capture();
         captured.push({
           url: responseUrl.toString(),
           title: facts.title,
@@ -190,10 +200,13 @@ export async function captureIsolatedWebsite(options: {
     if (captured.length === 0) {
       throw new WebsiteCaptureError("no_pages_captured", "No pages could be captured from this website.");
     }
+    await view?.close("completed", "浏览完成，显示最后画面；证据正在回写任务。");
+    view = undefined;
     await page.close();
     if (options.task.record_video) {
       const video = page.video();
-      if (video) videoPath = await video.path();
+      if (!video) throw new WebsiteCaptureError("recording_missing", "The browser did not produce a recording.");
+      videoPath = await video.path();
     }
     await context.close();
 
@@ -230,6 +243,9 @@ export async function captureIsolatedWebsite(options: {
     if (videoPath) {
       const { readFile, stat } = await import("node:fs/promises");
       const videoInfo = await stat(videoPath);
+      if (videoInfo.size === 0) {
+        throw new WebsiteCaptureError("recording_empty", "The browser recording is empty.");
+      }
       if (videoInfo.size > MAX_VIDEO_BYTES) {
         throw new WebsiteCaptureError("recording_too_large", "The browser recording exceeded the 40 MB limit.");
       }
@@ -255,6 +271,7 @@ export async function captureIsolatedWebsite(options: {
     const claims = buildWebsiteClaims(startUrl.toString(), pages);
     const introduction = buildWebsiteIntroduction(startUrl.toString(), pages, claims);
     await options.onProgress(96, "writing_report", "Preparing the sourced website introduction");
+    capturedSuccessfully = true;
     return {
       title,
       introduction,
@@ -267,6 +284,7 @@ export async function captureIsolatedWebsite(options: {
       completedAt: new Date().toISOString(),
     };
   } finally {
+    await view?.close(capturedSuccessfully ? "completed" : "failed", capturedSuccessfully ? "浏览完成" : "浏览已停止，请查看任务结果").catch(error=>console.error("[agent-browser] failed to close preview",error));
     options.signal?.removeEventListener("abort", abort);
     await browser?.close().catch(() => undefined);
     await rm(tempDir, { recursive: true, force: true });
@@ -391,7 +409,45 @@ export function buildWebsiteIntroduction(startUrl: string, pages: WebsiteCapture
   ].join("\n");
 }
 
-async function fulfillPublicReadOnlyRequest(route: Route): Promise<number> {
+export function createCaptureByteBudget(limit: number) {
+  if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("Invalid capture byte budget.");
+  let remaining = limit;
+  return {
+    exhausted: () => remaining === 0,
+    consume: (bytes: number) => {
+      if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error("Invalid capture byte count.");
+      if (bytes > remaining) { remaining = 0; return false; }
+      remaining -= bytes;
+      return true;
+    },
+  };
+}
+
+export async function fulfillBoundedCaptureResponse(
+  route: Pick<Route, "abort" | "fulfill">,
+  body: NodeJS.ReadableStream & AsyncIterable<Uint8Array>,
+  status: number,
+  headers: Record<string, string>,
+  budget: ReturnType<typeof createCaptureByteBudget>,
+  responseLimit = MAX_RESPONSE_BYTES,
+): Promise<number> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of body) {
+    const part = Buffer.from(chunk);
+    total += part.length;
+    if (!budget.consume(part.length) || total > responseLimit) {
+      abortResponseBody(body);
+      await route.abort("blockedbyclient");
+      return 0;
+    }
+    chunks.push(part);
+  }
+  await route.fulfill({ status, headers, body: Buffer.concat(chunks, total) });
+  return total;
+}
+
+async function fulfillPublicReadOnlyRequest(route: Route, budget: ReturnType<typeof createCaptureByteBudget>): Promise<number> {
   const request = route.request();
   const method = request.method().toUpperCase();
   if (method !== "GET" && method !== "HEAD") {
@@ -452,21 +508,7 @@ async function fulfillPublicReadOnlyRequest(route: Route): Promise<number> {
       await route.abort("blockedbyclient");
       return 0;
     }
-    const chunks: Buffer[] = [];
-    let total = 0;
-    for await (const chunk of response.body) {
-      const part = Buffer.from(chunk);
-      total += part.length;
-      if (total > MAX_RESPONSE_BYTES) {
-        abortResponseBody(response.body);
-        await route.abort("blockedbyclient");
-        return 0;
-      }
-      chunks.push(part);
-    }
-    const body = Buffer.concat(chunks, total);
-    await route.fulfill({ status: response.statusCode, headers, body });
-    return total;
+    return await fulfillBoundedCaptureResponse(route, response.body, response.statusCode, headers, budget);
   } catch (error) {
     console.warn("[website-capture] public request blocked", {
       host: parsedUrl.hostname,

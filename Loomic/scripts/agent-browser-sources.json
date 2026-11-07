@@ -1,0 +1,16 @@
+{
+  "chromix": {
+    "repository": "https://github.com/xiaozhou26/Chromix",
+    "commit": "bf3221bcfa08b652ff62a44f52ccce393ef1d351",
+    "license": "BSD-3-Clause",
+    "platforms": {
+      "win32-x64": { "version": "v154.0.8037.97", "archive": "chromix-win-x64.zip", "sha256": "4c3811f1b99797da583230c3b0add4b8f6b7ef38a8b8da05dee530af94c129a6", "executable": "chromix/chrome.exe" },
+      "linux-x64": { "version": "v155.0.8059.39", "archive": "chromix-linux-x64.zip", "sha256": "6dd0414bcaa7ab7611e39acd25f3c6e892d50bcacfab60c3c85ddc55e22d3ad5", "executable": "chromix/chrome" }
+    }
+  },
+  "swarmReference": {
+    "repository": "https://github.com/DhvanilPatel/swarm-cursors",
+    "commit": "3d49e0ac96172eb6af7ae8229b2152121bed2092",
+    "status": "visual reference only; no upstream source or assets redistributed because no reuse license is provided"
+  }
+}

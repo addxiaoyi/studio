@@ -37,6 +37,8 @@
 
 ## Current implementation status
 
+2026-11-07：新增 Web/桌面共用的 Agent 浏览器观察侧栏，服务端接入经过校验的 Chromix，支持真实画面、动作光标、暂停和刷新恢复。权限、许可、Windows 客户端与 Linux 沙箱证据见 [Agent 浏览器验收](docs/agent-browser-view-20261107.md)。
+
 2026-11-07：女装试穿模型与逐次费用确认、刷新取回结果、全站实底下拉菜单已完成本轮改造。真实 PostgreSQL、浏览器回归与生产发布证据见 [试穿计费与组件验收](docs/fashion-billing-controls-20261107.md)；上游付费真人试穿效果与本轮事务测试分开记录。
 
 视频工作区已接入当前合成 AI 编辑与 OneTake 文字剪辑。功能对照、真实模型/浏览器/Windows 候选程序证据和部署边界见

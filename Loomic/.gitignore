@@ -73,6 +73,7 @@ docs/tech/replicate-models-pricing.md
 *.tgz
 *.zip
 vendor/
+runtime/chromix/
 temp-hy3-server/
 __pycache__/
 **/__pycache__/

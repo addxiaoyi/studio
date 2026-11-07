@@ -10,6 +10,7 @@ import { ToastProvider } from "./toast";
 import { TierLimitToastProvider } from "./credits/tier-limit-toast";
 import { installErrorReporter } from "../lib/error-reporter";
 import { installWebVitals } from "../lib/web-vitals";
+import { AgentBrowserDock } from "./agent-browser/dock";
 
 function ClientInstrumentation() {
   useEffect(() => {
@@ -26,7 +27,7 @@ export function Providers({ children }: { children: ReactNode }) {
         <ClientInstrumentation />
         <AuthProvider>
           <ToastProvider>
-            <TierLimitToastProvider>{children}</TierLimitToastProvider>
+            <TierLimitToastProvider>{children}<AgentBrowserDock /></TierLimitToastProvider>
           </ToastProvider>
         </AuthProvider>
       </MotionConfig>

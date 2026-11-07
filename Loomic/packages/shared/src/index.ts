@@ -27,3 +27,4 @@ export * from "./video-motion.js";
 export * from "./video-editor-chat.js";
 export * from "./onetake.js";
 export * from "./goal-execution.js";
+export * from "./agent-browser.js";

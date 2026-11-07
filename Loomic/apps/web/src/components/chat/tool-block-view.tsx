@@ -1,4 +1,5 @@
 "use client";
+import { AgentBrowserButton } from "../agent-browser/open-button";
 
 import { motion } from "framer-motion";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -464,7 +465,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
         />
       )}
 
-      {isWebsiteTool && websiteTaskId ? <WebsiteCaptureProgressCard taskId={websiteTaskId} /> : null}
+      {isWebsiteTool && websiteTaskId ? <><AgentBrowserButton taskId={websiteTaskId}/><WebsiteCaptureProgressCard taskId={websiteTaskId} /></> : null}
       {exportedAssetId && session?.access_token ? <AuthenticatedRecording assetId={exportedAssetId} accessToken={session.access_token} maxBytes={250 * 1024 * 1024} label="视频成片" /> : null}
       {fashionAssetId && session?.access_token ? <AuthenticatedRecording kind="image" assetId={fashionAssetId} accessToken={session.access_token} maxBytes={25 * 1024 * 1024} label="试穿结果" /> : null}
       {isDesktopAgentTool && desktopTaskId ? <DesktopAgentTaskCard taskId={desktopTaskId} /> : null}

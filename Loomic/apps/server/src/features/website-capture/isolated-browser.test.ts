@@ -1,6 +1,36 @@
 import { describe, expect, it, vi } from "vitest";
+import { Readable } from "node:stream";
 
-import { blockIsolatedWebSocket, buildWebsiteClaims, buildWebsiteEvidence, buildWebsiteIntroduction, isPublicAddress, validatePublicHttpUrl } from "./isolated-browser.js";
+import { blockIsolatedWebSocket, buildWebsiteClaims, buildWebsiteEvidence, buildWebsiteIntroduction, createCaptureByteBudget, fulfillBoundedCaptureResponse, isPublicAddress, validatePublicHttpUrl } from "./isolated-browser.js";
+
+describe("capture byte budget", () => {
+  it("shares the limit across interleaved responses and fails closed on overflow", async () => {
+    const budget = createCaptureByteBudget(10);
+    const chunks = await Promise.all([4, 4, 4].map(async (size) => { await Promise.resolve(); return budget.consume(size); }));
+    expect(chunks).toEqual([true, true, false]);
+    expect(budget.exhausted()).toBe(true);
+    expect(budget.consume(1)).toBe(false);
+  });
+
+  it("accepts the exact limit and rejects invalid counts", () => {
+    const budget = createCaptureByteBudget(10);
+    expect(budget.consume(10)).toBe(true);
+    expect(budget.exhausted()).toBe(true);
+    expect(() => budget.consume(-1)).toThrow();
+    expect(() => createCaptureByteBudget(NaN)).toThrow();
+  });
+
+  it("charges bytes from an oversized response to the shared budget", async () => {
+    const budget = createCaptureByteBudget(10);
+    const route = { abort: vi.fn().mockResolvedValue(undefined), fulfill: vi.fn().mockResolvedValue(undefined) };
+    const stream = Readable.from([Buffer.from("123456")]);
+    expect(await fulfillBoundedCaptureResponse(route, stream, 200, {}, budget, 5)).toBe(0);
+    expect(route.abort).toHaveBeenCalledOnce();
+    expect(route.fulfill).not.toHaveBeenCalled();
+    expect(budget.consume(5)).toBe(false);
+    expect(budget.exhausted()).toBe(true);
+  });
+});
 
 describe("isolated website capture URL policy", () => {
   it.each([
