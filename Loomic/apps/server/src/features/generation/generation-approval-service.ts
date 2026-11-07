@@ -64,7 +64,7 @@ export function createGenerationApprovalService(db: Pool) {
     async gate(input: GateInput): Promise<GenerationApprovalGateResult> {
       if (input.estimatedCredits <= 0 && !input.forceConfirmation) return { state: "approved" };
 
-      const fingerprint = fingerprintPayload(input.payload);
+      const fingerprint = fingerprintPayload({ payload: input.payload, estimatedCredits: input.estimatedCredits });
       const autoApprove = await db.query<{ enabled: boolean }>(
         "select auto_approve_paid_generation as enabled from workspace_settings where workspace_id = $1",
         [input.workspaceId],
@@ -170,7 +170,7 @@ export function createGenerationApprovalService(db: Pool) {
       userId: string;
     }): Promise<GenerationApprovalRequest> {
       const existing = await db.query<ApprovalRow & { job_id?: string | null }>(
-        `select id, job_type, model, payload, payload_fingerprint, estimated_credits, expires_at, status, consumed_at, context, job_id
+        `select id, job_type, model, payload, payload_fingerprint, estimated_credits, expires_at, approved_at, status, consumed_at, context, job_id
          from generation_approvals where id = $1 and workspace_id = $2 and user_id = $3`,
         [input.approvalId, input.workspaceId, input.userId],
       );
@@ -181,27 +181,24 @@ export function createGenerationApprovalService(db: Pool) {
         `update generation_approvals
          set status = 'approved', approved_at = coalesce(approved_at, now())
          where id = $1 and workspace_id = $2 and user_id = $3
-           and status = 'pending' and consumed_at is null
+           and status = 'pending' and consumed_at is null and expires_at > now()
          returning id, job_type, model, payload, payload_fingerprint, estimated_credits, expires_at, context`,
         [input.approvalId, input.workspaceId, input.userId],
       );
       if (row.rows[0]) {
         const approval = row.rows[0];
-        if (new Date(approval.expires_at).getTime() <= Date.now()) {
-          await expire(db, input.approvalId);
-          throw new GenerationApprovalError("generation_approval_expired", "This generation confirmation has expired.");
-        }
         return toRequestFromRow(approval);
       }
 
       const current = await db.query<ApprovalRow & { job_id?: string | null }>(
-        `select id, job_type, model, payload, payload_fingerprint, estimated_credits, expires_at, status, consumed_at, context, job_id
+        `select id, job_type, model, payload, payload_fingerprint, estimated_credits, expires_at, approved_at, status, consumed_at, context, job_id
          from generation_approvals where id = $1 and workspace_id = $2 and user_id = $3`,
         [input.approvalId, input.workspaceId, input.userId],
       );
       const approval = current.rows[0];
       if (!approval) throw new GenerationApprovalError("generation_approval_invalid", "This generation confirmation is not valid.");
       if (approval.job_id) return { ...toRequestFromRow(approval), jobId: approval.job_id };
+      if (approval.status === "approved" && approval.approved_at && new Date(approval.approved_at).getTime() < new Date(approval.expires_at).getTime()) return toRequestFromRow(approval);
       if (new Date(approval.expires_at).getTime() <= Date.now()) {
         await expire(db, input.approvalId);
         throw new GenerationApprovalError("generation_approval_expired", "This generation confirmation has expired.");
@@ -221,11 +218,19 @@ export function createGenerationApprovalService(db: Pool) {
     },
 
     async reject(input: { approvalId: string; workspaceId: string; userId: string }) {
-      await db.query(
+      const rejected = await db.query<{ id: string }>(
         `update generation_approvals set status = 'rejected', rejected_at = now()
-         where id = $1 and workspace_id = $2 and user_id = $3 and status = 'pending' and consumed_at is null`,
+         where id = $1 and workspace_id = $2 and user_id = $3 and status = 'pending' and consumed_at is null
+         returning id`,
         [input.approvalId, input.workspaceId, input.userId],
       );
+      if (rejected.rows[0]) return;
+      const current = await db.query<{ status: string }>(
+        "select status from generation_approvals where id = $1 and workspace_id = $2 and user_id = $3",
+        [input.approvalId, input.workspaceId, input.userId],
+      );
+      if (current.rows[0]?.status === "rejected") return;
+      throw new GenerationApprovalError("generation_approval_invalid", "报价已确认、已过期或不存在，请恢复任务核对当前状态。");
     },
   };
 }
@@ -238,6 +243,7 @@ type ApprovalRow = {
   payload_fingerprint: string;
   estimated_credits: number;
   expires_at: string;
+  approved_at?: string | null;
   status?: GenerationApprovalState;
   consumed_at?: string | null;
   context?: GenerationApprovalRequest["context"];

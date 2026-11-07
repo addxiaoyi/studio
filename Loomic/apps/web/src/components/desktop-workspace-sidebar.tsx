@@ -1,11 +1,12 @@
 "use client";
 
-import { ChevronDown, ChevronRight, FolderKanban, Images, Settings, Wrench } from "lucide-react";
+import { ChevronDown, ChevronRight, Film, FolderKanban, Images, Settings, Wrench } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import type { FocusEvent, KeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import { useDesktopCopy } from "@/lib/desktop-copy";
+import { openVideoWorkspace } from "@/lib/video-navigation";
 
 /** `mode` 同时是路由段和文案键：标签一律从 desktop-copy 取，避免壳层硬编码中文。 */
 const advanced = [
@@ -26,7 +27,7 @@ export function DesktopWorkspaceSidebar() {
   const containerRef = useRef<HTMLElement>(null);
   // roving tabindex：同一时刻只有一项能被 Tab 命中，其余为 -1。
   const [activeIndex, setActiveIndex] = useState(0);
-  const settingsIndex = 2 + (advancedOpen ? advanced.length : 0);
+  const settingsIndex = 4 + (advancedOpen ? advanced.length : 0);
   const itemCount = settingsIndex + 1;
   // 折叠进阶项后索引可能越界，这里收敛到最后一个可见项，避免整组都没有 tabindex=0。
   const rovingIndex = Math.min(activeIndex, itemCount - 1);
@@ -43,6 +44,7 @@ export function DesktopWorkspaceSidebar() {
   }, []);
 
   function openMode(nextMode: string) {
+    if (pathname.startsWith("/video")) { window.location.assign(`/desktop-app/${nextMode}/`); return; }
     router.push(`/desktop-app/${nextMode}/`);
     setMode(nextMode);
     window.dispatchEvent(new Event("desktop:route-changed"));
@@ -110,13 +112,19 @@ export function DesktopWorkspaceSidebar() {
         <button type="button" tabIndex={rovingIndex === 0 ? 0 : -1} className="desktop-workspace-sidebar__item" aria-current={pathname.startsWith("/desktop-app/canvas") ? "page" : undefined} title={label.canvas} onClick={() => router.replace("/desktop-app/canvas/")}>
           <FolderKanban aria-hidden="true" /><span>{label.canvas}</span>
         </button>
-        <button type="button" tabIndex={rovingIndex === 1 ? 0 : -1} className="desktop-workspace-sidebar__item" aria-expanded={advancedOpen} title={label.advanced} onClick={() => setAdvancedOpen((open) => !open)}>
+        <button type="button" tabIndex={rovingIndex === 1 ? 0 : -1} className="desktop-workspace-sidebar__item" aria-current={pathname.startsWith("/fashion-gallery") ? "page" : undefined} title={label.fashion} onClick={() => router.push("/fashion-gallery/")}>
+          <Images aria-hidden="true" /><span>{label.fashion}</span>
+        </button>
+        <button type="button" tabIndex={rovingIndex === 2 ? 0 : -1} className="desktop-workspace-sidebar__item" aria-current={pathname.startsWith("/video") ? "page" : undefined} title={label.video} onClick={openVideoWorkspace}>
+          <Film aria-hidden="true" /><span>{label.video}</span>
+        </button>
+        <button type="button" tabIndex={rovingIndex === 3 ? 0 : -1} className="desktop-workspace-sidebar__item" aria-expanded={advancedOpen} title={label.advanced} onClick={() => setAdvancedOpen((open) => !open)}>
           {advancedOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}<span>{label.advanced}</span>
         </button>
         {advancedOpen ? advanced.map(({ mode: itemMode, icon: Icon }, index) => {
           const itemLabel = label[itemMode];
           return (
-            <button key={itemMode} type="button" tabIndex={rovingIndex === 2 + index ? 0 : -1} className="desktop-workspace-sidebar__item" aria-current={pathname === "/desktop" && mode === itemMode ? "page" : undefined} title={itemLabel} onClick={() => openMode(itemMode)}>
+            <button key={itemMode} type="button" tabIndex={rovingIndex === 4 + index ? 0 : -1} className="desktop-workspace-sidebar__item" aria-current={pathname === "/desktop" && mode === itemMode ? "page" : undefined} title={itemLabel} onClick={() => openMode(itemMode)}>
               <Icon aria-hidden="true" /><span>{itemLabel}</span>
             </button>
           );

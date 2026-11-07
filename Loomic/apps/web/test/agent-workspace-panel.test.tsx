@@ -86,8 +86,9 @@ describe("Agent workspace state", () => {
     const mounted = render(<AgentWorkspacePanel accessToken="test" canvasId="canvas" />);
     await user.click(screen.getByRole("button", { name: "Agent workspace" }));
     await screen.findByRole("heading", { name: "Goal first" });
+    await user.click(screen.getByRole("combobox", { name: "Recent goals" }));
     expect(screen.queryByRole("option", { name: "Goal foreign" })).not.toBeInTheDocument();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Recent goals" }), "second");
+    await user.click(screen.getByRole("option", { name: "Goal second" }));
     expect(screen.getByText("Result second")).toBeInTheDocument();
     expect(sessionStorage.getItem("agent-goal:canvas")).toBe("second");
     mounted.unmount();

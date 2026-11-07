@@ -89,7 +89,7 @@ function createWs(connected: boolean) {
   return ws as unknown as WebSocketHandle & { startRun: ReturnType<typeof vi.fn>; connected: boolean };
 }
 
-function renderSidebar(ws: WebSocketHandle, onInitialPromptHandoff?: (outcome: "sent" | "dismissed") => void) {
+function renderSidebar(ws: WebSocketHandle, onInitialPromptHandoff?: (outcome: "sent" | "dismissed") => void, requireInitialPaidConfirmation = false) {
   return render(
     <ToastProvider>
       <TierLimitToastProvider>
@@ -100,6 +100,7 @@ function renderSidebar(ws: WebSocketHandle, onInitialPromptHandoff?: (outcome: "
           onToggle={() => {}}
           ws={ws}
           initialPrompt={PROMPT}
+          requireInitialPaidConfirmation={requireInitialPaidConfirmation}
           {...(onInitialPromptHandoff ? { onInitialPromptHandoff } : {})}
         />
       </TierLimitToastProvider>
@@ -108,6 +109,7 @@ function renderSidebar(ws: WebSocketHandle, onInitialPromptHandoff?: (outcome: "
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
   Object.defineProperty(Element.prototype, "scrollIntoView", {
     configurable: true,
     value: vi.fn(),
@@ -153,6 +155,31 @@ afterEach(() => {
 });
 
 describe("ChatSidebar initial prompt delivery", () => {
+  it("does not send a strict try-on request when its approval policy is missing", async () => {
+    const ws = createWs(true);
+    renderSidebar(ws, undefined, true);
+    await waitFor(() => expect(screen.getByRole("button", { name: "重试发送" })).toBeInTheDocument());
+    expect(ws.startRun).not.toHaveBeenCalled();
+    expect(saveMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("retains the strict approval policy and references after a failed send", async () => {
+    const ws = createWs(true);
+    const user = userEvent.setup();
+    sessionStorage.setItem("helstera:initial-attachments", JSON.stringify([
+      { assetId: "person", url: "/person", mimeType: "image/png", source: "upload" },
+      { assetId: "outfit", url: "/outfit", mimeType: "image/webp", source: "upload" },
+    ]));
+    sessionStorage.setItem("helstera:initial-image-generation-preference", JSON.stringify({ mode: "auto", models: [], requirePaidConfirmation: true }));
+    saveMessageMock.mockImplementationOnce(() => { throw new Error("network down"); });
+    renderSidebar(ws, undefined, true);
+    await user.click(await screen.findByRole("button", { name: "重试发送" }));
+    await waitFor(() => expect(ws.startRun).toHaveBeenCalledTimes(1));
+    const payload = ws.startRun.mock.calls[0]?.[0] as { attachments: unknown[]; imageGenerationPreference: { requirePaidConfirmation: boolean } };
+    expect(payload.attachments).toHaveLength(2);
+    expect(payload.imageGenerationPreference.requirePaidConfirmation).toBe(true);
+  });
+
   it("parks the goal visibly instead of dropping it while the socket is down", async () => {
     const ws = createWs(false);
     renderSidebar(ws);

@@ -76,6 +76,7 @@ function CanvasPageContent() {
   const assetId = searchParams.get("assetId");
   const assetMediaType = searchParams.get("mediaType");
   const initialSessionId = searchParams.get("session") ?? undefined;
+  const [requireInitialPaidConfirmation] = useState(() => searchParams.get("confirmPaid") === "1");
   // Capture the goal once. It stays in the URL until the send pipeline confirms the
   // handoff (see `handleInitialPromptHandoff`), and a second copy lives in
   // sessionStorage because intermediate `?session=` / `?id=` rewrites drop `prompt`.
@@ -273,6 +274,7 @@ function CanvasPageContent() {
     if (!searchParams.has("prompt")) return;
     const next = new URLSearchParams(searchParams.toString());
     next.delete("prompt");
+    next.delete("confirmPaid");
     const query = next.toString();
     router.replace(query ? `${pathname}?${query}` : pathname);
   }, [initialPromptSettled, pathname, router, searchParams]);
@@ -631,6 +633,7 @@ function CanvasPageContent() {
         onCanvasSync={handleCanvasSync}
         onStreamEvent={checkForTimedOutJobs}
         initialPrompt={initialPrompt}
+        requireInitialPaidConfirmation={requireInitialPaidConfirmation}
         {...(initialPrompt ? { onInitialPromptHandoff: handleInitialPromptHandoff } : {})}
         initialSessionId={initialSessionId}
         onSessionChange={handleSessionChange}

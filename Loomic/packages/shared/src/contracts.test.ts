@@ -87,6 +87,7 @@ describe("@helstera/shared contracts", () => {
       prompt: "Generate a campaign key visual",
       imageGenerationPreference: {
         mode: "manual",
+        requirePaidConfirmation: true,
         models: [
           "google/nano-banana-2",
           "black-forest-labs/flux-kontext-pro",
@@ -95,6 +96,7 @@ describe("@helstera/shared contracts", () => {
     });
 
     expect(result.imageGenerationPreference?.mode).toBe("manual");
+    expect(result.imageGenerationPreference?.requirePaidConfirmation).toBe(true);
     expect(result.imageGenerationPreference?.models).toEqual([
       "google/nano-banana-2",
       "black-forest-labs/flux-kontext-pro",

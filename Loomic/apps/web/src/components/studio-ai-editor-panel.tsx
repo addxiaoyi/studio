@@ -1,5 +1,7 @@
 "use client";
 
+import { AppSelect } from "@/components/ui/app-select";
+
 import { useRef, useState } from "react";
 import { Bot, Sparkles, Upload, Undo2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -59,7 +61,7 @@ export function StudioAiEditorPanel(props: Props) {
         <summary className="cursor-pointer text-xs font-medium">{copy("背景音乐（可选）")}</summary>
         <div className="mt-3 space-y-3">
           {!flow.audio.length ? <div className="space-y-2"><p className="text-xs text-muted-foreground">{copy("当前工程还没有音乐，导入后即可设置起播时间和音量。")}</p><Button size="sm" variant="outline" disabled={locked} onClick={importMusic}><Upload className="size-3" />{copy("导入音乐")}</Button></div> : <>
-            <label className="block text-xs">{copy("背景音乐素材")}<select aria-label={copy("背景音乐素材")} value={flow.music} onChange={event => flow.setMusic(event.target.value)} disabled={locked} className="mt-1 w-full rounded border bg-background p-2 text-base sm:text-sm"><option value="">{copy("不添加音乐")}</option>{flow.audio.map(item => <option key={item.name}>{item.name}</option>)}</select></label>
+            <label className="block text-xs">{copy("背景音乐素材")}<AppSelect aria-label={copy("背景音乐素材")} value={flow.music} onChange={event => flow.setMusic(event.target.value)} disabled={locked} className="mt-1 w-full rounded border bg-background p-2 text-base sm:text-sm"><option value="">{copy("不添加音乐")}</option>{flow.audio.map(item => <option key={item.name}>{item.name}</option>)}</AppSelect></label>
             {flow.music && <><label className="block text-xs">{copy("音乐音量")} {flow.volume}%<input aria-label={copy("音乐音量")} type="range" min={0} max={100} value={flow.volume} onChange={event => flow.setVolume(Number(event.target.value))} disabled={locked} className="w-full" /></label><label className="block text-xs">{copy("音乐起播（秒）")}<input aria-label={copy("音乐起播（秒）")} type="number" min={0} max={Math.max(0, (flow.target?.duration ?? 7200) - 0.1)} step={0.1} value={flow.musicStart} onChange={event => flow.setMusicStart(Number(event.target.value))} disabled={locked} className="mt-1 w-full rounded border bg-background p-2 text-base sm:text-sm" /></label></>}
           </>}
         </div>

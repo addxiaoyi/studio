@@ -9,7 +9,7 @@ import {
 } from "../features/generation/generation-approval-service.js";
 import { createGenerationApprovalService } from "../features/generation/generation-approval-service.js";
 import type { JobService } from "../features/jobs/job-service.js";
-import type { CreditService } from "../features/credits/credit-service.js";
+import { CreditServiceError, type CreditService } from "../features/credits/credit-service.js";
 import { assertConnectorEnabled, ConnectorDisabledError } from "../features/agent-goals/connector-gate.js";
 
 export function registerGenerationApprovalRoutes(
@@ -283,6 +283,9 @@ function approvalError(error: unknown, reply: FastifyReply) {
   }
   if (error instanceof GenerationApprovalError) {
     return reply.code(error.statusCode).send({ ok: false, error: { code: error.code, message: error.message } });
+  }
+  if (error instanceof CreditServiceError && error.code === "insufficient_credits") {
+    return reply.code(402).send({ ok: false, error: { code: error.code, message: error.message } });
   }
   console.error("[generation-approvals] request failed", error);
   return reply.code(500).send({ ok: false, error: { code: "generation_approval_failed", message: "Unable to update generation confirmation." } });

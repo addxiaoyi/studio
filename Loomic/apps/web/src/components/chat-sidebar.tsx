@@ -105,6 +105,7 @@ type ChatSidebarProps = {
   /** Called for every stream event — used by job fallback polling to detect timed-out jobs */
   onStreamEvent?: (event: StreamEvent) => void;
   initialPrompt?: string | undefined;
+  requireInitialPaidConfirmation?: boolean;
   /** Called once the stashed goal was handed to the run pipeline ("sent") or dropped by the user ("dismissed"), so the caller can clear its URL/storage copy. */
   onInitialPromptHandoff?: ((outcome: "sent" | "dismissed") => void) | undefined;
   initialSessionId?: string | undefined;
@@ -132,6 +133,7 @@ export function ChatSidebar({
   onCanvasSync,
   onStreamEvent,
   initialPrompt,
+  requireInitialPaidConfirmation = false,
   onInitialPromptHandoff,
   initialSessionId,
   onSessionChange,
@@ -1298,7 +1300,6 @@ export function ChatSidebar({
       const raw = sessionStorage.getItem(INITIAL_ATTACHMENTS_KEY);
       if (raw) {
         storedAttachments = JSON.parse(raw) as ReadyAttachment[];
-        sessionStorage.removeItem(INITIAL_ATTACHMENTS_KEY);
       }
 
       const preferenceRaw = sessionStorage.getItem(
@@ -1308,7 +1309,6 @@ export function ChatSidebar({
         storedImageGenerationPreference = JSON.parse(
           preferenceRaw,
         ) as ImageGenerationPreference;
-        sessionStorage.removeItem(INITIAL_IMAGE_GENERATION_PREFERENCE_KEY);
       }
 
       const videoPreferenceRaw = sessionStorage.getItem(
@@ -1318,16 +1318,26 @@ export function ChatSidebar({
         storedVideoGenerationPreference = JSON.parse(
           videoPreferenceRaw,
         ) as VideoGenerationPreference;
-        sessionStorage.removeItem(INITIAL_VIDEO_GENERATION_PREFERENCE_KEY);
       }
 
       const modelRaw = sessionStorage.getItem(INITIAL_AGENT_MODEL_KEY);
       if (modelRaw) {
         storedAgentModel = modelRaw;
-        sessionStorage.removeItem(INITIAL_AGENT_MODEL_KEY);
       }
     } catch {
-      // Malformed JSON or unavailable storage
+      if (requireInitialPaidConfirmation) {
+        initialPromptSent.current = true;
+        setInitialPromptState("failed");
+        return;
+      }
+    }
+    if (requireInitialPaidConfirmation && (
+      storedImageGenerationPreference?.requirePaidConfirmation !== true ||
+      !Array.isArray(storedAttachments) || storedAttachments.length !== 2
+    )) {
+      initialPromptSent.current = true;
+      setInitialPromptState("failed");
+      return;
     }
 
     if (storedAgentModel) {
@@ -1375,6 +1385,7 @@ export function ChatSidebar({
     };
   }, [
     initialPrompt,
+    requireInitialPaidConfirmation,
     sessionsLoading,
     ws.connected,
     activeSessionId,
@@ -1389,6 +1400,14 @@ export function ChatSidebar({
   useEffect(() => {
     if (initialPromptState !== "sending" || !streaming) return;
     initialPromptDelivered.current = true;
+    try {
+      sessionStorage.removeItem(INITIAL_ATTACHMENTS_KEY);
+      sessionStorage.removeItem(INITIAL_IMAGE_GENERATION_PREFERENCE_KEY);
+      sessionStorage.removeItem(INITIAL_VIDEO_GENERATION_PREFERENCE_KEY);
+      sessionStorage.removeItem(INITIAL_AGENT_MODEL_KEY);
+    } catch {
+      // The run has already started; storage cleanup must not resend it.
+    }
     setInitialPromptState("idle");
     onInitialPromptHandoff?.("sent");
   }, [initialPromptState, streaming, onInitialPromptHandoff]);
@@ -1403,6 +1422,14 @@ export function ChatSidebar({
   const dismissInitialPrompt = useCallback(() => {
     initialPromptSent.current = true;
     setInitialPromptState("idle");
+    try {
+      sessionStorage.removeItem(INITIAL_ATTACHMENTS_KEY);
+      sessionStorage.removeItem(INITIAL_IMAGE_GENERATION_PREFERENCE_KEY);
+      sessionStorage.removeItem(INITIAL_VIDEO_GENERATION_PREFERENCE_KEY);
+      sessionStorage.removeItem(INITIAL_AGENT_MODEL_KEY);
+    } catch {
+      // Dismissing a prompt must remain possible when storage is unavailable.
+    }
     onInitialPromptHandoff?.("dismissed");
   }, [onInitialPromptHandoff]);
 

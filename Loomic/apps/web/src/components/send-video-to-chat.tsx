@@ -1,5 +1,7 @@
 "use client";
 
+import { AppSelect } from "@/components/ui/app-select";
+
 import { useState } from "react";
 import { getServerBaseUrl } from "@/lib/env";
 import { useVideoText } from "@/lib/video-copy";
@@ -45,7 +47,7 @@ export function SendVideoToChat({ assetId, token, media = "video" }: { assetId: 
   const target = sessions?.find((item) => item.id === selected);
   return <div className="flex flex-wrap items-center gap-2">
     {sessions === null ? <button type="button" onClick={loadSessions} disabled={busy} className="rounded border px-3 py-2 text-sm disabled:opacity-50">{copy(busy ? "正在加载会话" : "发送到聊天")}</button> : <>
-      <label className="text-sm">{copy("聊天会话")} <select value={selected} onChange={(event) => { setSelected(event.currentTarget.value); setDelivered(false); }} disabled={busy} className="max-w-64 rounded border bg-background p-2"><option value="">{copy(sessions.length ? "选择会话" : "没有可用会话")}</option>{sessions.map((item) => <option key={item.id} value={item.id}>{item.canvasName} / {item.title}</option>)}</select></label>
+      <label className="text-sm">{copy("聊天会话")} <AppSelect value={selected} onChange={(event) => { setSelected(event.currentTarget.value); setDelivered(false); }} disabled={busy} className="max-w-64 rounded border bg-background p-2"><option value="">{copy(sessions.length ? "选择会话" : "没有可用会话")}</option>{sessions.map((item) => <option key={item.id} value={item.id}>{item.canvasName} / {item.title}</option>)}</AppSelect></label>
       <button type="button" onClick={send} disabled={!selected || busy} className="rounded border px-3 py-2 text-sm disabled:opacity-50">{copy("发送")}</button>
     </>}
     {error && <p role="alert" className="text-sm text-destructive">{copy(error)}</p>}

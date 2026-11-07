@@ -42,6 +42,7 @@ export function useCreateProject() {
       model?: string;
       destination?: "canvas" | "storyboard";
       desktopMode?: boolean;
+      idempotencyKey?: string;
     }) => {
       const token = session?.access_token;
       if (!token || pendingRef.current) return pendingRef.current ?? false;
@@ -56,7 +57,8 @@ export function useCreateProject() {
             JSON.stringify(opts.attachments),
           );
         } catch {
-          // sessionStorage write failure is non-fatal
+          toastError("无法暂存参考图片，请检查浏览器存储设置后重试。");
+          return false;
         }
       } else {
         sessionStorage.removeItem(INITIAL_ATTACHMENTS_KEY);
@@ -69,7 +71,10 @@ export function useCreateProject() {
             JSON.stringify(opts.imageGenerationPreference),
           );
         } catch {
-          // sessionStorage write failure is non-fatal
+          if (opts.imageGenerationPreference.requirePaidConfirmation) {
+            toastError("无法保存费用确认设置，请检查浏览器存储设置后重试。");
+            return false;
+          }
         }
       } else {
         sessionStorage.removeItem(INITIAL_IMAGE_GENERATION_PREFERENCE_KEY);
@@ -107,7 +112,7 @@ export function useCreateProject() {
       );
       const newTab = desktopMode ? null : window.open("/loading-preview", "_blank");
 
-      const requestKey = crypto.randomUUID();
+      const requestKey = opts?.idempotencyKey ?? crypto.randomUUID();
       setCreating(true);
       const task = (async () => {
         try {
@@ -123,7 +128,7 @@ export function useCreateProject() {
             opts?.destination === "storyboard"
               ? `/storyboard?projectId=${encodeURIComponent(result.project.id)}`
               : opts?.prompt
-                ? `${canvasRoute}?id=${canvasId}&prompt=${encodeURIComponent(opts.prompt)}`
+                ? `${canvasRoute}?id=${canvasId}&prompt=${encodeURIComponent(opts.prompt)}${opts.imageGenerationPreference?.requirePaidConfirmation ? "&confirmPaid=1" : ""}`
                 : `${canvasRoute}?id=${canvasId}`;
 
           if (newTab) {

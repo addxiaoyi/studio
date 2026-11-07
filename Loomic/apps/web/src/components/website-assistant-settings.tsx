@@ -1,5 +1,7 @@
 "use client";
 
+import { AppSelect } from "@/components/ui/app-select";
+
 import { useEffect, useState } from "react";
 import type { DesktopAgentExecutionMode, DesktopAgentRole, DesktopCapability, WebsiteCaptureAssistantConnection, WebsiteCapturePairing } from "@helstera/shared";
 import { cancelDesktopAgentTask, createDesktopAgentTask, createWebsiteCapturePairing, fetchDesktopAgentTasks, fetchWebsiteAssistantConnection, resolveDesktopAgentApproval, revokeWebsiteAssistant, setWebsiteAssistantPaused, type DesktopAgentTaskResponse } from "@/lib/server-api";
@@ -209,13 +211,13 @@ export function WebsiteAssistantSettings({ accessToken }: { accessToken: string 
           <label className="block text-[11px] font-medium" htmlFor="desktop-agent-goal">任务目标</label>
           <textarea id="desktop-agent-goal" value={desktopGoal} onChange={(event) => setDesktopGoal(event.target.value)} placeholder="例如：读取当前页面标题、导航和主要功能" className="min-h-16 w-full resize-y rounded-md border border-border/60 bg-background px-2 py-2 text-sm" />
           <label className="block text-[11px] font-medium" htmlFor="desktop-agent-mode">执行模式</label>
-          <select id="desktop-agent-mode" value={executionMode} onChange={(event) => changeExecutionMode(event.target.value as DesktopAgentExecutionMode)} className="h-9 rounded-md border border-border/60 bg-background px-2 text-xs">
+          <AppSelect id="desktop-agent-mode" value={executionMode} onChange={(event) => changeExecutionMode(event.target.value as DesktopAgentExecutionMode)} className="h-9 rounded-md border border-border/60 bg-background px-2 text-xs">
             {EXECUTION_MODES.map((mode) => <option key={mode} value={mode}>{MODE_LABELS[mode]}</option>)}
-          </select>
+          </AppSelect>
           <p className="text-[11px] leading-5 text-muted-foreground">{MODE_DESCRIPTIONS[executionMode]}</p>
           <p className={executionClientReady ? "text-[11px] text-emerald-700" : "text-[11px] text-amber-700"} role="status">{connectionHint}</p>
           <div className="flex flex-wrap gap-2">
-            <label className="flex items-center gap-1.5 text-[11px]"><span>角色</span><select value={desktopRole} onChange={(event) => setDesktopRole(event.target.value as DesktopAgentRole)} className="h-8 rounded-md border border-border/60 bg-background px-2 text-xs"><option value="researcher">研究员</option><option value="planner">规划员</option><option value="operator">操作员</option><option value="reviewer">审阅员</option></select></label>
+            <label className="flex items-center gap-1.5 text-[11px]"><span>角色</span><AppSelect value={desktopRole} onChange={(event) => setDesktopRole(event.target.value as DesktopAgentRole)} className="h-8 rounded-md border border-border/60 bg-background px-2 text-xs"><option value="researcher">研究员</option><option value="planner">规划员</option><option value="operator">操作员</option><option value="reviewer">审阅员</option></AppSelect></label>
             {MODE_CAPABILITIES[executionMode].map((capability) => {
               const required = REQUIRED_MODE_CAPABILITIES[executionMode]?.includes(capability) ?? false;
               return <label key={capability} className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border/60 px-2 text-[11px]"><input type="checkbox" checked={desktopCapabilities.includes(capability)} onChange={() => toggleCapability(capability)} disabled={required} />{capability}{required ? <span className="text-muted-foreground">必需</span> : null}</label>;

@@ -11,6 +11,47 @@ const baseInput = {
 };
 
 describe("generation approval service", () => {
+  it("requires explicit confirmation for a zero-cost try-on even with automatic approval enabled", async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [{ enabled: true }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: "approval-free", expires_at: "2030-01-01T00:00:00.000Z" }] });
+    await expect(createGenerationApprovalService({ query } as never).gate({ ...baseInput, estimatedCredits: 0, forceConfirmation: true })).resolves.toMatchObject({ state: "confirmation_required", request: { approvalId: "approval-free" } });
+  });
+  it("binds the confirmation fingerprint to the estimated cost", async () => {
+    const createRequest = async (estimatedCredits: number) => {
+      const query = vi.fn()
+        .mockResolvedValueOnce({ rows: [{ enabled: true }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ id: "approval", expires_at: "2030-01-01T00:00:00.000Z" }] });
+      return createGenerationApprovalService({ query } as any).gate({ ...baseInput, estimatedCredits, forceConfirmation: true });
+    };
+
+    const first = await createRequest(2.25);
+    const revised = await createRequest(3);
+    expect(first.state).toBe("confirmation_required");
+    expect(revised.state).toBe("confirmation_required");
+    if (first.state !== "confirmation_required" || revised.state !== "confirmation_required") throw new Error("Expected confirmations");
+    expect(first.request.payloadFingerprint).not.toBe(revised.request.payloadFingerprint);
+  });
+
+  it("requires confirmation for a paid request even when the workspace auto-approves", async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [{ enabled: true }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: "approval-forced", expires_at: "2030-01-01T00:00:00.000Z" }] });
+    const service = createGenerationApprovalService({ query } as any);
+
+    await expect(service.gate({ ...baseInput, forceConfirmation: true })).resolves.toMatchObject({
+      state: "confirmation_required",
+      request: { approvalId: "approval-forced" },
+    });
+    expect(String(query.mock.calls[1]?.[0])).toContain("update generation_approvals");
+  });
+
   it("does not consume an already approved request while recovering a missing job", async () => {
     const query = vi.fn()
       .mockResolvedValueOnce({ rows: [{ enabled: false }] })

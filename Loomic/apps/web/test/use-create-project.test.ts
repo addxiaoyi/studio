@@ -70,6 +70,15 @@ describe("useCreateProject result contract", () => {
     expect(String(routerPushMock.mock.calls[0]?.[0])).toContain("canvas-1");
   });
 
+  it("forwards the caller's idempotency key to the project API", async () => {
+    createProjectMock.mockResolvedValueOnce({ project: { id: "project-1", primaryCanvas: { id: "canvas-1" } } });
+    const { result } = renderHook(() => useCreateProject());
+    await act(async () => {
+      await result.current.create({ idempotencyKey: "try-on-request", desktopMode: true });
+    });
+    expect(createProjectMock).toHaveBeenCalledWith("token", { name: "Untitled" }, { idempotencyKey: "try-on-request" });
+  });
+
   it("shares one in-flight request across rapid double submits", async () => {
     let resolveCreate: (value: unknown) => void = () => {};
     createProjectMock.mockImplementationOnce(
@@ -90,5 +99,42 @@ describe("useCreateProject result contract", () => {
     expect(createProjectMock).toHaveBeenCalledTimes(1);
     expect(first).toBe(true);
     expect(second).toBe(true);
+  });
+
+  it("does not create a project if reference attachments cannot be stored", async () => {
+    vi.stubGlobal("sessionStorage", {
+      setItem: vi.fn(() => { throw new Error("storage unavailable"); }),
+      removeItem: vi.fn(),
+    });
+    const { result } = renderHook(() => useCreateProject());
+    let created: boolean | undefined;
+    await act(async () => {
+      created = await result.current.create({
+        prompt: "try on",
+        attachments: [{ assetId: "asset", url: "/image", mimeType: "image/png", source: "upload" }],
+      });
+    });
+    expect(created).toBe(false);
+    expect(createProjectMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not create a project when a mandatory approval policy cannot be stored", async () => {
+    vi.stubGlobal("sessionStorage", {
+      setItem: vi.fn(() => { throw new Error("storage unavailable"); }),
+      removeItem: vi.fn(),
+    });
+    const { result } = renderHook(() => useCreateProject());
+    let created: boolean | undefined;
+    await act(async () => {
+      created = await result.current.create({
+        prompt: "try on",
+        imageGenerationPreference: { mode: "auto", models: [], requirePaidConfirmation: true },
+      });
+    });
+    expect(created).toBe(false);
+    expect(createProjectMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

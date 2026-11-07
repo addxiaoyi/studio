@@ -1,4 +1,6 @@
 "use client";
+
+import { AppSelect } from "@/components/ui/app-select";
 import {useEffect,useRef,useState} from "react";
 import type {VideoMaterialRequest} from "@helstera/shared";
 import {fetchVideoModels,type VideoModelInfo} from "@/lib/server-api";
@@ -37,9 +39,9 @@ export function StudioMaterialGeneration({request,userId,token,runtime,compositi
     <h3 className="text-sm font-medium">{english?"Generate a shot":"生成视频镜头"}</h3>
     {!state?<>
       <label className="block text-xs">{english?"Shot description":"镜头描述"}<textarea value={prompt} onChange={event=>setPrompt(event.target.value)} rows={3} className="mt-1 w-full rounded border bg-background p-2 text-base sm:text-sm"/></label>
-      <label className="block text-xs">{english?"Model":"视频模型"}<select aria-label="视频模型" value={model} onChange={event=>setModel(event.target.value)} disabled={loading} className="mt-1 w-full rounded border bg-background p-2 text-base sm:text-sm">{!models.length&&<option>{loading?"加载模型…":"暂无可用模型"}</option>}{models.map(item=><option key={item.id} value={item.id}>{item.displayName}</option>)}</select></label>
-      <div className="grid grid-cols-2 gap-2"><label className="text-xs">{english?"Seconds":"时长"}<select aria-label="生成时长" value={selectedDuration} onChange={event=>setDuration(Number(event.target.value))} className="mt-1 w-full rounded border bg-background p-2">{seconds.map(value=><option key={value}>{value}</option>)}</select></label><label className="text-xs">{english?"Resolution":"分辨率"}<select value={selectedResolution} onChange={event=>setResolution(event.target.value)} className="mt-1 w-full rounded border bg-background p-2">{resolutions.map(value=><option key={value}>{value}</option>)}</select></label></div>
-      <label className="block text-xs">{english?"Aspect ratio":"画幅"}<select value={ratio} onChange={event=>setRatio(event.target.value as "16:9"|"9:16")} className="ml-2 rounded border bg-background p-2"><option>16:9</option><option>9:16</option></select></label>
+      <label className="block text-xs">{english?"Model":"视频模型"}<AppSelect aria-label="视频模型" value={model} onChange={event=>setModel(event.target.value)} disabled={loading} className="mt-1 w-full rounded border bg-background p-2 text-base sm:text-sm">{!models.length&&<option>{loading?"加载模型…":"暂无可用模型"}</option>}{models.map(item=><option key={item.id} value={item.id}>{item.displayName}</option>)}</AppSelect></label>
+      <div className="grid grid-cols-2 gap-2"><label className="text-xs">{english?"Seconds":"时长"}<AppSelect aria-label="生成时长" value={selectedDuration} onChange={event=>setDuration(Number(event.target.value))} className="mt-1 w-full rounded border bg-background p-2">{seconds.map(value=><option key={value}>{value}</option>)}</AppSelect></label><label className="text-xs">{english?"Resolution":"分辨率"}<AppSelect value={selectedResolution} onChange={event=>setResolution(event.target.value)} className="mt-1 w-full rounded border bg-background p-2">{resolutions.map(value=><option key={value}>{value}</option>)}</AppSelect></label></div>
+      <label className="block text-xs">{english?"Aspect ratio":"画幅"}<AppSelect value={ratio} onChange={event=>setRatio(event.target.value as "16:9"|"9:16")} className="ml-2 rounded border bg-background p-2"><option>16:9</option><option>9:16</option></AppSelect></label>
       <p className="text-xs text-muted-foreground">{english?"Review the exact charge before this task starts.":"先查询本次精确费用，确认后才创建生成任务。"}</p>
       <Button className="w-full" disabled={busy||loading||!model||!prompt.trim()} onClick={()=>void generation.start({prompt,model,duration:selectedDuration,resolution:selectedResolution,aspectRatio:ratio,requireConfirmation:true})}>{english?"Review generation cost":"查看本次生成费用"}</Button>
     </>:<>

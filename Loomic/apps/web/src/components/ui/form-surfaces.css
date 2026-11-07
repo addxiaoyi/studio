@@ -1,0 +1,10 @@
+:where(input:not([type]), input[type="text"], input[type="search"], input[type="email"], input[type="url"], input[type="password"], input[type="number"], textarea):not(.visualforge-native-root *) {
+  border-color: var(--input-border, var(--border));
+  color: var(--foreground);
+  caret-color: var(--foreground);
+}
+:where(input[type="checkbox"], input[type="radio"], input[type="range"]):not(.visualforge-native-root *) { accent-color: var(--primary); }
+:where(select):not(.visualforge-native-root *):not([hidden]) { min-height: 36px; border: 1px solid var(--input-border, var(--border)); border-radius: 8px; background: var(--background); color: var(--foreground); padding: 6px 10px; font: inherit; }
+:where(select option):not(.visualforge-native-root *) { background: var(--popover); color: var(--popover-foreground); }
+[data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"] { background: var(--popover); border-color: var(--border); }
+[data-slot="input"] { background: var(--background); border-color: var(--input-border, var(--border)); }

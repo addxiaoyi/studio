@@ -310,6 +310,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
   const isVideoTool = block.toolName === "generate_video";
   const isWebsiteTool = block.toolName === "website_capture";
   const isVideoExport = block.toolName === "video_export";
+  const fashionAssetId = block.toolName === "fashion_try_on" && typeof block.output?.assetId === "string" ? block.output.assetId : undefined;
   const exportedAssetId = isVideoExport && typeof block.output?.assetId === "string" ? block.output.assetId : undefined;
   const isDesktopAgentTool = block.toolName === "desktop_control";
   const isDesktopMcpTool = block.toolName.startsWith("screen_");
@@ -465,6 +466,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
 
       {isWebsiteTool && websiteTaskId ? <WebsiteCaptureProgressCard taskId={websiteTaskId} /> : null}
       {exportedAssetId && session?.access_token ? <AuthenticatedRecording assetId={exportedAssetId} accessToken={session.access_token} maxBytes={250 * 1024 * 1024} label="视频成片" /> : null}
+      {fashionAssetId && session?.access_token ? <AuthenticatedRecording kind="image" assetId={fashionAssetId} accessToken={session.access_token} maxBytes={25 * 1024 * 1024} label="试穿结果" /> : null}
       {isDesktopAgentTool && desktopTaskId ? <DesktopAgentTaskCard taskId={desktopTaskId} /> : null}
 
       {/* Layer 2b-err: Media generation failed */}

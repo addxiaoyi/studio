@@ -70,7 +70,8 @@ test("real auth, approval and current-composition edits survive a lost receipt a
   const goal = page.getByLabel("描述视频编辑目标");
   await goal.fill("使用 clip.mp4 的第0至1.5秒替换当前合成为横屏，在0至1秒插入字幕‘编辑器真实验收’，添加 music.wav 从0.2秒开始以30%音量播放，最后导出MP4。严格执行这些参数。");
   await page.getByText("背景音乐（可选）", { exact: true }).click();
-  await page.getByLabel("背景音乐素材", { exact: true }).selectOption("music.wav");
+  await page.getByRole("combobox", { name: "背景音乐素材", exact: true }).click();
+  await page.getByRole("option", { name: "music.wav", exact: true }).click();
   await page.getByLabel("音乐起播（秒）", { exact: true }).fill("0.2");
   const snapshotCheck = await page.evaluate(async () => {
     try { return await (window as any).remotion_browserStudio.loomicSnapshot("MyComp"); }

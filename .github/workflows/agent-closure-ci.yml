@@ -47,6 +47,10 @@ jobs:
           node scripts/test-local-postgres.mjs src/features/agent-goals/goal-steps.postgres.test.ts src/features/assets/private-lifecycle.postgres.test.ts src/local-db/private-upload-ownership.postgres.test.ts src/local-db/viewer-locks.postgres.test.ts src/features/onetake/onetake.postgres.test.ts src/features/video-editor/plan-store.postgres.test.ts
       - name: Structured model planning deadlines
         run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/goal-planner.test.ts src/features/agent-goals/goal-plan-timeout.test.ts src/features/video-editor/planner.test.ts
+      - name: Try-on billing and shared form regressions
+        run: |
+          pnpm --filter @helstera/server exec vitest run src/features/generation/fashion-billing.postgres.test.ts src/http/fashion-billing.test.ts src/http/image-models-route.test.ts src/http/generation-approvals.test.ts src/http/media-connector-gate.test.ts
+          pnpm --filter @helstera/web exec vitest run test/fashion-models.test.ts test/fashion-generation.test.ts test/app-select.test.tsx test/styled-select.test.tsx test/website-assistant-settings.test.tsx
       - name: Video conversation contracts and model gates
         run: |
           pnpm --filter @helstera/shared exec vitest run src/video-editor-contracts.test.ts src/video-editor-chat.test.ts src/video-motion.test.ts
@@ -100,6 +104,12 @@ jobs:
           pnpm --filter @helstera/web exec playwright install --with-deps chromium
       - name: Confirm, compare, undo, reload and decode export (injected model plan)
         run: pnpm --filter @helstera/web exec playwright test --config playwright.diff-undo.config.ts
+      - name: Prepare pinned fashion runtime
+        run: |
+          node scripts/prepare-creative-sources.mjs fashion
+          node scripts/build-fashion-runtime.mjs
+      - name: Try-on quote, result recovery and responsive menus (injected API)
+        run: pnpm --filter @helstera/web exec playwright test --config playwright.fashion-billing.config.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -107,5 +117,7 @@ jobs:
           path: |
             Loomic/.creative-test-results/video-diff-undo.json
             Loomic/.creative-test-results/video-diff-undo/
+            Loomic/.creative-test-results/fashion-billing.json
+            Loomic/.creative-test-results/fashion-billing/
           if-no-files-found: error
           retention-days: 7

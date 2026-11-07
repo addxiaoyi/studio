@@ -45,6 +45,7 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
     title?: string;
     input_asset_ids?: string[];
     input_images?: string[];
+    purpose?: "try-on";
     routing?: Record<string, unknown>;
   };
 
@@ -179,12 +180,12 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
     // (Helstera has no plan-based tiers — every user can use any
     // model as long as they have sufficient credit balance.)
 
-    // Upload to Storage under the project-assets bucket
+    const bucket = payload.purpose === "try-on" ? "private-try-on" : "project-assets";
     const ext = generated.mimeType === "image/webp" ? "webp" : generated.mimeType === "image/jpeg" ? "jpg" : "png";
     const objectPath = `${workspaceId}/generated/${jobId}.${ext}`;
 
     const { error: uploadError } = await ctx.storage.upload(
-      "project-assets",
+      bucket,
       objectPath,
       buffer,
       {
@@ -202,8 +203,8 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
 
     // Insert asset_objects record — only include created_by if we have a valid user UUID
     const assetRow = ctx.localDb
-      ? (await ctx.localDb.query("insert into asset_objects (workspace_id, bucket, object_path, mime_type, byte_size, created_by) values ($1, 'project-assets', $2, $3, $4, $5) on conflict (object_path) do update set mime_type=excluded.mime_type, byte_size=excluded.byte_size returning id", [workspaceId, objectPath, generated.mimeType ?? "image/png", buffer.length, createdBy])).rows[0]
-      : (await admin!.from("asset_objects").upsert({ workspace_id: workspaceId, bucket: "project-assets", object_path: objectPath, mime_type: generated.mimeType ?? "image/png", byte_size: buffer.length, ...(createdBy ? { created_by: createdBy } : {}) }, { onConflict: "object_path" }).select("id").single()).data;
+      ? (await ctx.localDb.query("insert into asset_objects (workspace_id, bucket, object_path, mime_type, byte_size, created_by) values ($1, $6, $2, $3, $4, $5) on conflict (object_path) do update set mime_type=excluded.mime_type, byte_size=excluded.byte_size returning id", [workspaceId, objectPath, generated.mimeType ?? "image/png", buffer.length, createdBy, bucket])).rows[0]
+      : (await admin!.from("asset_objects").upsert({ workspace_id: workspaceId, bucket, object_path: objectPath, mime_type: generated.mimeType ?? "image/png", byte_size: buffer.length, ...(createdBy ? { created_by: createdBy } : {}) }, { onConflict: "object_path" }).select("id").single()).data;
     if (!assetRow) {
       throw new Error(
         "Failed to create asset record: unknown error",
@@ -214,9 +215,29 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
 
     // Generate a public URL for the result consumer
     const assetId = (assetRow as { id: string }).id;
+    let tryOnAssetId: string | undefined;
+    if (payload.purpose === "try-on") {
+      const asset = { workspace_id: workspaceId, created_by: createdBy, source_job_id: jobId, media_type: "image", object_path: objectPath, mime_type: generated.mimeType ?? "image/png", title: "试穿结果", metadata: { model, width: generated.width, height: generated.height } };
+      if (ctx.localDb) {
+        const saved = await ctx.localDb.query(
+          `insert into generated_assets(workspace_id,created_by,source_job_id,media_type,object_path,mime_type,title,metadata)
+           values($1,$2,$3,'image',$4,$5,$6,$7) on conflict(workspace_id,object_path)
+           do update set mime_type=excluded.mime_type,metadata=excluded.metadata returning id`,
+          [workspaceId, createdBy, jobId, objectPath, asset.mime_type, asset.title, asset.metadata],
+        );
+        tryOnAssetId = saved.rows[0]?.id;
+      } else {
+        const saved = await admin!.from("generated_assets").upsert(asset, { onConflict: "workspace_id,object_path" }).select("id").single();
+        if (saved.error) throw new Error("试穿素材登记失败", { cause: saved.error });
+        tryOnAssetId = saved.data?.id;
+      }
+      if (!tryOnAssetId) throw new Error("试穿素材登记未返回标识");
+    }
     const resultUrl = ctx.localDb
       ? `/api/uploads/${assetId}/file`
-      : (await ctx.storage.getPublicUrl("project-assets", objectPath)).data?.signedUrl;
+      : payload.purpose === "try-on"
+        ? (await ctx.storage.createSignedUrls(bucket, [objectPath], 300)).data?.[0]?.signedUrl
+        : (await ctx.storage.getPublicUrl(bucket, objectPath)).data?.signedUrl;
     if (!resultUrl) throw new Error("Storage URL creation failed: missing URL");
 
     let canvasElementId: string | undefined;
@@ -225,6 +246,7 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
     if (canvasId) {
       try {
         const insertOptions = {
+          bucket: bucket as "project-assets" | "private-try-on",
           canvasId,
           objectPath,
           assetId,
@@ -279,7 +301,7 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
       ...(generated.usage ? { usage: generated.usage } : {}),
       mime_type: generated.mimeType ?? "image/png",
       model,
-      ...(feedAssetId ? { generated_asset_id: feedAssetId } : {}),
+      ...(feedAssetId || tryOnAssetId ? { generated_asset_id: feedAssetId || tryOnAssetId } : {}),
       ...(canvasElementId ? { canvas_element_id: canvasElementId } : {}),
       ...(syncError ? { sync_pending: true, sync_error_code: "canvas_sync_failed", sync_error_message: syncError } : {}),
       ...(payload.routing ? { routing: payload.routing } : {}),

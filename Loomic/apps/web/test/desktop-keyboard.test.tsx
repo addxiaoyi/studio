@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DesktopWorkspaceSidebar } from "@/components/desktop-workspace-sidebar";
 
-const { mockReplace } = vi.hoisted(() => ({ mockReplace: vi.fn() }));
+const { mockReplace, openVideo } = vi.hoisted(() => ({ mockReplace: vi.fn(), openVideo: vi.fn() }));
+
+vi.mock("@/lib/video-navigation", () => ({ openVideoWorkspace: openVideo }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/desktop-app/canvas",
@@ -61,10 +63,17 @@ describe("DesktopWorkspaceSidebar 键盘导航", () => {
     render(<DesktopWorkspaceSidebar />);
 
     const canvas = item("画布");
+    const fashion = item("女装图集");
+    const video = item("视频创作");
     const advancedToggle = item("高级能力");
     canvas.focus();
     expect(document.activeElement).toBe(canvas);
 
+    await user.keyboard("{ArrowDown}");
+
+    expect(document.activeElement).toBe(fashion);
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(video);
     await user.keyboard("{ArrowDown}");
 
     expect(document.activeElement).toBe(advancedToggle);
@@ -74,10 +83,23 @@ describe("DesktopWorkspaceSidebar 键盘导航", () => {
 
     await user.keyboard("{ArrowUp}");
 
+    expect(document.activeElement).toBe(video);
+    await user.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(fashion);
+    await user.keyboard("{ArrowUp}");
+
     expect(document.activeElement).toBe(canvas);
     expect(canvas.tabIndex).toBe(0);
     expect(advancedToggle.tabIndex).toBe(-1);
     expect(tabbableItems()).toHaveLength(1);
+  });
+
+  it("opens the video studio with a document navigation for isolation", async () => {
+    const user = userEvent.setup();
+    render(<DesktopWorkspaceSidebar />);
+    await user.click(item("视频创作"));
+    expect(openVideo).toHaveBeenCalledOnce();
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it("用 Home/End 跳到首尾，且两端不回绕", async () => {
@@ -148,6 +170,11 @@ describe("DesktopWorkspaceSidebar 键盘导航", () => {
     render(<DesktopWorkspaceSidebar />);
 
     item("画布").focus();
+    await user.keyboard("{ArrowDown}");
+
+    expect(document.activeElement).toBe(item("女装图集"));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(item("视频创作"));
     await user.keyboard("{ArrowDown}");
 
     expect(document.activeElement).toBe(item("高级能力"));

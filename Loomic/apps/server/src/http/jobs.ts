@@ -6,6 +6,8 @@ import type { Pool } from "pg";
 import type { BackgroundJobStatus, BackgroundJobType, ImageQualityLevel, VideoResolution } from "@helstera/shared";
 import {
   applicationErrorResponseSchemaLoose,
+  CONFIGURED_PRICE_MULTIPLIER,
+  TOKEN_BILLING_RESERVE_CREDITS,
   createImageJobRequestSchema,
   createVideoJobRequestSchema,
   getPlanConfig,
@@ -63,6 +65,12 @@ export async function registerJobRoutes(
       if (!user) return sendUnauthenticated(reply);
 
       const payload = createImageJobRequestSchema.parse(request.body);
+      if (payload.purpose === "try-on" && (!approvalService || !options.tierGuard || !options.creditService)) {
+        return reply.code(503).send({ error: { code: "generation_confirmation_unavailable", message: "试穿费用确认暂不可用，请稍后重试。" } });
+      }
+      if (payload.purpose === "try-on" && (payload.input_asset_ids?.length !== 2 || payload.input_images?.length)) {
+        return reply.code(400).send({ error: { code: "invalid_input", message: "试穿需要人物与服装两张已上传的私有参考图。" } });
+      }
       if (payload.model && isRemovedImageModelId(payload.model)) {
         return reply.code(410).send({ error: { code: "model_retired", message: "The selected image model has been retired." } });
       }
@@ -78,6 +86,7 @@ export async function registerJobRoutes(
       const requestedModel = payload.model ?? "black-forest-labs/flux-kontext-pro";
       const routedModel = options.localDb
         ? await resolveConfiguredModel(options.localDb, "image", requestedModel, {
+            requiresInputImage: Boolean(payload.input_asset_ids?.length || payload.input_images?.length),
             strictRequested: Boolean(payload.model),
             allowUnverified: Boolean(payload.model),
             excludeModelIds: [
@@ -116,10 +125,21 @@ export async function registerJobRoutes(
         const quality: ImageQualityLevel = "hd";
         await options.tierGuard.checkModelAccess(model);
         await options.tierGuard.checkConcurrency(viewer.workspace.id);
-        creditsCost = await options.tierGuard.calculateCreditCost(model, "image_generation", { quality });
+        if (payload.purpose === "try-on" && routedModel) {
+          // Quote the selected healthy route, not another provider sharing this model ID.
+          creditsCost = routedModel.billing_unit === "per_million_tokens"
+            ? TOKEN_BILLING_RESERVE_CREDITS
+            : Number(routedModel.price_credits) * CONFIGURED_PRICE_MULTIPLIER;
+          if (!Number.isFinite(creditsCost) || creditsCost < 0) {
+            return reply.code(503).send({ error: { code: "model_price_unavailable", message: "所选试穿模型尚未配置有效价格，请刷新模型目录。" } });
+          }
+        } else {
+          creditsCost = await options.tierGuard.calculateCreditCost(model, "image_generation", { quality });
+        }
       }
 
       const jobPayload = {
+        ...(payload.purpose ? { purpose: payload.purpose } : {}),
         prompt: payload.prompt,
         model,
         ...(routing ? { routing } : {}),
@@ -130,7 +150,7 @@ export async function registerJobRoutes(
         ...(payload.input_asset_ids !== undefined ? { input_asset_ids: payload.input_asset_ids } : {}),
       };
       let approvalId: string | undefined;
-      if (approvalService && creditsCost > 0) {
+      if (approvalService && (creditsCost > 0 || payload.purpose === "try-on")) {
         const gate = await approvalService.gate({
           workspaceId: viewer.workspace.id,
           userId: user.id,
@@ -138,6 +158,7 @@ export async function registerJobRoutes(
           model,
           payload: jobPayload,
           estimatedCredits: creditsCost,
+          forceConfirmation: payload.purpose === "try-on",
           context: {
             ...(payload.canvas_id ? { canvasId: payload.canvas_id } : {}),
             ...(payload.session_id ? { sessionId: payload.session_id } : {}),

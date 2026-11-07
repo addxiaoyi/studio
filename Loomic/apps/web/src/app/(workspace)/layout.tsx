@@ -23,6 +23,7 @@ const routeTitles: Record<string, string> = {
   "/storyboard": "分镜工作台",
   "/texture-lab": "纹理工坊",
   "/gallery": "作品库",
+  "/fashion-gallery": "女装试穿",
   "/prompts": "提示词库",
   "/ecom-images": "电商图",
   "/ecom-images/history": "电商图历史",
@@ -44,7 +45,7 @@ export default function WorkspaceLayout({
   const pathname = usePathname();
 
   useEffect(() => {
-    const title = routeTitles[pathname];
+    const title = routeTitles[pathname.replace(/\/$/, "")];
     if (title) document.title = `${title} | Helstera`;
   }, [pathname]);
 

@@ -10,6 +10,7 @@ import type { Pool } from "pg";
 type CanvasElement = Record<string, unknown>;
 
 type ImageInsertOpts = {
+  bucket?: "project-assets" | "private-try-on";
   canvasId: string;
   objectPath: string;       // Storage path for oss:// marker (already uploaded by worker)
   width: number;
@@ -214,7 +215,7 @@ export async function insertImageElement(
 ): Promise<InsertResult> {
   // 1. Download image from storage and convert to base64 dataURL
   const { data: buffer, error: dlError } = await storage.download(
-    CANVAS_FILES_BUCKET,
+    opts.bucket ?? CANVAS_FILES_BUCKET,
     opts.objectPath
   );
 
@@ -285,7 +286,7 @@ export async function insertLocalImageElement(
   explicitPlacement?: Placement,
 ): Promise<InsertResult> {
   const { data: buffer, error } = await storage.download(
-    CANVAS_FILES_BUCKET,
+    opts.bucket ?? CANVAS_FILES_BUCKET,
     opts.objectPath,
   );
   if (error || !buffer) {

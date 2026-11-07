@@ -834,6 +834,10 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           };
 
           // ── Cost guard + credit checks (top-up credit system) ──
+          const requirePaidConfirmation = run.imageGenerationPreference?.requirePaidConfirmation === true;
+          if (requirePaidConfirmation && (!options.creditService || !options.tierGuard || !options.generationApprovalService)) {
+            throw new Error("Paid generation confirmation is unavailable. Please try again later.");
+          }
           let creditsCost = 0;
           if (options.creditService && options.tierGuard) {
             const quality = (input.quality as ImageQualityLevel) ?? "hd";
@@ -899,6 +903,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               userId,
               jobType: "image_generation",
               model: input.model,
+              forceConfirmation: requirePaidConfirmation,
               payload: {
                 prompt: input.prompt,
                 title: input.title,
@@ -918,6 +923,9 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                 },
                 ...(input.inputImages
                   ? { input_images: input.inputImages }
+                  : {}),
+                ...(input.inputAssetIds?.length
+                  ? { input_asset_ids: input.inputAssetIds }
                   : {}),
               },
               estimatedCredits: creditsCost,

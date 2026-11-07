@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { StudioAssetPicker } from "@/components/studio-asset-picker";
+import { selectOption } from "./select-option";
 
 const api = vi.hoisted(() => ({ fetchGeneratedAssets: vi.fn(), readStudioAsset: vi.fn() }));
 vi.mock("@/lib/server-api", () => ({ fetchGeneratedAssets: api.fetchGeneratedAssets }));
@@ -18,7 +19,7 @@ it("downloads the file identifier while preserving the library identifier for im
   const importAsset = vi.fn();
   render(<StudioAssetPicker token="test" importAsset={importAsset} />);
   fireEvent.click(screen.getByRole("button", { name: "从 Loomic 素材库导入" }));
-  fireEvent.change(await screen.findByLabelText("选择素材"), { target: { value: id } });
+  await selectOption(await screen.findByLabelText("选择素材"), "成片");
   fireEvent.click(screen.getByRole("button", { name: "导入编辑器" }));
   await waitFor(() => expect(importAsset).toHaveBeenCalledWith(file, id));
   expect(api.readStudioAsset).toHaveBeenCalledWith("test", assetObjectId);
@@ -29,7 +30,7 @@ it("reports a missing file identity instead of requesting a record ID", async ()
   api.fetchGeneratedAssets.mockResolvedValue({ assets: [{ id, title: "缺失文件" }] });
   render(<StudioAssetPicker token="test" importAsset={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "从 Loomic 素材库导入" }));
-  fireEvent.change(await screen.findByLabelText("选择素材"), { target: { value: id } });
+  await selectOption(await screen.findByLabelText("选择素材"), "缺失文件");
   fireEvent.click(screen.getByRole("button", { name: "导入编辑器" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("缺少文件标识");
   expect(api.readStudioAsset).not.toHaveBeenCalled();

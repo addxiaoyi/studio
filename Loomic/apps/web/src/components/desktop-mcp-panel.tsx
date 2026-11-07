@@ -1,5 +1,7 @@
 "use client";
 
+import { AppSelect } from "@/components/ui/app-select";
+
 import {
   Boxes,
   Cable,
@@ -613,7 +615,7 @@ export function DesktopMcpPanel({ locale }: { locale?: DesktopLocale | null } = 
           </label>
           <label>
             {copy.mcp.form.transport}
-            <select
+            <AppSelect
               value={transport}
               onChange={(event) =>
                 setTransport(event.target.value as "stdio" | "http")
@@ -621,7 +623,7 @@ export function DesktopMcpPanel({ locale }: { locale?: DesktopLocale | null } = 
             >
               <option value="stdio">{copy.mcp.form.transportStdio}</option>
               <option value="http">{copy.mcp.form.transportHttp}</option>
-            </select>
+            </AppSelect>
           </label>
           {transport === "stdio" ? (
             <>
@@ -725,7 +727,7 @@ export function DesktopMcpPanel({ locale }: { locale?: DesktopLocale | null } = 
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span>{copy.mcp.services.filter}</span>
-            <select
+            <AppSelect
               value={toolFilter}
               onChange={(event) =>
                 setToolFilter(event.target.value as ToolFilter)
@@ -736,7 +738,7 @@ export function DesktopMcpPanel({ locale }: { locale?: DesktopLocale | null } = 
               <option value="side-effect">
                 {copy.mcp.services.filterSideEffect}
               </option>
-            </select>
+            </AppSelect>
           </label>
         </div>
         <div className="mcp-panel__servers" aria-busy={loading}>

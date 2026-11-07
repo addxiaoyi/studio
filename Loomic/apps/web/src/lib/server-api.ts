@@ -1508,6 +1508,7 @@ export async function uploadFile(
   accessToken: string,
   file: File,
   projectId?: string,
+  purpose?: "try-on",
 ): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
@@ -1515,7 +1516,7 @@ export async function uploadFile(
     formData.append("projectId", projectId);
   }
 
-  const response = await apiFetch(`${getServerBaseUrl()}/api/uploads`, {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/uploads${purpose ? `?purpose=${encodeURIComponent(purpose)}` : ""}`, {
     method: "POST",
     headers: authHeaders(accessToken),
     body: formData,

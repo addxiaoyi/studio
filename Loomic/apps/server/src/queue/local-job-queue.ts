@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import type { PgmqClient, PgmqMessage } from "./pgmq-client.js";
+import { approvalBillingReady } from "../local-db/job-billing-gate.js";
 
 export function createLocalJobQueue(db: Pool): PgmqClient {
   let closed = false;
@@ -13,7 +14,7 @@ export function createLocalJobQueue(db: Pool): PgmqClient {
       const client = await db.connect();
       try {
         await client.query("begin");
-        const { rows } = await client.query("select id, job_type, payload, workspace_id, canvas_id, session_id, attempt_count, max_attempts from background_jobs where queue_name = $1 and status = 'queued' order by created_at for update skip locked limit $2", [queue, qty]);
+        const { rows } = await client.query(`select id, job_type, payload, workspace_id, canvas_id, session_id, attempt_count, max_attempts from background_jobs where queue_name = $1 and status = 'queued' and ${approvalBillingReady} order by created_at for update skip locked limit $2`, [queue, qty]);
         await client.query("commit");
         return rows.map((row, index) => ({ msg_id: index + 1, read_ct: 1, enqueued_at: new Date().toISOString(), vt: new Date().toISOString(), message: { job_id: row.id, job_type: row.job_type, workspace_id: row.workspace_id, canvas_id: row.canvas_id, session_id: row.session_id, payload: row.payload, attempt_count: Number(row.attempt_count ?? 0), max_attempts: Number(row.max_attempts ?? 3) } })) as unknown as PgmqMessage<T>[];
       } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }

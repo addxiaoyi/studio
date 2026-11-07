@@ -41,10 +41,13 @@ export async function registerUploadRoutes(
   },
 ) {
   // Upload a file
-  app.post("/api/uploads", async (request, reply) => {
+  app.post<{ Querystring: { purpose?: string } }>("/api/uploads", async (request, reply) => {
     try {
       const user = await options.auth.authenticate(request);
       if (!user) return sendUnauthorized(reply);
+      if (request.query.purpose && request.query.purpose !== "try-on") {
+        return reply.code(400).send({ error: { code: "invalid_purpose", message: "Unsupported upload purpose." } });
+      }
 
       const file = await request.file();
       if (!file) {
@@ -87,7 +90,7 @@ export async function registerUploadRoutes(
           : undefined;
 
       const result = await options.uploadService.uploadFile(user, {
-        bucket: "project-assets",
+        bucket: request.query.purpose === "try-on" ? "private-try-on" : "project-assets",
         fileName: file.filename,
         fileBuffer,
         mimeType,

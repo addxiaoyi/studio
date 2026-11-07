@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { approvalBillingReady } from "./job-billing-gate.js";
 import type { BackgroundJob, BackgroundJobStatus, BackgroundJobType } from "@helstera/shared";
 import type { AuthenticatedUser } from "../auth/types.js";
 import type { CreateJobInput, JobService } from "../features/jobs/job-service.js";
@@ -57,7 +58,7 @@ export function createLocalJobService(db: Pool, queue?: PgmqClient): JobService 
     async markRunning(jobId) { await db.query("update background_jobs set status = 'running', started_at = now(), updated_at = now() where id = $1 and status = 'queued'", [jobId]); },
     async claimJob(jobId) {
       const { rows } = await db.query<{ attempt_count: number; max_attempts: number }>(
-        "update background_jobs set status = 'running', attempt_count = attempt_count + 1, started_at = now(), updated_at = now() where id = $1 and status in ('queued','failed') returning attempt_count, max_attempts",
+        `update background_jobs set status = 'running', attempt_count = attempt_count + 1, started_at = now(), updated_at = now() where id = $1 and status in ('queued','failed') and ${approvalBillingReady} returning attempt_count, max_attempts`,
         [jobId],
       );
       return rows[0] ? { attempt_count: Number(rows[0].attempt_count), max_attempts: Number(rows[0].max_attempts ?? 3) } : null;

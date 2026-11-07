@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen,waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -31,12 +31,12 @@ describe("StyledSelect", () => {
     const trigger = screen.getByRole("combobox", { name: "热点排序" });
     await user.click(trigger);
     expect(screen.getByRole("listbox", { name: "热点排序" })).toBeVisible();
-    expect(trigger.getAttribute("aria-activedescendant")).toMatch(/option-0$/);
+    await waitFor(()=>expect(screen.getByRole("option",{name:"热度排行"})).toHaveAttribute("data-highlighted"));
 
     await user.keyboard("{ArrowDown}");
-    expect(trigger.getAttribute("aria-activedescendant")).toMatch(/option-1$/);
+    expect(screen.getByRole("option",{name:"最新发布"})).toHaveAttribute("data-highlighted");
     await user.keyboard("{End}");
-    expect(trigger.getAttribute("aria-activedescendant")).toMatch(/option-2$/);
+    expect(screen.getByRole("option",{name:"已收藏"})).toHaveAttribute("data-highlighted");
     await user.keyboard("{Enter}");
 
     expect(onChange).toHaveBeenCalledWith("saved");

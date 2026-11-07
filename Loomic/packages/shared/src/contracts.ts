@@ -65,6 +65,7 @@ export const messageMentionSchema = z.discriminatedUnion("mentionType", [
 export const imageGenerationPreferenceSchema = z.object({
   mode: z.enum(["auto", "manual"]),
   models: z.array(z.string().min(1)),
+  requirePaidConfirmation: z.boolean().optional(),
 });
 
 export const videoGenerationPreferenceSchema = z.object({
@@ -293,7 +294,7 @@ export const chatMessageCreateRequestSchema = z.object({
   contentBlocks: z.array(contentBlockSchema).nullable().optional(),
 });
 
-export const assetBucketSchema = z.enum(["project-assets", "user-avatars"]);
+export const assetBucketSchema = z.enum(["project-assets", "user-avatars", "private-try-on"]);
 
 export const assetObjectSchema = z.object({
   id: identifierSchema,

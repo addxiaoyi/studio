@@ -129,6 +129,7 @@ async function insertCanvasElement(
   }
 
   return (await insertLocalImageElement(db, storage, {
+    bucket: job.payload.purpose === "try-on" ? "private-try-on" : "project-assets",
     canvasId: requiredString(job.canvas_id, "canvas_id"),
     objectPath: requiredString(result.object_path, "object_path"),
     assetId,

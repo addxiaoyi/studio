@@ -50,7 +50,9 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/create", label: "剧本创作", icon: FileText },
       { href: "/storyboard", label: "分镜工作台", icon: Clapperboard },
+      { href: "/video", label: "视频创作", icon: Film },
       { href: "/texture-lab", label: "纹理工坊", icon: Grid2X2 },
+      { href: "/fashion-gallery", label: "女装试穿", icon: Images },
     ],
   },
   {
@@ -94,8 +96,11 @@ function isPathActive(pathname: string, href: string) {
 
 function NavLink({ item, active, compact = false, collapsed = false }: { item: NavItem; active: boolean; compact?: boolean; collapsed?: boolean }) {
   const Icon = item.icon;
+  const pathname = usePathname();
+  // WASM compilation needs document-level COOP/COEP headers, including on entry.
+  const Nav = item.href === "/video" || pathname.startsWith("/video") ? "a" : Link;
   return (
-    <Link
+    <Nav
       href={item.href}
       title={item.label}
       aria-label={item.label}
@@ -109,7 +114,7 @@ function NavLink({ item, active, compact = false, collapsed = false }: { item: N
     >
       <Icon className={cn("relative size-[18px] shrink-0", compact && "size-5")} strokeWidth={1.8} />
       {!collapsed && <span className={cn("whitespace-nowrap truncate animate-in fade-in slide-in-from-left-1 duration-150", compact && "max-w-16")}>{item.label}</span>}
-    </Link>
+    </Nav>
   );
 }
 

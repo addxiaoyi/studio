@@ -27,8 +27,10 @@ test("transcribes, edits, approves, exports and restores OneTake inside the curr
   await page.getByRole("button", { name: "打开文字剪辑", exact: true }).click();
   const workspace = page.getByRole("region", { name: "文字剪辑", exact: true });
   await workspace.getByLabel("选择音视频", { exact: true }).setInputFiles(process.env.HELT_ONETAKE_TEST_SOURCE!);
-  await workspace.getByRole("combobox", { name: /^转写模型/ }).selectOption("tiny", { timeout: 15_000 });
-  await workspace.getByRole("combobox", { name: /^语言/ }).selectOption("en", { timeout: 15_000 });
+  await workspace.getByRole("combobox", { name: /^转写模型/ }).click();
+  await page.getByRole("option", { name: "tiny", exact: true }).click();
+  await workspace.getByRole("combobox", { name: /^语言/ }).click();
+  await page.getByRole("option", { name: "English", exact: true }).click();
   const start = workspace.getByRole("button", { name: "上传并开始转写", exact: true });
   await expect(start).toBeDisabled();
   await workspace.getByRole("checkbox", { name: /我同意将所选素材/ }).check();
@@ -64,7 +66,8 @@ test("transcribes, edits, approves, exports and restores OneTake inside the curr
   await workspace.getByRole("button", { name: "重做", exact: true }).click();
   await workspace.getByRole("button", { name: "保存文本", exact: true }).click();
   await expect(workspace.getByText("文本已保存", { exact: true })).toBeVisible();
-  await workspace.getByRole("combobox", { name: /^字体/ }).selectOption("Microsoft YaHei", { timeout: 15_000 });
+  await workspace.getByRole("combobox", { name: /^字体/ }).click();
+  await page.getByRole("option", { name: "Microsoft YaHei", exact: true }).click();
   await workspace.getByRole("button", { name: "预览导出计划", exact: true }).click();
   const confirm = workspace.getByRole("button", { name: "确认并导出（0 积分）", exact: true });
   await expect(confirm).toBeDisabled();
@@ -78,7 +81,8 @@ test("transcribes, edits, approves, exports and restores OneTake inside the curr
   await expect(workspace.getByRole("button", { name: "已保存到私有素材库", exact: true })).toBeVisible();
   expect(Number((await fixture.db.query("select count(*) from generated_assets")).rows[0].count)).toBe(1);
   await workspace.getByRole("button", { name: "发送到聊天", exact: true }).click();
-  await workspace.getByRole("combobox", { name: /^聊天会话/ }).selectOption(fixture.sessionId);
+  await workspace.getByRole("combobox", { name: /^聊天会话/ }).click();
+  await page.getByRole("option", { name: /Export acceptance/ }).click();
   await workspace.getByRole("button", { name: "发送", exact: true }).click();
   await expect(workspace.getByRole("link", { name: "打开聊天", exact: true })).toBeVisible();
   await workspace.getByRole("button", { name: "发送", exact: true }).click();

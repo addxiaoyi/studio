@@ -37,6 +37,8 @@
 
 ## Current implementation status
 
+2026-11-07：女装试穿模型与逐次费用确认、刷新取回结果、全站实底下拉菜单已完成本轮改造。真实 PostgreSQL、浏览器回归与生产发布证据见 [试穿计费与组件验收](docs/fashion-billing-controls-20261107.md)；上游付费真人试穿效果与本轮事务测试分开记录。
+
 视频工作区已接入当前合成 AI 编辑与 OneTake 文字剪辑。功能对照、真实模型/浏览器/Windows 候选程序证据和部署边界见
 [`docs/onetake-integration-20261106.md`](docs/onetake-integration-20261106.md) 与
 [`docs/video-ai-editor-acceptance-20261106.md`](docs/video-ai-editor-acceptance-20261106.md)。下列通用 UX 数量保留自较早验收，不代表本次新增功能的覆盖率。

@@ -62,4 +62,9 @@ describe("image model route retirement filter", () => {
     expect(returnedIds).not.toContain("gpt-image-1.5");
     await app.close();
   });
+  it("returns no invented fallback model when the configured catalog is empty",async()=>{
+    healthyRows.mockResolvedValue([]);availabilityRows.mockResolvedValue([{...row("offline","unhealthy"),max_resolution:"2K"}]);
+    const app=Fastify();await registerImageModelRoutes(app,{auth:{authenticate:async()=>({id:"u"})} as never,viewerService:{ensureViewer:async()=>({workspace:{id:"w"}})} as never,creditService:{getBalance:async()=>({balance:10})} as never,localDb:{} as never});
+    try{const reply=await app.inject("/api/image-models");expect(reply.json()).toMatchObject({defaultModel:"",models:[],unavailableModels:[{id:"offline"}]});}finally{await app.close();}
+  });
 });

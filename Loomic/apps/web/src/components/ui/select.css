@@ -1,0 +1,22 @@
+.loomic-select { min-width: 0; width: 100%; color: var(--foreground); font-family: inherit; }
+.loomic-select-trigger { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 40px; border: 1px solid var(--input-border, var(--border)); border-radius: 9px; padding: 8px 11px; background: var(--background); color: var(--foreground); font: inherit; font-size: 14px; line-height: 1.5; text-align: start; cursor: pointer; }
+.loomic-select-trigger:hover:not(:disabled) { border-color: color-mix(in srgb, var(--foreground) 40%, var(--border)); background: var(--card); }
+.loomic-select-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.loomic-select-trigger:disabled { opacity: .55; cursor: not-allowed; }
+.loomic-select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loomic-select-icon, .loomic-select-check { display: inline-flex; flex: 0 0 16px; width: 16px; align-items: center; justify-content: center; }
+.loomic-select-icon svg, .loomic-select-check svg, .loomic-select-scroll svg { width: 16px; height: 16px; }
+.loomic-select-positioner { z-index: 100; outline: none; width: var(--anchor-width); max-width: calc(100vw - 24px); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+.loomic-select-popup { box-sizing: border-box; min-width: 100%; max-width: min(440px, calc(100vw - 24px)); overflow: hidden; border: 1px solid var(--border); border-radius: 11px; background: var(--popover, var(--card)); color: var(--popover-foreground, var(--foreground)); box-shadow: 0 12px 32px rgb(0 0 0 / .18), 0 2px 8px rgb(0 0 0 / .08); outline: none; }
+.loomic-select-list { box-sizing: border-box; max-height: min(320px, var(--available-height)); overflow-y: auto; overscroll-behavior: contain; padding: 5px; scrollbar-width: thin; }
+.loomic-select-option { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 10px; border-radius: 7px; color: inherit; font-size: 14px; line-height: 1.45; cursor: pointer; outline: none; user-select: none; }
+.loomic-select-option[data-highlighted] { background: var(--accent, var(--muted)); color: var(--accent-foreground, var(--foreground)); }
+.loomic-select-option[data-selected] { font-weight: 550; }
+.loomic-select-option[data-disabled] { opacity: .48; cursor: not-allowed; }
+.loomic-select-copy { display: grid; flex: 1; min-width: 0; gap: 3px; overflow-wrap: anywhere; }
+.loomic-select-note { color: var(--muted-foreground); font-size: 12px; font-weight: 400; line-height: 1.5; }
+.loomic-select-badge { flex-shrink: 0; border-radius: 5px; padding: 2px 6px; background: var(--muted); color: var(--muted-foreground); font-size: 11px; font-weight: 500; white-space: nowrap; }
+.loomic-select-scroll { display: flex; justify-content: center; padding: 3px; background: var(--popover, var(--card)); }
+.loomic-select-scroll[data-hidden] { display: none; }
+@media (max-width: 700px) { .loomic-select-trigger { min-height: 42px; font-size: 16px; } .loomic-select-option { min-height: 42px; } }
+@media (forced-colors: active) { .loomic-select-trigger, .loomic-select-popup { border: 1px solid ButtonText; } .loomic-select-option[data-highlighted] { outline: 1px solid Highlight; } }

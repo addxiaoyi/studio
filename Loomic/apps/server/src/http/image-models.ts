@@ -24,9 +24,9 @@ export async function registerImageModelRoutes(app: FastifyInstance, options: {
       const user = await options.auth.authenticate(request);
       if (user) { const viewer = await options.viewerService.ensureViewer(user); balance = (await options.creditService.getBalance(viewer.workspace.id)).balance; authenticated = true; }
     } catch { authenticated = false; }
-    if (options.localDb && configured.length > 0) {
+    if (options.localDb) {
       const visibleConfigured = filterVisibleImageModelRows(configured);
-      const defaultModel = visibleConfigured[0]?.model_id ?? "black-forest-labs/flux-kontext-pro";
+      const defaultModel = visibleConfigured[0]?.model_id ?? "";
       const models = visibleConfigured.flatMap((row) => {
         const presentation = getPublicModelPresentation(row.model_id, row.display_name, "image") ?? {
           displayName: row.display_name || row.model_id,
@@ -39,6 +39,7 @@ export async function registerImageModelRoutes(app: FastifyInstance, options: {
         providerInputTokenPriceCny: row.billing_unit === "per_million_tokens" ? Number(row.input_token_price_cny) : undefined,
         providerOutputTokenPriceCny: row.billing_unit === "per_million_tokens" ? Number(row.output_token_price_cny) : undefined,
         capabilities: { imageToImage: Boolean(row.supports_input_image) },
+        limits:{maxResolution:row.max_resolution??undefined},
         accessible: authenticated && balance >= minimumCreditCost(row), minTier: "free",
         }];
       });

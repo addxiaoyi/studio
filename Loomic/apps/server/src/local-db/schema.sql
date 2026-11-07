@@ -243,7 +243,7 @@ create table if not exists generation_approvals (
   model text not null,
   payload jsonb not null,
   payload_fingerprint text not null,
-  estimated_credits numeric(14,4) not null check (estimated_credits > 0),
+  estimated_credits numeric(14,4) not null check (estimated_credits >= 0),
   status text not null default 'pending' check (status in ('pending','approved','rejected','expired')),
   expires_at timestamptz not null,
   created_at timestamptz not null default now(),

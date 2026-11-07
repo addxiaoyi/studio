@@ -1,5 +1,7 @@
 "use client";
 
+import { AppSelect } from "@/components/ui/app-select";
+
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Plus, RefreshCw, Tags } from "lucide-react";
@@ -70,7 +72,7 @@ export default function AgentMarketplaceAdminPage() {
     <header className="agent-market-admin__header"><div><p>AGENT MARKETPLACE / ADMIN</p><h1>Agent 市场管理</h1><span>来源、版本、许可证和发布审核</span></div><button type="button" onClick={() => void load()}><RefreshCw aria-hidden="true"/>刷新</button></header>
     {error ? <p className="agent-market-admin__error" role="alert">{error}</p> : null}
     <section className="agent-market-admin__create"><h2><Plus aria-hidden="true"/>新建目录条目</h2><form onSubmit={(event) => void createItem(event)}>
-      <label>类型<select value={draft.kind} onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value as Kind }))}><option value="skill">Skill</option><option value="mcp">MCP</option><option value="plugin">插件</option></select></label>
+      <label>类型<AppSelect value={draft.kind} onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value as Kind }))}><option value="skill">Skill</option><option value="mcp">MCP</option><option value="plugin">插件</option></AppSelect></label>
       <label>名称<input required maxLength={120} value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}/></label>
       <label>Slug<input value={draft.slug} onChange={(event) => setDraft((current) => ({ ...current, slug: event.target.value }))}/></label>
       <label>版本<input required value={draft.version} onChange={(event) => setDraft((current) => ({ ...current, version: event.target.value }))}/></label>

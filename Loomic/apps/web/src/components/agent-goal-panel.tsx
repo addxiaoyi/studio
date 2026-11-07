@@ -1,5 +1,7 @@
 "use client";
 
+import { AppSelect } from "@/components/ui/app-select";
+
 import { Activity, Check, ChevronDown, Pause, Play, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
@@ -272,7 +274,7 @@ export function AgentGoalPanel({ accessToken, canvasId, chatSessionId, goalId, w
         <div><span className="agent-goal-panel__eyebrow">{english ? "WORKSPACE AUTOMATION" : "工作区自动化"}</span><h2>{selected?.goal ?? (english ? "No goal on this canvas" : "当前画布暂无目标")}</h2></div>
         <button type="button" className="agent-goal-icon-button" onClick={() => setOpen(false)} aria-label={english ? "Close" : "关闭"}><X size={16} /></button>
       </header>
-      {goals.length > 1 ? <label className="agent-goal-panel__select">{english ? "Recent goals" : "最近目标"}<select value={selected?.id ?? ""} onChange={(event) => setSelectedId(event.target.value)}><option value="">{english ? "Select a goal" : "选择目标"}</option>{goals.slice(0, 20).map((goal) => <option key={goal.id} value={goal.id}>{goal.goal.slice(0, 70)}</option>)}</select><ChevronDown size={14} /></label> : null}
+      {goals.length > 1 ? <label className="agent-goal-panel__select">{english ? "Recent goals" : "最近目标"}<AppSelect value={selected?.id ?? ""} onChange={(event) => setSelectedId(event.target.value)}><option value="">{english ? "Select a goal" : "选择目标"}</option>{goals.slice(0, 20).map((goal) => <option key={goal.id} value={goal.id}>{goal.goal.slice(0, 70)}</option>)}</AppSelect><ChevronDown size={14} /></label> : null}
       {selected ? <>
         <div className="agent-goal-panel__status"><strong>{statusLabel(selected.status, english)}</strong><span>{mode}</span></div>
         <div className="agent-goal-panel__actions">

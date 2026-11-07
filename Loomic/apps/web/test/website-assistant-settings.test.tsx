@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebsiteAssistantSettings } from "@/components/website-assistant-settings";
+import { selectOption } from "./select-option";
 
 const mocks = vi.hoisted(() => ({
   createDesktopAgentTask: vi.fn(),
@@ -32,7 +33,7 @@ describe("WebsiteAssistantSettings execution mode", () => {
     const user = userEvent.setup();
     render(<WebsiteAssistantSettings accessToken="token" />);
 
-    await user.selectOptions(screen.getByLabelText("执行模式"), "windows_ui");
+    await selectOption(screen.getByLabelText("执行模式"), "本机控件树 / Windows UI");
     await user.type(screen.getByLabelText("任务目标"), "Open Notepad");
 
     const screenRead = screen.getByRole("checkbox", { name: /screen\.read/ });
@@ -50,7 +51,7 @@ describe("WebsiteAssistantSettings execution mode", () => {
     const user = userEvent.setup();
     render(<WebsiteAssistantSettings accessToken="token" />);
 
-    await user.selectOptions(screen.getByLabelText("执行模式"), "windows_ui");
+    await selectOption(screen.getByLabelText("执行模式"), "本机控件树 / Windows UI");
     await user.type(screen.getByLabelText("任务目标"), "Open Notepad");
     await waitFor(() => expect(screen.getByRole("button", { name: "开始桌面任务" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "开始桌面任务" }));

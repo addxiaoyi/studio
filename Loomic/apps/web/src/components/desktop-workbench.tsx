@@ -1,5 +1,7 @@
 "use client";
 
+import { AppSelect } from "@/components/ui/app-select";
+
 import dynamic from "next/dynamic";
 import { DesktopMcpPanel } from "@/components/desktop-mcp-panel";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -208,7 +210,7 @@ export function DesktopWorkbench() {
           <button type="button" onClick={() => void chooseWorkspace()} disabled={busy || Boolean(runId)}><FolderOpen aria-hidden="true" />打开项目</button>
           <button type="button" onClick={() => void saveFile()} disabled={!dirty || busy}><Save aria-hidden="true" />保存</button>
           <button type="button" onClick={() => void inspectGitDiff()} disabled={!root}><GitBranch aria-hidden="true" />差异</button>
-          {scripts.length ? <select aria-label="运行项目测试或构建" disabled={!root || Boolean(runId)} value="" onChange={(event) => { if (event.target.value) void runScript(event.target.value); }}><option value="">运行脚本</option>{scripts.map((script) => <option key={script.name} value={script.name}>{script.name}</option>)}</select> : null}
+          {scripts.length ? <AppSelect aria-label="运行项目测试或构建" disabled={!root || Boolean(runId)} value="" onChange={(event) => { if (event.target.value) void runScript(event.target.value); }}><option value="">运行脚本</option>{scripts.map((script) => <option key={script.name} value={script.name}>{script.name}</option>)}</AppSelect> : null}
         </div>
       </header>
 

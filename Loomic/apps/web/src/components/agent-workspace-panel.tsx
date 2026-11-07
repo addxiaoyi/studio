@@ -1,4 +1,6 @@
 "use client";
+
+import { AppSelect } from "@/components/ui/app-select";
 import { AgentStepReceipts } from "./agent-step-receipts";
 
 import { Activity, Check, ChevronDown, Lightbulb, Pause, Play, RotateCcw, Sparkles, X } from "lucide-react";
@@ -479,15 +481,15 @@ export function AgentWorkspacePanel({ accessToken, canvasId, chatSessionId, goal
       <form className="agent-workspace-composer" onSubmit={submitGoal}>
         <label><span>{t.newGoal}</span><textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t.placeholder} rows={3} /></label>
         <div className="agent-workspace-selects">
-          <label><span>{t.output}</span><select value={outputKind} onChange={(event) => setOutputKind(event.target.value as AgentGoal["outputKind"])}>{outputOptions.map((value) => <option key={value} value={value}>{outputLabel(value, english)}</option>)}</select></label>
-          <label><span>{t.mode}</span><select value={executionMode} onChange={(event) => setExecutionMode(event.target.value as AgentGoal["executionMode"])}>{modeOptions.map((value) => <option key={value} value={value}>{modeLabel(value, english)}</option>)}</select></label>
+          <label><span>{t.output}</span><AppSelect value={outputKind} onChange={(event) => setOutputKind(event.target.value as AgentGoal["outputKind"])}>{outputOptions.map((value) => <option key={value} value={value}>{outputLabel(value, english)}</option>)}</AppSelect></label>
+          <label><span>{t.mode}</span><AppSelect value={executionMode} onChange={(event) => setExecutionMode(event.target.value as AgentGoal["executionMode"])}>{modeOptions.map((value) => <option key={value} value={value}>{modeLabel(value, english)}</option>)}</AppSelect></label>
         </div>
         <button type="submit" className="agent-workspace-primary" disabled={busy || !draft.trim()}><Sparkles size={14} aria-hidden="true" />{busy ? t.creating : t.create}</button>
       </form>
 
       {suggestions.length ? <section className="agent-workspace-section agent-workspace-suggestions"><h3><Lightbulb size={14} aria-hidden="true" />{t.suggestions}</h3>{suggestions.slice(0, 3).map((suggestion) => <article key={suggestion.id}><strong>{suggestion.title}</strong><p>{suggestion.detail}</p><div><button type="button" disabled={busy} onClick={() => void useSuggestion(suggestion.id)}>{t.accept}</button><button type="button" disabled={busy} onClick={() => void dismissSuggestion(suggestion.id)}>{t.dismiss}</button></div></article>)}</section> : null}
 
-      {goals.length > 1 ? <label className="agent-workspace-recent">{t.recent}<select value={selected?.id ?? ""} onChange={(event) => selectGoal(event.target.value)}><option value="">{t.select}</option>{goals.slice(0, 20).map((goal) => <option key={goal.id} value={goal.id}>{goal.goal.slice(0, 70)}</option>)}</select><ChevronDown size={14} aria-hidden="true" /></label> : null}
+      {goals.length > 1 ? <label className="agent-workspace-recent">{t.recent}<AppSelect value={selected?.id ?? ""} onChange={(event) => selectGoal(event.target.value)}><option value="">{t.select}</option>{goals.slice(0, 20).map((goal) => <option key={goal.id} value={goal.id}>{goal.goal.slice(0, 70)}</option>)}</AppSelect></label> : null}
 
       {selected ? <>
         {selected.result?.summary || selected.result?.documents?.length ? <section className="agent-workspace-section"><h3>{t.assets}</h3><p>{selected.result.summary}</p>{selected.result.documents?.map((report) => <AgentDocumentResult key={report.id} report={report} english={english} />)}</section> : null}

@@ -118,6 +118,7 @@ export type BackgroundJob = z.infer<typeof backgroundJobSchema>;
 // --- API Request schemas ---
 
 export const createImageJobRequestSchema = z.object({
+  purpose: z.enum(["try-on"]).optional(),
   project_id: z.string().uuid().optional(),
   canvas_id: z.string().uuid().optional(),
   session_id: z.string().uuid().optional(),
