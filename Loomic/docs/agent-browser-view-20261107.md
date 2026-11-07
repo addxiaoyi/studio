@@ -54,6 +54,8 @@ root 管理的 Linux 服务可使用 `scripts/agent-browser-linux-launcher.py`�
 
 最终鼠标复查发现顶部“已保存”状态层遮住画布观察入口，已将该入口移至画布左下工具栏，新增工具栏点击回归。浏览侧栏层级高于画布状态层，任务下拉浮层挂载在侧栏内部，防止菜单被侧栏遮挡。此补丁候选为 `full-web-rrpPQy`，12 项定向测试及 Web 类型检查通过。
 
+此候选线上已验证左下入口的鼠标命中与实际点击，任务下拉 `insidePanel=true` 且 `unobscured=true`。公开网站 3 页任务运行中看到 Chromix 实时画面，完成后截图与介绍回写聊天；最终截图为 `.creative-test-results/agent-browser-production-final.png`。定时帧与主动截帧的并发测试复现最大同时写入 5，修复后截图到文件发布串行，相关真实浏览器与数据库 8 项验证通过。
+
 本地证据位于 `.creative-test-results/agent-browser*`；不提交用户登录态、私人截图或下载缓存。Windows 原生 Chromix 归档下载遇到限速，已停止额外下载并保留部分文件；本轮桌面验收覆盖服务端浏览器观察，不声称已验收本机 Chromix 执行器。
 
 ## 最终发布与 CI

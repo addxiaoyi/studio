@@ -49,7 +49,7 @@ jobs:
         run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/goal-planner.test.ts src/features/agent-goals/goal-plan-timeout.test.ts src/features/video-editor/planner.test.ts
       - name: Private Agent browser access and controls
         run: |
-          node scripts/test-local-postgres.mjs src/features/agent-browser/browser-view.postgres.test.ts src/features/agent-browser/engine.test.ts
+          node scripts/test-local-postgres.mjs src/features/agent-browser/browser-view.postgres.test.ts src/features/agent-browser/engine.test.ts src/features/agent-browser/observer.test.ts
           pnpm --filter @helstera/web exec vitest run test/agent-browser-dock.test.tsx test/canvas-bottom-bar.test.tsx
       - name: Try-on billing and shared form regressions
         run: |

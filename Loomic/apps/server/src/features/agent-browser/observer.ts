@@ -60,11 +60,16 @@ export async function observeAgentBrowser(options: {
       }
     }
   }
+  function queueFrame() {
+    // A screenshot and its atomic file publication form one operation.
+    capturing = capturing.then(frame, frame);
+    return capturing;
+  }
   function tick() {
-    capturing = frame().finally(() => {
+    const pending = queueFrame().finally(() => {
       if (!stopped) timer = setTimeout(tick, FRAME_INTERVAL_MS);
     });
-    void capturing.catch((error) =>
+    void pending.catch((error) =>
       console.error("[agent-browser/observer] preview update failed", error),
     );
   }
@@ -120,8 +125,7 @@ export async function observeAgentBrowser(options: {
       await store.activity(id, lastCursor, label);
     },
     async capture() {
-      await capturing;
-      await frame();
+      await queueFrame();
     },
     async close(state: "completed" | "failed", detail: string) {
       stopped = true;
