@@ -225,6 +225,8 @@ export async function registerJobRoutes(
       if (!user) return sendUnauthenticated(reply);
 
       const payload = createVideoJobRequestSchema.parse(request.body);
+      const requireConfirmation=request.headers["x-generation-confirmation"]==="required";
+      if(requireConfirmation&&!approvalService)return reply.code(503).send({error:{code:"generation_confirmation_unavailable",message:"素材生成费用确认暂不可用，请稍后重试。"}});
       const idempotencyKey = typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"].trim().slice(0, 160) : undefined;
       const viewer = await options.viewerService.ensureViewer(user);
       if (options.localDb) await assertConnectorEnabled(options.localDb, viewer.workspace.id, user.id, "media-generation");
@@ -307,11 +309,12 @@ export async function registerJobRoutes(
         enable_audio: payload.enable_audio ?? false,
       };
       let approvalId: string | undefined;
-      if (approvalService && creditsCost > 0) {
+      if (approvalService && (creditsCost > 0 || requireConfirmation)) {
         const gate = await approvalService.gate({
           workspaceId: viewer.workspace.id,
           userId: user.id,
           jobType: "video_generation",
+          forceConfirmation:requireConfirmation,
           model,
           payload: jobPayload,
           estimatedCredits: creditsCost,

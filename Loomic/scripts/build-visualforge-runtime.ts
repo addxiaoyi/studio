@@ -6,6 +6,7 @@ import type { BunPlugin } from "bun";
 import { patchStudioEnvironment, patchStudioSource } from "./visualforge/studio-source";
 import { registerPinnedSourceResolver } from "./visualforge/source-resolver";
 import { studioOperations } from "./visualforge/operations-adapter";
+import { bundleMotionFiles } from "./visualforge/motion-bundle";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const lock = JSON.parse(readFileSync(resolve(root, "scripts/creative-sources.json"), "utf8")).video;
@@ -84,6 +85,7 @@ const plugin: BunPlugin = { name: "pinned-visualforge-source", setup(build) {
 } };
 const refreshRuntime = Bun.resolveSync("@rspack/plugin-react-refresh/react-refresh", join(source, "packages/browser-bundler"));
 const define = {
+  __LOOMIC_MOTION_FILES__:JSON.stringify(await bundleMotionFiles(root)),
   "process.env.NODE_ENV": JSON.stringify("development"),
   __BROWSER_STUDIO_ASSET_SIZES__: JSON.stringify({rspackWasm:0,vendorBundle:0}),
   __BROWSER_STUDIO_DEPENDENCY_VERSIONS__: JSON.stringify(dependencyVersions),

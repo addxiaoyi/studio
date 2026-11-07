@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { videoLayerSchema, videoLayerChangesSchema } from "./video-editor-context.js";
+import { motionTracksSchema, videoTransitionSchema, validateMotion, validateTransitions } from "./video-motion.js";
 
 const videoEditorClipSchema = z.strictObject({
   name: z.string().min(1).max(240),
@@ -15,11 +16,13 @@ export const videoEditorPlanRequestSchema = z.strictObject({
   revision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   compositionDuration: z.number().finite().positive().max(7200).optional(),
   layers: z.array(videoLayerSchema).max(200).optional(),
+  timelineClips:z.array(videoEditorClipSchema).max(20).optional(),
+  timelineTransitions:z.array(videoTransitionSchema).max(19).optional(),
   music: z.strictObject({ assetName: z.string().min(1).max(240), startMs: z.number().int().nonnegative(), volume: z.number().finite().min(0).max(2) }).optional(),
   captions: z.array(z.strictObject({ text: z.string().max(500), startMs: z.number().int().nonnegative(), endMs: z.number().int().positive() })).max(100).optional(),
   media: z.array(z.strictObject({
     name: z.string().min(1).max(240),
-    mimeType: z.enum(["video/mp4", "video/webm", "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4"]),
+    mimeType: z.enum(["video/mp4", "video/webm", "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4", "image/png", "image/jpeg", "image/webp", "image/gif"]),
     duration: z.number().finite().positive().max(7200),
   })).max(100),
 });
@@ -44,6 +47,9 @@ export const videoEditorActionSchema = z.discriminatedUnion("type", [
   videoEditorAudioActionSchema,
   z.strictObject({ type: z.literal("resize"), width: z.number().int().min(64).max(7680), height: z.number().int().min(64).max(7680) }),
   z.strictObject({ type: z.literal("layer"), layerId: z.string().min(1).max(80), changes: videoLayerChangesSchema }),
+  z.strictObject({type:z.literal("keyframes"),layerId:z.string().min(1).max(80),tracks:motionTracksSchema}),
+  z.strictObject({type:z.literal("transition"),...videoTransitionSchema.shape}),
+  z.strictObject({type:z.literal("image"),assetName:z.string().min(1).max(240),startMs:z.number().int().nonnegative(),endMs:z.number().int().positive(),fit:z.enum(["contain","cover"]).default("contain")}),
   z.strictObject({ type: z.literal("export"), format: z.literal("mp4").default("mp4") }),
 ]);
 
@@ -78,9 +84,15 @@ export function validateVideoEditorPlan(plan: VideoEditorPlan, input: VideoEdito
   if (cuts.length > 1) throw new Error("一次计划只能包含一个剪辑方案。");
   if (plan.actions.filter(action => action.type === "resize").length > 1) throw new Error("一次计划只能修改一次画幅。");
   const layerActions = plan.actions.filter(action => action.type === "layer");
-  if (cuts.length && layerActions.length) throw new Error("替换画面与修改原图层需分两次确认。");
+  const motionActions=plan.actions.filter(action=>action.type==="keyframes");
+  const transitions=plan.actions.filter(action=>action.type==="transition");
+  if(new Set(motionActions.map(action=>action.layerId)).size!==motionActions.length)throw new Error("同一图层动画请合并为一个动作。");
+  if ((cuts.length||transitions.length) && (layerActions.length||motionActions.length)) throw new Error("替换画面与修改原图层需分两次确认。");
   if (new Set(layerActions.map(action => action.layerId)).size !== layerActions.length) throw new Error("同一图层的修改请合并为一个动作。");
-  const duration = cuts[0]?.clips.reduce((sum, clip) => sum + clip.end - clip.start, 0) ?? input.compositionDuration;
+  const plannedTransitions=[...(!cuts.length?input.timelineTransitions??[]:[]).filter(item=>!transitions.some(action=>action.afterClip===item.afterClip)),...transitions];
+  if(transitions.length)validateTransitions(plannedTransitions,cuts[0]?.clips??input.timelineClips??[]);
+  const duration = (cuts[0]?.clips??(transitions.length?input.timelineClips:undefined))?.reduce((sum,clip)=>sum+clip.end-clip.start,0)??input.compositionDuration??0;
+  const finalDuration=duration-(cuts.length||transitions.length?plannedTransitions.reduce((sum,item)=>sum+item.durationMs/1000,0):0);
   if (!duration || duration > 7200) throw new Error("计划缺少有效的当前合成时长。");
   if (plan.actions.filter(action => action.type === "audio").length > 8 || plan.actions.filter(action => action.type === "caption").length > 100) throw new Error("字幕或音轨数量超出限制。");
   if (input.music) {
@@ -89,6 +101,13 @@ export function validateVideoEditorPlan(plan: VideoEditorPlan, input: VideoEdito
     if (audio.length !== 1 || !selected || selected.assetName !== input.music.assetName || selected.startMs !== input.music.startMs || selected.volume !== input.music.volume) throw new Error("计划改变了已选择的音乐、起播时间或音量，请重新生成。");
   }
   for (const action of plan.actions) {
+    if(action.type==="keyframes"){
+      const layer=input.layers?.find(item=>item.id===action.layerId);
+      if(!layer?.canAnimate)throw new Error("此图层暂不支持安全动画，请选择可动画图层。");
+      if(layerActions.some(item=>item.layerId===action.layerId))throw new Error("请分开确认图层属性与动画修改。");
+      validateMotion(action.tracks,layer.startMs,layer.endMs);
+    }
+    if(action.type==="image"&&(!media.get(action.assetName)?.mimeType.startsWith("image/")||action.endMs<=action.startMs||action.endMs>finalDuration*1000))throw new Error("图片不存在或显示时间超出视频。");
     if (action.type === "layer") {
       const layer = input.layers?.find(item => item.id === action.layerId);
       if (!layer || Object.keys(action.changes).some(key => !layer.editable.includes(key as keyof typeof action.changes))) throw new Error("图层不存在或不支持这项修改，请刷新后重新预览。");
@@ -100,8 +119,8 @@ export function validateVideoEditorPlan(plan: VideoEditorPlan, input: VideoEdito
       const asset = media.get(clip.name);
       if (!asset?.mimeType.startsWith("video/") || clip.end - clip.start < 1 / 30 || clip.end > asset.duration || Math.abs(clip.duration - asset.duration) > 0.001) throw new Error("剪辑引用了错误的素材类型或超出了真实时长。");
     }
-    if (action.type === "caption" && (action.endMs <= action.startMs || action.endMs > Math.round(duration * 1000))) throw new Error("字幕超出了当前时间线。");
-    if (action.type === "audio" && (!media.get(action.assetName)?.mimeType.startsWith("audio/") || action.startMs >= duration * 1000)) throw new Error("音乐引用了错误的素材类型或起播时间。");
+    if (action.type === "caption" && (action.endMs <= action.startMs || action.endMs > Math.round(finalDuration * 1000))) throw new Error("字幕超出了当前时间线。");
+    if (action.type === "audio" && (!media.get(action.assetName)?.mimeType.startsWith("audio/") || action.startMs >= finalDuration * 1000)) throw new Error("音乐引用了错误的素材类型或起播时间。");
   }
 }
 

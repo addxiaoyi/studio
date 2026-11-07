@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { videoEditorPlanRequestSchema, videoEditorPlanResponseSchema, videoEditorPlanSchema } from "./video-editor-contracts.js";
 import { videoStudioControlSchema, videoStudioStateSchema } from "./video-editor-context.js";
+export const videoMaterialRequestSchema=z.discriminatedUnion("type",[
+  z.strictObject({type:z.literal("library"),query:z.string().max(160).default(""),mediaType:z.enum(["image","video"]).optional()}),
+  z.strictObject({type:z.literal("generate"),prompt:z.string().trim().min(1).max(4000),duration:z.number().int().min(1).max(60).optional(),aspectRatio:z.enum(["16:9","9:16"]).optional()}),
+]);
+export type VideoMaterialRequest=z.infer<typeof videoMaterialRequestSchema>;
 
 export const videoChatMessageSchema = z.strictObject({
   role: z.enum(["user", "assistant"]), content: z.string().min(1).max(6000),
@@ -15,7 +20,8 @@ export const videoChatReplySchema = z.strictObject({
   message: z.string().trim().min(1).max(6000),
   plan: videoEditorPlanSchema.optional(),
   control: videoStudioControlSchema.optional(),
-}).refine(reply => !(reply.plan && reply.control), "一次回复只执行一个阶段。");
+  material:videoMaterialRequestSchema.optional(),
+}).refine(reply => [reply.plan,reply.control,reply.material].filter(Boolean).length<=1, "一次回复只执行一个阶段。");
 export const videoChatResponseSchema = z.object({
   source: z.literal("model"), model: z.string(), reply: videoChatReplySchema,
   approval: videoEditorPlanResponseSchema.shape.approval,

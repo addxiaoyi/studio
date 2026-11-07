@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { registerPinnedSourceResolver } from "./visualforge/source-resolver";
+import { bundleMotionFiles } from "./visualforge/motion-bundle";
 
 const root = resolve(import.meta.dir, "..");
 const directory = await mkdtemp(join(tmpdir(), "loomic-visualforge-test-"));
@@ -12,6 +13,7 @@ try {
     naming: "ai-mutation.test.js",
     target: "bun",
     external: ["bun:test"],
+    define:{__LOOMIC_MOTION_FILES__:JSON.stringify(await bundleMotionFiles(root))},
     plugins: [{
       name: "pinned-test-dependencies",
       setup(build) {

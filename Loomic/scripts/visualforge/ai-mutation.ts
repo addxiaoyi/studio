@@ -9,6 +9,7 @@ import { studioCutSource, cutFrames, STUDIO_FPS, type StudioCut, type StudioCapt
 import { nativeCaptions } from "./native-captions";
 import { actionCut } from "../../apps/web/src/lib/studio-action-cut";
 import { inspectLayers, changeLayers } from "./native-layers";
+import { animateLayers, motionFiles } from "./native-motion";
 import type { StudioEdit, StudioUndo, StudioEditReceipt } from "../../apps/web/src/lib/visualforge-runtime";
 export type { StudioEdit } from "../../apps/web/src/lib/visualforge-runtime";
 
@@ -63,6 +64,7 @@ export function inspectComposition(project: VirtualProject, compositionFile: str
     if (node.type !== "JSXElement") return;
     const tag = node.openingElement.name;
     if (tag.type !== "JSXIdentifier") return;
+    if(tag.name==="LoomicMotion"){node.children.forEach(child=>walk(child,file,offset,limit,ancestry));return;}
     const isSequence = tag.name === "Sequence";
     const from = offset + (isSequence ? Number(attribute(node, "from") ?? 0) : 0);
     const frames = isSequence ? attribute(node, "durationInFrames") : null;
@@ -127,7 +129,7 @@ async function applyLegacyEdit(project: EditedProject, compositionFile: string, 
   const prior = project.loomicCuts?.[edit.compositionId];
   const exportable = edit.replaceVideo || prior?.revision === edit.revision;
   next.loomicCuts = { ...next.loomicCuts };
-  if (exportable) next.loomicCuts[edit.compositionId] = { revision: await projectFingerprint(next, edit.compositionId), cut: edit.replaceVideo ? edit.cut : { ...prior!.cut, captions: [...(prior?.cut.captions ?? []), ...(edit.cut.captions ?? [])], audio: [...(prior?.cut.audio ?? []), ...(edit.cut.audio ?? [])] } };
+  if (exportable) next.loomicCuts[edit.compositionId] = { revision: await projectFingerprint(next, edit.compositionId), cut: edit.replaceVideo ? edit.cut : { ...prior!.cut, captions: [...(prior?.cut.captions ?? []), ...(edit.cut.captions ?? [])], audio: [...(prior?.cut.audio ?? []), ...(edit.cut.audio ?? [])],images:[...(prior?.cut.images??[]),...(edit.cut.images??[])] } };
   else delete next.loomicCuts[edit.compositionId];
   return next;
 }
@@ -138,11 +140,16 @@ async function applyStudioEdit(project: EditedProject, compositionFile: string, 
   if(await projectFingerprint(project,edit.compositionId)!==edit.revision)throw new Error("合成或素材已改变，请重新预览。");
   const before=inspectComposition(project,compositionFile,edit.compositionId);
   const changes=edit.commands.filter(action=>action.type==="layer");
-  let next:EditedProject=changeLayers(project,compositionFile,edit.compositionId,before.fps,before.duration,changes);
-  if(edit.commands.some(action=>["cut","caption","audio"].includes(action.type)))next=await applyLegacyEdit(next,compositionFile,{...edit,revision:await projectFingerprint(next,edit.compositionId)});
+  const motion=edit.commands.filter(action=>action.type==="keyframes");
+  let next:EditedProject=animateLayers(project,compositionFile,edit.compositionId,before.fps,before.duration,motion);
+  next=changeLayers(next,compositionFile,edit.compositionId,before.fps,before.duration,changes);
+  if(edit.commands.some(action=>["cut","caption","audio","transition","image"].includes(action.type))){
+    if(edit.cut.transitions?.length)next={...next,files:{...next.files,...motionFiles()}};
+    next=await applyLegacyEdit(next,compositionFile,{...edit,revision:await projectFingerprint(next,edit.compositionId)});
+  }
   const resize=edit.commands.find(action=>action.type==="resize");
   if(resize)next=applyCodemodChanges(next,updateCompositionMetadata({project:next,compositionFile,compositionId:edit.compositionId,metadata:{width:resize.width,height:resize.height}}).changes);
-  if(changes.length||resize){next={...next,loomicCuts:{...next.loomicCuts}};delete next.loomicCuts![edit.compositionId];}
+  if(changes.length||resize||motion.length){next={...next,loomicCuts:{...next.loomicCuts}};delete next.loomicCuts![edit.compositionId];}
   if(!next.loomicAppliedEdits?.includes(edit.id))next={...next,loomicAppliedEdits:[...(next.loomicAppliedEdits??[]),edit.id].slice(-500)};
   return next;
 }
@@ -150,7 +157,7 @@ async function applyStudioEdit(project: EditedProject, compositionFile: string, 
 export async function prepareStudioEdit(project: EditedProject, compositionFile: string, edit: StudioEdit): Promise<EditedProject> {
   if (project.loomicAppliedEdits?.includes(edit.id)) return project;
   const before = inspectComposition(project, compositionFile, edit.compositionId);
-  const approved = edit.commands ? { ...edit, ...actionCut(edit.commands, before) } : edit;
+  const approved = edit.commands ? { ...edit, ...actionCut(edit.commands, {...before,cut:project.loomicCuts?.[edit.compositionId]?.cut}) } : edit;
   const next = await applyStudioEdit(project, compositionFile, approved);
   if (!edit.commands) return next;
   const baseFiles: Record<string, string | null> = {};
@@ -193,7 +200,7 @@ export async function prepareStudioUndo(project: EditedProject, compositionFile:
   if (journal.baseCut) cuts[input.compositionId] = journal.baseCut;else delete cuts[input.compositionId];
   const base: EditedProject = { ...project, files, loomicCuts: cuts, loomicAppliedEdits: project.loomicAppliedEdits?.filter(id => id !== input.id) };
   if (await projectFingerprint(base, input.compositionId) !== journal.edit.revision) throw new Error("原视频恢复记录不完整，无法安全撤销。");
-  let next = remaining.length ? await applyStudioEdit(base, compositionFile, { ...journal.edit, commands: remaining, ...actionCut(remaining, { duration: journal.duration, format: journal.format }) }) : base;
+  let next = remaining.length ? await applyStudioEdit(base, compositionFile, { ...journal.edit, commands: remaining, ...actionCut(remaining, { duration: journal.duration, format: journal.format,cut:journal.baseCut?.cut }) }) : base;
   // Keep the consumed edit marker even after full undo so a lost receipt cannot replay it.
   next = { ...next, loomicAppliedEdits: project.loomicAppliedEdits };
   return { ...next, loomicEditJournals: { ...project.loomicEditJournals, [input.id]: { ...journal, undone, revision: await projectFingerprint(next, input.compositionId) } } };

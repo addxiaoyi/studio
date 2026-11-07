@@ -2,7 +2,7 @@ import type { VirtualProject } from "../../vendor/visualforge/packages/browser-s
 import { getBrowserStudioStoredPublicFile } from "../../vendor/visualforge/packages/browser-studio/src/opfs-public-files";
 import { studioCutSource, cutFrames, STUDIO_FPS, type StudioCut } from "../../apps/web/src/lib/studio-cut";
 
-const VIDEO_MIMES: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4" };
+const VIDEO_MIMES: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4",png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",webp:"image/webp",gif:"image/gif" };
 export function listStudioMedia(project: VirtualProject) {
   return Object.keys(project.publicFiles || {}).flatMap(name => {
     const mimeType = VIDEO_MIMES[name.split(".").pop()?.toLowerCase() || ""];

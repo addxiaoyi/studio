@@ -49,9 +49,9 @@ jobs:
         run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/goal-planner.test.ts src/features/agent-goals/goal-plan-timeout.test.ts src/features/video-editor/planner.test.ts
       - name: Video conversation contracts and model gates
         run: |
-          pnpm --filter @helstera/shared exec vitest run src/video-editor-contracts.test.ts src/video-editor-chat.test.ts
-          pnpm --filter @helstera/server exec vitest run src/http/video-editor-chat.test.ts src/http/video-editor.test.ts
-          pnpm --filter @helstera/web exec vitest run test/studio-conversation.test.tsx test/studio-direct-control.test.ts
+          pnpm --filter @helstera/shared exec vitest run src/video-editor-contracts.test.ts src/video-editor-chat.test.ts src/video-motion.test.ts
+          pnpm --filter @helstera/server exec vitest run src/http/video-editor-chat.test.ts src/http/video-editor.test.ts src/http/video-material-approval.test.ts src/features/generation/material-approval-gate.test.ts
+          pnpm --filter @helstera/web exec vitest run test/studio-conversation.test.tsx test/studio-direct-control.test.ts test/studio-material-api.test.ts test/studio-material-library.test.tsx test/studio-video-generation.test.ts
       - name: Chat copy and reconnect recovery
         run: pnpm --filter @helstera/web exec vitest run test/chat-copy.test.tsx test/chat-selection.test.tsx test/chat-input.test.tsx test/chat-sessions.test.tsx test/chat-sidebar.test.tsx test/chat-stream.test.ts
       - name: Video workspace regressions

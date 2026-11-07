@@ -8,6 +8,8 @@ import type { StudioWorkflowProps } from "@/hooks/use-studio-ai-workflow";
 import { useLocale } from "@/lib/i18n";
 import { useVideoText } from "@/lib/video-copy";
 import type { VideoStudioControl } from "@helstera/shared";
+import {StudioMaterialLibrary} from "./studio-material-library";
+import {StudioMaterialGeneration} from "./studio-material-generation";
 
 type Props=StudioWorkflowProps & {onOpenPanel?(panel:"assets"|"transcript"|"timeline"):void;onViewTimeline?():void};
 function controlLabel(control:VideoStudioControl,english:boolean){
@@ -23,6 +25,7 @@ export function StudioConversationPanel(props:Props){
   const locked=chat.sending||chat.restoring||flow.busy||flow.restoring||flow.receiptPending;
   const visible=chat.turns.filter(turn=>turn.compositionId===flow.target?.compositionId);
   const inlinePlan=[...visible].reverse().find(turn=>turn.planId&&turn.planId===flow.plan?.approval?.id);
+  const activeGeneration=[...visible].reverse().find(turn=>turn.material?.type==="generate");
   useEffect(()=>{const node=scroll.current;if(node)node.scrollTop=node.scrollHeight;},[chat.turns.length,flow.target?.compositionId,flow.plan,flow.notice,chat.error]);
   useEffect(()=>{if(props.contextRequest)input.current?.focus();},[props.contextRequest]);
   function submit(event:FormEvent){event.preventDefault();void chat.send();}
@@ -44,6 +47,8 @@ export function StudioConversationPanel(props:Props){
           <p className="mb-1 text-[11px] text-muted-foreground">{turn.role==="user"?english?"You":"你":english?"AI director":"AI 创作助手"}</p>
           <p className="select-text whitespace-pre-wrap break-words text-sm leading-6">{turn.content}</p>
           {turn===inlinePlan&&<StudioChatPlan flow={flow} locked={locked}/>}
+          {turn.material?.type==="library"&&<StudioMaterialLibrary token={props.token} runtime={props.runtime} compositionId={turn.compositionId} query={turn.material.query} mediaType={turn.material.mediaType} onImported={name=>chat.materialImported(turn.compositionId,name)}/>}
+          {turn===activeGeneration&&turn.material?.type==="generate"&&<StudioMaterialGeneration request={turn.material} userId={props.userId} token={props.token} runtime={props.runtime} compositionId={turn.compositionId} onImported={name=>chat.materialImported(turn.compositionId,name)}/>}
           {turn.planId&&turn!==inlinePlan&&<p className="text-xs text-muted-foreground">{turn.status==="applied"?english?"Applied":"已应用":turn.status==="undone"?english?"Undone":"已撤销":english?"Previous proposal":"历史方案，以当前工程为准"}</p>}
           {turn.control&&<Button size="sm" variant="outline" disabled={locked||turn.status!=="pending"} onClick={()=>void chat.executeControl(turn)}>{turn.status==="applied"?english?"Completed":"已完成":turn.status==="failed"?english?"Failed — send again":"操作失败，请重新发送":turn.status==="superseded"?english?"Previous action":"历史操作":controlLabel(turn.control,english)}</Button>}
         </article>)}

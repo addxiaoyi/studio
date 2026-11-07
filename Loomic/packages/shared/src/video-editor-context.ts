@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { motionTracksSchema } from "./video-motion.js";
 
 export const videoLayerChangesSchema = z.strictObject({
   text: z.string().max(500).optional(),
@@ -19,6 +20,8 @@ export const videoLayerSchema = z.strictObject({
   text: z.string().max(500).optional(), startMs: z.number().nonnegative(), endMs: z.number().positive(),
   editable: z.array(z.enum(["text", "fontSize", "color", "x", "y", "opacity", "volume", "startMs", "endMs", "removed"])).max(10),
   values: z.record(z.string().max(20),z.union([z.string().max(500),z.number().finite()])).refine(values=>Object.keys(values).length<=10).optional(),
+  motion: motionTracksSchema.optional(),
+  canAnimate: z.boolean().optional(),
 });
 export type VideoEditorLayer = z.infer<typeof videoLayerSchema>;
 

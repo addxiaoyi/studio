@@ -51,6 +51,7 @@ type GateInput = {
   payload: Record<string, unknown>;
   estimatedCredits: number;
   approvalId?: string;
+  forceConfirmation?: boolean;
   context?: GenerationApprovalRequest["context"];
 };
 
@@ -61,16 +62,16 @@ export type GenerationApprovalGateResult =
 export function createGenerationApprovalService(db: Pool) {
   return {
     async gate(input: GateInput): Promise<GenerationApprovalGateResult> {
-      if (input.estimatedCredits <= 0) return { state: "approved" };
+      if (input.estimatedCredits <= 0 && !input.forceConfirmation) return { state: "approved" };
 
       const fingerprint = fingerprintPayload(input.payload);
       const autoApprove = await db.query<{ enabled: boolean }>(
         "select auto_approve_paid_generation as enabled from workspace_settings where workspace_id = $1",
         [input.workspaceId],
       );
-      if (autoApprove.rows[0]?.enabled) return { state: "approved" };
+      if (autoApprove.rows[0]?.enabled && !input.forceConfirmation) return { state: "approved" };
 
-      if (!input.approvalId) {
+      if (!input.approvalId && !input.forceConfirmation) {
         const previouslyApproved = await db.query<{ id: string }>(
           `select id from generation_approvals
            where workspace_id = $1 and user_id = $2 and job_type = $3

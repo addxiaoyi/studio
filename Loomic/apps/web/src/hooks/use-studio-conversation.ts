@@ -73,11 +73,11 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
       studio.undoable=undoable;if(undoable.length)studio.controls.push("undo");
       if(flow.context?.compositionId===compositionId)studio.selection=[studio.selection,flow.context.context,flow.context.comment].filter(Boolean).join("\n").slice(0,2000);
       const media:VideoChatRequest["media"]=[];
-      for(const item of runtime.listMedia())media.push({name:item.name,mimeType:item.mimeType as VideoChatRequest["media"][number]["mimeType"],duration:await studioVideoDuration(await runtime.readMedia(item.name))});
+      for(const item of runtime.listMedia())media.push({name:item.name,mimeType:item.mimeType as VideoChatRequest["media"][number]["mimeType"],duration:item.mimeType.startsWith("image/")?snapshot.duration:await studioVideoDuration(await runtime.readMedia(item.name))});
       abort.signal.throwIfAborted();
       const previous=chatHistory(history.current,compositionId,flow.plan,flow.applied,flow.undoneActions);
       append({role:"user",content:prompt,compositionId});setDraft("");
-      const response=await requestStudioChat(props.token,{prompt,projectId:runtime.projectId(),compositionId,revision:snapshot.revision,compositionDuration:snapshot.duration,layers:snapshot.layers??[],media,history:previous,studio,locale,...(flow.plan&&!flow.applied?{pendingPlan:flow.plan.commands}:{})},abort.signal);
+      const response=await requestStudioChat(props.token,{prompt,projectId:runtime.projectId(),compositionId,revision:snapshot.revision,compositionDuration:snapshot.duration,layers:snapshot.layers??[],timelineClips:snapshot.cut?.clips.map(({id:_id,...clip})=>clip),timelineTransitions:snapshot.cut?.transitions,media,history:previous,studio,locale,...(flow.plan&&!flow.applied?{pendingPlan:flow.plan.commands}:{})},abort.signal);
       abort.signal.throwIfAborted();
       const current=await runtime.snapshot();
       if(current.compositionId!==compositionId||current.revision!==snapshot.revision)throw new Error("对话期间工程已改变，本次操作未执行，请重新发送。");
@@ -90,7 +90,8 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
       }else if(answer.control){
         const turn=append({role:"assistant",content:answer.message,compositionId,control:answer.control,revision:snapshot.revision,status:"pending"});
         if(["play","pause","seek","mute","select"].includes(answer.control.type))await executeControl(turn,true);
-      }else append({role:"assistant",content:answer.message,compositionId});
+      }else if(answer.material)append({role:"assistant",content:answer.message,compositionId,material:answer.material,status:"pending"});
+      else append({role:"assistant",content:answer.message,compositionId});
     }catch(cause){
       if(!mounted.current)return;
       const message=abort.signal.aborted?"已停止等待回复，没有执行修改。":cause instanceof Error?cause.message:"AI 暂时不可用，请重试。";
@@ -124,5 +125,6 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
     }catch(cause){setError(cause instanceof Error?cause.message:"操作失败，请核对当前视频后重试。");updateTurns(current=>current.map(item=>item.id===turn.id?{...item,status:"failed"}:item));}
     finally{acting.current=false;setSending(false);}
   }
-  return {flow,turns,draft,setDraft,sending,restoring,error,send,stop,executeControl};
+  async function materialImported(compositionId:string,name:string){append({role:"assistant",content:`素材 ${name} 已加入当前工程，可以继续描述剪辑或动画要求。`,compositionId});await flow.refreshTarget();}
+  return {flow,turns,draft,setDraft,sending,restoring,error,send,stop,executeControl,materialImported};
 }

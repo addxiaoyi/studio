@@ -10,8 +10,11 @@ export function studioTimelineDiff(plan: StudioAiPlan, undone: readonly number[]
   const original = plan.snapshot;
   const commands = plan.commands.actions.map((action, index) => ({ action, index })).filter(({ index }) => !undone.includes(index));
   const cut = commands.find(({ action }) => action.type === "cut");
+  const transitions=commands.filter(({action})=>action.type==="transition");
   let cursor = 0;
   const oldClips: TimelineSpan[] = original.cut?.clips.map((clip, index) => {
+    const transition=original.cut?.transitions?.find(item=>item.afterClip===index-1);
+    if(transition)cursor-=Math.round(transition.durationMs/1000*30)/30;
     const start = cursor;cursor += clip.end - clip.start;
     return { id: `before-video-${index}`, label: clip.name, start, end: cursor, detail: `${clip.start}–${clip.end}s`, change: "existing" };
   }) ?? [{ id: "before-video", label: original.compositionId, start: 0, end: original.duration, change: "existing" }];
@@ -20,11 +23,15 @@ export function studioTimelineDiff(plan: StudioAiPlan, undone: readonly number[]
     audio: (original.cut?.audio ?? []).map((track, index) => ({ id: `before-audio-${index}`, label: track.assetName, start: track.startMs / 1000, end: Math.min(original.duration, track.startMs / 1000 + (plan.mediaDurations?.[track.assetName] ?? original.duration)), detail: `${Math.round(track.volume * 100)}%`, change: "existing" })),
     audioKnown: original.cut !== null };
   cursor = 0;
-  const newClips = cut?.action.type === "cut" ? cut.action.clips.map((clip, index): TimelineSpan => {
+  const clips=cut?.action.type==="cut"?cut.action.clips:transitions.length?original.cut?.clips:undefined;
+  const combinedTransitions=[...(!cut?original.cut?.transitions??[]:[]).filter(item=>!transitions.some(({action})=>action.type==="transition"&&action.afterClip===item.afterClip)),...transitions.flatMap(({action})=>action.type==="transition"?[action]:[])];
+  const newClips = clips ? clips.map((clip, index): TimelineSpan => {
+    const overlap=combinedTransitions.find(item=>item.afterClip===index-1);
+    if(overlap)cursor-=Math.round(overlap.durationMs/1000*30)/30;
     const start = cursor;cursor += Math.max(1, Math.round((clip.end - clip.start) * 30)) / 30;
-    return { id: `after-video-${index}`, label: clip.name, start, end: cursor, actionIndex: cut.index, detail: `${clip.start}–${clip.end}s`, change: "replaced" };
-  }) : oldClips;
-  const duration = cut ? cursor : original.duration;
+    return { id: `after-video-${index}`, label: clip.name, start, end: cursor, actionIndex: cut?.index??transitions[0]!.index, detail: `${clip.start}–${clip.end}s`, change: "replaced" };
+  }) : oldClips.map(span=>({...span}));
+  const duration = clips ? cursor : original.duration;
   const after: TimelineVersion = { duration, format: cut?.action.type === "cut" ? cut.action.format : original.format, video: newClips,
     captions: cut ? [] : before.captions.map(span=>({...span})), audio: cut ? [] : before.audio.map(span=>({...span})), audioKnown: Boolean(cut) || before.audioKnown };
   const details:TimelineDiff["details"]=[];
@@ -33,6 +40,9 @@ export function studioTimelineDiff(plan: StudioAiPlan, undone: readonly number[]
       after.format=action.width<action.height?"portrait":"landscape";
       details.push({index,action,before:`${original.width??"?"} × ${original.height??"?"}`});
     }
+    if(action.type==="keyframes")details.push({index,action,before:original.layers?.find(layer=>layer.id===action.layerId)?.motion?.length?"已有动画将替换":"静态图层"});
+    if(action.type==="transition")details.push({index,action,before:"硬切"});
+    if(action.type==="image")after.video.push({id:`image-${index}`,label:action.assetName,start:action.startMs/1000,end:action.endMs/1000,change:"added",actionIndex:index});
     if(action.type==="layer"){
       const layer=original.layers?.find(item=>item.id===action.layerId);
       details.push({index,action,before:layer?.text??layer?.label??action.layerId});

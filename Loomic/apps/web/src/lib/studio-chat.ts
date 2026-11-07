@@ -1,8 +1,8 @@
-import { videoChatResponseSchema, videoChatRequestSchema, type VideoChatRequest, type VideoStudioControl } from "@helstera/shared";
+import { videoChatResponseSchema, videoChatRequestSchema, type VideoChatRequest, type VideoStudioControl, type VideoMaterialRequest } from "@helstera/shared";
 import { getServerBaseUrl } from "./env";
 import type { StudioAiPlan } from "./studio-ai-edit";
 
-export type StudioChatTurn = {id:string;role:"user"|"assistant";content:string;compositionId:string;createdAt:number;planId?:string;status?:"pending"|"applied"|"undone"|"superseded"|"failed";control?:VideoStudioControl;revision?:string};
+export type StudioChatTurn = {id:string;role:"user"|"assistant";content:string;compositionId:string;createdAt:number;planId?:string;status?:"pending"|"applied"|"undone"|"superseded"|"failed";control?:VideoStudioControl;revision?:string;material?:VideoMaterialRequest};
 export type StudioConversation = {turns:StudioChatTurn[];draft:string};
 export async function requestStudioChat(token:string,input:VideoChatRequest,signal:AbortSignal){
   const response=await fetch(`${getServerBaseUrl()}/api/video/editor/chat`,{method:"POST",credentials:"include",headers:{"content-type":"application/json",authorization:`Bearer ${token}`},body:JSON.stringify(videoChatRequestSchema.parse(input)),signal:AbortSignal.any([signal,AbortSignal.timeout(100000)])});

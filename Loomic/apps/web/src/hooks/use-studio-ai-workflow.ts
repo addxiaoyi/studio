@@ -212,7 +212,7 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
     if (!runtime || receiptPending) return;
     await run(async () => {
       const snapshot = await runtime.snapshot();
-      if (undoneActions.length || !plan?.exportFormat || !applied || !snapshot.cut || !desktopVideoBridge()) {
+      if (undoneActions.length || !plan?.exportFormat || !applied || !snapshot.cut || snapshot.cut.transitions?.length || snapshot.cut.images?.length || !desktopVideoBridge()) {
         runtime.openExport();setNotice("请在导出窗口确认格式和文件名，完成后可在下方预览并保存成片。");return;
       }
       if (snapshot.revision !== applied || snapshot.compositionId !== plan.snapshot?.compositionId) throw new Error("视频已改变，请重新预览导出方案。");

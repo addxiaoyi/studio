@@ -4,7 +4,7 @@ import { resolveCompositionComponentInProject } from "../../vendor/visualforge/p
 import type { VirtualProject } from "../../vendor/visualforge/packages/browser-studio/src/types";
 import type { VideoEditorLayer, VideoLayerChanges } from "../../packages/shared/src/video-editor-context";
 
-type LayerNode = { layer: VideoEditorLayer; node: JSXElement; file: string; offset: number; fps: number };
+type LayerNode = { layer: VideoEditorLayer; node: JSXElement; file: string; offset: number; fps: number; motionWrapper?:JSXElement };
 type SourceEdit = { start: number; end: number; source: string };
 const visualTags = new Set(["div","span","p","h1","h2","h3","AbsoluteFill","Solid","Text","CanvasImage","Img","Video","Audio"]);
 const styleKeys = { fontSize:"fontSize",color:"color",x:"left",y:"top",opacity:"opacity" } as const;
@@ -26,14 +26,21 @@ function captionText(node: JSXElement) {
   return node.children.map(child=>child.type==="JSXText"?child.value:child.type==="JSXExpressionContainer"&&child.expression.type==="StringLiteral"?child.expression.value:"").join("").trim().slice(0,500);
 }
 
-function layerNodes(project: VirtualProject, compositionFile: string, compositionId: string, fps: number, duration: number): LayerNode[] {
+export function layerNodes(project: VirtualProject, compositionFile: string, compositionId: string, fps: number, duration: number): LayerNode[] {
   const root=resolveCompositionComponentInProject({project,compositionFile,compositionId});
   const layers:LayerNode[]=[];
-  const walk=(node:Node,file:string,offset:number,limit:number,ancestry:Set<string>)=>{
+  const walk=(node:Node,file:string,offset:number,limit:number,ancestry:Set<string>,inheritedTiming=false)=>{
     if(layers.length>=200)throw new Error("图层超过200个，请简化当前合成后使用AI编辑。");
-    if(node.type==="JSXFragment"){node.children.forEach(child=>walk(child,file,offset,limit,ancestry));return;}
+    if(node.type==="JSXFragment"){node.children.forEach(child=>walk(child,file,offset,limit,ancestry,inheritedTiming));return;}
     if(node.type!=="JSXElement"||node.openingElement.name.type!=="JSXIdentifier")return;
     const tag=node.openingElement.name.name;
+    if(tag==="LoomicMotion"){
+      const start=layers.length;
+      node.children.forEach(child=>walk(child,file,offset,limit,ancestry,inheritedTiming));
+      const target=layers[start];
+      if(target){target.motionWrapper=node;const serialized=scalar(node,"tracksJson");if(typeof serialized==="string")target.layer.motion=JSON.parse(serialized);}
+      return;
+    }
     const ast=parse(project.files[file]!,{sourceType:"module",plugins:["jsx","typescript"]});
     const imported=ast.program.body.find(item=>item.type==="ImportDeclaration"&&item.specifiers.some(specifier=>specifier.local.name===tag));
     if(imported?.type==="ImportDeclaration"&&/basic-captions\.element$/.test(imported.source.value))return;
@@ -41,13 +48,13 @@ function layerNodes(project: VirtualProject, compositionFile: string, compositio
       const key=`${file}:${tag}`;if(ancestry.has(key)||ancestry.size>24)throw new Error("图层组件循环引用，无法读取。");
       const inspectionId="__loomic_layer_inspection__";
       const child=resolveCompositionComponentInProject({project:{...project,files:{...project.files,[file]:`${project.files[file]}\nconst __loomicLayer=<Composition id="${inspectionId}" component={${tag}} />;`}},compositionFile:file,compositionId:inspectionId});
-      walk(child.root,child.filePath,offset,limit,new Set([...ancestry,key]));return;
+      walk(child.root,child.filePath,offset,limit,new Set([...ancestry,key]),inheritedTiming);return;
     }
     const sequence=tag==="Sequence";
     const from=offset+(sequence?Number(scalar(node,"from")??0):0);
     const length=sequence?scalar(node,"durationInFrames"):undefined;
     const end=typeof length==="number"?Math.min(limit,from+length):limit;
-    const dynamicTiming=sequence&&((value(node,"from")!==undefined&&typeof scalar(node,"from")!=="number")||(value(node,"durationInFrames")!==undefined&&typeof length!=="number"));
+    const dynamicTiming=inheritedTiming||sequence&&((value(node,"from")!==undefined&&typeof scalar(node,"from")!=="number")||(value(node,"durationInFrames")!==undefined&&typeof length!=="number"));
     const editable:VideoEditorLayer["editable"]=[];
     const text=captionText(node);
     const values:NonNullable<VideoEditorLayer["values"]>={...(text===undefined?{}:{text})};
@@ -67,12 +74,12 @@ function layerNodes(project: VirtualProject, compositionFile: string, compositio
       }
       const volume=scalar(node,"volume");if(typeof volume==="number")values.volume=volume;
     }
-    if(visualTags.has(tag)||sequence)layers.push({node,file,offset,fps,layer:{id:`layer-${layers.length}`,label:String(scalar(node,"name")??text??tag).slice(0,240),kind:tag,...(text===undefined?{}:{text}),startMs:Math.round(Math.max(0,from)/fps*1000),endMs:Math.round(Math.max(from+1,end)/fps*1000),editable,...(Object.keys(values).length?{values}:{})}});
-    node.children.forEach(child=>walk(child,file,from,end,ancestry));
+    if(visualTags.has(tag)||sequence)layers.push({node,file,offset,fps,layer:{id:`layer-${layers.length}`,label:String(scalar(node,"name")??text??tag).slice(0,240),kind:tag,...(text===undefined?{}:{text}),startMs:Math.round(Math.max(0,from)/fps*1000),endMs:Math.round(Math.max(from+1,end)/fps*1000),editable,canAnimate:!dynamicTiming&&!sequence&&tag!=="Audio",...(Object.keys(values).length?{values}:{})}});
+    node.children.forEach(child=>walk(child,file,from,end,ancestry,dynamicTiming));
   };
   walk(root.root,root.filePath,0,Math.round(duration*fps),new Set());
   // A source node rendered more than once cannot be edited as an isolated occurrence.
-  for(const entry of layers)if(layers.filter(other=>other.file===entry.file&&other.node.start===entry.node.start).length>1)entry.layer.editable=[];
+  for(const entry of layers)if(layers.filter(other=>other.file===entry.file&&other.node.start===entry.node.start).length>1){entry.layer.editable=[];entry.layer.canAnimate=false;}
   return layers;
 }
 
@@ -92,7 +99,7 @@ export function changeLayers(project:VirtualProject,file:string,id:string,fps:nu
     const patch=(start:number|null|undefined,end:number|null|undefined,text:string)=>{if(start==null||end==null)throw new Error("图层位置不可用。");patches.push({start,end,source:text});};
     const attributes:Record<string,string>={};
     const update=command.changes;
-    if(update.removed){patch(node.start,node.end,"<></>");continue;}
+    if(update.removed){const removed=target.motionWrapper??node;patch(removed.start,removed.end,"<></>");continue;}
     if(update.text!==undefined){
       if(typeof scalar(node,"text")==="string")attributes.text=JSON.stringify(update.text);
       else if(node.closingElement)patch(node.openingElement.end,node.closingElement.start,`{${JSON.stringify(update.text)}}`);

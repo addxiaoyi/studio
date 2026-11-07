@@ -55,6 +55,25 @@ describe("current composition AI mutation", () => {
     changed=await prepareStudioUndo(changed,compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(changed,"MyComp"),actionIndex:1});
     expect(await projectFingerprint(changed,"MyComp")).toBe(revision);
   });
+  it("persists editable GSAP keyframes and reverses a motion edit after reload",async()=>{
+    const project=createBlankTemplateProject();project.files[compositionFile]=project.files[compositionFile]!.replace("return null;",'return <div>动起来</div>;');
+    const before=inspectComposition(project,compositionFile,"MyComp"),revision=await projectFingerprint(project,"MyComp");
+    const tracks=[{property:"opacity" as const,points:[{timeMs:0,value:0,ease:"none" as const},{timeMs:900,value:1,ease:"power2.out" as const}]}];
+    const edit:StudioEdit={id,compositionId:"MyComp",revision,cut,replaceVideo:false,commands:[{type:"keyframes",layerId:before.layers[0]!.id,tracks}]};
+    const applied=await prepareStudioEdit(project,compositionFile,edit);
+    expect(applied.files["/project/src/loomic-gsap.js"]!.length).toBeGreaterThan(10000);
+    expect(inspectComposition(applied,compositionFile,"MyComp").layers[0]?.motion).toEqual(tracks);
+    const undone=await prepareStudioUndo(structuredClone(applied),compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(applied,"MyComp")});
+    expect(await projectFingerprint(undone,"MyComp")).toBe(revision);
+  });
+  it("creates overlapping transition sequences and restores hard cuts on undo",async()=>{
+    const project=createBlankTemplateProject();const clips=[{name:"a.mp4",duration:2,start:0,end:2},{name:"b.mp4",duration:2,start:0,end:2}];
+    const edit:StudioEdit={id,compositionId:"MyComp",revision:await projectFingerprint(project,"MyComp"),cut,replaceVideo:true,commands:[{type:"cut",format:"landscape",clips},{type:"transition",afterClip:0,style:"fade",durationMs:500}]};
+    const applied=await prepareStudioEdit(project,compositionFile,edit);
+    expect(inspectComposition(applied,compositionFile,"MyComp").duration).toBe(3.5);
+    const reverted=await prepareStudioUndo(applied,compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(applied,"MyComp"),actionIndex:1});
+    expect(inspectComposition(reverted,compositionFile,"MyComp").duration).toBe(4);
+  });
   it("reads native BasicCaptions under nested sequences and clips to their visible range", () => {
     const project = createBlankTemplateProject();
     project.files[compositionFile] = 'import {BasicCaptions as Subtitles} from "./basic-captions.element";\n' + project.files[compositionFile]!.replace("return null;", 'return <Sequence from={15} durationInFrames={30}><Subtitles from={15} captions={[{text:"原生字幕",startMs:0,endMs:1500,timestampMs:null,confidence:null}]} /></Sequence>;');

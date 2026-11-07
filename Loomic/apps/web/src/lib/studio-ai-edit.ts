@@ -1,7 +1,10 @@
 import { videoEditorPlanResponseSchema, videoEditorPlanRequestSchema, videoEditorPlanSchema, videoEditorConfirmationSchema, validateVideoEditorPlan, type VideoEditorPlanResponse, type VideoEditorPlanRequest, type VideoEditorExportReceipt } from "@helstera/shared";
-import type { StudioAudio, StudioCaption, StudioCut, StudioMedia } from "./studio-cut";
+import type { StudioCut, StudioMedia } from "./studio-cut";
 import type { StudioSnapshot, StudioEdit } from "./visualforge-runtime";
 import { getServerBaseUrl } from "./env";
+import { studioActionLabel } from "./studio-action-label";
+import {actionCut} from "./studio-action-cut";
+import {cutFrames,STUDIO_FPS} from "./studio-cut";
 
 export type StudioAiAction = { label: string; status: "ready" | "planned"; type: VideoEditorPlanResponse["plan"]["actions"][number]["type"] };
 export type StudioAiPlan = { cut: StudioCut; targetDuration: number | null; actions: StudioAiAction[]; notices: string[]; source: "model" | "local-fallback"; summary: string; exportFormat?: "webm" | "mp4"; replaceVideo?: boolean; snapshot?: StudioSnapshot; approval?: VideoEditorPlanResponse["approval"]; commands?: VideoEditorPlanResponse["plan"]; mediaDurations?: Record<string, number> };
@@ -40,19 +43,17 @@ export async function requestStudioAiPlan(token: string, input: VideoEditorPlanR
 }
 
 export function normalizeModelPlan(plan: VideoEditorPlanResponse["plan"], snapshot: StudioSnapshot): StudioAiPlan {
-  const cutAction = plan.actions.find((action) => action.type === "cut");
-  const clips = cutAction?.clips.map(clip => ({ ...clip, id: crypto.randomUUID() })) ?? snapshot.cut?.clips ?? [{ id: "existing", name: "current-composition", duration: snapshot.duration, start: 0, end: snapshot.duration }];
-  const captions: StudioCaption[] = plan.actions.filter((action): action is Extract<typeof action, { type: "caption" }> => action.type === "caption").map(({ text, startMs, endMs }) => ({ text, startMs, endMs }));
-  const audio: StudioAudio[] = plan.actions.filter((action): action is Extract<typeof action, { type: "audio" }> => action.type === "audio").map(({ assetName, startMs, volume }) => ({ assetName, startMs, volume }));
   const exportAction = plan.actions.find((action) => action.type === "export");
   const actions: StudioAiAction[] = plan.actions.map(action => ({ type: action.type, status: "planned", label: action.type === "cut"
     ? `替换当前画面为${action.format === "portrait" ? "竖屏" : "横屏"}剪辑：${action.clips.map(clip => `${clip.name} ${clip.start}–${clip.end} 秒`).join("；")}`
     : action.type === "caption" ? `字幕 ${action.startMs / 1000}–${action.endMs / 1000} 秒：${action.text}`
     : action.type === "resize" ? `画幅调整为 ${action.width} × ${action.height}`
     : action.type === "layer" ? `${action.changes.removed ? "删除" : "修改"}图层「${snapshot.layers?.find(layer=>layer.id===action.layerId)?.label??action.layerId}」：${JSON.stringify(action.changes)}`
+    : action.type === "keyframes" || action.type === "transition" || action.type === "image" ? studioActionLabel(action,snapshot)
     : action.type === "audio" ? `音乐 ${action.assetName}，${action.startMs / 1000} 秒起播，音量 ${Math.round(action.volume * 100)}%（0 积分）` : "导出 MP4 到本机（0 积分）" }));
-  return { cut: { format: cutAction?.format ?? snapshot.format, clips, captions, audio }, targetDuration: clips.reduce((sum, clip) => sum + clip.end - clip.start, 0), actions,
-    notices: ["字幕文案由模型生成，未经语音转写。已有音乐和本机导出为 0 积分，模型推理沿用现有 Agent 配置。"], source: "model", summary: plan.summary, snapshot, commands: plan, replaceVideo: Boolean(cutAction), ...(exportAction ? { exportFormat: exportAction.format } : {}) };
+  const resolved=actionCut(plan.actions,snapshot);
+  return { ...resolved, targetDuration: cutFrames(resolved.cut)/STUDIO_FPS, actions,
+    notices: ["字幕文案由模型生成，未经语音转写。已有音乐和本机导出为 0 积分，模型推理沿用现有 Agent 配置。"], source: "model", summary: plan.summary, snapshot, commands: plan, ...(exportAction ? { exportFormat: exportAction.format } : {}) };
 }
 
 export async function confirmStudioPlan(token: string, plan: StudioAiPlan, confirmed: ReadonlySet<number>): Promise<StudioEdit> {
