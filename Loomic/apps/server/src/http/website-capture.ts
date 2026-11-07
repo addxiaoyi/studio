@@ -2,13 +2,15 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool } from "pg";
 import { z } from "zod";
 
-import { createWebsiteCaptureRequestSchema, desktopAgentTaskRequestSchema, type WebsiteCapturePromo, type WebsiteCaptureTask } from "@helstera/shared";
+import { createWebsiteCaptureRequestSchema, desktopAgentTaskRequestSchema, type WebsiteCapturePromo, type WebsiteCaptureTask, type WebsitePresentation } from "@helstera/shared";
+import { assertConnectorEnabled } from "../features/agent-goals/connector-gate.js";
 import type { RequestAuthenticator } from "../auth/types.js";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
 import { validatePublicHttpUrl, WebsiteCaptureError } from "../features/website-capture/isolated-browser.js";
 import { WebsiteAssistantHub, validateLocalExactUrl } from "../features/website-capture/assistant-hub.js";
 import { claimWebsiteCaptureRetry } from "../features/website-capture/retry.js";
 import { softDeleteWebsiteCaptureAssets } from "../features/website-capture/asset-cleanup.js";
+import { decideRecordingApproval, requestRecordingApproval } from "../features/website-capture/recording-approval.js";
 import type { JobService } from "../features/jobs/job-service.js";
 import type { CreditService } from "../features/credits/credit-service.js";
 import type { TierGuard } from "../features/credits/tier-guard.js";
@@ -36,6 +38,7 @@ type TaskRow = {
   follow_external: boolean;
   assistant_connection_id: string | null;
   promo_status?: WebsiteCaptureTask["promoStatus"];
+  presentation?: WebsitePresentation | null;
   promo?: WebsiteCaptureTask["promo"];
   promo_approval_id?: string | null;
   promo_job_id?: string | null;
@@ -165,6 +168,11 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       const input = createWebsiteCaptureRequestSchema.parse(request.body);
       const viewer = await options.viewerService.ensureViewer(user);
       const startUrl = input.mode === "isolated" ? await validatePublicHttpUrl(input.url) : validateLocalExactUrl(input.url);
+      await assertConnectorEnabled(options.db,viewer.workspace.id,user.id,input.mode==="isolated"?"isolated-browser":"desktop-agent");
+      if(input.sessionId){
+        const session=await options.db.query("select cs.id from chat_sessions cs join canvases c on c.id=cs.canvas_id join projects p on p.id=c.project_id where cs.id=$1 and cs.created_by=$2 and p.workspace_id=$3",[input.sessionId,user.id,viewer.workspace.id]);
+        if(!session.rows[0])return reply.code(404).send({ok:false,error:{code:"session_not_found",message:"聊天会话不存在或无权访问。"}});
+      }
       if (input.mode === "local") {
         const connection = await options.assistantHub.getConnection(user.id, viewer.workspace.id);
         if (!connection || connection.status !== "connected") {
@@ -172,8 +180,8 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         }
         const inserted = await options.db.query<TaskRow>(
           `insert into website_capture_tasks
-            (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, assistant_connection_id, promo, idempotency_key)
-           values ($1,$2,$3,'local',$4,$5,$6,$7,$8,$9,$10)
+            (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, assistant_connection_id, promo, idempotency_key, stage)
+           values ($1,$2,$3,'local',$4,$5,$6,$7,$8,$9,$10,case when $6 then 'waiting_recording_approval' else 'queued' end)
            on conflict (workspace_id, created_by, idempotency_key) do nothing
            returning id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
                      error_message, created_at, updated_at, follow_external, assistant_connection_id`,
@@ -182,29 +190,42 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         const task = inserted.rows[0] ?? (await options.db.query<TaskRow>(
           `select id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
                   error_message, created_at, updated_at, follow_external, assistant_connection_id
-             from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3`,
-          [viewer.workspace.id, user.id, input.idempotencyKey],
+             from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3
+               and start_url=$4 and mode=$5 and page_limit=$6 and record_video=$7 and follow_external=$8
+               and session_id is not distinct from $9::uuid and promo is not distinct from $10::jsonb`,
+          [viewer.workspace.id, user.id, input.idempotencyKey, startUrl.toString(), input.mode, input.pageLimit, input.recordVideo, input.followExternal, input.sessionId ?? null, input.promo?.enabled ? JSON.stringify(input.promo) : null],
         )).rows[0];
-        if (!task) return reply.code(500).send({ ok: false, error: { code: "task_create_failed", message: "无法创建本地浏览任务。" } });
+        if (!task) return reply.code(409).send({ ok: false, error: { code: "idempotency_conflict", message: "该请求标识已用于其他浏览参数，请重新发起任务。" } });
+        if (input.recordVideo && task.status === "queued") {
+          const recordingApproval = await requestRecordingApproval(options.db, task.id, viewer.workspace.id, user.id);
+          return reply.code(inserted.rows[0] ? 202 : 200).send({ ok: true, data: { task: await loadTask(options.db, task.id, viewer.workspace.id), jobId: null, reused: !inserted.rows[0], recordingApproval } });
+        }
         if (task.status === "queued") await options.assistantHub.startLocalTask(task.id, user.id);
         return reply.code(inserted.rows[0] ? 202 : 200).send({ ok: true, data: { task: await loadTask(options.db, task.id, viewer.workspace.id), jobId: null, reused: !inserted.rows[0] } });
       }
       const inserted = await options.db.query<TaskRow>(
         `insert into website_capture_tasks
-          (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key, stage, presentation)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,case when $7 then 'waiting_recording_approval' else 'queued' end,$11::jsonb)
          on conflict (workspace_id, created_by, idempotency_key) do nothing
          returning id, background_job_id, status, mode, start_url, progress, stage, result,
                    error_message, created_at, updated_at`,
-        [viewer.workspace.id, user.id, input.sessionId ?? null, input.mode, startUrl.toString(), input.pageLimit, input.recordVideo, input.followExternal, input.promo?.enabled ? JSON.stringify(input.promo) : null, input.idempotencyKey],
+        [viewer.workspace.id, user.id, input.sessionId ?? null, input.mode, startUrl.toString(), input.pageLimit, input.recordVideo, input.followExternal, input.promo?.enabled ? JSON.stringify(input.promo) : null, input.idempotencyKey,input.presentation?JSON.stringify(input.presentation):null],
       );
       const task = inserted.rows[0] ?? (await options.db.query<TaskRow>(
           `select id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
                 error_message, created_at, updated_at, follow_external, assistant_connection_id
-           from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3`,
-        [viewer.workspace.id, user.id, input.idempotencyKey],
+           from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3
+             and start_url=$4 and mode=$5 and page_limit=$6 and record_video=$7 and follow_external=$8
+             and session_id is not distinct from $9::uuid and promo is not distinct from $10::jsonb and presentation is not distinct from $11::jsonb`,
+        [viewer.workspace.id, user.id, input.idempotencyKey, startUrl.toString(), input.mode, input.pageLimit, input.recordVideo, input.followExternal, input.sessionId ?? null, input.promo?.enabled ? JSON.stringify(input.promo) : null,input.presentation?JSON.stringify(input.presentation):null],
       )).rows[0];
-      if (!task) return reply.code(500).send({ ok: false, error: { code: "task_create_failed", message: "无法创建网站浏览任务。" } });
+      if (!task) return reply.code(409).send({ ok: false, error: { code: "idempotency_conflict", message: "该请求标识已用于其他浏览参数，请重新发起任务。" } });
+
+      if (input.recordVideo && task.status === "queued") {
+        const recordingApproval = await requestRecordingApproval(options.db, task.id, viewer.workspace.id, user.id);
+        return reply.code(inserted.rows[0] ? 202 : 200).send({ ok: true, data: { task: await loadTask(options.db, task.id, viewer.workspace.id), jobId: null, reused: !inserted.rows[0], recordingApproval } });
+      }
 
       let jobId = task.background_job_id;
       let reused = true;
@@ -240,6 +261,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     if (!user) return unauthorized(reply);
     try {
       const viewer = await options.viewerService.ensureViewer(user);
+      await recoverExpiredPromoApproval(options.db, request.params.taskId, viewer.workspace.id, user.id);
       let task = await loadTask(options.db, request.params.taskId, viewer.workspace.id);
       if (!task) return reply.code(404).send({ ok: false, error: { code: "task_not_found", message: "网站浏览任务不存在。" } });
       if (task.backgroundJobId && (task.status === "queued" || task.status === "running")) {
@@ -271,11 +293,62 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       );
       const approval = task.promoApprovalId
         ? (await options.db.query<{ id: string; job_type: "video_generation"; model: string; estimated_credits: number; expires_at: string; payload: { duration?: number; resolution?: string; input_asset_ids?: string[] } }>(
-            `select id,job_type,model,estimated_credits,expires_at,payload from generation_approvals where id=$1 and workspace_id=$2 and user_id=$3`,
+            `select id,job_type,model,estimated_credits,expires_at,payload from generation_approvals where id=$1 and workspace_id=$2 and user_id=$3 and status='pending' and expires_at>now()`,
             [task.promoApprovalId, viewer.workspace.id, user.id],
           )).rows[0]
         : null;
-      return reply.send({ ok: true, data: { task, events: events.rows, ...(approval ? { promoApproval: { approvalId: approval.id, jobType: approval.job_type, model: approval.model, estimatedCredits: Number(approval.estimated_credits), expiresAt: approval.expires_at, hasReferenceImage: (approval.payload.input_asset_ids?.length ?? 0) > 0, ...(approval.payload.duration !== undefined ? { duration: approval.payload.duration } : {}), ...(approval.payload.resolution ? { resolution: approval.payload.resolution } : {}) } } : {}) } });
+      const recordingApproval = (await options.db.query<{ id: string; action: Record<string, unknown>; status: string; expires_at: string }>(
+        `select a.id,a.action,a.status,a.expires_at from website_recording_approvals a
+         join website_capture_tasks t on t.id=a.task_id
+         where a.task_id=$1 and a.workspace_id=$2 and a.user_id=$3 and t.created_by=$3
+           and t.status='queued' and a.status in ('pending','approved') and a.expires_at>now()
+         order by a.created_at desc limit 1`,
+        [task.id, viewer.workspace.id, user.id],
+      )).rows[0];
+      return reply.send({ ok: true, data: { task, events: events.rows, ...(recordingApproval ? { recordingApproval: { id: recordingApproval.id, action: recordingApproval.action, status: recordingApproval.status, expiresAt: recordingApproval.expires_at } } : {}), ...(approval ? { promoApproval: { approvalId: approval.id, jobType: approval.job_type, model: approval.model, estimatedCredits: Number(approval.estimated_credits), expiresAt: approval.expires_at, hasReferenceImage: (approval.payload.input_asset_ids?.length ?? 0) > 0, ...(approval.payload.duration !== undefined ? { duration: approval.payload.duration } : {}), ...(approval.payload.resolution ? { resolution: approval.payload.resolution } : {}) } } : {}) } });
+    } catch (error) {
+      return sendWebsiteCaptureError(error, reply);
+    }
+  });
+
+  app.post<{ Params: { taskId: string; decision: string } }>("/api/website-capture/:taskId/recording-approval/:decision", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    try {
+      const viewer = await options.viewerService.ensureViewer(user);
+      const { approvalId } = z.object({ approvalId: z.string().uuid() }).parse(request.body);
+      const decision = z.enum(["approve", "reject"]).parse(request.params.decision);
+      const task = (await options.db.query<{ id: string; mode: "local" | "isolated"; status: string; session_id: string | null; background_job_id: string | null }>(
+        `select t.id,t.mode,t.status,t.session_id,t.background_job_id from website_capture_tasks t
+         join website_recording_approvals a on a.task_id=t.id
+         where t.id=$1 and t.workspace_id=$2 and t.created_by=$3 and a.id=$4 and a.workspace_id=$2 and a.user_id=$3`,
+        [request.params.taskId, viewer.workspace.id, user.id, approvalId],
+      )).rows[0];
+      if (!task || task.status !== "queued") return reply.code(409).send({ ok: false, error: { code: "recording_approval_invalid", message: "录制审批不存在或任务已结束。" } });
+      if(decision==="approve")await assertConnectorEnabled(options.db,viewer.workspace.id,user.id,task.mode==="isolated"?"isolated-browser":"desktop-agent");
+      const decided = await decideRecordingApproval(options.db, approvalId, viewer.workspace.id, user.id, decision === "approve");
+      if (!decided) {
+        const approved = decision === "approve" && (await options.db.query(
+          "select id from website_recording_approvals where id=$1 and task_id=$2 and workspace_id=$3 and user_id=$4 and status='approved' and expires_at>now()",
+          [approvalId, task.id, viewer.workspace.id, user.id],
+        )).rows.length === 1;
+        if (!approved) return reply.code(409).send({ ok: false, error: { code: "recording_approval_invalid", message: "录制审批已过期、已处理或参数已改变。" } });
+      }
+      if (decision === "reject") {
+        await options.db.query("update website_capture_tasks set status='canceled',stage='canceled',updated_at=now() where id=$1 and status='queued'", [task.id]);
+      } else if (task.mode === "local") {
+        await options.assistantHub.startLocalTask(task.id, user.id);
+      } else {
+        const job = await options.jobService.createJob(user, {
+          workspaceId: viewer.workspace.id,
+          ...(task.session_id ? { sessionId: task.session_id } : {}),
+          idempotencyKey: `website-recording:${task.id}:${approvalId}`,
+          jobType: "website_capture",
+          payload: { task_id: task.id, recording_approval_id: approvalId },
+        });
+        await options.db.query("update website_capture_tasks set background_job_id=$2,updated_at=now() where id=$1 and background_job_id is null", [task.id, job.id]);
+      }
+      return reply.send({ ok: true, data: { task: await loadTask(options.db, task.id, viewer.workspace.id) } });
     } catch (error) {
       return sendWebsiteCaptureError(error, reply);
     }
@@ -335,14 +408,21 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     if (!user) return unauthorized(reply);
     try {
       const viewer = await options.viewerService.ensureViewer(user);
-      let taskRow: { id: string; background_job_id: string | null; status: string; mode: WebsiteCaptureTask["mode"] } | undefined = (await claimWebsiteCaptureRetry(options.db, request.params.taskId, viewer.workspace.id, user.id)) ?? undefined;
+      let taskRow: { id: string; background_job_id: string | null; status: string; mode: WebsiteCaptureTask["mode"]; record_video: boolean } | undefined = (await claimWebsiteCaptureRetry(options.db, request.params.taskId, viewer.workspace.id, user.id)) ?? undefined;
       if (!taskRow) {
-        taskRow = (await options.db.query<{ id: string; background_job_id: string | null; status: string; mode: WebsiteCaptureTask["mode"] }>(
-          `select id,background_job_id,status,mode
+        taskRow = (await options.db.query<{ id: string; background_job_id: string | null; status: string; mode: WebsiteCaptureTask["mode"]; record_video: boolean }>(
+          `select id,background_job_id,status,mode,record_video
              from website_capture_tasks where id=$1 and workspace_id=$2 and created_by=$3`,
           [request.params.taskId, viewer.workspace.id, user.id],
         )).rows[0];
         if (taskRow && (taskRow.status === "queued" || taskRow.status === "running")) {
+          if (taskRow.record_video && taskRow.status === "queued") {
+            if (taskRow.background_job_id) {
+              return reply.code(409).send({ ok: false, error: { code: "recording_job_active", message: "录制作业仍在处理中，请等待其结束后再重新申请。" } });
+            }
+            await requestRecordingApproval(options.db, taskRow.id, viewer.workspace.id, user.id);
+            return reply.send({ ok: true, data: { task: await loadTask(options.db, taskRow.id, viewer.workspace.id), reused: true } });
+          }
           if (taskRow.status === "queued" && taskRow.mode === "local") {
             await options.assistantHub.startLocalTask(taskRow.id, user.id);
           } else if (taskRow.status === "queued" && taskRow.background_job_id) {
@@ -360,6 +440,11 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
           return reply.send({ ok: true, data: { task: await loadTask(options.db, taskRow.id, viewer.workspace.id), reused: true } });
         }
         return reply.code(409).send({ ok: false, error: { code: "task_not_retryable", message: "任务不存在或当前不可重试。" } });
+      }
+      if (taskRow.record_video) {
+        await requestRecordingApproval(options.db, taskRow.id, viewer.workspace.id, user.id);
+        await options.db.query("insert into website_capture_events(task_id,stage,detail) values($1,'waiting_recording_approval',$2)", [taskRow.id, "重新录制需要再次确认。"]);
+        return reply.send({ ok: true, data: { task: await loadTask(options.db, taskRow.id, viewer.workspace.id), reused: false } });
       }
       if (taskRow.mode !== "local" && !taskRow.background_job_id) {
         await options.db.query("update website_capture_tasks set status='failed',stage='failed',error_message='缺少后台任务记录，无法安全重试',updated_at=now() where id=$1 and status='queued'", [taskRow.id]);
@@ -392,6 +477,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
     }
     try {
       const viewer = await options.viewerService.ensureViewer(user);
+      await recoverExpiredPromoApproval(options.db, request.params.taskId, viewer.workspace.id, user.id);
       const found = await options.db.query<{
         id: string;
         workspace_id: string;
@@ -438,12 +524,14 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         model: modelRow.model_id,
         payload: parameters,
         estimatedCredits,
+        forceConfirmation: true,
         context: { ...(task.session_id ? { sessionId: task.session_id } : {}), websiteCaptureTaskId: task.id },
       });
       if (gate.state === "confirmation_required") {
         await options.db.query("update website_capture_tasks set promo_status='awaiting_approval', promo_approval_id=$2, promo_error=null, updated_at=now() where id=$1", [task.id, gate.request.approvalId]);
         return reply.send({ ok: true, data: { state: "confirmation_required", request: gate.request } });
       }
+      if (estimatedCredits > 0) throw new Error("Paid website promo generation requires explicit confirmation.");
       const job = await options.jobService.createJob(user, {
         workspaceId: viewer.workspace.id,
         ...(task.session_id ? { sessionId: task.session_id } : {}),
@@ -463,6 +551,19 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
   });
 }
 
+async function recoverExpiredPromoApproval(db: Pool, taskId: string, workspaceId: string, userId: string): Promise<void> {
+  await db.query(
+    `update website_capture_tasks t set promo_status='failed', promo_error='The generation confirmation expired. Request it again.', updated_at=now()
+     where t.id=$1 and t.workspace_id=$2 and t.created_by=$3 and t.promo_status='awaiting_approval'
+       and not exists (
+         select 1 from generation_approvals a
+         where a.id=t.promo_approval_id and a.workspace_id=t.workspace_id and a.user_id=t.created_by
+           and (a.status='approved' or (a.status='pending' and a.expires_at>now()))
+       )`,
+    [taskId, workspaceId, userId],
+  );
+}
+
 async function cleanupCaptureAssets(db: Pool, taskId: string): Promise<number> {
   try {
     return await softDeleteWebsiteCaptureAssets(db, taskId);
@@ -476,7 +577,7 @@ async function loadTask(db: Pool, taskId: string, workspaceId: string): Promise<
   const { rows } = await db.query<TaskRow>(
     `select id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
             error_message, created_at, updated_at, follow_external, assistant_connection_id,
-            promo, promo_status, promo_approval_id, promo_job_id, promo_video_url, promo_error
+            promo, promo_status, promo_approval_id, promo_job_id, promo_video_url, promo_error, presentation
        from website_capture_tasks where id=$1 and workspace_id=$2`,
     [taskId, workspaceId],
   );
@@ -493,6 +594,7 @@ function toTask(row: TaskRow): WebsiteCaptureTask {
     progress: Number(row.progress),
     stage: row.stage,
     result: row.result,
+    ...(row.presentation!==undefined?{presentation:row.presentation}:{}),
     error: row.error_message,
     ...(row.promo_status ? { promoStatus: row.promo_status } : {}),
     ...(row.promo !== undefined ? { promo: row.promo } : {}),

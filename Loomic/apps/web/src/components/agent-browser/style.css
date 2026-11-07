@@ -27,3 +27,14 @@ html[data-helstera-desktop="true"] .agent-browser-panel { inset-block-start: 46p
 .agent-browser-footer a { display: inline-flex; gap: 4px; align-items: center; margin-top: 7px; color: var(--foreground); text-decoration: underline; }
 .agent-browser-footer svg { width: 14px; height: 14px; }
 @media(max-width:640px) { .agent-browser-panel-expanded { width: 100vw; } .agent-browser-content { padding: 14px; } }
+.website-presentation-card { margin-bottom:16px; border:1px solid var(--border); border-radius:10px; background:var(--card); }
+.website-presentation-heading { display:flex; align-items:center; gap:8px; width:100%; min-height:44px; padding:12px; text-align:start; font-size:13px; font-weight:600; }
+.website-presentation-heading svg { width:17px;height:17px; }
+.website-presentation-heading span:last-child { margin-inline-start:auto;font-size:11px;color:var(--muted-foreground);font-weight:400; }
+.website-presentation-body { display:grid; gap:12px; padding:0 12px 12px; font-size:12px;line-height:1.65; }
+.website-presentation-body > p { color:var(--muted-foreground); }
+.website-presentation-body label { display:grid;gap:6px; }
+.website-presentation-input { width:100%;min-height:40px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--background);color:var(--foreground);font-size:16px; }
+.website-presentation-options { display:grid;grid-template-columns:1fr 1fr;gap:10px; }
+.website-presentation-approval { display:grid;gap:8px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--background); }
+.website-presentation-buttons { display:flex;gap:8px;flex-wrap:wrap; }

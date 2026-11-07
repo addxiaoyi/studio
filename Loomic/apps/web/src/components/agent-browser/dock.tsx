@@ -15,6 +15,7 @@ import { useAgentBrowsers } from "@/hooks/use-agent-browser";
 import { Button } from "@/components/ui/button";
 import { StyledSelect } from "@/components/ui/styled-select";
 import { AgentCursor } from "./cursor";
+import { WebsitePresentationCard } from "./presentation-card";
 import "./style.css";
 
 export function AgentBrowserDock() {
@@ -161,6 +162,7 @@ function BrowserSessionDock() {
             </Button>
           </header>
           <div className="agent-browser-content">
+            {session&&<WebsitePresentationCard userId={session.user.id} token={session.access_token} sourceUrl={selected?.url??""}/>}
             {view.error && (
               <div role="alert" className="agent-browser-error">
                 <p>{view.error}</p>

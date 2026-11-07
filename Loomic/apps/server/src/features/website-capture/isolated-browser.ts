@@ -10,6 +10,9 @@ import { z } from "zod";
 import { launchAgentBrowser } from "../agent-browser/engine.js";
 import { browserViewStore } from "../agent-browser/store.js";
 import { observeAgentBrowser } from "../agent-browser/observer.js";
+import { websitePresentationSchema, type WebsitePresentation } from "@helstera/shared";
+import { capturePresentationScene, type PresentationScene } from "./presentation-snapshot.js";
+import { recordWebsitePresentation } from "./presentation.js";
 import type { Pool, PoolClient } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import type { WebsiteCaptureClaim, WebsiteCaptureEvidence, WebsiteCapturePage, WebsiteCaptureResult } from "@helstera/shared";
@@ -38,6 +41,7 @@ export type CaptureTask = {
   page_limit: number;
   record_video: boolean;
   follow_external?: boolean;
+  presentation?: WebsitePresentation | null;
 };
 
 type CaptureProgress = (percent: number, stage: string, detail?: string) => Promise<void>;
@@ -102,6 +106,10 @@ export async function captureIsolatedWebsite(options: {
   let videoPath: string | undefined;
   let view: Awaited<ReturnType<typeof observeAgentBrowser>> | undefined;
   let capturedSuccessfully = false;
+  async function closeView(state:"completed"|"failed",detail:string){await view?.close(state,detail);view=undefined;}
+  const presentation=options.task.presentation?websitePresentationSchema.parse(options.task.presentation):null;
+  if(presentation&&!options.task.record_video)throw new Error("网站演示需要先确认录制。");
+  const scenes:PresentationScene[]=[];
   const abort = () => { void browser?.close().catch(error => console.error("[capture] cancellation close failed", error)); };
   options.signal?.throwIfAborted();
   options.signal?.addEventListener("abort", abort, { once: true });
@@ -116,7 +124,7 @@ export async function captureIsolatedWebsite(options: {
       ignoreHTTPSErrors: false,
       permissions: [],
       serviceWorkers: "block",
-      ...(options.task.record_video
+      ...(options.task.record_video && !presentation
         ? { recordVideo: { dir: tempDir, size: { width: 1280, height: 720 } } }
         : {}),
       viewport: { width: 1280, height: 720 },
@@ -173,6 +181,7 @@ export async function captureIsolatedWebsite(options: {
         await view?.beforeAction("正在保存页面证据");
         const screenshot = await page.screenshot({ type: "jpeg", quality: 76, fullPage: false });
         await view?.capture();
+        if(presentation)scenes.push(await capturePresentationScene(page));
         captured.push({
           url: responseUrl.toString(),
           title: facts.title,
@@ -200,17 +209,32 @@ export async function captureIsolatedWebsite(options: {
     if (captured.length === 0) {
       throw new WebsiteCaptureError("no_pages_captured", "No pages could be captured from this website.");
     }
-    await view?.close("completed", "浏览完成，显示最后画面；证据正在回写任务。");
-    view = undefined;
+    await closeView("completed", "浏览完成，显示最后画面；证据正在回写任务。");
     await page.close();
-    if (options.task.record_video) {
+    if (options.task.record_video && !presentation) {
       const video = page.video();
       if (!video) throw new WebsiteCaptureError("recording_missing", "The browser did not produce a recording.");
       videoPath = await video.path();
     }
     await context.close();
 
-    await options.onProgress(78, "saving_assets", "Saving screenshots and recording");
+    if(presentation){
+      await options.onProgress(74,"presentation_recording","正在录制多光标网页重建演示");
+      videoPath=await recordWebsitePresentation({browser,directory:tempDir,scenes,config:presentation,
+        onPage:async demo=>{
+          if(process.env.HELSTERA_BROWSER_VIEW_ENABLED!=="1")return;
+          view=await observeAgentBrowser({page:demo,engine:launched.engine,store:browserViewStore(options.db,options.storageRoot),
+            taskId:options.task.id,workspaceId:options.task.workspace_id,userId:options.task.created_by,
+            name:"网站介绍演示",sourceUrl:startUrl.toString(),assertActive:()=>assertTaskIsRunning(options.db,options.task.id),
+            ...(options.signal?{signal:options.signal}:{}),});
+        },
+        checkpoint:async()=>{options.signal?.throwIfAborted();await assertTaskIsRunning(options.db,options.task.id);await view?.beforeAction("多光标网页重建 · 正在录制",null);},
+        onProgress:async progress=>{await options.onProgress(74+Math.round(progress*.18),"presentation_recording",`多光标网页重建演示 ${progress}%`);},
+      });
+      await closeView("completed","网站演示录制完成，视频正在保存。");
+    }
+
+    await options.onProgress(presentation?93:78, "saving_assets", "Saving screenshots and recording");
     const pages: WebsiteCapturePage[] = [];
     for (const [index, item] of captured.entries()) {
       await assertTaskIsRunning(options.db, options.task.id);
@@ -259,8 +283,8 @@ export async function captureIsolatedWebsite(options: {
         bytes: video,
         mimeType: "video/webm",
         mediaType: "video",
-        title: `Website browsing recording: ${pages[0]?.title ?? startUrl.hostname}`,
-        metadata: { sourceUrl: startUrl.toString(), pageCount: pages.length },
+        title: `${presentation?"网站介绍演示":"Website browsing recording"}: ${pages[0]?.title ?? startUrl.hostname}`,
+        metadata: { sourceUrl: startUrl.toString(), pageCount: pages.length,...(presentation?{presentation}:{}),generatedBy:"website-capture" },
       });
       recordingAssetId = asset.id;
       recordingUrl = asset.url;
@@ -282,6 +306,7 @@ export async function captureIsolatedWebsite(options: {
       ...(recordingAssetId ? { recordingAssetId } : {}),
       ...(recordingUrl ? { recordingUrl } : {}),
       completedAt: new Date().toISOString(),
+      ...(presentation?{presentation}:{}),
     };
   } finally {
     await view?.close(capturedSuccessfully ? "completed" : "failed", capturedSuccessfully ? "浏览完成" : "浏览已停止，请查看任务结果").catch(error=>console.error("[agent-browser] failed to close preview",error));

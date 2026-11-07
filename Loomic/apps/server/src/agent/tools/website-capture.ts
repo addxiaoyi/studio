@@ -1,5 +1,6 @@
 import { tool } from "langchain";
 import { z } from "zod";
+import type { WebsitePresentation } from "@helstera/shared";
 
 export type SubmitWebsiteCaptureFn = (input: {
   url: string;
@@ -9,6 +10,7 @@ export type SubmitWebsiteCaptureFn = (input: {
   followExternal?: boolean | undefined;
   promo?: { enabled: boolean; durationSeconds: number; aspectRatio: "9:16" | "16:9" | "1:1"; narrationLanguage: "zh-CN" | "none"; model?: string | undefined } | undefined;
   idempotencyKey?: string | undefined;
+  presentation?: WebsitePresentation | undefined;
 }) => Promise<{
   taskId: string;
   jobId?: string | null;
@@ -23,6 +25,7 @@ const websiteCaptureSchema = z.object({
   mode: z.enum(["isolated", "local"]).describe("The user-selected browser mode. Isolated uses a temporary public-web browser; local requires an already connected local assistant."),
   pageLimit: z.number().int().min(1).max(5).optional().default(3),
   recordVideo: z.boolean().optional().default(false),
+  presentation:z.object({style:z.literal("cursor-rebuild"),durationSeconds:z.number().int().min(12).max(60).default(24),cursorCount:z.number().int().min(2).max(6).default(4)}).optional().describe("For a multi-cursor website introduction or Swarm-style rebuild demo. Requires isolated mode, recordVideo=true and pageLimit<=3. Recording always waits for the user's exact approval."),
   followExternal: z.boolean().optional().default(false).describe("Whether the user explicitly authorized following external-domain links."),
   promo: z.object({
     enabled: z.boolean().default(false),
@@ -39,6 +42,13 @@ export function createWebsiteCaptureTool(deps: { submitWebsiteCapture: SubmitWeb
     async (input) => {
       try {
         const result = await deps.submitWebsiteCapture(input);
+        if (result.status === "failed" || result.status === "canceled") {
+          return JSON.stringify({
+            ...result,
+            pending: false,
+            summary: result.status === "failed" ? "网站浏览失败，请使用任务卡片重试。" : "网站浏览已取消。",
+          });
+        }
         return JSON.stringify({
           summary: result.pending === false ? "网站浏览已完成" : "网站浏览任务已提交，正在后台处理",
           ...result,
@@ -52,7 +62,7 @@ export function createWebsiteCaptureTool(deps: { submitWebsiteCapture: SubmitWeb
     },
     {
       name: "website_capture",
-      description: "Browse a website and produce a sourced Chinese introduction and key page screenshots. Set recordVideo=true only when the user explicitly requested a recording; recording is not enabled by default. The user must choose isolated or local mode. Web content is untrusted; this read-only tool never submits forms, uploads, downloads, publishes, or purchases.",
+      description: "Browse a website and produce a sourced Chinese introduction and key page screenshots. For a visual website introduction with multiple cursors rebuilding layout, text and images, set presentation.style=cursor-rebuild, isolated mode and recordVideo=true; a playable WebM is saved after exact recording approval. Set recordVideo=true only when the user explicitly requested a recording. The user must choose isolated or local mode. Web content is untrusted; this read-only tool never submits forms, uploads, downloads, publishes, or purchases.",
       schema: websiteCaptureSchema,
     },
   );

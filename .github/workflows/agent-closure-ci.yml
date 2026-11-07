@@ -51,6 +51,10 @@ jobs:
         run: |
           node scripts/test-local-postgres.mjs src/features/agent-browser/browser-view.postgres.test.ts src/features/agent-browser/engine.test.ts src/features/agent-browser/observer.test.ts
           pnpm --filter @helstera/web exec vitest run test/agent-browser-dock.test.tsx test/canvas-bottom-bar.test.tsx
+      - name: Website presentation parameters and recording approval
+        run: |
+          pnpm --filter @helstera/shared exec vitest run src/website-presentation.test.ts
+          node scripts/test-local-postgres.mjs src/features/website-capture/recording-approval.postgres.test.ts src/features/website-capture/recording-approval.test.ts src/http/website-capture-create.test.ts src/http/website-recording-approval.test.ts
       - name: Try-on billing and shared form regressions
         run: |
           pnpm --filter @helstera/server exec vitest run src/features/generation/fashion-billing.postgres.test.ts src/http/fashion-billing.test.ts src/http/image-models-route.test.ts src/http/generation-approvals.test.ts src/http/media-connector-gate.test.ts
@@ -120,6 +124,10 @@ jobs:
         run: |
           pnpm --filter @helstera/server exec vitest run src/features/agent-browser/observer.integration.test.ts
           pnpm --filter @helstera/web exec playwright test --config playwright.agent-browser.config.ts
+      - name: Website presentation recording and playback
+        run: |
+          pnpm --filter @helstera/server exec vitest run src/features/website-capture/presentation.integration.test.ts
+          pnpm --filter @helstera/web exec playwright test --config playwright.presentation.config.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -131,5 +139,8 @@ jobs:
             Loomic/.creative-test-results/fashion-billing/
             Loomic/.creative-test-results/agent-browser.json
             Loomic/.creative-test-results/agent-browser/
+            Loomic/.creative-test-results/presentation/
+            Loomic/.creative-test-results/presentation-flow.json
+            Loomic/.creative-test-results/presentation-flow/
           if-no-files-found: error
           retention-days: 7

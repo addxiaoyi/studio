@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 
 import type { ToolBlock, WebsiteCaptureTask } from "@helstera/shared";
 import { useAuth } from "../../lib/auth-context";
-import { approveWebsiteCaptureAction, cancelJob, cancelWebsiteCapture, exportJob, fetchJob, fetchJobs, fetchJobTimeline, fetchWebsiteCapture, fetchWebsiteCaptureActions, prepareWebsitePromo, rejectWebsiteCaptureAction, retryWebsiteCapture, syncJob, type PendingWebsiteAction } from "../../lib/server-api";
+import { approveWebsiteCaptureAction, cancelJob, cancelWebsiteCapture, decideWebsiteRecording, exportJob, fetchJob, fetchJobs, fetchJobTimeline, fetchWebsiteCapture, fetchWebsiteCaptureActions, prepareWebsitePromo, rejectWebsiteCaptureAction, retryWebsiteCapture, syncJob, type PendingWebsiteAction, type RecordingApproval } from "../../lib/server-api";
 import { canRetryGeneration, formatGenerationError, shouldFailoverVideoError } from "../../lib/generation-error-policy";
 import { ChatImage } from "./image-lightbox";
 import { DesktopAgentProgressCard as DesktopAgentTaskCard } from "./desktop-agent-progress-card";
@@ -607,6 +607,7 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
   const [pendingActions, setPendingActions] = useState<PendingWebsiteAction[]>([]);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [promoApproval, setPromoApproval] = useState<{ approvalId: string; model: string; estimatedCredits: number; duration?: number; resolution?: string; hasReferenceImage: boolean; expiresAt: string } | null>(null);
+  const [recordingApproval, setRecordingApproval] = useState<RecordingApproval | null>(null);
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -614,14 +615,19 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
     const load = async () => {
       try {
         const data = await fetchWebsiteCapture(session.access_token, taskId);
-        const actions = await fetchWebsiteCaptureActions(session.access_token, taskId);
         if (!stopped) {
           setTask(data.task);
           setEvents(data.events);
-          setPendingActions(actions);
-          if (data.promoApproval) setPromoApproval(data.promoApproval);
+          setRecordingApproval(data.recordingApproval ?? null);
+          setPromoApproval(data.promoApproval ?? null);
           setError(null);
         }
+        if (["succeeded", "failed", "canceled"].includes(data.task.status)) {
+          if (!stopped) setPendingActions([]);
+          return data.task.status;
+        }
+        const actions = await fetchWebsiteCaptureActions(session.access_token, taskId);
+        if (!stopped) setPendingActions(actions);
         return data.task.status;
       } catch (nextError) {
         if (!stopped) setError(nextError instanceof Error ? nextError.message : "无法读取网站浏览状态");
@@ -630,14 +636,14 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
     };
     void load();
     const timer = window.setInterval(() => {
-      if (task && ["succeeded", "failed", "canceled"].includes(task.status)) return;
+      if (task && ["succeeded", "failed", "canceled"].includes(task.status) && task.promoStatus !== "awaiting_approval" && task.promoStatus !== "queued" && task.promoStatus !== "running") return;
       void load();
     }, 2_000);
     return () => {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [session?.access_token, taskId, task?.status]);
+  }, [session?.access_token, taskId, task?.status, task?.promoStatus]);
 
   const cancel = async () => {
     if (!session?.access_token || canceling) return;
@@ -690,6 +696,21 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
     }
   };
 
+  const resolveRecording = async (decision: "approve" | "reject") => {
+    if (!session?.access_token || !recordingApproval || actionBusy) return;
+    setActionBusy(recordingApproval.id);
+    try {
+      const result = await decideWebsiteRecording(session.access_token, taskId, recordingApproval.id, decision);
+      setTask(result.task);
+      setRecordingApproval(null);
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "录制审批失败，请重试。");
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
   const progress = Math.max(0, Math.min(100, task?.progress ?? 0));
   const statusText = task?.status === "succeeded"
     ? "网站介绍与素材已完成"
@@ -718,6 +739,14 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
         <div className={`h-full rounded-full transition-[width] ${task?.status === "failed" ? "bg-destructive" : "bg-foreground/60"}`} style={{ width: `${progress}%` }} />
       </div>
       {task?.stage ? <p className="mt-2 text-[11px] text-muted-foreground">阶段：{formatWebsiteCaptureStage(task.stage)}</p> : null}
+      {recordingApproval ? <div className="mt-3 rounded border border-amber-500/40 p-3" aria-label="网站录制审批">
+        <p className="text-xs font-medium">确认网站录制</p>
+        {recordingApproval.action.presentation&&<p className="text-xs">多光标网站演示 · {recordingApproval.action.presentation.durationSeconds} 秒 · {recordingApproval.action.presentation.cursorCount} 个光标 · WebM</p>}
+        <p className="mt-1 break-all text-xs">{recordingApproval.action.url}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{recordingApproval.action.mode === "local" ? "本地浏览器" : "隔离浏览器"} · 最多 {recordingApproval.action.pageLimit} 页 · {recordingApproval.action.followExternal ? "允许跟随外部链接" : "不跟随外部链接"}</p>
+        <p className="mt-1 text-xs text-muted-foreground">有效期至 {new Date(recordingApproval.expiresAt).toLocaleString()}</p>
+        {recordingApproval.status === "pending" ? <div className="mt-2 flex gap-2"><button type="button" onClick={() => void resolveRecording("approve")} disabled={actionBusy !== null} className="rounded bg-foreground px-3 py-2 text-xs text-background disabled:opacity-50">确认录制</button><button type="button" onClick={() => void resolveRecording("reject")} disabled={actionBusy !== null} className="rounded border px-3 py-2 text-xs disabled:opacity-50">拒绝</button></div> : <button type="button" onClick={() => void resolveRecording("approve")} disabled={actionBusy !== null} className="mt-2 rounded border px-3 py-2 text-xs disabled:opacity-50">已确认，重试启动</button>}
+      </div> : task?.stage === "waiting_recording_approval" ? <div className="mt-2"><p className="text-xs text-destructive">录制审批不可用或已过期。</p><button type="button" onClick={() => void retry()} className="mt-2 rounded border px-3 py-2 text-xs">重新申请审批</button></div> : task?.stage === "recording_dispatching" ? <p className="mt-2 text-xs text-muted-foreground">录制任务正在派发；若长时间没有进展，请取消任务后重新发起。</p> : null}
       {events.length > 0 ? (
         <ol className="mt-2 space-y-1 border-l border-border/60 pl-2.5" aria-label="最近任务进度事件">
           {events.slice(-5).map((event) => (
@@ -756,7 +785,7 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
           <div className="grid grid-cols-2 gap-2">
             {task.result.pages.map((page) => <a key={page.assetId} href={page.screenshotUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-border/40"><img src={page.screenshotUrl} alt={`页面截图：${page.title}`} className="aspect-video w-full object-cover" /></a>)}
           </div>
-          {task.result.recordingUrl ? <video controls preload="metadata" src={task.result.recordingUrl} className="w-full rounded-lg border border-border/40" aria-label="网站浏览录屏" /> : null}
+          {task.result.recordingAssetId && session?.access_token ? <AuthenticatedRecording assetId={task.result.recordingAssetId} accessToken={session.access_token} /> : task.result.recordingUrl ? <video controls preload="metadata" src={task.result.recordingUrl} className="w-full rounded-lg border border-border/40" aria-label="网站浏览录屏" /> : null}
           {promoApproval ? <GenerationApprovalCard approvalId={promoApproval.approvalId} jobType="video_generation" model={promoApproval.model} estimatedCredits={promoApproval.estimatedCredits} hasReferenceImage={promoApproval.hasReferenceImage} expiresAt={promoApproval.expiresAt} {...(promoApproval.duration !== undefined ? { duration: promoApproval.duration } : {})} {...(promoApproval.resolution !== undefined ? { resolution: promoApproval.resolution } : {})} /> : null}
           {task.promo?.enabled ? (task.promoVideoUrl ? <video controls preload="metadata" src={task.promoVideoUrl} className="w-full rounded-lg border border-border/40" aria-label="网站宣传成片" /> : task.promoStatus !== "awaiting_approval" && task.promoStatus !== "queued" && task.promoStatus !== "running" ? <button type="button" onClick={() => void preparePromo()} className="min-h-10 rounded-md border border-border/70 px-3 text-xs">生成宣传成片（需确认费用）</button> : <p className="text-xs text-muted-foreground">宣传成片任务：{task.promoStatus === "awaiting_approval" ? "等待费用确认" : "生成中"}</p>) : null}
         </div>

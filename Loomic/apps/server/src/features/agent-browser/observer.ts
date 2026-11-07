@@ -15,9 +15,11 @@ export async function observeAgentBrowser(options: {
   engine: "chromix" | "chromium";
   assertActive(): Promise<void>;
   signal?: AbortSignal;
+  name?: string;
+  sourceUrl?: string;
 }) {
   const { page, store } = options;
-  const id = await store.create({ ...options, name: "浏览 Agent" });
+  const id = await store.create({ ...options, name: options.name??"浏览 Agent" });
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let capturing = Promise.resolve();
@@ -39,7 +41,7 @@ export async function observeAgentBrowser(options: {
       });
       const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
       await store.writeFrame(id, bytes, {
-        url: page.url(),
+        url: options.sourceUrl??page.url(),
         title: await page.title(),
         ...viewport,
       });

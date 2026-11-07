@@ -2,6 +2,7 @@ const stageLabels: Record<string, string> = {
   queued: "等待执行",
   connecting: "连接浏览器",
   browser_starting: "启动隔离浏览器",
+  presentation_recording: "录制多光标网站演示",
   page_loading: "浏览页面",
   saving_assets: "保存截图与录屏",
   recording_failed: "录屏未能完成",

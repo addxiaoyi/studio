@@ -2298,15 +2298,32 @@ export async function createWebsiteCapture(
   return (await response.json() as { ok: true; data: { task: WebsiteCaptureTask; jobId: string | null; reused: boolean } }).data;
 }
 
+export type RecordingApproval = {
+  id: string;
+  status: "pending" | "approved";
+  expiresAt: string;
+  action: { url: string; mode: "isolated" | "local"; pageLimit: number; followExternal: boolean; presentation?: import("@helstera/shared").WebsitePresentation };
+};
+
+type WebsiteCaptureDetails = { task: WebsiteCaptureTask; events: Array<{ id: number; stage: string; detail: string; created_at: string }>; recordingApproval?: RecordingApproval; promoApproval?: { approvalId: string; jobType: "video_generation"; model: string; estimatedCredits: number; duration?: number; resolution?: string; hasReferenceImage: boolean; expiresAt: string } };
+
 export async function fetchWebsiteCapture(
   accessToken: string,
   taskId: string,
-): Promise<{ task: WebsiteCaptureTask; events: Array<{ id: number; stage: string; detail: string; created_at: string }>; promoApproval?: { approvalId: string; jobType: "video_generation"; model: string; estimatedCredits: number; duration?: number; resolution?: string; hasReferenceImage: boolean; expiresAt: string } }> {
+): Promise<WebsiteCaptureDetails> {
   const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/${encodeURIComponent(taskId)}`, {
     headers: authHeaders(accessToken),
   });
   if (!response.ok) return handleErrorResponse(response);
-  return (await response.json() as { ok: true; data: { task: WebsiteCaptureTask; events: Array<{ id: number; stage: string; detail: string; created_at: string }>; promoApproval?: { approvalId: string; jobType: "video_generation"; model: string; estimatedCredits: number; duration?: number; resolution?: string; hasReferenceImage: boolean; expiresAt: string } } }).data;
+  return (await response.json() as { ok: true; data: WebsiteCaptureDetails }).data;
+}
+
+export async function decideWebsiteRecording(accessToken: string, taskId: string, approvalId: string, decision: "approve" | "reject"): Promise<{ task: WebsiteCaptureTask }> {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/${encodeURIComponent(taskId)}/recording-approval/${decision}`, {
+    method: "POST", headers: authJsonHeaders(accessToken), body: JSON.stringify({ approvalId }),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: { task: WebsiteCaptureTask } }).data;
 }
 
 export async function cancelWebsiteCapture(accessToken: string, taskId: string): Promise<{ task: WebsiteCaptureTask }> {

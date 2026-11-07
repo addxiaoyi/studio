@@ -1652,6 +1652,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         };
 
         submitWebsiteCapture = async (input) => {
+          if(input.presentation&&(input.mode!=="isolated"||!input.recordVideo||(input.pageLimit??3)>3))throw new Error("多光标网站演示需要隔离模式、开启录制且最多3页。");
           if (!options.localDb || !options.jobService || !userId) {
             throw new Error("网站浏览后台任务当前不可用。");
           }
@@ -1698,9 +1699,9 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               progress: number;
             }>(
               `insert into website_capture_tasks
-                (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, assistant_connection_id, promo, idempotency_key)
-               values ($1,$2,$3,'local',$4,$5,$6,$7,$8,$9,$10)
-               on conflict (created_by, idempotency_key) do nothing
+                (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, assistant_connection_id, promo, idempotency_key, stage)
+               values ($1,$2,$3,'local',$4,$5,$6,$7,$8,$9,$10,case when $6 then 'waiting_recording_approval' else 'queued' end)
+               on conflict (workspace_id, created_by, idempotency_key) do nothing
                returning id, status, progress`,
               [
                 workspaceId,
@@ -1723,19 +1724,26 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                   status: string;
                   progress: number;
                 }>(
-                  "select id, status, progress from website_capture_tasks where created_by=$1 and idempotency_key=$2",
-                  [userId, idempotencyKey],
+                  `select id, status, progress from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3
+                     and start_url=$4 and mode=$5 and page_limit=$6 and record_video=$7 and follow_external=$8
+                     and session_id is not distinct from $9::uuid and promo is not distinct from $10::jsonb`,
+                  [workspaceId, userId, idempotencyKey, startUrl.toString(), input.mode, input.pageLimit ?? 3, input.recordVideo ?? false, input.followExternal ?? false, sessionId ?? null, input.promo?.enabled ? JSON.stringify(input.promo) : null],
                 )
               ).rows[0];
             if (!task) throw new Error("��վ������񴴽�ʧ�ܡ�");
+            if (input.recordVideo && task.status === "queued") {
+              const { requestRecordingApproval } = await import("../features/website-capture/recording-approval.js");
+              const recordingApproval = await requestRecordingApproval(options.localDb, task.id, workspaceId, userId);
+              return { taskId: task.id, jobId: null, status: task.status, progress: Number(task.progress ?? 0), pending: true, recordingApproval };
+            }
             if (task.status === "queued")
               await options.desktopAgentHub?.startLocalTask(task.id, userId);
             return {
               taskId: task.id,
               jobId: null,
-              status: "running",
+              status: task.status,
               progress: Number(task.progress ?? 0),
-              pending: task.status !== "succeeded",
+              pending: task.status === "queued" || task.status === "running",
             };
           }
           const taskResult = await options.localDb.query<{
@@ -1745,9 +1753,9 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             progress: number;
           }>(
             `insert into website_capture_tasks
-              (workspace_id, created_by, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key)
-             values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-             on conflict (created_by, idempotency_key) do nothing
+              (workspace_id, created_by, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key, session_id, stage, presentation)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,case when $6 then 'waiting_recording_approval' else 'queued' end,$11::jsonb)
+             on conflict (workspace_id, created_by, idempotency_key) do nothing
              returning id, background_job_id, status, progress`,
             [
               workspaceId,
@@ -1759,6 +1767,8 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               input.followExternal ?? false,
               input.promo?.enabled ? JSON.stringify(input.promo) : null,
               idempotencyKey,
+              sessionId,
+              input.presentation?JSON.stringify(input.presentation):null,
             ],
           );
           let task = taskResult.rows[0];
@@ -1770,12 +1780,19 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                 status: string;
                 progress: number;
               }>(
-                "select id, background_job_id, status, progress from website_capture_tasks where created_by=$1 and idempotency_key=$2",
-                [userId, idempotencyKey],
+                `select id, background_job_id, status, progress from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3
+                   and start_url=$4 and mode=$5 and page_limit=$6 and record_video=$7 and follow_external=$8
+                   and session_id is not distinct from $9::uuid and promo is not distinct from $10::jsonb and presentation is not distinct from $11::jsonb`,
+                [workspaceId, userId, idempotencyKey, startUrl.toString(), input.mode, input.pageLimit ?? 3, input.recordVideo ?? false, input.followExternal ?? false, sessionId ?? null, input.promo?.enabled ? JSON.stringify(input.promo) : null,input.presentation?JSON.stringify(input.presentation):null],
               )
             ).rows[0];
           }
           if (!task) throw new Error("网站浏览任务创建失败。");
+          if (input.recordVideo && task.status === "queued") {
+            const { requestRecordingApproval } = await import("../features/website-capture/recording-approval.js");
+            const recordingApproval = await requestRecordingApproval(options.localDb, task.id, workspaceId, userId);
+            return { taskId: task.id, jobId: null, status: task.status, progress: Number(task.progress ?? 0), pending: true, recordingApproval };
+          }
           let jobId = task.background_job_id;
           if (!jobId && task.status === "queued") {
             const job = await options.jobService.createJob(
@@ -1798,7 +1815,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             jobId,
             status: task.status,
             progress: Number(task.progress ?? 0),
-            pending: task.status !== "succeeded",
+            pending: task.status === "queued" || task.status === "running",
           };
         };
 

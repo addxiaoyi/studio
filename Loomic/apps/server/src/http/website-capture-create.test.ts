@@ -52,7 +52,9 @@ describe("website capture creation idempotency scope", () => {
     const query = vi.fn(async (sql: string, values?: unknown[]) => {
       if (sql.includes("insert into website_capture_tasks")) return { rows: [] };
       if (sql.includes("from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3")) {
-        expect(values).toEqual([workspaceId, user.id, payload.idempotencyKey]);
+        expect(values).toEqual([workspaceId, user.id, payload.idempotencyKey, payload.url, payload.mode, payload.pageLimit, payload.recordVideo, payload.followExternal, null, null, null]);
+        expect(sql).toContain("record_video=$7");
+        expect(sql).toContain("presentation is not distinct from $11::jsonb");
         return { rows: [currentTask] };
       }
       if (sql.includes("from website_capture_tasks where id=$1 and workspace_id=$2")) return { rows: [currentTask] };
@@ -67,6 +69,16 @@ describe("website capture creation idempotency scope", () => {
     const insert = query.mock.calls.find(([sql]) => String(sql).includes("insert into website_capture_tasks"));
     expect(insert?.[0]).toContain("on conflict (workspace_id, created_by, idempotency_key)");
     expect(insert?.[1]?.slice(0, 2)).toEqual([workspaceId, user.id]);
+    expect(jobService.createJob).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("rejects an idempotency key reused with different capture parameters", async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    const { app, jobService } = buildApp(query);
+    const response = await app.inject({ method: "POST", url: "/api/website-capture", payload: { ...payload, recordVideo: true } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("idempotency_conflict");
     expect(jobService.createJob).not.toHaveBeenCalled();
     await app.close();
   });

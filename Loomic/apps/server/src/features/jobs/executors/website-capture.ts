@@ -2,6 +2,8 @@ import { captureIsolatedWebsite, WebsiteCaptureError } from "../../website-captu
 import { softDeleteWebsiteCaptureAssets } from "../../website-capture/asset-cleanup.js";
 import { registerExecutor, type ExecutorContext } from "../job-executor.js";
 import { assertConnectorEnabled } from "../../agent-goals/connector-gate.js";
+import { completeWebsiteCapture } from "../../website-capture/complete-capture.js";
+import { claimApprovedRecording, recordingActionFromTask } from "../../website-capture/recording-approval.js";
 
 async function resolveCaptureTaskId(jobId: string, ctx: ExecutorContext): Promise<string> {
   const job = await ctx.jobService.getJobAdmin(jobId);
@@ -24,29 +26,38 @@ registerExecutor("website_capture", async (jobId, _queueMessage, ctx: ExecutorCo
   if (!ctx.localDb) throw new Error("Website capture requires the local database runtime.");
 
   const taskId = await resolveCaptureTaskId(jobId, ctx);
+  const job = await ctx.jobService.getJobAdmin(jobId);
+  const approvalId = (job.payload as Record<string, unknown> | null)?.recording_approval_id;
 
   const task = (await ctx.localDb.query<{
     id: string;
     workspace_id: string;
     created_by: string;
+    mode: string;
+    session_id: string | null;
+    assistant_connection_id: string | null;
     start_url: string;
     page_limit: number;
     record_video: boolean;
+    presentation: import("@helstera/shared").WebsitePresentation | null;
     follow_external: boolean;
     status: string;
   }>(
-    "select id, workspace_id, created_by, start_url, page_limit, record_video, follow_external, status from website_capture_tasks where id=$1",
+    "select id, workspace_id, created_by, mode, session_id, assistant_connection_id, start_url, page_limit, record_video, presentation, follow_external, status from website_capture_tasks where id=$1",
     [taskId],
   )).rows[0];
   if (!task) throw Object.assign(new Error("Website capture task was not found."), { code: "invalid_input" });
   if (task.status === "canceled") throw Object.assign(new Error("Website capture was canceled."), { code: "job_canceled" });
 
-  await ctx.localDb.query(
-    "update website_capture_tasks set status='running', progress=1, stage='connecting', updated_at=now() where id=$1 and status in ('queued','failed')",
-    [taskId],
-  );
-  await appendEvent(ctx, taskId, "connecting", "正在启动隔离浏览器");
-
+  const claimed = task.record_video
+    ? typeof approvalId === "string" && await claimApprovedRecording(ctx.localDb, taskId, recordingActionFromTask(task), approvalId)
+    : (await ctx.localDb.query<{ id: string }>(
+      "update website_capture_tasks set status='running', progress=1, stage='connecting', updated_at=now() where id=$1 and record_video=false and status in ('queued','failed') returning id",
+      [taskId],
+    )).rows.length === 1;
+  if (!claimed) {
+    throw Object.assign(new Error("Website capture could not be claimed; it may already be running or have ended."), { code: "capture_not_claimed" });
+  }
   const onProgress = async (progress: number, stage: string, detail = "") => {
     await assertConnectorEnabled(ctx.localDb!, task.workspace_id, task.created_by, "isolated-browser");
     await ctx.localDb!.query(
@@ -58,6 +69,7 @@ registerExecutor("website_capture", async (jobId, _queueMessage, ctx: ExecutorCo
   };
 
   try {
+    await appendEvent(ctx, taskId, "connecting", "正在启动隔离浏览器");
     await assertConnectorEnabled(ctx.localDb, task.workspace_id, task.created_by, "isolated-browser");
     const result = await captureIsolatedWebsite({
       db: ctx.localDb,
@@ -67,11 +79,12 @@ registerExecutor("website_capture", async (jobId, _queueMessage, ctx: ExecutorCo
       task,
       onProgress,
     });
-    await ctx.localDb.query(
-      "update website_capture_tasks set status='succeeded', progress=100, stage='completed', result=$2::jsonb, error_message=null, completed_at=now(), updated_at=now() where id=$1 and status='running'",
-      [taskId, JSON.stringify(result)],
-    );
-    await appendEvent(ctx, taskId, "completed", "网站介绍与素材已保存");
+    if (!await completeWebsiteCapture(ctx.localDb, taskId, result)) {
+      throw Object.assign(new Error("Website capture is no longer running."), { code: "job_canceled" });
+    }
+    await appendEvent(ctx, taskId, "completed", "网站介绍与素材已保存").catch((eventError) => {
+      console.error("[website-capture] failed to append completed event", eventError);
+    });
     return result as unknown as Record<string, unknown>;
   } catch (error) {
     const code = error instanceof WebsiteCaptureError ? error.code : ((error as { code?: string }).code ?? "executor_error");

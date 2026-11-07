@@ -7,7 +7,7 @@ import { getServerBaseUrl } from "@/lib/env";
 const MAX_RECORDING_BYTES = 40 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function AuthenticatedRecording({ assetId, accessToken, maxBytes = MAX_RECORDING_BYTES, label = "网站浏览录屏", kind = "video" }: { assetId: string; accessToken: string; maxBytes?: number; label?: string; kind?: "image" | "video" }) {
+export function AuthenticatedRecording({ assetId, accessToken, maxBytes = MAX_RECORDING_BYTES, label = "网站浏览录屏", kind = "video",downloadName }: { assetId: string; accessToken: string; maxBytes?: number; label?: string; kind?: "image" | "video";downloadName?:string }) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,6 +22,7 @@ export function AuthenticatedRecording({ assetId, accessToken, maxBytes = MAX_RE
         headers: { Authorization: `Bearer ${accessToken}` },
         signal: controller.signal,
         redirect: "error",
+        credentials: "include",
       });
       if (!response.ok) throw new Error("无法读取录屏，请检查登录状态或素材权限。");
       const blob = await boundedResponseBlob(response, maxBytes);
@@ -42,5 +43,5 @@ export function AuthenticatedRecording({ assetId, accessToken, maxBytes = MAX_RE
   if (error) return <p role="alert" className="text-xs text-destructive">{error}</p>;
   if (!url) return <p role="status" className="text-xs text-muted-foreground">{kind === "image" ? "正在加载试穿图像…" : "正在加载网站录屏..."}</p>;
   if (kind === "image") return <img src={url} alt={label} className="max-h-96 w-full rounded-lg object-contain" />;
-  return <video controls preload="metadata" src={url} className="w-full rounded-lg border border-border/40" aria-label={label} />;
+  return <div className="space-y-2"><video controls preload="metadata" src={url} className="w-full rounded-lg border border-border/40" aria-label={label} />{downloadName&&<a href={url} download={downloadName} className="inline-flex min-h-9 items-center rounded-md border border-border px-3 text-xs">下载 WebM 演示录像</a>}</div>;
 }
