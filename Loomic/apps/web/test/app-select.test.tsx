@@ -43,7 +43,10 @@ it("preserves option values and form submission with disabled options", async ()
     "aria-disabled",
     "true",
   );
-  await user.keyboard("{End}{Enter}");
+  await waitFor(()=>expect(screen.getByRole("option",{name:"模型甲"})).toHaveAttribute("data-highlighted"));
+  await user.keyboard("{End}");
+  await waitFor(()=>expect(screen.getByRole("option",{name:"模型乙"})).toHaveAttribute("data-highlighted"));
+  await user.keyboard("{Enter}");
   expect(onChange).toHaveBeenCalledOnce();
   expect(onChange.mock.calls[0]?.[0].target.value).toBe("c");
   expect(new FormData(view.container.querySelector("form")!).get("model")).toBe(
@@ -82,4 +85,9 @@ it("mounts a list inside its native dialog and restores focus on Escape", async 
   );
   await user.keyboard("{Escape}");
   expect(trigger).toHaveFocus();
+});
+it("keeps menus inside an elevated browser panel",async()=>{
+  render(<aside data-select-portal><StyledSelect value="a" options={[{value:"a",label:"浏览任务"}]} onChange={vi.fn()} aria-label="会话"/></aside>);
+  await userEvent.setup().click(screen.getByRole("combobox",{name:"会话"}));
+  await waitFor(()=>expect(screen.getByRole("listbox").closest("[data-select-portal]")).not.toBeNull());
 });

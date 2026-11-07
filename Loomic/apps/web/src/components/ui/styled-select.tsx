@@ -47,7 +47,7 @@ export function StyledSelect({
   function opened(open: boolean) {
     if (open) {
       const node = trigger.current;
-      setPortal(node?.closest<HTMLDialogElement>("dialog[open]") ?? null);
+      setPortal(node?.closest<HTMLElement>("dialog[open], [data-select-portal]") ?? null);
     }
   }
   return (

@@ -136,6 +136,7 @@ function BrowserSessionDock() {
     <>
       {open && (
         <aside
+          data-select-portal
           id="agent-browser-panel"
           className={`agent-browser-panel${expanded ? " agent-browser-panel-expanded" : ""}`}
           aria-label={labels.title}

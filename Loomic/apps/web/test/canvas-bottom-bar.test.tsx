@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -41,6 +41,9 @@ describe("CanvasBottomBar", () => {
     );
 
     expect(screen.getByTestId("canvas-bottom-toolbar")).toHaveClass("w-10", "min-w-10", "shrink-0");
+    const observe=vi.fn();window.addEventListener("loomic:show-agent-browser",observe,{once:true});
+    await userEvent.click(within(screen.getByTestId("canvas-bottom-toolbar")).getByRole("button",{name:"展开 Agent 浏览器"}));
+    expect(observe).toHaveBeenCalledOnce();
     expect(screen.getByRole("status")).toHaveTextContent("已选 2 项");
     expect(screen.getByRole("button", { name: "缩放比例 100%，打开缩放选项" })).toHaveAttribute("aria-expanded", "false");
 
