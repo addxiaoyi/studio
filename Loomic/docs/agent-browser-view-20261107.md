@@ -53,3 +53,12 @@ root 管理的 Linux 服务可使用 `scripts/agent-browser-linux-launcher.py`�
 账号身份改变时整个观察组件重新建立，旧请求中止、私有 Blob URL 撤销，即使尚未收到新账号的会话列表也不显示旧画面。相关前端测试共 5 项通过；目标、MCP 和 OneTake 下拉回归按实际异步菜单挂载等待，保留原业务断言。
 
 本地证据位于 `.creative-test-results/agent-browser*`；不提交用户登录态、私人截图或下载缓存。Windows 原生 Chromix 归档下载遇到限速，已停止额外下载并保留部分文件；本轮桌面验收覆盖服务端浏览器观察，不声称已验收本机 Chromix 执行器。
+
+## 最终发布与 CI
+
+- 当前前端候选为 `full-web-1oiSev`，3,250 个文件哈希核验后原子切换上线；接口健康正常。数据库迁移已登记，验收会话记录为 `engine=chromix`、`state=completed`、`frame_revision=2`。
+- 运行中的 `chrome://sandbox` 确认 Layer 1 为 Namespace，PID namespaces、Network namespaces、Seccomp-BPF、TSYNC 均为 Yes；没有关闭浏览器 sandbox。
+- 实现提交 `2c9d3ef2`，后续修复 `3e636bb3`、`30f56e23`、`e7d55f61` 已推送开发分支。
+- [Agent Closure CI 42382248155](https://github.com/addxiaoyi/studio/actions/runs/42382248155) 对 `e7d55f61` 完整通过，包含四包类型、数据库、组件、视频/试穿及新增真实浏览器观察回归。
+- [Desktop Candidate CI 42381766503](https://github.com/addxiaoyi/studio/actions/runs/42381766503) 对入口修复提交 `30f56e23` 的 Windows/macOS/Linux 候选全部通过；后续账号隔离修复引发的候选构建按该次运行状态单独判断。
+- [Website Capture CI 42380580489](https://github.com/addxiaoyi/studio/actions/runs/42380580489) 对服务端实现提交通过。
