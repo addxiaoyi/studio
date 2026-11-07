@@ -87,8 +87,9 @@ describe("Agent workspace state", () => {
     await user.click(screen.getByRole("button", { name: "Agent workspace" }));
     await screen.findByRole("heading", { name: "Goal first" });
     await user.click(screen.getByRole("combobox", { name: "Recent goals" }));
+    const second = await screen.findByRole("option", { name: "Goal second" });
     expect(screen.queryByRole("option", { name: "Goal foreign" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("option", { name: "Goal second" }));
+    await user.click(second);
     expect(screen.getByText("Result second")).toBeInTheDocument();
     expect(sessionStorage.getItem("agent-goal:canvas")).toBe("second");
     mounted.unmount();

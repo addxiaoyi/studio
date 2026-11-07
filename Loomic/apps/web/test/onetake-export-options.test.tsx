@@ -18,5 +18,5 @@ it("prevents AVI soft subtitles before preparing an invalid approval", async () 
 it("does not offer AVI when only soft subtitles are available", async () => {
   render(<OneTakeExportOptions options={transcriptExportSchema.parse({ subtitle: { mode: "soft" } })} onChange={vi.fn()} copy={oneTakeCopy("zh-CN")} burnAvailable={false} disabled={false} />);
   await userEvent.setup().click(screen.getByRole("combobox", { name: "格式" }));
-  expect(screen.getByRole("option", { name: "AVI" })).toHaveAttribute("aria-disabled", "true");
+  expect(await screen.findByRole("option", { name: "AVI" })).toHaveAttribute("aria-disabled", "true");
 });

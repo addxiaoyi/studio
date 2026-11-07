@@ -11,12 +11,13 @@ const api = vi.hoisted(() => ({
   readAgentBrowserFrame: vi.fn(),
   controlAgentBrowser: vi.fn(),
 }));
+const auth=vi.hoisted(()=>({userId:"user"}));
 vi.mock("@/lib/agent-browser-api", async (original) => ({
   ...(await original<typeof import("@/lib/agent-browser-api")>()),
   ...api,
 }));
 vi.mock("@/lib/auth-context", () => ({
-  useAuth: () => ({ session: { access_token: "token", user: { id: "user" } } }),
+  useAuth: () => ({ session: { access_token: "token", user: { id: auth.userId } } }),
 }));
 vi.mock("@/lib/i18n", () => ({ useLocale: () => "zh-CN" }));
 vi.mock("gsap", () => ({ default: { to: () => ({ kill: vi.fn() }) } }));
@@ -38,6 +39,7 @@ const session = {
   expiresAt: new Date(Date.now() + 60_000).toISOString(),
 };
 beforeEach(() => {
+  auth.userId="user";
   vi.clearAllMocks();
   api.listAgentBrowsers.mockResolvedValue({
     enabled: true,
@@ -60,6 +62,14 @@ beforeEach(() => {
       disconnect() {}
     },
   );
+});
+
+it("unmounts the previous owner's preview when the account changes",async()=>{
+  const mounted=render(<><AgentBrowserButton/><AgentBrowserDock/></>);
+  await userEvent.setup().click(screen.getByRole("button",{name:"展开 Agent 浏览器"}));await screen.findByAltText("浏览器画面：Example");
+  auth.userId="other-user";api.listAgentBrowsers.mockImplementation(()=>new Promise(()=>{}));
+  mounted.rerender(<><AgentBrowserButton/><AgentBrowserDock/></>);
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:preview");
 });
 afterEach(() => {
   cleanup();

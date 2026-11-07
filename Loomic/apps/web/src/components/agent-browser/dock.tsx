@@ -18,6 +18,11 @@ import { AgentCursor } from "./cursor";
 import "./style.css";
 
 export function AgentBrowserDock() {
+  const {session}=useAuth();
+  return session?<BrowserSessionDock key={session.user.id}/>:null;
+}
+
+function BrowserSessionDock() {
   const { session } = useAuth();
   const english = useLocale() === "en-US";
   const [open, setOpen] = useState(false),

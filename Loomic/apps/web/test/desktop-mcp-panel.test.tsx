@@ -389,7 +389,7 @@ describe("DesktopMcpPanel", () => {
     expect(await screen.findByText("search")).toBeTruthy();
 
     await user.click(filter);
-    await user.click(screen.getByRole("option", { name: "有副作用" }));
+    await user.click(await screen.findByRole("option", { name: "有副作用" }));
     await waitFor(() => expect(filter.getAttribute("aria-expanded")).toBe("false"));
     expect(screen.getByText("write_file")).toBeTruthy();
     expect(screen.queryByText("search")).toBeNull();
