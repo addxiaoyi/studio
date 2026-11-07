@@ -47,6 +47,8 @@
 
 聊天现已支持消息复制和正文Ctrl/Cmd+C，重连旧快照不再覆盖新的流式回答；生产复制验收与Electron沙箱启动/崩溃恢复回归见[`docs/chat-copy-recovery-20261106.md`](docs/chat-copy-recovery-20261106.md)。
 
+2026-11-07 已上线划词操作：选择消息片段后可直接复制或添加为输入框引用，保留已有草稿且不自动发送；宽窄布局切换保留引用。实际划选、复制、引用和320px恢复证据见[`docs/chat-selection-20261107.md`](docs/chat-selection-20261107.md)。
+
 The current GitHub snapshot includes the creator-workspace UX pass and the
 reliability work that is present in this checkout. The detailed 100-item
 acceptance matrix is tracked in
