@@ -57,6 +57,8 @@ AI方案新增时间线差异对比及字幕、配乐、剪辑逐项撤销；工
 
 视频页已上线持续对话操控，覆盖已有图层修改、画幅、预览控制、明确对话确认和本机历史恢复。真实模型多轮修改与线上自定义模型回复已验收，最新Agent CI通过；安装包及能力边界见[`docs/video-conversation-20261107.md`](docs/video-conversation-20261107.md)。
 
+对话动画和素材流程已上线：GSAP关键帧、淡化/滑入转场、图片插入、私有素材搜索导入和强制费用确认。正式Windows候选实际运行通过；用户图片的合成副本完成真实模型修改、MP4导出、私有保存和重新导入，原合成保留。完整证据及付费生成验收边界见[`docs/video-motion-materials-20261107.md`](docs/video-motion-materials-20261107.md)。
+
 The current GitHub snapshot includes the creator-workspace UX pass and the
 reliability work that is present in this checkout. The detailed 100-item
 acceptance matrix is tracked in
