@@ -55,7 +55,7 @@
 
 AI方案新增时间线差异对比及字幕、配乐、剪辑逐项撤销；工程动作日志支持刷新恢复，完整撤销保留已消费标记。真实模型复杂方案、浏览器导出解码和原工程恢复已通过；发布状态与边界见[`docs/video-timeline-undo-20261107.md`](docs/video-timeline-undo-20261107.md)。
 
-视频页正在升级为持续对话操控，覆盖已有图层修改、画幅、预览控制、明确对话确认和本机历史恢复。当前验收与发布状态见[`docs/video-conversation-20261107.md`](docs/video-conversation-20261107.md)。
+视频页已上线持续对话操控，覆盖已有图层修改、画幅、预览控制、明确对话确认和本机历史恢复。真实模型多轮修改与线上自定义模型回复已验收，最新Agent CI通过；安装包及能力边界见[`docs/video-conversation-20261107.md`](docs/video-conversation-20261107.md)。
 
 The current GitHub snapshot includes the creator-workspace UX pass and the
 reliability work that is present in this checkout. The detailed 100-item
