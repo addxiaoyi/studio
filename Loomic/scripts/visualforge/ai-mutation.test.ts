@@ -76,11 +76,13 @@ describe("current composition AI mutation", () => {
   });
   it("isolates a duplicated composition before editing its shared source",async()=>{
     const project=createBlankTemplateProject();
+    project.files["/project/src/unrelated.ts"]="export const value='unrelated';";
     project.files[compositionFile]=project.files[compositionFile]!.replace("return null;",'return <div>原始图片标题</div>;').replace("<Composition","<><Composition").replace("    />","    /><Composition id=\"Copy\" component={MyComponent} durationInFrames={60} fps={30} width={1280} height={720}/></>");
     const revision=await projectFingerprint(project,"Copy");
     const changed=await prepareStudioEdit(project,compositionFile,{id,compositionId:"Copy",revision,cut,replaceVideo:false,commands:[{type:"layer",layerId:"layer-0",changes:{text:"副本修改"}}]});
     expect(inspectComposition(changed,compositionFile,"MyComp").layers[0]?.text).toBe("原始图片标题");
     expect(inspectComposition(changed,compositionFile,"Copy").layers[0]?.text).toBe("副本修改");
+    expect(Object.keys(changed.files).some(path=>path.includes("loomic-copy-")&&path.endsWith("unrelated.ts"))).toBe(false);
     const undone=await prepareStudioUndo(changed,compositionFile,{id,compositionId:"Copy",revision:await projectFingerprint(changed,"Copy")});
     expect(await projectFingerprint(undone,"Copy")).toBe(revision);
   });
