@@ -11,13 +11,21 @@ AI 方案中新增“查看时间线差异”。同一时间刻度对比原视�
 ## 已验证
 
 - Web 定向4文件15项通过，覆盖方案确认、逐项撤销、保存失败后的工程恢复、导出旧文件保留和禁止重复执行。Web独立类型检查退出0。
+- VisualForge源码与修改回归16项、99断言通过，包含全部撤销后再次收到原计划仍保持幂等。
 - 固定方案经过真实PostgreSQL独立schema与Chromium：预览不修改、逐项确认、依赖拒绝、撤字幕、刷新、撤配乐、导出WebM并经FFmpeg完整解码、最后恢复原工程。
 - 使用生产实际模型配置 `openai:grok-4.6` 完成同一流程，1 passed / 68.1秒。模型按要求返回5个动作：两段竖屏剪辑（1.5秒+1秒）、两条字幕、0.2秒开始的30%音量配乐、MP4导出计划。撤销配乐后另行确认导出当前版本为WebM；不把这个文件记作MP4。
 - 真实模型测试确认接口只调用一次，完整撤销后再次刷新不重放；`originalRestored:true`、`undone:[0,1,2,3]`，页面异常0。
+- 真实输出525,539字节，VP8/Opus、720×1280、75帧；容器时长2.52秒（视频2.5秒，含音频封装尾部）。1.8秒抽帧可见保留的“第二镜头”字幕；撤销配乐后音轨峰值/平均均为-91dB（解码为静音）。SHA-256 `40904e7a27656046dd984ccbeb56167ab49d7a356143918a5f24bf388c57f809`。
 - 1440px和540px差异截图已检查，条块可点击读取详细时间与动作。CI新增固定方案浏览器门禁，使用真实PostgreSQL、Chromium和FFmpeg；不把该门禁视为真实模型测试。
 
 证据保存在 `.creative-test-results/video-diff-undo.json`、`video-diff-undo-real.json`、各自的截图及 `partial-undo.webm`。临时账号、素材、模型凭据和候选包不纳入功能提交。
 
 ## 发布记录
 
-本轮仅发布Web及浏览器编辑器运行包；无新增数据库迁移。发布后的候选哈希、线上工程保留核验和CI结果在完成后更新于本节。
+功能提交 `7c015799` 已推送 `codex/agent-workspace-ci`。候选 `full-web-I0HJG5` 构建68页成功，仅发布Web及浏览器编辑器运行包，无新增数据库迁移。
+
+增量归档大小2,094,620字节，SHA-256 `41ae333c82412108b60840e40b5ba5e2e2a5013e38a6cbffbb0deb7e6045aeda`；3251个候选文件逐一核验，清单SHA-256 `50d489e0e85d35c5b68121ccad7bdfe199eb5748d5177abd66909bb04f8ef6d4`。原子替换后静态路由、缺失资源状态及 `/api/health` 通过，记录位于 `.creative-test-results/diff-undo-deploy.log`。
+
+2026-11-07 14:50线上验收使用真实模型生成两条字幕方案，打开差异图并通过键盘查看“动作1”详情。确认数0/2时应用按钮禁用，关闭并放弃预览后原工程指纹保持 `17916c85…9ad8c8`、字幕数0、页面错误0；测试草稿已清除。证据为 `.creative-test-results/video-timeline-production/proof.json` 和 `timeline-diff.png`。
+
+GitHub [Agent Closure 42348572205](https://github.com/addxiaoyi/studio/actions/runs/42348572205) 已全部通过：四端类型、数据库与用户流程回归，以及新增Linux浏览器门禁（1 passed / 42.2秒、编辑器16项/99断言、运行包构建）。Desktop Candidate `42348572225` 仍在运行，尚不记作全部桌面CI成功。
