@@ -7,9 +7,12 @@ import { findProjectFile } from "../../vendor/visualforge/packages/codemods/src/
 import type { VirtualProject } from "../../vendor/visualforge/packages/browser-studio/src/types";
 import { studioCutSource, cutFrames, STUDIO_FPS, type StudioCut, type StudioCaption } from "../../apps/web/src/lib/studio-cut";
 import { nativeCaptions } from "./native-captions";
+import { actionCut } from "../../apps/web/src/lib/studio-action-cut";
+import type { StudioEdit, StudioUndo, StudioEditReceipt } from "../../apps/web/src/lib/visualforge-runtime";
+export type { StudioEdit } from "../../apps/web/src/lib/visualforge-runtime";
 
-export type StudioEdit = { id: string; compositionId: string; revision: string; cut: StudioCut; replaceVideo: boolean };
-type EditedProject = VirtualProject & { loomicAppliedEdits?: string[]; loomicCuts?: Record<string, { revision: string; cut: StudioCut }> };
+type EditJournal = { edit: StudioEdit; revision: string; undone: number[]; baseFiles: Record<string, string | null>; baseCut: { revision: string; cut: StudioCut } | null; duration: number; format: StudioCut["format"] };
+type EditedProject = VirtualProject & { loomicAppliedEdits?: string[]; loomicCuts?: Record<string, { revision: string; cut: StudioCut }>; loomicEditJournals?: Record<string, EditJournal> };
 
 export async function projectFingerprint(project: VirtualProject, compositionId: string) {
   const bytes = new TextEncoder().encode(JSON.stringify({ compositionId, files: project.files, publicFiles: project.publicFiles }));
@@ -95,7 +98,7 @@ export function inspectComposition(project: VirtualProject, compositionFile: str
   return { duration: durationInFrames / fps, fps, format: width < height ? "portrait" as const : "landscape" as const, captions };
 }
 
-export async function prepareStudioEdit(project: EditedProject, compositionFile: string, edit: StudioEdit): Promise<EditedProject> {
+async function applyStudioEdit(project: EditedProject, compositionFile: string, edit: StudioEdit): Promise<EditedProject> {
   if (project.loomicAppliedEdits?.includes(edit.id)) return project;
   if (await projectFingerprint(project, edit.compositionId) !== edit.revision) throw new Error("合成或素材已改变，请重新生成计划。");
   const resolved = resolveCompositionComponentInProject({ project, compositionFile, compositionId: edit.compositionId });
@@ -122,7 +125,59 @@ export async function prepareStudioEdit(project: EditedProject, compositionFile:
   const prior = project.loomicCuts?.[edit.compositionId];
   const exportable = edit.replaceVideo || prior?.revision === edit.revision;
   next.loomicCuts = { ...next.loomicCuts };
-  if (exportable) next.loomicCuts[edit.compositionId] = { revision: await projectFingerprint(next, edit.compositionId), cut: edit.replaceVideo ? edit.cut : { ...edit.cut, captions: [...(prior?.cut.captions ?? []), ...(edit.cut.captions ?? [])], audio: [...(prior?.cut.audio ?? []), ...(edit.cut.audio ?? [])] } };
+  if (exportable) next.loomicCuts[edit.compositionId] = { revision: await projectFingerprint(next, edit.compositionId), cut: edit.replaceVideo ? edit.cut : { ...prior!.cut, captions: [...(prior?.cut.captions ?? []), ...(edit.cut.captions ?? [])], audio: [...(prior?.cut.audio ?? []), ...(edit.cut.audio ?? [])] } };
   else delete next.loomicCuts[edit.compositionId];
   return next;
+}
+
+export async function prepareStudioEdit(project: EditedProject, compositionFile: string, edit: StudioEdit): Promise<EditedProject> {
+  if (project.loomicAppliedEdits?.includes(edit.id)) return project;
+  const before = inspectComposition(project, compositionFile, edit.compositionId);
+  const approved = edit.commands ? { ...edit, ...actionCut(edit.commands, before) } : edit;
+  const next = await applyStudioEdit(project, compositionFile, approved);
+  if (!edit.commands) return next;
+  const baseFiles: Record<string, string | null> = {};
+  for (const name of new Set([...Object.keys(project.files), ...Object.keys(next.files)])) {
+    if (project.files[name] !== next.files[name]) baseFiles[name] = project.files[name] ?? null;
+  }
+  const journal: EditJournal = { edit: structuredClone(approved), revision: await projectFingerprint(next, edit.compositionId), undone: [], baseFiles,
+    baseCut: structuredClone(project.loomicCuts?.[edit.compositionId] ?? null), duration: before.duration, format: before.format };
+  const retained = Object.entries(project.loomicEditJournals ?? {}).slice(-19);
+  return { ...next, loomicEditJournals: { ...Object.fromEntries(retained), [edit.id]: journal } };
+}
+
+export async function inspectEditReceipt(project: EditedProject, compositionId: string): Promise<StudioEditReceipt | undefined> {
+  const id = project.loomicAppliedEdits?.at(-1);
+  const journal = id ? project.loomicEditJournals?.[id] : undefined;
+  if (!id || !journal || journal.edit.compositionId !== compositionId) return undefined;
+  const actions = journal.edit.commands ?? [];
+  const complete = actions.every((action, index) => action.type === "export" || journal.undone.includes(index));
+  return { id, revision: journal.revision, originalRevision: journal.edit.revision, undone: journal.undone, complete,
+    canUndo: !complete && await projectFingerprint(project, compositionId) === journal.revision };
+}
+
+export async function prepareStudioUndo(project: EditedProject, compositionFile: string, input: StudioUndo): Promise<EditedProject> {
+  const journal = project.loomicEditJournals?.[input.id];
+  if (!journal?.edit.commands || journal.edit.compositionId !== input.compositionId) throw new Error("此方案没有可恢复的动作记录。");
+  const actual = await projectFingerprint(project, input.compositionId);
+  if (actual !== input.revision || actual !== journal.revision || project.loomicAppliedEdits?.at(-1) !== input.id) throw new Error("视频已有后续修改，不能覆盖；请先撤销后续修改。");
+  const actions = journal.edit.commands;
+  if (input.actionIndex !== undefined && (!Number.isInteger(input.actionIndex) || !actions[input.actionIndex] || actions[input.actionIndex]?.type === "export")) throw new Error("此动作不能撤销，已导出的文件会保留。");
+  const indexes = input.actionIndex === undefined ? actions.flatMap((action, index) => action.type === "export" ? [] : [index]) : [input.actionIndex];
+  if (indexes.every(index => journal.undone.includes(index))) return project;
+  const undone = [...new Set([...journal.undone, ...indexes])].sort((a, b) => a - b);
+  const remaining = actions.filter((action, index) => action.type !== "export" && !undone.includes(index));
+  if (!remaining.some(action => action.type === "cut") && remaining.some(action => action.type === "caption" ? action.endMs > journal.duration * 1000 : action.type === "audio" && action.startMs >= journal.duration * 1000)) {
+    throw new Error("请先撤销超出原视频时长的字幕或配乐，再撤销剪辑。");
+  }
+  const files = { ...project.files };
+  for (const [path, content] of Object.entries(journal.baseFiles)) { if (content === null) delete files[path];else files[path] = content; }
+  const cuts = { ...project.loomicCuts };
+  if (journal.baseCut) cuts[input.compositionId] = journal.baseCut;else delete cuts[input.compositionId];
+  const base: EditedProject = { ...project, files, loomicCuts: cuts, loomicAppliedEdits: project.loomicAppliedEdits?.filter(id => id !== input.id) };
+  if (await projectFingerprint(base, input.compositionId) !== journal.edit.revision) throw new Error("原视频恢复记录不完整，无法安全撤销。");
+  let next = remaining.length ? await applyStudioEdit(base, compositionFile, { ...journal.edit, ...actionCut(remaining, { duration: journal.duration, format: journal.format }) }) : base;
+  // Keep the consumed edit marker even after full undo so a lost receipt cannot replay it.
+  next = { ...next, loomicAppliedEdits: project.loomicAppliedEdits };
+  return { ...next, loomicEditJournals: { ...project.loomicEditJournals, [input.id]: { ...journal, undone, revision: await projectFingerprint(next, input.compositionId) } } };
 }

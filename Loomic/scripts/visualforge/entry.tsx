@@ -5,7 +5,7 @@ import { createBlankTemplateProject } from "../../vendor/visualforge/packages/br
 import type { VirtualProject } from "../../vendor/visualforge/packages/browser-studio/src/types";
 import { readStudioProject, saveStudioProject, saveStudioExport, type StudioExport } from "../../apps/web/src/lib/visualforge-storage";
 import { lockStudio, studioImportName } from "../../apps/web/src/lib/visualforge-session";
-import type { StudioHost, StudioSnapshot, StudioEdit } from "../../apps/web/src/lib/visualforge-runtime";
+import type { StudioHost, StudioSnapshot, StudioEdit, StudioUndo } from "../../apps/web/src/lib/visualforge-runtime";
 import type { StudioCut } from "../../apps/web/src/lib/studio-cut";
 import { applyStudioCut, currentCompositionId, listStudioMedia, readStudioMedia } from "./cut";
 import { installStudioChinese } from "./studio-i18n";
@@ -76,6 +76,20 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
     readCut: () => currentCut,
     projectId: () => currentCompositionId() ?? "current-project",
     openExport: openStudioExport,
+    async undoAction(input: StudioUndo): Promise<StudioSnapshot> {
+      host.signal.throwIfAborted();
+      if (currentCompositionId() !== input.compositionId) throw new Error("请切回对应视频后再撤销。");
+      const operations = window.remotion_browserStudio as typeof window.remotion_browserStudio & {
+        loomicUndoAction(input: StudioUndo): Promise<void>; loomicSnapshot(id: string): Promise<StudioSnapshot>;
+      };
+      if (!operations?.loomicUndoAction) throw new Error("此编辑器版本不支持逐项撤销，请刷新。");
+      await operations.loomicUndoAction(input);await queue;
+      if (saveFailure) throw saveFailure;
+      await saveStudioProject(host.userId, currentProject);
+      const snapshot = await operations.loomicSnapshot(input.compositionId);
+      const saved = (currentProject as typeof currentProject & {loomicCuts?: Record<string,{revision:string;cut:StudioCut}>}).loomicCuts?.[input.compositionId];
+      return {...snapshot,cut:saved?.revision===snapshot.revision?saved.cut:null,appliedEdits:(currentProject as typeof currentProject & {loomicAppliedEdits?:string[]}).loomicAppliedEdits??[]};
+    },
     selectComposition(id: string) {
       if (!window.remotion_browserStudio?.getCompositionFile(id)) throw new Error("目标视频已不存在，请重新选择。");
       if (currentCompositionId() === id) return;

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { BunPlugin } from "bun";
 import { patchStudioEnvironment, patchStudioSource } from "./visualforge/studio-source";
 import { registerPinnedSourceResolver } from "./visualforge/source-resolver";
+import { studioOperations } from "./visualforge/operations-adapter";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const lock = JSON.parse(readFileSync(resolve(root, "scripts/creative-sources.json"), "utf8")).video;
@@ -28,8 +29,7 @@ const plugin: BunPlugin = { name: "pinned-visualforge-source", setup(build) {
     const sourceText = readFileSync(args.path, "utf8").replaceAll("\r\n", "\n");
     const marker = "\n\treturn {\n\t\taddComposition,";
     if (!sourceText.includes(marker)) throw new Error("Pinned Studio mutation entry changed.");
-    const extension = `\n\treturn {\n\t\tasync loomicSnapshot(compositionId) {\n\t\t\tconst project = getProject();\n\t\t\tconst compositionFile = getCompositionFile({compositionId, project});\n\t\t\tif (!compositionFile) throw new Error('请选择当前合成。');\n\t\t\treturn {...inspectComposition(project, compositionFile, compositionId), revision: await projectFingerprint(project, compositionId), compositionId};\n\t\t},\n\t\tasync loomicApplyEdit(edit) {\n\t\t\tconst original = getProject();\n\t\t\tconst compositionFile = getCompositionFile({compositionId: edit.compositionId, project: original});\n\t\t\tif (!compositionFile) throw new Error('当前合成已不存在。');\n\t\t\tconst next = await prepareStudioEdit(original, compositionFile, edit);\n\t\t\tif (next === original) return;\n\t\t\tif (getProject() !== original) throw new Error('合成已改变，请重新生成计划。');\n\t\t\tcontroller.applyMutation({fileName: compositionFile, mutate: () => next, nodePathMutationFiles: null, timelineSelection: null, undoRedoNavigation: null});\n\t\t},\n\t\taddComposition,`;
-    return { contents: `import {prepareStudioEdit, inspectComposition, projectFingerprint} from ${JSON.stringify(adapter)};\n${sourceText.replace(marker, extension)}`, loader: "ts" };
+    return { contents: `import {prepareStudioEdit, prepareStudioUndo, inspectComposition, inspectEditReceipt, projectFingerprint} from ${JSON.stringify(adapter)};\n${sourceText.replace(marker, studioOperations)}`, loader: "ts" };
   });
   build.onResolve({filter:/^fflate$/}, () => ({path: join(source,"packages/browser-studio/node_modules/fflate/esm/browser.js")}));
   registerPinnedSourceResolver(build, source);

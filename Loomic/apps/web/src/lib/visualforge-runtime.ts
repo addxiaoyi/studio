@@ -1,9 +1,12 @@
 import type { StudioExport } from "./visualforge-storage";
 import type { StudioCut, StudioMedia } from "./studio-cut";
 import type { StudioAiContext } from "./studio-ai-context";
+import type { VideoEditorAction } from "@helstera/shared";
 
-export type StudioSnapshot = { compositionId: string; revision: string; duration: number; format: StudioCut["format"]; captions: NonNullable<StudioCut["captions"]>; cut: StudioCut | null; appliedEdits?: string[] };
-export type StudioEdit = { id: string; compositionId: string; revision: string; cut: StudioCut; replaceVideo: boolean };
+export type StudioEditReceipt = { id: string; revision: string; originalRevision: string; undone: number[]; complete: boolean; canUndo: boolean };
+export type StudioUndo = { id: string; compositionId: string; revision: string; actionIndex?: number };
+export type StudioSnapshot = { compositionId: string; revision: string; duration: number; format: StudioCut["format"]; captions: NonNullable<StudioCut["captions"]>; cut: StudioCut | null; appliedEdits?: string[]; editReceipt?: StudioEditReceipt };
+export type StudioEdit = { id: string; compositionId: string; revision: string; cut: StudioCut; replaceVideo: boolean; commands?: VideoEditorAction[] };
 
 export type StudioRuntime = {
   dispose(): void;
@@ -20,6 +23,7 @@ export type StudioRuntime = {
   openExport(): void;
   selectComposition(id: string): void;
   undoEdit(input: { id: string; compositionId: string; appliedRevision: string; originalRevision: string }): Promise<void>;
+  undoAction(input: StudioUndo): Promise<StudioSnapshot>;
 };
 export type StudioHost = {
   userId: string;

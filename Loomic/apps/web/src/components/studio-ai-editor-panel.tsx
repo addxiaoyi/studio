@@ -7,6 +7,7 @@ import { useStudioAiWorkflow, type StudioWorkflowProps } from "@/hooks/use-studi
 import { studioTargetLabel } from "@/lib/studio-ai-context";
 import { useVideoText } from "@/lib/video-copy";
 import { useLocale } from "@/lib/i18n";
+import { StudioTimelineDiff } from "./studio-timeline-diff";
 
 type Props = StudioWorkflowProps & { onViewTimeline?: () => void };
 
@@ -68,19 +69,24 @@ export function StudioAiEditorPanel(props: Props) {
       {!flow.prompt.trim() && !flow.restoring && <p className="text-xs text-muted-foreground">{copy("输入修改要求，或选择上方的常用操作。")}</p>}
 
       {flow.plan && <section className="space-y-3 rounded-lg border bg-background p-3" data-testid="studio-ai-plan">
-        <h3 className="text-sm font-semibold">{copy(flow.applied ? "修改已应用" : "确认这些修改")}</h3>
+        <h3 className="text-sm font-semibold">{copy(flow.completelyUndone ? "本次修改已全部撤销" : flow.applied ? "修改已应用" : "确认这些修改")}</h3>
         <p className="text-xs text-muted-foreground">{flow.plan.snapshot?.compositionId}</p>
         <p className="text-xs leading-5 text-muted-foreground">{flow.plan.summary}</p>
+        <StudioTimelineDiff plan={flow.plan} undone={flow.undoneActions} applied={Boolean(flow.applied)} />
         <ol className="space-y-2 text-xs">{flow.plan.actions.map((action, index) => {
           const command = flow.plan?.commands?.actions[index];
           const label = !english || !command ? action.label : command.type === "caption" ? `Caption ${command.startMs / 1000}–${command.endMs / 1000}s: ${command.text}` : command.type === "cut" ? `Replace visuals: ${command.clips.map(clip => `${clip.name} ${clip.start}–${clip.end}s`).join("; ")}` : command.type === "audio" ? `Music: ${command.assetName}, ${command.startMs / 1000}s, ${Math.round(command.volume * 100)}%` : "Export MP4";
-          return <li key={`${action.type}:${index}`}><label className="flex items-start gap-2"><input type="checkbox" checked={flow.confirmed.has(index)} onChange={event => flow.toggleAction(index, event.target.checked)} disabled={flow.busy || Boolean(flow.applied)} /><span>{label}</span></label></li>;
+          const undone = flow.undoneActions.includes(index);
+          return <li key={`${action.type}:${index}`} className="space-y-1" data-action-index={index}>
+            <label className="flex items-start gap-2"><input type="checkbox" checked={flow.confirmed.has(index)} onChange={event => flow.toggleAction(index, event.target.checked)} disabled={flow.busy || Boolean(flow.applied)} /><span className={undone ? "text-muted-foreground line-through" : ""}>{label}</span></label>
+            {undone ? <p className="pl-5 text-xs text-muted-foreground">{copy("已撤销")}</p> : flow.applied && flow.actionUndoAvailable && action.type !== "export" ? <button type="button" disabled={locked} onClick={() => void flow.undoAppliedAction(index)} aria-label={`${copy("撤销动作")} ${index + 1}`} className="ml-5 rounded border px-2 py-1 text-xs hover:bg-muted">{copy(action.type === "caption" ? "撤销此字幕" : action.type === "audio" ? "撤销此配乐" : "撤销剪辑")}</button> : null}
+          </li>;
         })}</ol>
         {!flow.applied ? <><p className="text-xs text-muted-foreground">{copy("已确认")} {flow.confirmed.size}/{flow.plan.actions.length}</p><Button className="w-full" disabled={flow.busy || flow.confirmed.size !== flow.plan.actions.length} onClick={flow.applyPlan}>{copy("确认并应用修改")}</Button><Button variant="ghost" className="w-full" disabled={flow.busy} onClick={flow.discardPlan}>{copy("放弃方案，继续编辑要求")}</Button></> : <>
           {props.onViewTimeline && <Button variant="outline" className="w-full" onClick={props.onViewTimeline}>{copy("查看时间线")}</Button>}
-          <Button className="w-full" disabled={locked || flow.exportedOnce} onClick={flow.exportVideo}><Download className="size-4" />{copy(flow.exportedOnce ? "成片已保存" : "导出视频")}</Button>
+          <Button className="w-full" disabled={locked || flow.exportedOnce && !flow.undoneActions.length} onClick={flow.exportVideo}><Download className="size-4" />{copy(flow.undoneActions.length ? "导出当前版本" : flow.exportedOnce ? "成片已保存" : "导出视频")}</Button>
           {flow.canUndo && <Button variant="ghost" className="w-full" disabled={locked} onClick={flow.undoPlan}><Undo2 className="size-3" />{copy("撤销本次修改")}</Button>}
-          {!flow.canUndo && flow.plan.actions.some(action => action.type !== "export") && <p className="text-xs text-muted-foreground">{copy("已恢复保存的修改，可继续预览和导出；本次打开没有可用的撤销记录。")}</p>}
+          {!flow.canUndo && !flow.completelyUndone && flow.plan.actions.some(action => action.type !== "export") && <p className="text-xs text-muted-foreground">{copy("撤销记录不可用或视频已有后续编辑，请先使用时间线撤销。")}</p>}
         </>}
         {flow.receiptPending && <Button variant="outline" className="w-full" disabled={flow.busy} onClick={flow.retryReceipt}>{copy("重试同步记录")}</Button>}
       </section>}

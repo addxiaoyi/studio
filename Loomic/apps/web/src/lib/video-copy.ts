@@ -1,6 +1,9 @@
 import { useLocale, type Locale } from "./i18n";
 
 const english: Record<string, string> = {
+  "本次修改已全部撤销": "All edits in this plan were undone", "已撤销": "Undone", "撤销动作": "Undo action", "撤销此字幕": "Undo caption", "撤销此配乐": "Undo music", "撤销剪辑": "Undo cut", "导出当前版本": "Export current version",
+  "该动作已撤销，其他动作保留。已导出的文件不受影响。": "Action undone. Other actions and existing exports are preserved.",
+  "撤销记录不可用或视频已有后续编辑，请先使用时间线撤销。": "Undo history is unavailable or there are later edits. Undo later changes in the timeline first.",
   "AI 修改": "AI edit", "修改流程": "Edit workflow", "描述要求": "Describe", "确认方案": "Review", "预览与导出": "Preview and export",
   "请先同步上一视频的修改记录，再继续编辑。": "Sync the previous video's edit history before continuing.",
   "音乐起播时间必须在当前视频时长内。": "Music must start within the current video duration.",

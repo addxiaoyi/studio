@@ -4,7 +4,7 @@ import type { StudioSnapshot, StudioEdit } from "./visualforge-runtime";
 import { getServerBaseUrl } from "./env";
 
 export type StudioAiAction = { label: string; status: "ready" | "planned"; type: "cut" | "caption" | "audio" | "export" };
-export type StudioAiPlan = { cut: StudioCut; targetDuration: number | null; actions: StudioAiAction[]; notices: string[]; source: "model" | "local-fallback"; summary: string; exportFormat?: "webm" | "mp4"; replaceVideo?: boolean; snapshot?: StudioSnapshot; approval?: VideoEditorPlanResponse["approval"]; commands?: VideoEditorPlanResponse["plan"] };
+export type StudioAiPlan = { cut: StudioCut; targetDuration: number | null; actions: StudioAiAction[]; notices: string[]; source: "model" | "local-fallback"; summary: string; exportFormat?: "webm" | "mp4"; replaceVideo?: boolean; snapshot?: StudioSnapshot; approval?: VideoEditorPlanResponse["approval"]; commands?: VideoEditorPlanResponse["plan"]; mediaDurations?: Record<string, number> };
 
 function requestedDuration(prompt: string): number | null {
   const match = prompt.match(/(\d+(?:\.\d+)?)\s*(?:秒|s)(?![a-z])/i);
@@ -36,7 +36,7 @@ export async function requestStudioAiPlan(token: string, input: VideoEditorPlanR
   const payload = videoEditorPlanResponseSchema.parse(await editorRequest(token, "plan", request));
   validateVideoEditorPlan(payload.plan, request);
   if (!payload.approval) throw new Error("服务端尚未启用逐项审批，请升级服务后重试。");
-  return { ...normalizeModelPlan(payload.plan, snapshot), approval: payload.approval };
+  return { ...normalizeModelPlan(payload.plan, snapshot), approval: payload.approval, mediaDurations: Object.fromEntries(input.media.map(item => [item.name, item.duration])) };
 }
 
 export function normalizeModelPlan(plan: VideoEditorPlanResponse["plan"], snapshot: StudioSnapshot): StudioAiPlan {
@@ -59,7 +59,7 @@ export async function confirmStudioPlan(token: string, plan: StudioAiPlan, confi
   const approved = videoEditorConfirmationSchema.parse(await editorRequest(token, `plans/${plan.approval.id}/confirm`, { revision: plan.snapshot.revision, fingerprint: plan.approval.fingerprint, actions: [...confirmed] }));
   if (approved.id !== plan.approval.id || approved.compositionId !== plan.snapshot.compositionId || JSON.stringify(approved.plan) !== JSON.stringify(videoEditorPlanSchema.parse(plan.commands))) throw new Error("服务端确认的计划与预览不一致，请重新生成并确认。");
   const normalized = normalizeModelPlan(approved.plan, plan.snapshot);
-  return { id: plan.approval.id, compositionId: approved.compositionId, revision: plan.snapshot.revision, cut: normalized.cut, replaceVideo: Boolean(normalized.replaceVideo) };
+  return { id: plan.approval.id, compositionId: approved.compositionId, revision: plan.snapshot.revision, cut: normalized.cut, replaceVideo: Boolean(normalized.replaceVideo), commands: approved.plan.actions };
 }
 
 export async function completeStudioPlan(token: string, plan: StudioAiPlan, output?: VideoEditorExportReceipt) {

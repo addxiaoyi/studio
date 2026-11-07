@@ -53,6 +53,8 @@
 
 后续已统一为一个AI修改和导出入口，并补齐修改对象、常用操作、方案失效、确认应用、撤销与成片回流。真实浏览器/数据库中的标题修改→可播放WebM导出→撤销，以及回执丢失恢复均通过；详情见[`docs/video-creator-flow-20261107.md`](docs/video-creator-flow-20261107.md)。
 
+AI方案新增时间线差异对比及字幕、配乐、剪辑逐项撤销；工程动作日志支持刷新恢复，完整撤销保留已消费标记。真实模型复杂方案、浏览器导出解码和原工程恢复已通过；发布状态与边界见[`docs/video-timeline-undo-20261107.md`](docs/video-timeline-undo-20261107.md)。
+
 The current GitHub snapshot includes the creator-workspace UX pass and the
 reliability work that is present in this checkout. The detailed 100-item
 acceptance matrix is tracked in

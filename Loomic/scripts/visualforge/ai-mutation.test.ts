@@ -1,12 +1,44 @@
 import { describe, expect, it } from "bun:test";
 import { createBlankTemplateProject } from "../../vendor/visualforge/packages/browser-studio/src/templates/blank";
-import { inspectComposition, prepareStudioEdit, projectFingerprint, type StudioEdit } from "./ai-mutation";
+import { inspectComposition, prepareStudioEdit, prepareStudioUndo, projectFingerprint, type StudioEdit } from "./ai-mutation";
 
 const compositionFile = "/project/src/Composition.tsx";
 const id = "123e4567-e89b-42d3-a456-426614174000";
 const cut = { format: "portrait" as const, clips: [{ id: "clip", name: "clip.mp4", duration: 5, start: 1, end: 4 }], captions: [{ text: "中文标题", startMs: 0, endMs: 1000 }], audio: [{ assetName: "music.wav", startMs: 1000, volume: 0.3 }] };
 
 describe("current composition AI mutation", () => {
+  it("undoes one caption or audio action after restart and restores the original cut last", async () => {
+    const project = createBlankTemplateProject();
+    const revision = await projectFingerprint(project, "MyComp");
+    const edit: StudioEdit = { id, compositionId:"MyComp",revision,cut,replaceVideo:true,commands:[
+      {type:"cut",format:"portrait",clips:cut.clips.map(({id:_id,...clip})=>clip)},
+      {type:"caption",...cut.captions[0]!}, {type:"audio",...cut.audio[0]!},
+    ] };
+    let next=await prepareStudioEdit(project,compositionFile,edit);
+    next=await prepareStudioUndo(structuredClone(next),compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(next,"MyComp"),actionIndex:1});
+    expect(inspectComposition(next,compositionFile,"MyComp").captions).toEqual([]);
+    expect(next.loomicCuts?.MyComp?.cut.audio).toEqual(cut.audio);
+    const beforeDuplicate=next;
+    next=await prepareStudioUndo(next,compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(next,"MyComp"),actionIndex:1});
+    expect(next).toBe(beforeDuplicate);
+    next=await prepareStudioUndo(next,compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(next,"MyComp"),actionIndex:2});
+    expect(next.loomicCuts?.MyComp?.cut.audio).toEqual([]);
+    next=await prepareStudioUndo(next,compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(next,"MyComp"),actionIndex:0});
+    expect(await projectFingerprint(next,"MyComp")).toBe(revision);
+    expect(next.loomicEditJournals?.[id]?.undone).toEqual([0,1,2]);
+    expect(next.loomicAppliedEdits).toContain(id);
+    expect(await prepareStudioEdit(next,compositionFile,edit)).toBe(next);
+  });
+
+  it("blocks undo over manual edits and cut undo that would invalidate remaining layers", async () => {
+    const project=createBlankTemplateProject();
+    const lateCaption={text:"最后一秒",startMs:2000,endMs:3000};
+    const next=await prepareStudioEdit(project,compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(project,"MyComp"),cut:{...cut,captions:[lateCaption],audio:[]},replaceVideo:true,commands:[{type:"cut",format:"portrait",clips:cut.clips.map(({id:_id,...clip})=>clip)},{type:"caption",...lateCaption}]});
+    const revision=await projectFingerprint(next,"MyComp");
+    await expect(prepareStudioUndo(next,compositionFile,{id,compositionId:"MyComp",revision,actionIndex:0})).rejects.toThrow("先撤销");
+    const changed={...next,files:{...next.files,"/project/src/manual.ts":"export const title='Manual';"}};
+    await expect(prepareStudioUndo(changed,compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(changed,"MyComp"),actionIndex:1})).rejects.toThrow("后续修改");
+  });
   it("reads native BasicCaptions under nested sequences and clips to their visible range", () => {
     const project = createBlankTemplateProject();
     project.files[compositionFile] = 'import {BasicCaptions as Subtitles} from "./basic-captions.element";\n' + project.files[compositionFile]!.replace("return null;", 'return <Sequence from={15} durationInFrames={30}><Subtitles from={15} captions={[{text:"原生字幕",startMs:0,endMs:1500,timestampMs:null,confidence:null}]} /></Sequence>;');

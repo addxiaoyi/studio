@@ -48,6 +48,57 @@ jobs:
       - name: Chat copy and reconnect recovery
         run: pnpm --filter @helstera/web exec vitest run test/chat-copy.test.tsx test/chat-selection.test.tsx test/chat-input.test.tsx test/chat-sessions.test.tsx test/chat-sidebar.test.tsx test/chat-stream.test.ts
       - name: Video workspace regressions
-        run: pnpm --filter @helstera/web exec vitest run test/video-locale.test.tsx test/studio-ai-context.test.tsx test/studio-ai-workflow.test.tsx test/studio-creator-menu.test.ts test/studio-ai-edit.test.ts test/generated-asset-identity.test.ts test/studio-asset-picker.test.tsx test/onetake-history.test.tsx test/onetake-export-options.test.tsx test/send-video-to-chat.test.tsx test/agent-workspace-panel.test.tsx test/agent-goal-timeout.test.ts
+        run: pnpm --filter @helstera/web exec vitest run test/video-locale.test.tsx test/studio-ai-context.test.tsx test/studio-ai-workflow.test.tsx test/studio-creator-menu.test.ts test/studio-ai-edit.test.ts test/studio-ai-session.test.ts test/studio-timeline-diff.test.tsx test/generated-asset-identity.test.ts test/studio-asset-picker.test.tsx test/onetake-history.test.tsx test/onetake-export-options.test.tsx test/send-video-to-chat.test.tsx test/agent-workspace-panel.test.tsx test/agent-goal-timeout.test.ts
       - name: Deployment recovery gates on Linux
         run: python3 -m unittest scripts.test_deploy_production_candidate scripts.test_prepare_production_candidate scripts.test_isolated_pg_rehearsal scripts.test_apply_studio_nginx scripts.test_validate_studio_nginx -q
+  editor-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: loomic_editor
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: Loomic
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/loomic_editor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @helstera/shared build
+      - name: Prepare pinned editor source
+        run: node scripts/prepare-creative-sources.mjs video
+      - name: Verify durable action undo and build runtime
+        run: |
+          bun run scripts/test-visualforge.ts
+          bun run scripts/build-visualforge-runtime.ts
+      - name: Install browser and media dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          pnpm --filter @helstera/web exec playwright install --with-deps chromium
+      - name: Confirm, compare, undo, reload and decode export (injected model plan)
+        run: pnpm --filter @helstera/web exec playwright test --config playwright.diff-undo.config.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: editor-timeline-undo-evidence
+          path: |
+            Loomic/.creative-test-results/video-diff-undo.json
+            Loomic/.creative-test-results/video-diff-undo/
+          if-no-files-found: error
+          retention-days: 7
