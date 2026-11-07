@@ -16,10 +16,12 @@ export function registerVideoChatRoute(app: FastifyInstance, services: VideoEdit
     try {
       const viewer=await services.viewerService.ensureViewer(user);
       const config=await services.settingsService.getChatModelConfig(user,viewer.workspace.id);
-      const output=await invokeEditorPlanner(services.createPlanModel(config),[new SystemMessage(studioChatPrompt()),new HumanMessage(JSON.stringify(input))]);
+      const model=services.createPlanModel(config);
+      const structured=model.withStructuredOutput?.(videoChatReplySchema,{name:"video_reply",...(config.model.startsWith("google:")?{}:{method:"jsonMode"})});
+      const output=await invokeEditorPlanner(structured??model,[new SystemMessage(studioChatPrompt()),new HumanMessage(JSON.stringify(input))],90_000);
       let answer;
       try {
-        answer=videoChatReplySchema.parse(JSON.parse(extractJson(extractText(output))));
+        answer=videoChatReplySchema.parse(structured?output:JSON.parse(extractJson(extractText(output))));
         if(answer.plan)validateVideoEditorPlan(answer.plan,input);
         if(answer.control)validateStudioControl(answer.control,input);
       }catch(error){

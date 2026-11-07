@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { loadEnvFile } from "node:process";
 import { resolve } from "node:path";
 import { createEditorBrowserFixture } from "../../server/src/features/video-editor/browser-fixture";
@@ -32,13 +33,15 @@ test("conversation reads context, edits existing layers, controls playback and r
   const replies:unknown[]=[];
   async function send(prompt:string){
     await page.getByLabel("与视频 AI 对话",{exact:true}).fill(prompt);
-    const response=page.waitForResponse(response=>response.url().endsWith("/api/video/editor/chat"),{timeout:90000});
+    const response=page.waitForResponse(response=>response.url().endsWith("/api/video/editor/chat"),{timeout:110000});
     await page.getByRole("button",{name:"发送",exact:true}).click();
     const reply=await response;expect(reply.status(),await reply.text()).toBe(200);replies.push(await reply.json());
+    await mkdir(info.outputDir,{recursive:true});await writeFile(info.outputPath("replies.json"),JSON.stringify(replies,null,2));
     await expect(page.getByRole("button",{name:"停止",exact:true})).toHaveCount(0);
   }
   async function apply(inChat=false){
     const card=page.getByTestId("studio-ai-plan");
+    await expect(card,replies.map(item=>JSON.stringify(item)).join("\n")).toBeVisible();
     if(inChat){await page.getByLabel("与视频 AI 对话",{exact:true}).fill("确认全部并执行");await page.getByRole("button",{name:"发送",exact:true}).click();}
     else {for(const check of await card.getByRole("checkbox").all())await check.check();await card.getByRole("button",{name:"确认并应用修改",exact:true}).click();}
     await expect(card.getByRole("heading",{name:"修改已应用",exact:true})).toBeVisible();

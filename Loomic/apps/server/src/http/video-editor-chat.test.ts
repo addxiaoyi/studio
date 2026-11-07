@@ -17,6 +17,16 @@ it("answers questions without saving or executing a plan",async()=>{
   const {app,save}=setup({message:"当前视频2秒，有一条欢迎标题。"});
   try{const response=await app.inject({method:"POST",url:"/api/video/editor/chat",payload:input});expect(response.statusCode).toBe(200);expect(save).not.toHaveBeenCalled();}finally{await app.close();}
 });
+it("uses provider JSON output when the configured model supports it",async()=>{
+  const {app,model,save}=setup({message:"unused"});
+  const structured=vi.fn(()=>({invoke:vi.fn().mockResolvedValue({message:"当前视频2秒。"})}));
+  Object.assign(model,{withStructuredOutput:structured});
+  try{
+    const response=await app.inject({method:"POST",url:"/api/video/editor/chat",payload:input});
+    expect(response.statusCode).toBe(200);expect(response.json().reply.message).toBe("当前视频2秒。");
+    expect(structured).toHaveBeenCalledWith(expect.anything(),{name:"video_reply",method:"jsonMode"});expect(model.invoke).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled();
+  }finally{await app.close();}
+});
 it.each([
   {message:"执行代码",control:{type:"shell",command:"bad"}},
   {message:"改标题",plan:{summary:"越界",actions:[{type:"layer",layerId:"other",changes:{text:"x"}}]}},

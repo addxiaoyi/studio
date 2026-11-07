@@ -20,10 +20,14 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
   const saving=useRef(Promise.resolve<unknown>(undefined));
   const loaded=useRef(false);
   const acting=useRef(false);
+  function updateTurns(update:(current:StudioChatTurn[])=>StudioChatTurn[]) {
+    const next=update(history.current);if(next===history.current)return;
+    history.current=next;setTurns(next);
+  }
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;controller.current?.abort();};},[]);
   useEffect(()=>{
     let alive=true;loaded.current=false;setRestoring(true);
-    void readStudioChat<StudioConversation>(props.userId).then(saved=>{if(alive){setTurns(saved?.turns??[]);setDraft(saved?.draft??"");loaded.current=true;}}).catch(()=>{if(alive)setError("无法读取本机对话记录，请刷新后重试。");}).finally(()=>{if(alive)setRestoring(false);});
+    void readStudioChat<StudioConversation>(props.userId).then(saved=>{if(alive){updateTurns(()=>saved?.turns??[]);setDraft(saved?.draft??"");loaded.current=true;}}).catch(()=>{if(alive)setError("无法读取本机对话记录，请刷新后重试。");}).finally(()=>{if(alive)setRestoring(false);});
     return()=>{alive=false;};
   },[props.userId]);
   useEffect(()=>{
@@ -34,12 +38,12 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
   useEffect(()=>{
     if(!flow.plan?.approval?.id||!flow.applied)return;
     const id=flow.plan.approval.id,status=flow.completelyUndone?"undone":"applied";
-    setTurns(current=>current.some(turn=>turn.planId===id&&turn.status!==status)?current.map(turn=>turn.planId===id?{...turn,status}:turn):current);
+    updateTurns(current=>current.some(turn=>turn.planId===id&&turn.status!==status)?current.map(turn=>turn.planId===id?{...turn,status}:turn):current);
   },[flow.plan?.approval?.id,flow.applied,flow.completelyUndone]);
 
   function append(turn:Omit<StudioChatTurn,"id"|"createdAt">) {
     const next={...turn,id:crypto.randomUUID(),createdAt:Date.now()};
-    const updated=[...history.current,next].slice(-100);history.current=updated;setTurns(updated);return next;
+    updateTurns(current=>[...current,next].slice(-100));return next;
   }
   async function send() {
     if(!props.runtime||!draft.trim()||controller.current||flow.busy||flow.receiptPending||restoring||flow.restoring)return;
@@ -73,7 +77,7 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
       if(answer.plan){
         if(!response.approval)throw new Error("方案缺少审批记录，未执行修改。");
         await flow.acceptPlan({...normalizeModelPlan(answer.plan,snapshot),approval:response.approval,mediaDurations:Object.fromEntries(media.map(item=>[item.name,item.duration]))});
-        setTurns(current=>current.map(turn=>turn.status==="pending"?{...turn,status:"superseded"}:turn));
+        updateTurns(current=>current.map(turn=>turn.status==="pending"?{...turn,status:"superseded"}:turn));
         append({role:"assistant",content:answer.message,compositionId,planId:response.approval.id,status:"pending"});
       }else if(answer.control){
         const turn=append({role:"assistant",content:answer.message,compositionId,control:answer.control,revision:snapshot.revision,status:"pending"});
@@ -95,7 +99,7 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
       if(snapshot.compositionId!==turn.compositionId||snapshot.revision!==turn.revision)throw new Error("当前视频已改变，请重新发送此操作。");
       // Consume the UI action before dispatch. A refresh cannot replay an uncertain action.
       const consumed=history.current.map(item=>item.id===turn.id?{...item,status:"superseded" as const}:item);
-      await saving.current;await saveStudioChat(props.userId,{turns:consumed,draft});setTurns(consumed);
+      await saving.current;await saveStudioChat(props.userId,{turns:consumed,draft});updateTurns(()=>consumed);
       const command=turn.control;
       let content:string;
       if(command.type==="undo"){
@@ -107,9 +111,9 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
       else if(command.type==="panel"){
         if(!props.onOpenPanel)throw new Error("该工作区面板暂不可用。");props.onOpenPanel(command.panel);content="已打开对应工作区，请继续选择素材或确认处理。";
       }else content=await props.runtime.control(command,turn.compositionId);
-      setTurns(current=>current.map(item=>item.id===turn.id?{...item,status:"applied"}:item));
+      updateTurns(current=>current.map(item=>item.id===turn.id?{...item,status:"applied"}:item));
       append({role:"assistant",content,compositionId:props.runtime.projectId()});await flow.refreshTarget();
-    }catch(cause){setError(cause instanceof Error?cause.message:"操作失败，请核对当前视频后重试。");setTurns(current=>current.map(item=>item.id===turn.id?{...item,status:"failed"}:item));}
+    }catch(cause){setError(cause instanceof Error?cause.message:"操作失败，请核对当前视频后重试。");updateTurns(current=>current.map(item=>item.id===turn.id?{...item,status:"failed"}:item));}
     finally{acting.current=false;setSending(false);}
   }
   return {flow,turns,draft,setDraft,sending,restoring,error,send,stop,executeControl};

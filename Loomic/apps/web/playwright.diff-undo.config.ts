@@ -5,5 +5,5 @@ export default defineConfig({
   outputDir:`../../.creative-test-results/${evidence}`,
   reporter:[["list"],["json",{outputFile:`../../.creative-test-results/${evidence}.json`}]],
   webServer:{command:"node node_modules/next/dist/bin/next dev -p 3224 --hostname 127.0.0.1",url:"http://localhost:3224/login/",env:{NEXT_PUBLIC_SERVER_BASE_URL:"http://localhost:3311"},reuseExistingServer:false,timeout:120000},
-  use:{baseURL:"http://localhost:3224",browserName:"chromium",viewport:{width:1440,height:960}},
+  use:{baseURL:"http://localhost:3224",browserName:"chromium",viewport:{width:1440,height:960},actionTimeout:30000},
 });

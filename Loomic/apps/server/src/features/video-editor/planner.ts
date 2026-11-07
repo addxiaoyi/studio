@@ -12,7 +12,7 @@ export function assertPlannerCredential(key: string | undefined) {
   }
 }
 
-export async function invokeEditorPlanner(model: BaseLanguageModel, messages: Parameters<BaseLanguageModel["invoke"]>[0], timeoutMs = PLAN_TIMEOUT_MS) {
+export async function invokeEditorPlanner<T>(model: {invoke(input:Parameters<BaseLanguageModel["invoke"]>[0],options?:{signal?:AbortSignal}):Promise<T>}, messages: Parameters<BaseLanguageModel["invoke"]>[0], timeoutMs = PLAN_TIMEOUT_MS) {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_resolve, reject) => {

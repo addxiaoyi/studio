@@ -42,7 +42,7 @@ test("complex plan previews the timeline, persists individual undo, and exports 
   await expect(page.getByLabel("导入本机素材",{exact:true})).toBeEnabled();
   const before=await page.evaluate(()=> (window as any).remotion_browserStudio.loomicSnapshot("MyComp"));
   await page.getByLabel("与视频 AI 对话",{exact:true}).fill('只做以下5个动作，顺序保持一致：1.竖屏剪辑first.mp4的0.5至2秒，再接second.mp4的0至1秒，总时长2.5秒；2.在0至1秒添加字幕“新品上市”；3.在1.5至2.4秒添加字幕“第二镜头”；4.使用已选music.wav从0.2秒开始以30%音量播放；5.导出MP4。不要添加其他动作，保留上述精确参数。');
-  const response=page.waitForResponse(response=>response.url().endsWith("/api/video/editor/chat"),{timeout:90000});
+  const response=page.waitForResponse(response=>response.url().endsWith("/api/video/editor/chat"),{timeout:110000});
   await page.getByRole("button",{name:"发送",exact:true}).click();
   const planned=await response;expect(planned.status(),await planned.text()).toBe(200);
   const chatPayload=await planned.json();const payload={...chatPayload,plan:chatPayload.reply.plan};
