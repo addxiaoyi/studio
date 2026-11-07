@@ -40,3 +40,11 @@
 生产数据库复核最近两次验收报价（修复前 0.1、修复后 0.05）：均为 rejected、无 job_id、未消费；对应试穿扣费流水为 0，无运行中的媒体任务。
 
 MCP 工具筛选、信息流表单与连续重开下拉补充回归合计 33 项通过。GitHub 首轮四包类型检查、数据库与组件门禁、网站抓取 CI 通过；视频动画测试因成功状态文案与编译事件先后顺序不同超时，改为等待真实可操作状态，并保留动画帧值、转场像素、刷新持久化和真实导出解码断言。
+
+## GitHub 最终结果
+
+- 实现提交 `4b37b6ba`，测试修复提交 `683d1520`，均已推送 `codex/agent-workspace-ci`。
+- [Agent Closure CI 42377016054](https://github.com/addxiaoyi/studio/actions/runs/42377016054) 对 `683d1520` 完整通过：四包类型、数据库、共享控件、真实 Chromium 视频与试穿回归。
+- [Desktop Candidate CI 42376336741](https://github.com/addxiaoyi/studio/actions/runs/42376336741) 对实现提交 `4b37b6ba` 的 Windows/macOS/Linux 候选全部通过。测试补充提交触发的新候选构建仍需按其实际状态判断，不能复用此结论。
+- [Website Capture CI 42376336747](https://github.com/addxiaoyi/studio/actions/runs/42376336747) 通过。
+- 生产设置页额外验收执行模式菜单：计算背景色 `oklch(1 0 0)`，弹层完整落在 1280×720 视口内，Esc 关闭后焦点回到原触发器；未变更用户配置。
