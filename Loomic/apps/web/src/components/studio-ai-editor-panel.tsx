@@ -12,13 +12,22 @@ import { readRecoveredStudioSession, type StudioAiSession } from "@/lib/studio-a
 import type { VideoEditorPlanRequest, VideoEditorExportReceipt } from "@helstera/shared";
 import { useVideoText } from "@/lib/video-copy";
 import { useLocale } from "@/lib/i18n";
+import { studioContextPrompt, type StudioAiContext } from "@/lib/studio-ai-context";
 
-type Props = { runtime: StudioRuntime | null; mediaRevision: number; userId: string; token: string; exported(output: StudioExport): void };
+type Props = { runtime: StudioRuntime | null; mediaRevision: number; userId: string; token: string; exported(output: StudioExport): void; contextRequest?: StudioAiContext | null };
 
-export function StudioAiEditorPanel({ runtime, mediaRevision, userId, token, exported }: Props) {
+export function StudioAiEditorPanel({ runtime, mediaRevision, userId, token, exported, contextRequest }: Props) {
   const copy = useVideoText();
   const english = useLocale() === "en-US";
   const [prompt, setPrompt] = useState("");
+  const [context, setContext] = useState<StudioAiContext | null>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!contextRequest) return;
+    setContext(contextRequest);
+    if (contextRequest.comment) setPrompt(current => current.trim() ? current : contextRequest.comment);
+    promptRef.current?.focus({ preventScroll: true });
+  }, [contextRequest]);
   const [plan, setPlan] = useState<StudioAiPlan | null>(null);
   const [confirmed, setConfirmed] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -83,7 +92,7 @@ export function StudioAiEditorPanel({ runtime, mediaRevision, userId, token, exp
         const duration = await studioVideoDuration(await runtime.readMedia(item.name));
         media.push({ name: item.name, mimeType: item.mimeType as VideoEditorPlanRequest["media"][number]["mimeType"], duration });
       }
-      const next = await requestStudioAiPlan(token, { prompt, projectId: runtime.projectId(), compositionId: snapshot.compositionId, revision: snapshot.revision, compositionDuration: snapshot.duration, captions: snapshot.captions, media,
+      const next = await requestStudioAiPlan(token, { prompt: studioContextPrompt(prompt, context, snapshot.compositionId), projectId: runtime.projectId(), compositionId: snapshot.compositionId, revision: snapshot.revision, compositionDuration: snapshot.duration, captions: snapshot.captions, media,
         ...(music ? { music: { assetName: music, volume: volume / 100, startMs: Math.round(musicStart * 1000) } } : {}) }, snapshot);
       await saveStudioPlan(userId, { plan: next });
       if (mounted.current) setPlan(next);
@@ -152,7 +161,12 @@ export function StudioAiEditorPanel({ runtime, mediaRevision, userId, token, exp
   return <aside aria-label={copy("AI 编辑当前合成")} className="flex min-h-0 w-full shrink-0 flex-col bg-card text-card-foreground">
     <div className="border-b px-4 py-3"><h2 className="flex items-center gap-2 text-sm font-semibold"><Bot className="size-4" aria-hidden="true" />{copy("AI 编辑当前合成")}</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">{copy("模型生成计划，逐项确认后修改当前时间线。")}</p></div>
     <div className="space-y-3 overflow-y-auto p-4">
-      <textarea aria-label={copy("描述视频编辑目标")} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={copy("例如：剪成 30 秒竖屏视频，加标题字幕和已导入的音乐")} rows={4} disabled={!runtime || busy} className="w-full resize-y rounded-lg border bg-background p-3 text-base sm:text-sm" />
+      {context && <section aria-label={copy("来自编辑器的上下文")} className="space-y-2 rounded-lg border bg-background p-3 text-xs">
+        <div className="flex items-start justify-between gap-2"><strong className="min-w-0 break-all">{copy("合成")} · {context.compositionId}</strong><button type="button" onClick={() => setContext(null)} className="shrink-0 rounded px-1 hover:bg-muted">{copy("移除")}</button></div>
+        <p className="text-muted-foreground">{copy("已连接本站 AI。补充编辑要求，生成计划后逐项确认。")}</p>
+        {context.context && <details><summary className="cursor-pointer">{copy("查看选中内容")}</summary><pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all font-sans">{context.context}</pre></details>}
+      </section>}
+      <textarea ref={promptRef} aria-label={copy("描述视频编辑目标")} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={copy("例如：剪成 30 秒竖屏视频，加标题字幕和已导入的音乐")} rows={4} maxLength={4000} disabled={!runtime || busy} className="w-full resize-y rounded-lg border bg-background p-3 text-base sm:text-sm" />
       <label className="block space-y-1 text-xs">{copy("背景音乐素材")}<select aria-label={copy("背景音乐素材")} className="w-full rounded border bg-background p-2 text-base sm:text-sm" value={music} onChange={event => setMusic(event.target.value)} disabled={busy || !audio.length}><option value="">{copy("由计划选择现有素材")}</option>{audio.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
       <label className="block text-xs">{copy("音乐音量")} {volume}%<input aria-label={copy("音乐音量")} type="range" min={0} max={100} value={volume} onChange={event => setVolume(Number(event.target.value))} disabled={busy} className="w-full" /></label>
       <label className="block space-y-1 text-xs">{copy("音乐起播（秒）")}<input aria-label={copy("音乐起播（秒）")} type="number" min={0} max={7200} step={0.1} value={musicStart} onChange={event => setMusicStart(Number(event.target.value))} disabled={busy || !music} className="w-full rounded border bg-background p-2 text-base sm:text-sm" /></label>

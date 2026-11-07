@@ -1,5 +1,6 @@
 import type { StudioExport } from "./visualforge-storage";
 import type { StudioCut, StudioMedia } from "./studio-cut";
+import type { StudioAiContext } from "./studio-ai-context";
 
 export type StudioSnapshot = { compositionId: string; revision: string; duration: number; format: StudioCut["format"]; captions: NonNullable<StudioCut["captions"]>; cut: StudioCut | null; appliedEdits?: string[] };
 export type StudioEdit = { id: string; compositionId: string; revision: string; cut: StudioCut; replaceVideo: boolean };
@@ -25,6 +26,7 @@ export type StudioHost = {
   ready(): void;
   error(message: string): void;
   exported(output: StudioExport): void;
+  openAi?(context: StudioAiContext): boolean;
 };
 export type StudioModule = {
   mountVisualForge(container: HTMLElement, host: StudioHost): Promise<StudioRuntime>;

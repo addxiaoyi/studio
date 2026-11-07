@@ -18,6 +18,7 @@ import { useTheme } from "next-themes";
 import { useCallback, useEffect, useRef, useState } from "react";
 import styles from "./visualforge-workspace.module.css";
 import { useVideoText } from "@/lib/video-copy";
+import type { StudioAiContext } from "@/lib/studio-ai-context";
 
 export function VisualForgeWorkspace() {
   const copy = useVideoText();
@@ -35,6 +36,12 @@ export function VisualForgeWorkspace() {
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [transcriptDirty, setTranscriptDirty] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiContext, setAiContext] = useState<StudioAiContext | null>(null);
+  const receiveAi = useRef<(context: StudioAiContext) => boolean>(() => false);
+  receiveAi.current = context => {
+    if (transcriptDirty) { setError(copy("请先保存或放弃文字剪辑修改，再打开 AI 编辑。"));return false; }
+    setAiContext(context);setAiOpen(true);setTranscriptOpen(false);return true;
+  };
   const transcriptCopy = oneTakeCopy(useLocale());
   const exported = useCallback((output: StudioExport) => setOutputs(current => [output, ...current.filter(item => item.id !== output.id)]), []);
   const theme = useRef(resolvedTheme || "dark");
@@ -51,6 +58,7 @@ export function VisualForgeWorkspace() {
     setError("");
     setReady(false);
     setMountedRuntime(null);
+    setAiContext(null);
     setStatus("正在加载视频工程…");
     if (!userId || !container.current) return;
     const abort = new AbortController();
@@ -77,6 +85,7 @@ export function VisualForgeWorkspace() {
           ready: () => {
             if (!abort.signal.aborted) setReady(true);
           },
+          openAi: context => receiveAi.current(context),
           error: (message) => {
             if (!abort.signal.aborted) setError(message);
           },
@@ -163,7 +172,7 @@ export function VisualForgeWorkspace() {
         )}
         <div className={styles.body} hidden={transcriptOpen}>
           <div ref={container} data-testid="video-studio" className={styles.studio} />
-          <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioAiEditorPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={exported} />}</div>
+          <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioAiEditorPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={exported} contextRequest={aiContext} />}</div>
         </div>
         {transcriptOpen && token && userId && <div className={styles.transcript}><OneTakeWorkspace token={token} userId={userId} runtime={ready ? mountedRuntime : null} onExport={exported} onDirty={setTranscriptDirty} /></div>}
       </div>

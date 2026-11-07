@@ -8,6 +8,20 @@ const studioRoot = resolve(import.meta.dir, "../../vendor/visualforge/packages/s
 const read = (file: string) => readFileSync(resolve(studioRoot, file), "utf8");
 
 describe("pinned Studio typography adapter", () => {
+  test("removes the brand menu and routes agent actions through Loomic", () => {
+    const menu = patchStudioSource("helpers/use-menu-structure.tsx", read("helpers/use-menu-structure.tsx"));
+    expect(menu).toContain("struct = struct.filter(menu => menu.id !== 'remotion')");
+    expect(menu).toContain("label: t('Menu')");
+    const context = patchStudioSource("components/composition-menu-items.ts", read("components/composition-menu-items.ts"));
+    expect(context).toContain("sendStudioContext(contextForAgents, composition?.id)");
+    expect(context).not.toContain("copyText(contextForAgents)");
+    const annotation = patchStudioSource("helpers/get-codex-annotation.ts", read("helpers/get-codex-annotation.ts"));
+    expect(annotation).not.toContain(".oai");
+    expect(annotation).toContain("requestStudioAnnotation");
+    const ask = patchStudioSource("components/AskAiModal.tsx", read("components/AskAiModal.tsx"));
+    expect(ask).not.toContain("<iframe");
+    expect(ask).toContain("sendStudioContext");
+  });
   test("leaves generic menu labels and user enum values untouched", () => {
     const file = "components/NewComposition/MenuContent.tsx";
     const source = read(file);
@@ -48,6 +62,9 @@ describe("pinned Studio typography adapter", () => {
       "components/ModalContainer.tsx", "i18n/index.tsx",
       "helpers/use-breakpoint.ts",
       "components/Menu/portals.ts",
+      "components/composition-menu-items.ts", "components/folder-menu-items.ts", "components/InspectorLocationCopy.tsx",
+      "components/Timeline/get-copy-context-for-agents-menu-item.ts", "components/get-annotate-with-chatgpt-menu-item.ts",
+      "helpers/get-codex-annotation.ts", "components/AskAiModal.tsx",
     ]) {
       const lf = read(file).replaceAll("\r\n", "\n");
       const patched = patchStudioSource(file, lf);

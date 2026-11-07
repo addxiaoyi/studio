@@ -1,4 +1,5 @@
 import { studioChinese } from "./studio-copy";
+import { patchStudioAiSource } from "./studio-ai-source";
 
 const UI_FONT = 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
 
@@ -139,5 +140,5 @@ export function patchStudioSource(file: string, source: string) {
     replace("tooltipLabel: showRenderLabel ? null : renderLabel", "tooltipLabel: showRenderLabel ? null : t(renderLabel)");
     replace("\n\t\trenderLabel,", "\n\t\tt,\n\t\trenderLabel,");
   }
-  return text;
+  return patchStudioAiSource(file, text);
 }

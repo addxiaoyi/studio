@@ -1,6 +1,11 @@
 import { useLocale, type Locale } from "./i18n";
 
 const english: Record<string, string> = {
+  "来自编辑器的上下文": "Context from editor", "合成": "Composition", "移除": "Remove", "查看选中内容": "View selected context",
+  "已连接本站 AI。补充编辑要求，生成计划后逐项确认。": "Connected to Loomic AI. Describe the edit, then review each planned action.",
+  "请先保存或放弃文字剪辑修改，再打开 AI 编辑。": "Save or discard transcript edits before opening AI editing.",
+  "当前合成已切换，请重新从该合成发送上下文。": "The composition changed. Send context from that composition again.",
+  "编辑要求与上下文合计过长，请缩短要求或移除上下文后重试。": "The request and context are too long. Shorten the request or remove the context.",
   "视频创作": "Video studio", "视频创作工作台": "Video workspace", "导入素材，在同一工程里剪辑、预览和导出": "Import, edit, preview and export in one project",
   "AI 编辑": "AI editor", "关闭 AI 编辑": "Close AI editor", "成片与导出": "Finished videos and exports", "本机导出记录": "Local exports",
   "正在加载视频创作工作台…": "Loading video workspace…", "正在加载视频工程…": "Loading project…", "编辑器已就绪": "Editor ready", "工程已保存在本机": "Project saved locally", "正在编译工程…": "Compiling project…", "编辑器暂不可用": "Editor unavailable", "重新打开编辑器": "Reopen editor",

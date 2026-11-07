@@ -9,6 +9,7 @@ import type { StudioHost, StudioSnapshot, StudioEdit } from "../../apps/web/src/
 import type { StudioCut } from "../../apps/web/src/lib/studio-cut";
 import { applyStudioCut, currentCompositionId, listStudioMedia, readStudioMedia } from "./cut";
 import { installStudioChinese } from "./studio-i18n";
+import { installStudioAiContext } from "../../apps/web/src/lib/studio-ai-context";
 declare global {
   interface Window {
     loomicSaveStudioExport?: ((output: StudioExport) => Promise<void>) | undefined;
@@ -44,6 +45,7 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
   };
   const root = createRoot(container);
   const disposeTranslations = installStudioChinese(container);
+  const disposeAi = installStudioAiContext(context => host.openAi?.(context) ?? false, currentCompositionId);
   let queue = Promise.resolve();
   let saveFailure: Error | null = null;
   root.render(<BrowserStudio project={project} initialElement={null} readOnly={false}
@@ -59,7 +61,7 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
     }}
   />);
   return {
-    dispose() { disposeTranslations(); window.removeEventListener("remotion-browser-studio-operations-ready", notifyReady); root.unmount(); window.loomicSaveStudioExport = undefined; void queue.finally(release); },
+    dispose() { disposeAi(); disposeTranslations(); window.removeEventListener("remotion-browser-studio-operations-ready", notifyReady); root.unmount(); window.loomicSaveStudioExport = undefined; void queue.finally(release); },
     setTheme(theme: string) {
       localStorage.setItem("remotion.studio.theme", theme);
       document.documentElement.setAttribute("data-remotion-studio-theme", theme);
