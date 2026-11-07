@@ -77,7 +77,7 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
 
   useEffect(() => {
     if (!contextRequest || lock.current) return;
-    clearPreview();setContext(contextRequest);setError("");setNotice("");
+    setContext(contextRequest);setError("");setNotice("");
     if (contextRequest.comment) updatePrompt(current => current.trim() ? current : contextRequest.comment);
     void refreshTarget();promptRef.current?.focus({ preventScroll: true });
   }, [contextRequest, clearPreview, refreshTarget]);
@@ -150,14 +150,29 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
   }
 
   async function discardPlan() { await run(async () => { await clearStudioPlan(userId);clearPreview();setNotice("方案已放弃，视频没有修改。"); }); }
+  async function acceptPlan(next:StudioAiPlan) {
+    if(lock.current||receiptPending)throw new Error("请先完成当前修改记录同步。");
+    if(!runtime||!next.snapshot)throw new Error("当前视频不可用。");
+    const current=await runtime.snapshot();
+    if(current.revision!==next.snapshot.revision||current.compositionId!==next.snapshot.compositionId)throw new Error("生成方案期间视频已改变，请重新发送要求。");
+    await saveStudioPlan(userId,{plan:next});clearPreview();setPlan(next);setTarget(current);setNotice("");setError("");
+  }
   function toggleAction(index: number, checked: boolean) { setConfirmed(current => { const next = new Set(current);if (checked) next.add(index);else next.delete(index);return next; }); }
 
   async function applyPlan() {
-    if (!runtime || !plan || applied || confirmed.size !== plan.actions.length) return;
+    await applyConfirmedPlan(confirmed);
+  }
+  async function confirmAllAndApply() {
+    if(!plan||applied)return;
+    const selected=new Set(plan.actions.map((_,index)=>index));setConfirmed(selected);
+    await applyConfirmedPlan(selected);
+  }
+  async function applyConfirmedPlan(selected:ReadonlySet<number>) {
+    if (!runtime || !plan || applied || selected.size !== plan.actions.length) return;
     await run(async () => {
       const snapshot = await runtime.snapshot();
       if (snapshot.compositionId !== plan.snapshot?.compositionId || snapshot.revision !== plan.snapshot.revision) throw new Error("当前视频或素材已改变，请重新预览方案。");
-      const edit = await confirmStudioPlan(token, plan, confirmed);
+      const edit = await confirmStudioPlan(token, plan, selected);
       if (plan.actions.some(action => action.type !== "export")) await runtime.applyEdit(edit);
       const saved = await runtime.snapshot();setTarget(saved);setApplied(saved.revision);setCanUndo(plan.actions.some(action => action.type !== "export"));setActionUndoAvailable(saved.editReceipt?.canUndo ?? false);setReceiptPending(true);
       setNotice("修改已应用。可在时间线预览，满意后导出视频。");
@@ -231,5 +246,5 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
   const media = runtime?.listMedia() ?? [];
   return { prompt, setPrompt, promptRef, context, target, plan, confirmed, busy, restoring, error, notice, applied, canUndo, receiptPending, exportedOnce, undoneActions, actionUndoAvailable, completelyUndone, undoAppliedAction,
     music, setMusic, volume, setVolume, musicStart, setMusicStart, audio: media.filter(item => item.mimeType.startsWith("audio/")), hasVideo: media.some(item => item.mimeType.startsWith("video/")),
-    previewPlan, applyPlan, discardPlan, undoPlan, retryReceipt, exportVideo, toggleAction, addRequest, importMusic, removeContext };
+    previewPlan, applyPlan, confirmAllAndApply, discardPlan, undoPlan, retryReceipt, exportVideo, toggleAction, addRequest, importMusic, removeContext, acceptPlan, refreshTarget };
 }

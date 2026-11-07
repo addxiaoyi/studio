@@ -1,7 +1,7 @@
 "use client";
 
 import { StudioAssetPicker } from "@/components/studio-asset-picker";
-import { StudioAiEditorPanel } from "@/components/studio-ai-editor-panel";
+import { StudioConversationPanel } from "@/components/studio-conversation-panel";
 import { StudioExportCard } from "@/components/studio-export-card";
 import { OneTakeWorkspace } from "@/components/onetake/workspace";
 import { useLocale } from "@/lib/i18n";
@@ -35,7 +35,7 @@ export function VisualForgeWorkspace() {
   const [retry, setRetry] = useState(0);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [transcriptDirty, setTranscriptDirty] = useState(false);
-  const [aiOpen, setAiOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(true);
   const [aiContext, setAiContext] = useState<StudioAiContext | null>(null);
   const aiBusy = useRef(false);
   const exportsRef = useRef<HTMLElement>(null);
@@ -141,6 +141,14 @@ export function VisualForgeWorkspace() {
     setMediaRevision((value) => value + 1);
   }, []);
   const reopen = () => setRetry((value) => value + 1);
+  const openPanel=(panel:"assets"|"transcript"|"timeline")=>{
+    if(panel==="transcript"){setTranscriptOpen(true);return;}
+    setTranscriptOpen(false);if(panel==="timeline")setAiOpen(false);
+    if(panel==="assets"){
+      const button=document.querySelector<HTMLButtonElement>('[data-studio-assets]');
+      if(!button||button.disabled)throw new Error("素材库正在处理，请稍后重试。");button.click();
+    }
+  };
   const openExport = () => {
     try { runtime.current?.openExport(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "无法打开导出设置。"); }
@@ -191,7 +199,7 @@ export function VisualForgeWorkspace() {
         )}
         <div className={styles.body} hidden={transcriptOpen}>
           <div ref={container} data-testid="video-studio" className={styles.studio} />
-          <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioAiEditorPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={exported} contextRequest={aiContext} active={aiOpen} onBusyChange={updateAiBusy} onViewTimeline={viewTimeline} />}</div>
+          <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioConversationPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={exported} contextRequest={aiContext} active={aiOpen} onBusyChange={updateAiBusy} onViewTimeline={viewTimeline} onOpenPanel={openPanel} />}</div>
         </div>
         {transcriptOpen && token && userId && <div className={styles.transcript}><OneTakeWorkspace token={token} userId={userId} runtime={ready ? mountedRuntime : null} onExport={exported} onDirty={setTranscriptDirty} /></div>}
       </div>

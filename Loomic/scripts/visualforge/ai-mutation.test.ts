@@ -39,6 +39,22 @@ describe("current composition AI mutation", () => {
     const changed={...next,files:{...next.files,"/project/src/manual.ts":"export const title='Manual';"}};
     await expect(prepareStudioUndo(changed,compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(changed,"MyComp"),actionIndex:1})).rejects.toThrow("后续修改");
   });
+  it("updates existing text and canvas through approved actions and undoes them separately",async()=>{
+    const project=createBlankTemplateProject();
+    project.files[compositionFile]=project.files[compositionFile]!.replace("return null;",'return <div style={{color:"#ffffff",fontSize:32}}>欢迎</div>;');
+    const before=inspectComposition(project,compositionFile,"MyComp");
+    const layer=before.layers.find(item=>item.text==="欢迎")!;
+    const revision=await projectFingerprint(project,"MyComp");
+    const edit:StudioEdit={id,compositionId:"MyComp",revision,cut,replaceVideo:false,commands:[{type:"layer",layerId:layer.id,changes:{text:"新品",fontSize:64,color:"#ff0000"}},{type:"resize",width:720,height:1280}]};
+    let changed=await prepareStudioEdit(project,compositionFile,edit);
+    expect(changed.files[compositionFile]).not.toContain(">欢迎<");expect(changed.files[compositionFile]).toContain('fontSize:64');
+    expect(inspectComposition(changed,compositionFile,"MyComp")).toMatchObject({width:720,height:1280});
+    changed=await prepareStudioUndo(changed,compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(changed,"MyComp"),actionIndex:0});
+    expect(inspectComposition(changed,compositionFile,"MyComp").layers.some(item=>item.text==="欢迎")).toBe(true);
+    expect(inspectComposition(changed,compositionFile,"MyComp").height).toBe(1280);
+    changed=await prepareStudioUndo(changed,compositionFile,{id,compositionId:"MyComp",revision:await projectFingerprint(changed,"MyComp"),actionIndex:1});
+    expect(await projectFingerprint(changed,"MyComp")).toBe(revision);
+  });
   it("reads native BasicCaptions under nested sequences and clips to their visible range", () => {
     const project = createBlankTemplateProject();
     project.files[compositionFile] = 'import {BasicCaptions as Subtitles} from "./basic-captions.element";\n' + project.files[compositionFile]!.replace("return null;", 'return <Sequence from={15} durationInFrames={30}><Subtitles from={15} captions={[{text:"原生字幕",startMs:0,endMs:1500,timestampMs:null,confidence:null}]} /></Sequence>;');

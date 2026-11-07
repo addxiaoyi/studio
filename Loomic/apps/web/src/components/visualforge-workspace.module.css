@@ -3,10 +3,10 @@
 .studio { position: relative; flex: 1; min-width: 0; min-height: 0; height: 100%; }
 .ai { position: absolute; inset-block: 0; inset-inline-end: 0; z-index: 30; display: flex; width: min(360px, 100%); background: var(--card); border-inline-start: 1px solid var(--border); }
 .ai[hidden], .body[hidden] { display: none; }
-.ai > aside { width: 100%; min-height: 0; }
+.ai > aside { width: 100%; min-height: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; }
 .transcript { flex: 1; min-height: 0; overflow-y: auto; }
 @media (min-width: 900px) {
-  .ai { position: relative; inset: auto; flex-shrink: 0; width: 320px; }
+  .ai { position: relative; inset: auto; flex-shrink: 0; width: clamp(340px, 30vw, 420px); }
 }
 @media (max-width: 767px) {
   .frame { height: max(620px, calc(100dvh - 64px)); }

@@ -30,3 +30,9 @@ it("shows interactive before and after tracks without mutating a plan", async ()
   fireEvent.click(screen.getByRole("button",{name:"字幕: 新字幕, 0.5s–2.5s"}));
   expect(screen.getByRole("status")).toHaveTextContent("动作 2");expect(JSON.stringify(plan)).toBe(before);
 });
+it("previews edits to existing captions and canvas without altering the original tracks",()=>{
+  const current={...snapshot,width:1280,height:720,layers:[{id:"layer-1",label:"原字幕",kind:"div",text:"原字幕",startMs:0,endMs:1000,editable:["text" as const]}]};
+  const editing=normalizeModelPlan({summary:"改标题和画幅",actions:[{type:"layer",layerId:"layer-1",changes:{text:"新标题"}},{type:"resize",width:720,height:1280}]},current);
+  const diff=studioTimelineDiff(editing)!;
+  expect(diff.before.captions[0]?.label).toBe("原字幕");expect(diff.after.captions[0]?.label).toBe("新标题");expect(diff.after.format).toBe("portrait");expect(diff.details).toHaveLength(2);
+});

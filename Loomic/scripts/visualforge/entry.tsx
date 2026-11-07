@@ -10,6 +10,7 @@ import type { StudioCut } from "../../apps/web/src/lib/studio-cut";
 import { applyStudioCut, currentCompositionId, listStudioMedia, readStudioMedia } from "./cut";
 import { installStudioChinese } from "./studio-i18n";
 import { installStudioAiContext, openStudioExport } from "../../apps/web/src/lib/studio-ai-context";
+import { readStudioState, controlStudio } from "./studio-controls";
 declare global {
   interface Window {
     loomicSaveStudioExport?: ((output: StudioExport) => Promise<void>) | undefined;
@@ -76,6 +77,8 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
     readCut: () => currentCut,
     projectId: () => currentCompositionId() ?? "current-project",
     openExport: openStudioExport,
+    studioState: readStudioState,
+    control: controlStudio,
     async undoAction(input: StudioUndo): Promise<StudioSnapshot> {
       host.signal.throwIfAborted();
       if (currentCompositionId() !== input.compositionId) throw new Error("请切回对应视频后再撤销。");

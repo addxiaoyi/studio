@@ -8,6 +8,7 @@ import type { VirtualProject } from "../../vendor/visualforge/packages/browser-s
 import { studioCutSource, cutFrames, STUDIO_FPS, type StudioCut, type StudioCaption } from "../../apps/web/src/lib/studio-cut";
 import { nativeCaptions } from "./native-captions";
 import { actionCut } from "../../apps/web/src/lib/studio-action-cut";
+import { inspectLayers, changeLayers } from "./native-layers";
 import type { StudioEdit, StudioUndo, StudioEditReceipt } from "../../apps/web/src/lib/visualforge-runtime";
 export type { StudioEdit } from "../../apps/web/src/lib/visualforge-runtime";
 
@@ -95,10 +96,11 @@ export function inspectComposition(project: VirtualProject, compositionFile: str
     for (const child of node.children) walk(child, file, from, end, ancestry);
   };
   walk(resolved.root, resolved.filePath, 0, durationInFrames, new Set());
-  return { duration: durationInFrames / fps, fps, format: width < height ? "portrait" as const : "landscape" as const, captions };
+  return { duration: durationInFrames / fps, fps, width, height, format: width < height ? "portrait" as const : "landscape" as const, captions,
+    layers: inspectLayers(project,compositionFile,compositionId,fps,durationInFrames/fps) };
 }
 
-async function applyStudioEdit(project: EditedProject, compositionFile: string, edit: StudioEdit): Promise<EditedProject> {
+async function applyLegacyEdit(project: EditedProject, compositionFile: string, edit: StudioEdit): Promise<EditedProject> {
   if (project.loomicAppliedEdits?.includes(edit.id)) return project;
   if (await projectFingerprint(project, edit.compositionId) !== edit.revision) throw new Error("合成或素材已改变，请重新生成计划。");
   const resolved = resolveCompositionComponentInProject({ project, compositionFile, compositionId: edit.compositionId });
@@ -127,6 +129,21 @@ async function applyStudioEdit(project: EditedProject, compositionFile: string, 
   next.loomicCuts = { ...next.loomicCuts };
   if (exportable) next.loomicCuts[edit.compositionId] = { revision: await projectFingerprint(next, edit.compositionId), cut: edit.replaceVideo ? edit.cut : { ...prior!.cut, captions: [...(prior?.cut.captions ?? []), ...(edit.cut.captions ?? [])], audio: [...(prior?.cut.audio ?? []), ...(edit.cut.audio ?? [])] } };
   else delete next.loomicCuts[edit.compositionId];
+  return next;
+}
+
+async function applyStudioEdit(project: EditedProject, compositionFile: string, edit: StudioEdit): Promise<EditedProject> {
+  if(!edit.commands)return applyLegacyEdit(project,compositionFile,edit);
+  if(project.loomicAppliedEdits?.includes(edit.id))return project;
+  if(await projectFingerprint(project,edit.compositionId)!==edit.revision)throw new Error("合成或素材已改变，请重新预览。");
+  const before=inspectComposition(project,compositionFile,edit.compositionId);
+  const changes=edit.commands.filter(action=>action.type==="layer");
+  let next:EditedProject=changeLayers(project,compositionFile,edit.compositionId,before.fps,before.duration,changes);
+  if(edit.commands.some(action=>["cut","caption","audio"].includes(action.type)))next=await applyLegacyEdit(next,compositionFile,{...edit,revision:await projectFingerprint(next,edit.compositionId)});
+  const resize=edit.commands.find(action=>action.type==="resize");
+  if(resize)next=applyCodemodChanges(next,updateCompositionMetadata({project:next,compositionFile,compositionId:edit.compositionId,metadata:{width:resize.width,height:resize.height}}).changes);
+  if(changes.length||resize){next={...next,loomicCuts:{...next.loomicCuts}};delete next.loomicCuts![edit.compositionId];}
+  if(!next.loomicAppliedEdits?.includes(edit.id))next={...next,loomicAppliedEdits:[...(next.loomicAppliedEdits??[]),edit.id].slice(-500)};
   return next;
 }
 
@@ -176,7 +193,7 @@ export async function prepareStudioUndo(project: EditedProject, compositionFile:
   if (journal.baseCut) cuts[input.compositionId] = journal.baseCut;else delete cuts[input.compositionId];
   const base: EditedProject = { ...project, files, loomicCuts: cuts, loomicAppliedEdits: project.loomicAppliedEdits?.filter(id => id !== input.id) };
   if (await projectFingerprint(base, input.compositionId) !== journal.edit.revision) throw new Error("原视频恢复记录不完整，无法安全撤销。");
-  let next = remaining.length ? await applyStudioEdit(base, compositionFile, { ...journal.edit, ...actionCut(remaining, { duration: journal.duration, format: journal.format }) }) : base;
+  let next = remaining.length ? await applyStudioEdit(base, compositionFile, { ...journal.edit, commands: remaining, ...actionCut(remaining, { duration: journal.duration, format: journal.format }) }) : base;
   // Keep the consumed edit marker even after full undo so a lost receipt cannot replay it.
   next = { ...next, loomicAppliedEdits: project.loomicAppliedEdits };
   return { ...next, loomicEditJournals: { ...project.loomicEditJournals, [input.id]: { ...journal, undone, revision: await projectFingerprint(next, input.compositionId) } } };

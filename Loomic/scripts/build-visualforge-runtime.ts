@@ -24,6 +24,13 @@ for (const name of readdirSync(join(source, "packages"))) {
 const dependencyVersions = { ...catalog, ...Object.fromEntries([...packages].map(([name, pkg]) => [name, pkg.manifest.version])), "react-refresh": "0.18.0" };
 const workspaceExports = Object.fromEntries([...packages].filter(([name]) => name.startsWith("@remotion/") || name === "remotion").map(([name, pkg]) => [name, {packageRoot: relative(source, pkg.directory).replaceAll("\\", "/"), exports: Object.fromEntries(Object.entries(pkg.manifest.exports || {}).map(([key, value]: [string, any]) => [key, typeof value === "string" ? value : value.module || value.import || value.default]))}]));
 const plugin: BunPlugin = { name: "pinned-visualforge-source", setup(build) {
+  build.onLoad({filter:/[\\/]studio[\\/]src[\\/]components[\\/]WebMcp\.tsx$/},args=>{
+    const contents=readFileSync(args.path,"utf8").replaceAll("\r\n","\n");
+    const marker="\t\tconst {modelContext} = document as Document & {\n\t\t\treadonly modelContext?: WebMcpModelContext;\n\t\t};";
+    if(!contents.includes(marker))throw new Error("Studio playback bridge changed upstream.");
+    const bridge=resolve(root,"scripts/visualforge/studio-controls.ts");
+    return {contents:`import {studioModelContext} from ${JSON.stringify(bridge)};\n`+contents.replace(marker,"\t\tconst modelContext=studioModelContext((document as any).modelContext);"),loader:"tsx"};
+  });
   build.onLoad({ filter: /[\\/]browser-studio[\\/]src[\\/]browser-studio-operations\.ts$/ }, args => {
     const adapter = resolve(root, "scripts/visualforge/ai-mutation.ts").replaceAll("\\", "/");
     const sourceText = readFileSync(args.path, "utf8").replaceAll("\r\n", "\n");

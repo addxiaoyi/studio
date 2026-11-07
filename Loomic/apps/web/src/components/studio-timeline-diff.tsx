@@ -6,6 +6,7 @@ import { Button } from "./ui/button";
 import { studioTimelineDiff, type TimelineSpan, type TimelineVersion } from "@/lib/studio-timeline-diff";
 import type { StudioAiPlan } from "@/lib/studio-ai-edit";
 import { useLocale } from "@/lib/i18n";
+import { studioActionLabel } from "@/lib/studio-action-label";
 
 type Props = { plan: StudioAiPlan; undone: readonly number[]; applied: boolean };
 const time = (seconds: number) => `${Number(seconds.toFixed(2))}s`;
@@ -41,6 +42,7 @@ export function StudioTimelineDiff({ plan, undone, applied }: Props) {
         {version(applied ? english ? "Current plan result" : "当前方案结果" : english ? "After confirmation" : "确认后", diff.after)}
       </div>
       <p className="text-xs text-muted-foreground">{english ? "Gray: existing · Blue: replacement · Purple: captions · Green: music. Each bar also names the change." : "灰色为原内容，蓝色为替换画面，紫色为字幕，绿色为配乐；条块同时标明变更类型。"}</p>
+      {!!diff.details.length&&<ul className="space-y-2 text-sm">{diff.details.map(item=><li key={item.index} className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{english?"Before":"修改前"}：{item.before}</p><p className="mt-1">{english?"Action":"动作"} {item.index+1} · {studioActionLabel(item.action,plan.snapshot,english)}</p></li>)}</ul>}
       {selected && <output className="block rounded border p-3 text-sm" aria-live="polite">{selected.label} · {time(selected.start)}–{time(selected.end)}{selected.detail && ` · ${selected.detail}`}{selected.actionIndex !== undefined && ` · ${english?'Action':'动作'} ${selected.actionIndex + 1}`}</output>}
       {diff.exportPlanned && <p className="text-xs text-muted-foreground">{english ? "Export creates a file after a separate confirmation; it does not change timeline tracks." : "导出另行确认后生成文件，不改变时间线轨道。"}</p>}
     </DialogContent>

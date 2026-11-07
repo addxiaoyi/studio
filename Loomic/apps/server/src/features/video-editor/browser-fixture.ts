@@ -10,7 +10,7 @@ import { createLocalSettingsService } from "../../local-db/settings-service.js";
 import { createLocalViewerService } from "../../local-db/viewer-service.js";
 import { createEditorPlanStore } from "./plan-store.js";
 
-export async function createEditorBrowserFixture(databaseUrl: string, webOrigin: string, modelText?: string) {
+export async function createEditorBrowserFixture(databaseUrl: string, webOrigin: string, modelText?: string | ((input: Record<string, unknown>)=>unknown)) {
   if (!["127.0.0.1", "localhost", "[::1]"].includes(new URL(databaseUrl).hostname)) throw new Error("Video acceptance requires a local database.");
   const schema = `video_browser_${randomUUID().replaceAll("-", "")}`;
   const admin = new Pool({ connectionString: databaseUrl });
@@ -48,7 +48,7 @@ export async function createEditorBrowserFixture(databaseUrl: string, webOrigin:
     });
     registerLocalAuthRoutes(app, { db, env });
     registerVideoEditorRoutes(app, { env, auth: createLocalRequestAuthenticator(db), settingsService: createLocalSettingsService(db), viewerService: createLocalViewerService(db), planStore: createEditorPlanStore(db),
-      ...(modelText === undefined ? {} : { createPlanModel: () => ({ invoke: async () => ({ content: modelText }) }) as never }) });
+      ...(modelText === undefined ? {} : { createPlanModel: () => ({ invoke: async (messages: {content:string}[]) => ({ content: typeof modelText==="string"?modelText:JSON.stringify(modelText(JSON.parse(messages[1]!.content))) }) }) as never }) });
     await app.listen({ host: "127.0.0.1", port: 3311 });
     return { email, password, userId, db, close };
   } catch (error) {

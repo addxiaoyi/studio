@@ -16,17 +16,20 @@ import { createStreamingChatModel } from "../agent/deep-agent.js";
 import { z } from "zod";
 import { EditorApprovalError, type EditorPlanStore } from "../features/video-editor/plan-store.js";
 import { assertPlannerCredential, EditorPlannerError, invokeEditorPlanner } from "../features/video-editor/planner.js";
+import { registerVideoChatRoute } from "./video-editor-chat.js";
+import { extractText, extractJson } from "../features/video-editor/model-json.js";
 
 type PlanModelFactory = (config: { model: string; baseUrl?: string; apiKey?: string }) => BaseLanguageModel;
 
-export function registerVideoEditorRoutes(app: FastifyInstance, options: {
+export type VideoEditorServices = {
   auth: RequestAuthenticator;
   env: ServerEnv;
   settingsService: SettingsService;
   viewerService: ViewerService;
   createPlanModel?: PlanModelFactory;
   planStore?: EditorPlanStore;
-}) {
+};
+export function registerVideoEditorRoutes(app: FastifyInstance, options: VideoEditorServices) {
   const createPlanModel = options.createPlanModel ?? ((config) => {
     if (!config.model.startsWith("google:")) assertPlannerCredential(config.apiKey ?? options.env.openAIApiKey);
     return createStreamingChatModel(
@@ -36,6 +39,8 @@ export function registerVideoEditorRoutes(app: FastifyInstance, options: {
       { baseUrl: config.baseUrl, apiKey: config.apiKey, maxRetries: 0, streaming: false, maxTokens: 4096 },
     );
   });
+
+  registerVideoChatRoute(app,{...options,createPlanModel});
 
   app.post("/api/video/editor/plan", async (request, reply) => {
     try {
@@ -107,25 +112,6 @@ function buildPlannerPrompt(): string {
     "如果提供 music，则只能添加这一条指定音轨，assetName、startMs、volume 必须与 music 完全一致，不得自行更换。",
     '输出格式：{"summary":"...","actions":[{"type":"cut","format":"landscape","clips":[{"name":"clip.mp4","duration":10,"start":0,"end":5}]},{"type":"caption","text":"...","startMs":0,"endMs":1000},{"type":"audio","assetName":"music.mp3","startMs":0,"volume":0.8},{"type":"export","format":"mp4"}]}',
   ].join("\n");
-}
-
-function extractText(response: unknown): string {
-  if (typeof response === "string") return response;
-  if (response && typeof response === "object" && "content" in response) {
-    const content = (response as { content?: unknown }).content;
-    if (typeof content === "string") return content;
-    if (Array.isArray(content)) return content.map((item) => typeof item === "string" ? item : item && typeof item === "object" && "text" in item ? String((item as { text?: unknown }).text ?? "") : "").join("");
-  }
-  throw new Error("Model returned no text.");
-}
-
-function extractJson(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
-  if (fenced) return fenced;
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("Model response was not JSON.");
-  return text.slice(start, end + 1);
 }
 
 function sendUnauthorized(reply: FastifyReply) {

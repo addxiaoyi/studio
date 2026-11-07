@@ -3,9 +3,9 @@ const databaseName = "loomic-visualforge-projects";
 
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(databaseName, 3);
+    const request = indexedDB.open(databaseName, 4);
     request.onupgradeneeded = () => {
-      for (const store of ["projects", "exports", "editorPlans"]) {
+      for (const store of ["projects", "exports", "editorPlans", "editorChats"]) {
         if (!request.result.objectStoreNames.contains(store)) request.result.createObjectStore(store);
       }
     };
@@ -34,3 +34,5 @@ export const listStudioExports = (userId: string) => transaction<StudioExport[]>
 export const readStudioPlan = <T>(userId: string) => transaction<T | undefined>("editorPlans", "readonly", store => store.get(userId));
 export const saveStudioPlan = (userId: string, plan: unknown) => transaction("editorPlans", "readwrite", store => store.put(plan, userId));
 export const clearStudioPlan = (userId: string) => transaction("editorPlans", "readwrite", store => store.delete(userId));
+export const readStudioChat = <T>(userId:string) => transaction<T|undefined>("editorChats","readonly",store=>store.get(userId));
+export const saveStudioChat = (userId:string,chat:unknown) => transaction("editorChats","readwrite",store=>store.put(chat,userId));

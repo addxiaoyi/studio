@@ -21,7 +21,7 @@ test.beforeAll(async () => {
     { type:"audio",assetName:"music.wav",startMs:200,volume:0.3 },
     { type:"export",format:"mp4" },
   ] };
-  fixture = await createEditorBrowserFixture(process.env.DATABASE_URL!, "http://localhost:3224", realModel ? undefined : JSON.stringify(plan));
+  fixture = await createEditorBrowserFixture(process.env.DATABASE_URL!, "http://localhost:3224", realModel ? undefined : JSON.stringify({message:"准备好剪辑方案，请确认。",plan}));
   folder = await mkdtemp(join(tmpdir(), "loomic-diff-"));
   for (const [name, duration, source] of [["first.mp4",3,"testsrc2=size=320x180:rate=30"],["second.mp4",2,"color=c=blue:s=320x180:r=30"]] as const) {
     execFileSync(ffmpeg,["-v","error","-f","lavfi","-i",source,"-t",String(duration),"-c:v","libx264","-pix_fmt","yuv420p",join(folder,name)]);
@@ -40,16 +40,12 @@ test("complex plan previews the timeline, persists individual undo, and exports 
   await expect(page.getByLabel("导入本机素材",{exact:true})).toBeEnabled({timeout:90000});
   await page.getByLabel("导入本机素材",{exact:true}).setInputFiles([join(folder,"first.mp4"),join(folder,"second.mp4"),join(folder,"music.wav")]);
   await expect(page.getByLabel("导入本机素材",{exact:true})).toBeEnabled();
-  await page.getByRole("button",{name:"AI 编辑",exact:true}).click();
   const before=await page.evaluate(()=> (window as any).remotion_browserStudio.loomicSnapshot("MyComp"));
-  await page.getByLabel("描述视频编辑目标",{exact:true}).fill('只做以下5个动作，顺序保持一致：1.竖屏剪辑first.mp4的0.5至2秒，再接second.mp4的0至1秒，总时长2.5秒；2.在0至1秒添加字幕“新品上市”；3.在1.5至2.4秒添加字幕“第二镜头”；4.使用已选music.wav从0.2秒开始以30%音量播放；5.导出MP4。不要添加其他动作，保留上述精确参数。');
-  await page.getByText("背景音乐（可选）",{exact:true}).click();
-  await page.getByLabel("背景音乐素材",{exact:true}).selectOption("music.wav");
-  await page.getByLabel("音乐起播（秒）",{exact:true}).fill("0.2");
-  const response=page.waitForResponse(response=>response.url().endsWith("/api/video/editor/plan"),{timeout:90000});
-  await page.getByRole("button",{name:"预览修改方案",exact:true}).click();
+  await page.getByLabel("与视频 AI 对话",{exact:true}).fill('只做以下5个动作，顺序保持一致：1.竖屏剪辑first.mp4的0.5至2秒，再接second.mp4的0至1秒，总时长2.5秒；2.在0至1秒添加字幕“新品上市”；3.在1.5至2.4秒添加字幕“第二镜头”；4.使用已选music.wav从0.2秒开始以30%音量播放；5.导出MP4。不要添加其他动作，保留上述精确参数。');
+  const response=page.waitForResponse(response=>response.url().endsWith("/api/video/editor/chat"),{timeout:90000});
+  await page.getByRole("button",{name:"发送",exact:true}).click();
   const planned=await response;expect(planned.status(),await planned.text()).toBe(200);
-  const payload=await planned.json();
+  const chatPayload=await planned.json();const payload={...chatPayload,plan:chatPayload.reply.plan};
   expect(payload.plan.actions.map((action:{type:string})=>action.type)).toEqual(["cut","caption","caption","audio","export"]);
   expect(payload.plan.actions[0]).toMatchObject({format:"portrait",clips:[{name:"first.mp4",start:0.5,end:2},{name:"second.mp4",start:0,end:1}]});
   expect(payload.plan.actions[1]).toMatchObject({text:"新品上市",startMs:0,endMs:1000});
@@ -72,12 +68,11 @@ test("complex plan previews the timeline, persists individual undo, and exports 
   const snapshot=()=>page.evaluate(()=> (window as any).remotion_browserStudio.loomicSnapshot("MyComp"));
   expect((await snapshot()).captions).toHaveLength(2);
   await page.getByRole("button",{name:"撤销动作 1",exact:true}).click();
-  await expect(page.getByLabel("AI 编辑当前合成",{exact:true}).getByRole("alert")).toContainText("先撤销");
+  await expect(page.getByLabel("视频 AI 对话",{exact:true}).getByRole("alert")).toContainText("先撤销");
   expect((await snapshot()).duration).toBe(2.5);
   await page.getByRole("button",{name:"撤销动作 2",exact:true}).click();
   await expect.poll(async()=> (await snapshot()).captions.map((caption:{text:string})=>caption.text)).toEqual(["第二镜头"]);
   await page.reload();await expect(page.getByLabel("导入本机素材",{exact:true})).toBeEnabled({timeout:90000});
-  await page.getByRole("button",{name:"AI 编辑",exact:true}).click();
   await expect(plan.locator('[data-action-index="1"]')).toContainText("已撤销");
   await expect(page.getByRole("button",{name:"撤销动作 4",exact:true})).toBeEnabled();
   await page.getByRole("button",{name:"撤销动作 4",exact:true}).click();
@@ -98,7 +93,6 @@ test("complex plan previews the timeline, persists individual undo, and exports 
   await expect(page.getByRole("heading",{name:"本次修改已全部撤销",exact:true})).toBeVisible();
   const after=await snapshot();expect(after.editReceipt.undone).toEqual([0,1,2,3]);
   await page.reload();await expect(page.getByLabel("导入本机素材",{exact:true})).toBeEnabled({timeout:90000});
-  await page.getByRole("button",{name:"AI 编辑",exact:true}).click();
   await expect(page.getByRole("heading",{name:"本次修改已全部撤销",exact:true})).toBeVisible();
   expect((await snapshot()).revision).toBe(before.revision);
   expect(confirmations).toHaveLength(1);

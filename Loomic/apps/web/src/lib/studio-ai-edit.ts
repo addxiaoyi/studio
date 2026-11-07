@@ -3,7 +3,7 @@ import type { StudioAudio, StudioCaption, StudioCut, StudioMedia } from "./studi
 import type { StudioSnapshot, StudioEdit } from "./visualforge-runtime";
 import { getServerBaseUrl } from "./env";
 
-export type StudioAiAction = { label: string; status: "ready" | "planned"; type: "cut" | "caption" | "audio" | "export" };
+export type StudioAiAction = { label: string; status: "ready" | "planned"; type: VideoEditorPlanResponse["plan"]["actions"][number]["type"] };
 export type StudioAiPlan = { cut: StudioCut; targetDuration: number | null; actions: StudioAiAction[]; notices: string[]; source: "model" | "local-fallback"; summary: string; exportFormat?: "webm" | "mp4"; replaceVideo?: boolean; snapshot?: StudioSnapshot; approval?: VideoEditorPlanResponse["approval"]; commands?: VideoEditorPlanResponse["plan"]; mediaDurations?: Record<string, number> };
 
 function requestedDuration(prompt: string): number | null {
@@ -48,6 +48,8 @@ export function normalizeModelPlan(plan: VideoEditorPlanResponse["plan"], snapsh
   const actions: StudioAiAction[] = plan.actions.map(action => ({ type: action.type, status: "planned", label: action.type === "cut"
     ? `替换当前画面为${action.format === "portrait" ? "竖屏" : "横屏"}剪辑：${action.clips.map(clip => `${clip.name} ${clip.start}–${clip.end} 秒`).join("；")}`
     : action.type === "caption" ? `字幕 ${action.startMs / 1000}–${action.endMs / 1000} 秒：${action.text}`
+    : action.type === "resize" ? `画幅调整为 ${action.width} × ${action.height}`
+    : action.type === "layer" ? `${action.changes.removed ? "删除" : "修改"}图层「${snapshot.layers?.find(layer=>layer.id===action.layerId)?.label??action.layerId}」：${JSON.stringify(action.changes)}`
     : action.type === "audio" ? `音乐 ${action.assetName}，${action.startMs / 1000} 秒起播，音量 ${Math.round(action.volume * 100)}%（0 积分）` : "导出 MP4 到本机（0 积分）" }));
   return { cut: { format: cutAction?.format ?? snapshot.format, clips, captions, audio }, targetDuration: clips.reduce((sum, clip) => sum + clip.end - clip.start, 0), actions,
     notices: ["字幕文案由模型生成，未经语音转写。已有音乐和本机导出为 0 积分，模型推理沿用现有 Agent 配置。"], source: "model", summary: plan.summary, snapshot, commands: plan, replaceVideo: Boolean(cutAction), ...(exportAction ? { exportFormat: exportAction.format } : {}) };

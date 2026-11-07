@@ -1,8 +1,9 @@
 import type { StudioAiPlan } from "./studio-ai-edit";
+import type { VideoEditorAction } from "@helstera/shared";
 
 export type TimelineSpan = { id: string; label: string; start: number; end: number; actionIndex?: number; detail?: string; change: "existing" | "added" | "replaced" };
 export type TimelineVersion = { duration: number; format: "portrait" | "landscape"; video: TimelineSpan[]; captions: TimelineSpan[]; audio: TimelineSpan[]; audioKnown: boolean };
-export type TimelineDiff = { before: TimelineVersion; after: TimelineVersion; scale: number; exportPlanned: boolean };
+export type TimelineDiff = { before: TimelineVersion; after: TimelineVersion; scale: number; exportPlanned: boolean; details: {index:number;action:VideoEditorAction;before:string}[] };
 
 export function studioTimelineDiff(plan: StudioAiPlan, undone: readonly number[] = []): TimelineDiff | null {
   if (!plan.snapshot || !plan.commands) return null;
@@ -25,10 +26,24 @@ export function studioTimelineDiff(plan: StudioAiPlan, undone: readonly number[]
   }) : oldClips;
   const duration = cut ? cursor : original.duration;
   const after: TimelineVersion = { duration, format: cut?.action.type === "cut" ? cut.action.format : original.format, video: newClips,
-    captions: cut ? [] : [...before.captions], audio: cut ? [] : [...before.audio], audioKnown: Boolean(cut) || before.audioKnown };
+    captions: cut ? [] : before.captions.map(span=>({...span})), audio: cut ? [] : before.audio.map(span=>({...span})), audioKnown: Boolean(cut) || before.audioKnown };
+  const details:TimelineDiff["details"]=[];
   for (const { action, index } of commands) {
+    if(action.type==="resize"){
+      after.format=action.width<action.height?"portrait":"landscape";
+      details.push({index,action,before:`${original.width??"?"} × ${original.height??"?"}`});
+    }
+    if(action.type==="layer"){
+      const layer=original.layers?.find(item=>item.id===action.layerId);
+      details.push({index,action,before:layer?.text??layer?.label??action.layerId});
+      const caption=after.captions.find(item=>layer&&item.label===layer.text&&item.start===layer.startMs/1000&&item.end===layer.endMs/1000);
+      if(caption&&layer){
+        if(action.changes.removed)after.captions=after.captions.filter(item=>item!==caption);
+        else {caption.label=action.changes.text??caption.label;caption.start=(action.changes.startMs??layer.startMs)/1000;caption.end=(action.changes.endMs??layer.endMs)/1000;caption.change="replaced";caption.actionIndex=index;}
+      }
+    }
     if (action.type === "caption") after.captions.push({ id: `caption-${index}`, label: action.text, start: action.startMs / 1000, end: action.endMs / 1000, change: "added", actionIndex: index });
     if (action.type === "audio") after.audio.push({ id: `audio-${index}`, label: action.assetName, start: action.startMs / 1000, end: Math.min(duration, action.startMs / 1000 + (plan.mediaDurations?.[action.assetName] ?? duration)), detail: `${Math.round(action.volume * 100)}%`, change: "added", actionIndex: index });
   }
-  return { before, after, scale: Math.max(before.duration, after.duration, 0.01), exportPlanned: commands.some(({action}) => action.type === "export") };
+  return { before, after, scale: Math.max(before.duration, after.duration, 0.01), exportPlanned: commands.some(({action}) => action.type === "export"),details };
 }
