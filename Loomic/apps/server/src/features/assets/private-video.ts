@@ -10,6 +10,7 @@ type PrivateVideoInput = {
   uploadId: string;
   bytes: Buffer;
   mimeType: "video/mp4" | "video/webm";
+  filename?:string;
 };
 
 export async function savePrivateVideo(db: Pool, storage: StorageProvider, input: PrivateVideoInput) {
@@ -25,6 +26,7 @@ async function savePrivateMedia(db: Pool, storage: StorageProvider, input: Priva
   const bucket = mediaType === "video" ? "private-video" : "private-try-on";
   const uploadKey = mediaType === "video" ? "videoExportUploadId" : "tryOnUploadId";
   const digest = createHash("sha256").update(input.bytes).digest("hex");
+  const title=mediaType==="video"?input.filename?.split(/[\\/]/).pop()?.replace(/[\u0000-\u001f\u007f]/g,"").trim().slice(0,160)||"Video export":"试穿结果";
   const client = await db.connect();
   let uploaded = false;
   let commitStarted = false;
@@ -47,6 +49,7 @@ async function savePrivateMedia(db: Pool, storage: StorageProvider, input: Priva
       if (!item.id || !item.active || item.digest !== digest || item.mime_type !== input.mimeType) {
         throw new PrivateVideoConflict("The upload identifier is already in use or its cloud copy has expired.");
       }
+      if(mediaType==="video"&&input.filename)await client.query("update generated_assets set title=$5 where workspace_id=$1 and created_by=$2 and metadata->>$4::text=$3 and title='Video export'",[input.workspaceId,input.userId,input.uploadId,uploadKey,title]);
       commitStarted = true;
       await client.query("commit");
       return { assetId: item.id, created: false };
@@ -62,7 +65,7 @@ async function savePrivateMedia(db: Pool, storage: StorageProvider, input: Priva
     await client.query(
       `insert into generated_assets(workspace_id,created_by,media_type,object_path,mime_type,title,metadata,retention_until)
        values($1,$2,$6,$3,$4,$7,$5::jsonb,now() + interval '3 days')`,
-      [input.workspaceId, input.userId, objectPath, input.mimeType, JSON.stringify({ [uploadKey]: input.uploadId, sha256: digest }), mediaType, mediaType === "image" ? "试穿结果" : "Video export"],
+      [input.workspaceId, input.userId, objectPath, input.mimeType, JSON.stringify({ [uploadKey]: input.uploadId, sha256: digest }), mediaType, title],
     );
     commitStarted = true;
     await client.query("commit");

@@ -73,7 +73,7 @@ function registerPrivateMediaRoutes(app: FastifyInstance, options: PrivateMediaO
       const viewer = await options.viewerService.ensureViewer(user);
       const input = { workspaceId: viewer.workspace.id, userId: user.id, uploadId, bytes };
       const saved = kind === "video"
-        ? await savePrivateVideo(options.db, options.storage, { ...input, mimeType: file.mimetype as "video/mp4" | "video/webm" })
+        ? await savePrivateVideo(options.db, options.storage, { ...input, filename:file.filename, mimeType: file.mimetype as "video/mp4" | "video/webm" })
         : await savePrivateImage(options.db, options.storage, { ...input, mimeType: file.mimetype as "image/png" | "image/jpeg" | "image/webp" });
       return reply.code(saved.created ? 201 : 200).send({ ok: true, assetId: saved.assetId, url: `/api/uploads/${saved.assetId}/file`, created: saved.created });
     } catch (error) {

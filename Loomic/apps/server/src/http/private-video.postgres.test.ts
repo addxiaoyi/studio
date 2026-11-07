@@ -26,6 +26,10 @@ it.skipIf(!databaseUrl || !exportPath)("persists a real export once across retri
     expect((await upload()).json()).toMatchObject({ assetId, created: false });
     const rows = (await fixture.db.query("select * from asset_objects")).rows;
     expect(rows).toHaveLength(1);
+    expect((await fixture.db.query("select title from generated_assets")).rows[0].title).toBe("render.mp4");
+    await fixture.db.query("update generated_assets set title='Video export'");
+    expect((await upload()).json()).toMatchObject({assetId,created:false});
+    expect((await fixture.db.query("select title from generated_assets")).rows[0].title).toBe("render.mp4");
     expect(rows[0].bucket).toBe("private-video");
     expect(await readFile(join(fixture.root, rows[0].bucket, rows[0].object_path))).toEqual(bytes);
     const path = `/api/uploads/${assetId}/file`;
