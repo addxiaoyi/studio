@@ -51,6 +51,8 @@
 
 视频编辑器已移除品牌菜单，合成/选中内容的AI上下文与批注入口改为本站AI面板；上下文进入计划预览和逐项确认流程。改动和线上菜单验收见[`docs/video-internal-ai-20261107.md`](docs/video-internal-ai-20261107.md)。
 
+后续已统一为一个AI修改和导出入口，并补齐修改对象、常用操作、方案失效、确认应用、撤销与成片回流。真实浏览器/数据库中的标题修改→可播放WebM导出→撤销，以及回执丢失恢复均通过；详情见[`docs/video-creator-flow-20261107.md`](docs/video-creator-flow-20261107.md)。
+
 The current GitHub snapshot includes the creator-workspace UX pass and the
 reliability work that is present in this checkout. The detailed 100-item
 acceptance matrix is tracked in
