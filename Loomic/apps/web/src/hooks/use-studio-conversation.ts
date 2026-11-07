@@ -115,7 +115,7 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
         const after=await props.runtime.snapshot();
         if(after.revision===snapshot.revision)throw new Error("撤销未完成，请查看方案中的原因。");
         content="撤销已完成，当前工程已更新。";
-      }else if(command.type==="export"){await flow.exportVideo();content="已打开当前版本的导出设置，请确认格式和文件名。";}
+      }else if(command.type==="export"){props.runtime.openExport();content="已打开当前版本的导出设置，请确认格式和文件名。";}
       else if(command.type==="panel"){
         if(!props.onOpenPanel)throw new Error("该工作区面板暂不可用。");props.onOpenPanel(command.panel);content="已打开对应工作区，请继续选择素材或确认处理。";
       }else content=await props.runtime.control(command,turn.compositionId);

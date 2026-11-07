@@ -23,7 +23,7 @@ export function StudioConversationPanel(props:Props){
   const locked=chat.sending||chat.restoring||flow.busy||flow.restoring||flow.receiptPending;
   const visible=chat.turns.filter(turn=>turn.compositionId===flow.target?.compositionId);
   const inlinePlan=[...visible].reverse().find(turn=>turn.planId&&turn.planId===flow.plan?.approval?.id);
-  useEffect(()=>{const node=scroll.current;if(node)node.scrollTop=node.scrollHeight;},[chat.turns.length,flow.plan,flow.notice,chat.error]);
+  useEffect(()=>{const node=scroll.current;if(node)node.scrollTop=node.scrollHeight;},[chat.turns.length,flow.target?.compositionId,flow.plan,flow.notice,chat.error]);
   useEffect(()=>{if(props.contextRequest)input.current?.focus();},[props.contextRequest]);
   function submit(event:FormEvent){event.preventDefault();void chat.send();}
   function keyboard(event:KeyboardEvent<HTMLTextAreaElement>){
