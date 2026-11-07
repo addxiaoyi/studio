@@ -385,19 +385,26 @@ describe("DesktopMcpPanel", () => {
     setDesktopApi(api);
     render(<DesktopMcpPanel />);
 
-    const filter = screen.getByLabelText("工具筛选");
+    const filter = screen.getByRole("combobox", { name: "工具筛选" });
     expect(await screen.findByText("search")).toBeTruthy();
 
-    await user.selectOptions(filter, "side-effect");
+    await user.click(filter);
+    await user.click(screen.getByRole("option", { name: "有副作用" }));
+    await waitFor(() => expect(filter.getAttribute("aria-expanded")).toBe("false"));
     expect(screen.getByText("write_file")).toBeTruthy();
     expect(screen.queryByText("search")).toBeNull();
     expect(screen.queryByText("listNotes")).toBeNull();
 
-    await user.selectOptions(filter, "readonly");
+    filter.focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(await screen.findByRole("option", { name: "只读" }));
+    await waitFor(() => expect(filter.getAttribute("aria-expanded")).toBe("false"));
     expect(screen.getByText("search")).toBeTruthy();
     expect(screen.queryByText("write_file")).toBeNull();
 
-    await user.selectOptions(filter, "all");
+    filter.focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(await screen.findByRole("option", { name: "全部" }));
     expect(screen.getByText("search")).toBeTruthy();
     expect(screen.getByText("write_file")).toBeTruthy();
     expect(screen.getByText("listNotes")).toBeTruthy();

@@ -4,7 +4,23 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { AppSelect } from "@/components/ui/app-select";
 import { StyledSelect } from "@/components/ui/styled-select";
+import { useState } from "react";
 afterEach(cleanup);
+it("can select and reopen repeatedly inside a label", async () => {
+  function Form() {
+    const [value, setValue] = useState("a");
+    return <label>筛选<AppSelect value={value} onChange={event=>setValue(event.target.value)}><option value="a">全部</option><option value="b">只读</option><option value="c">写入</option></AppSelect></label>;
+  }
+  render(<Form/>);
+  const user=userEvent.setup();
+  const trigger=screen.getByRole("combobox",{name:"筛选"});
+  for (const name of ["只读","写入","全部"]) {
+    await user.click(trigger);
+    await user.click(await screen.findByRole("option",{name}));
+    await waitFor(()=>expect(trigger).toHaveAttribute("aria-expanded","false"));
+    expect(trigger).toHaveTextContent(name);
+  }
+});
 it("preserves option values and form submission with disabled options", async () => {
   const onChange = vi.fn(),
     user = userEvent.setup();
@@ -23,7 +39,7 @@ it("preserves option values and form submission with disabled options", async ()
     </form>,
   );
   await user.click(screen.getByRole("combobox", { name: "生成模型" }));
-  expect(screen.getByRole("option", { name: "不可用" })).toHaveAttribute(
+  expect(await screen.findByRole("option", { name: "不可用" })).toHaveAttribute(
     "aria-disabled",
     "true",
   );

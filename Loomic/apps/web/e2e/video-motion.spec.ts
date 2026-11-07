@@ -45,7 +45,9 @@ test("GSAP frames, transition blending and export survive refresh and per-action
     const card=page.getByTestId("studio-ai-plan");await expect(card.getByRole("button",{name:"确认并应用修改",exact:true})).toBeVisible();
     for(const checkbox of await card.getByRole("checkbox").all())await checkbox.check();await card.getByRole("button",{name:"确认并应用修改",exact:true}).click();
     await expect(card.getByRole("button",{name:"撤销本次修改",exact:true})).toBeEnabled();
-    await expect(page.getByText("编辑器已就绪",{exact:true})).toBeVisible({timeout:90000});
+    // The saved-plan notice can follow the compiler event; readiness is independent of its copy.
+    await expect(page.getByLabel("导入本机素材",{exact:true})).toBeEnabled({timeout:90000});
+    await expect(page.getByText("正在编译工程…",{exact:true})).toHaveCount(0,{timeout:90000});
   }
   await send("将red.mp4的0至2秒接blue.mp4的0至2秒，横屏，在第一个衔接处添加500毫秒淡化转场。同时在0至1.5秒添加文字‘动画验收’。只返回cut、transition、caption三个动作。");await apply();
   expect((await snapshot()).duration).toBe(3.5);const cutRevision=(await snapshot()).revision;
