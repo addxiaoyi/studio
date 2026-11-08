@@ -194,6 +194,18 @@
 .workflow-assistant-compose .workflow-compose-note { font-size: 10px; line-height: 1.6; margin-top: 8px; }
 .workflow-assistant .workflow-ai-references { gap: 4px; margin-bottom: 10px; }
 .workflow-assistant .workflow-ai-references > button { min-height: 26px; height: auto; padding: 3px 7px; border-radius: 6px; font-size: 10px; }
+.workflow-dock[data-workflow-surface] .workflow-dock-body:has(> .workflow-assistant) { display: flex; overflow: hidden; }
+.workflow-dock[data-workflow-surface] .workflow-assistant { width: 100%; min-width: 0; min-height: 0; gap: 12px; }
+.workflow-dock[data-workflow-surface] .workflow-assistant > header { flex: none; }
+.workflow-dock[data-workflow-surface] .workflow-assistant-history,
+.workflow-dock[data-workflow-surface] .workflow-assistant-examples { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.workflow-dock[data-workflow-surface] .workflow-assistant-history:empty { display: none; }
+.workflow-dock[data-workflow-surface] .workflow-assistant-compose { flex: none; }
+@media (max-height: 620px) {
+  .workflow-dock[data-workflow-surface] .workflow-dock-body:has(> .workflow-assistant) { display: block; overflow-y: auto; }
+  .workflow-dock[data-workflow-surface] .workflow-assistant-history,
+  .workflow-dock[data-workflow-surface] .workflow-assistant-examples { flex: none; overflow: visible; }
+}
 @media (max-width: 760px) {
   .workflow-assistant-compose .workflow-compose-field textarea {
     font-size: 16px;

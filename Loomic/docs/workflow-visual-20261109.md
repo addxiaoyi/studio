@@ -13,3 +13,9 @@ AI 对话区统一请求、方案与输入层级。待确认方案仍展开完�
 - 截图验证浅色、深色和深色窄屏，没有把隔离服务中缺失 WebSocket/计费查询的提示当作生产状态。
 
 日志位于 `M:/loomic-builds/`：`workflow-visual-unit.log`、`workflow-visual-types.log`、`workflow-visual-browser.log`、`workflow-visual-browser-final.log`、`workflow-visual-desktop.log`、`workflow-visual-build.log`、`workflow-visual-candidate-types.log`。没有发起生产媒体生成或消费待确认费用。
+
+## 发布验收
+
+`e49b952` 已推送并增量发布。3251 个静态文件核验通过，画布、视频、女装及桌面入口返回 200，Server 健康。已登录的原画布验证节点样式、当前连接强调、紧凑导航和已应用方案折叠。发布记录 `publish-workflow-visual.log`。
+
+最终把 AI 输入区固定在面板底部，历史消息独立滚动；短屏保留整区滚动，避免控件挤出屏幕。Windows 候选版再次验证四条历史方案、深浅主题及 760px 窄屏中发送按钮可见，`workflow-visual-compose.log` 通过（59 秒）。
