@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { retainWorkflowLayout } from "./scene";
 import {
   websiteWorkflow,
   workflowGraphSchema,
@@ -208,7 +209,7 @@ export function useCanvasWorkflow(
     const proposed = proposal;
     await run(async () => {
       if (selected) {
-        edit(proposed.graph);
+        edit(retainWorkflowLayout(proposed.graph, graph));
         setNotice("AI 方案已应用到草稿，请检查并保存。");
       } else {
         const doc = await createCanvasWorkflow(

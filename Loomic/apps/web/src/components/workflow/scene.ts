@@ -417,6 +417,15 @@ export function placeWorkflow(
   };
 }
 
+export function retainWorkflowLayout(proposed: WorkflowGraph, previous: WorkflowGraph): WorkflowGraph {
+  if (!previous.nodes.length) return proposed;
+  const origin = { x: Math.min(...previous.nodes.map(node => node.position.x)), y: Math.min(...previous.nodes.map(node => node.position.y)) };
+  return { ...proposed, nodes: proposed.nodes.map(node => {
+    const saved = previous.nodes.find(item => item.id === node.id);
+    return { ...node, position: saved?.position ?? { x: Math.max(-10000, Math.min(10000, origin.x + node.position.x)), y: Math.max(-10000, Math.min(10000, origin.y + node.position.y)) } };
+  }) };
+}
+
 export function linkWorkflowResults(
   scene: readonly SceneElement[],
   workflowId: string,

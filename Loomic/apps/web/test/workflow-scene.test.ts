@@ -5,6 +5,7 @@ import {
   readSceneWorkflow,
   nodeElementId,
   adoptWorkflowCopies,
+  retainWorkflowLayout,
   type SceneElement,
 } from "@/components/workflow/scene";
 
@@ -18,6 +19,16 @@ const note: SceneElement = {
   text: "普通画布备注",
 };
 describe("workflows on the existing canvas", () => {
+  it("keeps AI revisions beside existing work instead of resetting nodes to the canvas origin", () => {
+    const before = websiteWorkflow();
+    before.nodes = before.nodes.map(node => ({ ...node, position: { x: node.position.x + 2000, y: 700 } }));
+    const proposed = websiteWorkflow();
+    proposed.nodes[1]!.title = "更新后的截图步骤";
+    proposed.nodes.push({ id: "extra", title: "另一个网址", position: { x: 0, y: 250 }, config: { kind: "url", url: "https://example.com/" } });
+    const revised = retainWorkflowLayout(proposed, before);
+    expect(revised.nodes[1]!.position).toEqual(before.nodes[1]!.position);
+    expect(revised.nodes[3]!.position).toEqual({ x: 2000, y: 950 });
+  });
   it("gives native copies independent node identities and reconnects copied arrows", () => {
     const graph = websiteWorkflow(),
       scene = projectWorkflow([note], "flow", graph, {}, false);
