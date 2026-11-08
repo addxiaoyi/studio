@@ -59,6 +59,12 @@ jobs:
           node scripts/test-local-postgres.mjs src/features/website-capture/canvas-delivery.postgres.test.ts
           pnpm --filter @helstera/server exec vitest run src/features/website-capture/recording-progress.test.ts src/features/website-capture/canvas-delivery.test.ts
           pnpm --filter @helstera/web exec vitest run test/capture-canvas-actions.test.tsx test/canvas-video-actions.test.tsx test/website-capture-recording.test.tsx test/canvas-timeline-panel.test.tsx test/capture-recording-import.test.tsx
+      - name: Visual workflow contracts and execution journal
+        run: |
+          pnpm --filter @helstera/shared exec vitest run src/canvas-workflow.test.ts
+          node scripts/test-local-postgres.mjs src/features/canvas-workflows/service.postgres.test.ts
+          pnpm --filter @helstera/server exec vitest run src/features/canvas-workflows/execution-access.test.ts src/features/agent-goals/agent-goal-background.test.ts src/agent/tools/index.test.ts
+          pnpm --filter @helstera/web exec vitest run test/workflow-node-inspector.test.tsx
       - name: Try-on billing and shared form regressions
         run: |
           pnpm --filter @helstera/server exec vitest run src/features/generation/fashion-billing.postgres.test.ts src/http/fashion-billing.test.ts src/http/image-models-route.test.ts src/http/generation-approvals.test.ts src/http/media-connector-gate.test.ts
@@ -132,6 +138,8 @@ jobs:
         run: |
           pnpm --filter @helstera/server exec vitest run src/features/website-capture/presentation.integration.test.ts src/features/website-capture/recording-quality.integration.test.ts src/features/website-capture/frame-continuity.integration.test.ts src/features/website-capture/encoding-budget.integration.test.ts src/features/website-capture/sso.integration.test.ts src/features/website-capture/login-session.test.ts src/features/website-capture/login-session.integration.test.ts src/features/website-capture/login-handoff.integration.test.ts src/features/website-capture/journey-planner.test.ts src/features/website-capture/journey-navigation.integration.test.ts
           pnpm --filter @helstera/web exec playwright test --config playwright.presentation.config.ts
+      - name: Visual workflow editor and real browser output
+        run: pnpm --filter @helstera/web exec playwright test --config playwright.workflow.config.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -146,5 +154,7 @@ jobs:
             Loomic/.creative-test-results/presentation/
             Loomic/.creative-test-results/presentation-flow.json
             Loomic/.creative-test-results/presentation-flow/
+            Loomic/.creative-test-results/workflow/
+            Loomic/.creative-test-results/workflow.json
           if-no-files-found: error
           retention-days: 7

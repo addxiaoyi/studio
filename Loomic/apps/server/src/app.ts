@@ -127,6 +127,8 @@ import { registerVideoEditorRoutes } from "./http/video-editor.js";
 import { registerOneTakeRoutes } from "./http/onetake.js";
 import { createEditorPlanStore } from "./features/video-editor/plan-store.js";
 import { registerAgentWorkflowRoutes } from "./http/agent-workflows.js";
+import { registerCanvasWorkflowRoutes } from "./http/canvas-workflows.js";
+import { guardWorkflowExecution } from "./features/canvas-workflows/execution-access.js";
 import { registerSettingsRoutes } from "./http/settings.js";
 import { registerAdminProviderRoutes } from "./http/admin-providers.js";
 import { createProviderConfigService } from "./local-db/provider-config-service.js";
@@ -284,7 +286,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     }),
   );
   const agentGoalEvents = new AgentGoalEventPublisher(localDb, connectionManager, eventBuffer);
-  const goalSteps = new GoalStepWorker(localDb, createGoalStepExecutor({ db: localDb, storage: storageProvider, storageRoot: env.storageRoot ?? "/www/helstera/uploads", webOrigin: env.webOrigin, desktop: websiteAssistantHub }));
+  const goalSteps = new GoalStepWorker(localDb, guardWorkflowExecution(localDb, createGoalStepExecutor({ db: localDb, storage: storageProvider, storageRoot: env.storageRoot ?? "/www/helstera/uploads", webOrigin: env.webOrigin, desktop: websiteAssistantHub })));
   if (process.env.NODE_ENV !== "test") {
     agentGoalWorker.start();
     agentGoalEvents.start();
@@ -591,6 +593,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     viewerService,
     assistantHub: websiteAssistantHub,
   });
+  registerCanvasWorkflowRoutes(app, { db: localDb, auth, env, settingsService });
   registerAgentMemoryRoutes(app, {
     auth,
     db: localDb,

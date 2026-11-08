@@ -43,6 +43,8 @@ const TOOL_CONFIG: Record<string, ToolDisplayConfig> = {
   generate_video: { label: "\u751f\u6210\u89c6\u9891", icon: "video", showCard: true },
   screenshot_canvas: { label: "\u622a\u53d6\u753b\u5e03", icon: "eye", showCard: true },
   website_capture: { label: "\u6d4f\u89c8\u7f51\u7ad9", icon: "eye", showCard: true },
+  draft_canvas_workflow: { label: "搭建可视化工作流", icon: "tool", showCard: true },
+  inspect_canvas_workflows: { label: "查看画布工作流", icon: "eye", showCard: true },
   get_brand_kit: { label: "\u54c1\u724c\u5de5\u5177\u5305", icon: "palette", showCard: true },
   project_search: { label: "\u641c\u7d22\u9879\u76ee", icon: "search", showCard: true },
   task: { label: "\u6267\u884c\u4efb\u52a1", icon: "tool", showCard: false },

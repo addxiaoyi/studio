@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HexColorPicker } from "react-colorful";
-import { Film, Shapes, Trash2, WandSparkles } from "lucide-react";
+import { Film, GitBranch, Shapes, Trash2, WandSparkles } from "lucide-react";
 import { AgentBrowserButton } from "./agent-browser/open-button";
 
 /* ── Preset color swatches for background picker ── */
@@ -32,6 +32,7 @@ interface CanvasBottomBarProps {
   selectedCount: number;
   onClearSelection: () => void;
   onDeleteSelection: () => void;
+  onOpenWorkflow?: (() => void) | undefined;
 }
 
 /* ── Inline SVG icons ── */
@@ -137,7 +138,7 @@ function ElementRow({ el, onSelect }: { el: ExcalidrawEl; onSelect: (id: string)
 /* ================================================================
    Main component
    ================================================================ */
-export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, layersToggleRef, filesOpen, onToggleFiles, filesToggleRef, timelineOpen, onToggleTimeline, timelineToggleRef, leftPanelOpen, selectedCount, onClearSelection, onDeleteSelection }: CanvasBottomBarProps) {
+export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, layersToggleRef, filesOpen, onToggleFiles, filesToggleRef, timelineOpen, onToggleTimeline, timelineToggleRef, leftPanelOpen, selectedCount, onClearSelection, onDeleteSelection, onOpenWorkflow }: CanvasBottomBarProps) {
   /* ── Zoom state ── */
   const [zoom, setZoom] = useState(1);
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
@@ -246,6 +247,7 @@ export function CanvasBottomBar({ excalidrawApi, layersOpen, onToggleLayers, lay
       {selectedCount > 0 && <div className="mb-1 flex items-center gap-1 rounded-xl border border-border/60 bg-background/95 px-2 py-1 text-[11px] shadow-sm" role="status" aria-live="polite"><span className="whitespace-nowrap text-foreground">已选 {selectedCount} 项</span><button type="button" onClick={onClearSelection} className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">清除</button><button type="button" onClick={onDeleteSelection} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="删除选中元素"><Trash2 className="size-3" aria-hidden="true" />删除</button></div>}
       <div data-testid="canvas-bottom-toolbar" className="flex w-10 min-w-10 shrink-0 flex-col items-center gap-0.5 rounded-2xl glass-soft border border-border/40 px-1 py-1 shadow-soft">
         <AgentBrowserButton compact className={btnClass}/>
+        {onOpenWorkflow && <button type="button" className={btnClass} onClick={onOpenWorkflow} aria-label="打开可视化工作流" title="工作流"><GitBranch size={16}/></button>}
         {/* ── Background color button ── */}
         <button ref={bgBtnRef} type="button" className={btnClass} onClick={toggleBgPicker} aria-label="画布背景色" title="画布背景色">
           {bgColor === "transparent"

@@ -24,7 +24,7 @@ function setup() {
   const db = { query: vi.fn(async (sql: string, _values?: unknown[]) => {
     if (sql.includes("from agent_connector_permissions")) return { rows: [{ enabled: state.connectorEnabled }] };
     if (sql.includes("select g.status")) return { rows: state.active ? [{ status: "running", task_status: "running" }] : [] };
-    if (sql.includes("select id,object_path")) return { rows: [{ id: "image-asset", object_path: "image.jpg", mime_type: "image/jpeg" }] };
+    if (sql.includes("from generated_assets ga")) return { rows: [{ id: "image-asset", object_path: "image.jpg", mime_type: "image/jpeg" }] };
     return { rows: [] };
   }) };
   const writer = { insertImage: vi.fn().mockResolvedValue({ elementId: "image-element" }), insertVideo: vi.fn() };
@@ -97,12 +97,17 @@ describe("background website reports", () => {
 });
 
 describe("background website capture canvas writeback", () => {
+  it("rejects deleted or expired evidence before adding any element",async()=>{
+    const image=vi.fn(),video=vi.fn();
+    await expect(writeCaptureToCanvas({db:{query:vi.fn(async()=>({rows:[]}))} as never,storage:{} as never,writer:{insertImage:image,insertVideo:video},canvasId:"canvas",taskId:"task",workspaceId:"workspace",pages:[{assetId:"missing",title:"Missing"}]})).rejects.toThrow("到期");
+    expect(image).not.toHaveBeenCalled();expect(video).not.toHaveBeenCalled();
+  });
   it("writes captured screenshots and recordings to the selected canvas", async () => {
     const image = vi.fn().mockResolvedValue({ elementId: "image-element" });
     const video = vi.fn().mockResolvedValue({ elementId: "video-element" });
     const db = {
       query: vi.fn(async (sql: string) => {
-        if (sql.includes("select id,object_path,mime_type from generated_assets")) {
+        if (sql.includes("from generated_assets ga")) {
           return { rows: [
             { id: "asset-image", object_path: "workspace/image.jpg", mime_type: "image/jpeg" },
             { id: "asset-video", object_path: "workspace/recording.webm", mime_type: "video/webm" },

@@ -1,5 +1,6 @@
 "use client";
 import { AgentBrowserButton } from "../agent-browser/open-button";
+import { openCanvasWorkflow } from "@/lib/canvas-workflow-api";
 
 import { motion } from "framer-motion";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -416,6 +417,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
   return (
     <div ref={containerRef} className="space-y-1.5">
       {workflowId ? <AgentWorkflowCard workflowId={workflowId} /> : null}
+      {block.toolName === "draft_canvas_workflow" && typeof block.output?.visualWorkflowId === "string" && <div className="mt-2 rounded-xl border border-border bg-muted/30 p-3"><p className="text-sm font-medium">{String(block.output.title ?? "可视化工作流")}</p><p className="my-2 text-xs text-muted-foreground">草稿已保存，节点尚未执行。检查参数和连线后再运行。</p><button type="button" onClick={()=>openCanvasWorkflow(String(block.output?.visualWorkflowId))} className="min-h-9 rounded-md bg-foreground px-3 text-xs text-background">打开工作流</button></div>}
       {requiresApproval && !hideApprovalCard ? (
         <GenerationApprovalCard
           approvalId={approvalOutput.approvalId as string}

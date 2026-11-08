@@ -4,6 +4,7 @@ import type { BackendFactory, BackendProtocol } from "deepagents";
 import type { Pool } from "pg";
 import type { ConnectionManager } from "../../ws/connection-manager.js";
 import { createBrandKitTool } from "./brand-kit.js";
+import { createCanvasWorkflowTool, createInspectWorkflowsTool } from "./canvas-workflow.js";
 import {
   type SubmitDesktopAgentTaskFn,
   createDesktopAgentTool,
@@ -80,6 +81,7 @@ export function createMainAgentTools(
   },
 ) {
   const tools: StructuredTool[] = [
+    ...(deps.localDb ? [createCanvasWorkflowTool(deps.localDb), createInspectWorkflowsTool(deps.localDb)] : []),
     createProjectSearchTool(backend),
     createInspectCanvasTool(deps),
     createManipulateCanvasTool(deps),

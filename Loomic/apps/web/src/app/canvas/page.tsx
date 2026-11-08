@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, Suspense } from "react";
 
@@ -28,6 +29,7 @@ import { CanvasTimelinePanel } from "../../components/canvas-timeline-panel";
 import { CreditHeaderButton } from "../../components/credits/credit-header-button";
 import type { DesktopExecutionContext } from "@helstera/shared";
 import { AgentWorkspacePanel } from "../../components/agent-workspace-panel";
+const WorkflowWorkspace = dynamic(() => import("../../components/workflow/workspace").then(module => module.WorkflowWorkspace), { ssr: false, loading: () => <div role="status" className="absolute inset-0 z-40 grid place-items-center bg-background">正在加载工作流…</div> });
 
 function isBlankCanvasContent(content: {
   elements: Record<string, unknown>[];
@@ -69,6 +71,8 @@ function clearStashedInitialPrompt() {
 }
 
 function CanvasPageContent() {
+  const [workflowOpen,setWorkflowOpen]=useState(false),[workflowId,setWorkflowId]=useState<string|undefined>();
+  const previousChatOpen=useRef(true);
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const desktopMode = pathname.startsWith("/desktop-app/");
@@ -405,6 +409,10 @@ function CanvasPageContent() {
     }
   }, [canvasData]);
 
+  const openWorkflow = useCallback((id?:string) => { previousChatOpen.current=chatOpen;excalidrawApiRef.current?.updateScene({appState:{selectedElementIds:{}}});setChatOpen(false);setWorkflowId(id);setWorkflowOpen(true); },[chatOpen]);
+  const closeWorkflow = useCallback(()=>{setWorkflowOpen(false);setChatOpen(previousChatOpen.current);},[]);
+  useEffect(()=>{const open=(event:Event)=>openWorkflow((event as CustomEvent<{id?:string}>).detail?.id);window.addEventListener("loomic:workflow-open",open);return()=>window.removeEventListener("loomic:workflow-open",open);},[openWorkflow]);
+
   // Fallback polling for timed-out generation jobs.
   // When the agent's tool times out but the worker eventually succeeds,
   // the backend will have already inserted the element into the canvas.
@@ -630,6 +638,7 @@ function CanvasPageContent() {
           selectedCount={selectedCanvasElements.length}
           onClearSelection={handleClearSelection}
           onDeleteSelection={handleDeleteSelection}
+          onOpenWorkflow={()=>openWorkflow()}
         />
         <CanvasTimelinePanel
           excalidrawApi={excalidrawApi}
@@ -653,6 +662,7 @@ function CanvasPageContent() {
           onClose={handleCloseFiles}
           triggerRef={filesToggleRef}
         />
+        {workflowOpen && <WorkflowWorkspace token={accessToken} canvasId={canvasData.id} sessionId={initialSessionId} initialId={workflowId} onClose={closeWorkflow} onCanvasSync={handleCanvasSync} />}
       </div>
       <ChatSidebar
         accessToken={accessToken}

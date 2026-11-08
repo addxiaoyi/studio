@@ -1355,7 +1355,7 @@ export function CanvasEditor({
     >
       <div
         ref={canvasRootRef}
-        className="h-full w-full relative"
+        className="h-full w-full relative isolate"
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}

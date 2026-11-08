@@ -206,11 +206,14 @@ export async function writeCaptureToCanvas(input: {
   const assetIds = [...new Set([...imageAssetIds, input.recordingAssetId].filter(Boolean))] as string[];
   if (!assetIds.length) return [];
   const { rows } = await input.db.query<{ id: string; object_path: string; mime_type: string | null }>(
-    `select id,object_path,mime_type from generated_assets
-      where id=any($1::uuid[]) and workspace_id=$2 and deleted_at is null`,
+    `select coalesce(ao.id,ga.id) as id,ga.object_path,ga.mime_type from generated_assets ga
+      left join asset_objects ao on ao.workspace_id=ga.workspace_id and ao.object_path=ga.object_path
+      where (ga.id=any($1::uuid[]) or ao.id=any($1::uuid[])) and ga.workspace_id=$2 and ga.deleted_at is null
+        and ga.retention_state='active' and ga.retention_until>now()`,
     [assetIds, input.workspaceId],
   );
   const assets = new Map(rows.map((row) => [row.id, row]));
+  if (assetIds.some(id => !assets.has(id))) throw new Error("结果素材已删除、到期或不属于当前工作区，未写入画布。");
   const elementIds: string[] = [];
   for (const [index, page] of input.pages.entries()) {
     const asset = assets.get(page.assetId);

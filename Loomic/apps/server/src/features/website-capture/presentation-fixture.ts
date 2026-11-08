@@ -36,6 +36,7 @@ import { createLocalProjectService } from "../../local-db/project-service.js";
 export async function createPresentationFixture(
   databaseUrl: string,
   origin: string,
+  configure?: (context: { app: ReturnType<typeof Fastify>; db: Pool; auth: import("../../auth/types.js").RequestAuthenticator; viewerService: import("../bootstrap/ensure-user-foundation.js").ViewerService; browser: import("playwright").Browser; storage: LocalStorageProvider; root: string; userId: string; workspaceId: string; canvasId: string; sessionId: string }) => Promise<void>,
 ) {
   if (
     !["localhost", "127.0.0.1", "[::1]"].includes(new URL(databaseUrl).hostname)
@@ -327,6 +328,7 @@ export async function createPresentationFixture(
     await registerCanvasRoutes(app, { auth, canvasService: createLocalCanvasService(db) });
     await registerChatRoutes(app, { auth, chatService: createLocalChatService(db) });
     await registerProjectRoutes(app, { auth, projectService: createLocalProjectService(db, root) });
+    await configure?.({app,db,auth,viewerService,browser,storage,root,userId,workspaceId,canvasId,sessionId});
     await app.listen({ port: 3315, host: "127.0.0.1" });
     return { app, db, root, sessionId, canvasId, userId, workspaceId, token, close };
   } catch (error) {
