@@ -43,3 +43,24 @@
 真实HTTP持续流回归在旧关闭实现中失败（响应体未关闭），修复后5项Chromium/HTTP集成测试全部通过，Server类型检查通过。证据：`M:/loomic-builds/capture-close-before.log`、`capture-close-final.log`、`capture-close-types.log`。此回归证明资源释放，不单独作为生产任务完成的证据。
 
 `ffadbdc` 的 Website Capture CI `42449335950`、Agent Closure CI `42449335997`、Desktop Candidate CI `42449336014` 全部成功。
+
+## 最终生产验收
+
+最终运行代码提交 `2a3f249`，生产任务 `980ada41-1964-4bfb-93dd-000f48e4633f` 已成功。服务健康接口返回 `ok=true`；任务表返回 `status=succeeded`、`progress=100`、`error_message=null`，视频资产与聊天完成消息各1条。产物ID：`2e16a609-eb73-4f3d-9754-54c3272ff3ef`。原画布保留新的视频播放、下载和导入编辑入口。
+
+- 成片12秒、1280×720、60fps、720帧，4,755,184字节，FFmpeg完整解码退出码0。
+- 工作台与信息流各6秒，分别在12%–68%滚动区间检查202对相邻帧：两段均202/202变化，最长连续重复0帧。
+- 未加载完成的资产页未进入成片，旧三页样片中6秒静止加载尾段已去除。这次产物只包含两个成功读取的页面，不表示资产页也已成功访问。
+- 原画布真实播放器完整播放：`duration=11.998`、`currentTime=11.998`、`ended=true`、`totalVideoFrames=724`（含预加载呈现）、`droppedVideoFrames=0`。
+- 生产任务耗时约6分38秒（05:21:46–05:28:24 UTC）。逐帧截图在当前服务器上生成较慢，当前修复保证输出连续性，不等同于实时视频采集，也不承诺低帧率侧栏预览达到60fps。
+
+证据位于 `M:/loomic-builds/frame-continuity-final/`：`production-final.webm`、`production-final-segments.json`、`production-final-decode.log`、`production-final-playback.json`、`production-final-playback.png`；保存和回写证据为 `M:/loomic-builds/teardown-health.log`。此前卡在关闭阶段的两个有效片段保存在同目录 `recovered-page-0.webm` 与 `recovered-page-1.webm`，原任务已取消。
+
+生产部署校验的SHA256：
+
+- `page-recording.ts`: `8f9231ea79a90c50a3fb05bfd9d2978489f9d16b562b7ba30913bde9599ae3c2`
+- `video-encoder.ts`: `c315c7b84e1af61417c529fdf971694a16f629ba399676c3fc838b216eb4c54c`
+- `isolated-browser.ts`: `fcf9b44a76292bd17da09eb79e4043860c7cb70040deed9fc249935d66c165a7`
+- `capture-teardown.ts`: `a3481da516c9ff547045babf33ed44ac0e3c548f663e9d5fec59d7c07bc2424c`
+
+`2a3f249` 的 Website Capture CI `42450350221`、Agent Closure CI `42450350202`、Desktop Candidate CI `42450350274` 全部成功，包括Windows、macOS、Linux候选构建。此后验收文档单独提交并跳过CI，代码内容不变；候选构建成功与桌面真机播放验收是不同证据，本轮真实播放验收在生产画布的浏览器中完成。
