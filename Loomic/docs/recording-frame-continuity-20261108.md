@@ -27,3 +27,11 @@
 一分钟完整压力测试产生29,265,239字节（低于40 MiB），3600帧完整解码。相同运行中的连续性、嵌套滚动、马赛克及演示测试合计9项全部通过，Server类型检查通过。证据：`M:/loomic-builds/frame-continuity-budget-final.log`、`frame-continuity-budget-final/encoding-budget.json`、`frame-continuity-budget-final/frame-continuity.json`。短时压力回归已纳入CI。码率控制会让高复杂度画面的压缩更明显，需同时检查生产页面文字清晰度和播放。
 
 工作在M盘隔离检出执行，D盘原工作区未提交改动、安装包、缓存均保留。
+
+## 加载页阻断
+
+多页生产验收发现，后续页面仍显示整页加载遮罩时也会开始录制。新增应用就绪检查：等待覆盖主要视区的加载状态或 `aria-busy` 消失，15秒后仍未就绪则明确报错；小型加载部件不阻断正常页面。检查不依赖网络空闲来推断应用已完成初始化。
+
+新增真实Chromium用例在旧实现下2项失败，修复后延迟就绪、持续加载、小型异步部件及连续性/马赛克共7项通过，Server类型检查通过。证据：`M:/loomic-builds/frame-readiness-before.log`、`frame-readiness-final.log`、`frame-readiness-types.log`。
+
+编码预算提交 `aa88c53` 的 Website Capture CI `42448479706`、Agent Closure CI `42448479783`、Desktop Candidate CI `42448479707` 全部成功。

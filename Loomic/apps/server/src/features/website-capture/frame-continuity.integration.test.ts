@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { expect, it } from "vitest";
 import { launchAgentBrowser } from "../agent-browser/engine.js";
-import { recordPageSegment } from "./page-recording.js";
+import { recordPageSegment, waitForRecordingPage } from "./page-recording.js";
 import { ffmpegBinary, joinCaptureSegments } from "./video-encoder.js";
 
 it("keeps actual decoded scrolling frames continuous under a slow observer", async () => {
@@ -37,3 +37,32 @@ it("keeps actual decoded scrolling frames continuous under a slow observer", asy
     expect(longestRepeat).toBeLessThanOrEqual(1);
   } finally { await browser.close(); }
 }, 120_000);
+
+it("waits for the application loading screen to disappear before recording", async () => {
+  const { browser } = await launchAgentBrowser();
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<div role="status" aria-label="正在加载" style="position:fixed;inset:0">HELSTERA STUDIO</div><script>setTimeout(()=>document.body.innerHTML="<h1>Ready workspace</h1>",4000)</script>');
+    await waitForRecordingPage(page);
+    expect(await page.locator("h1").count()).toBe(1);
+    expect(await page.locator("h1").textContent()).toBe("Ready workspace");
+  } finally { await browser.close(); }
+}, 20_000);
+
+it("rejects a stuck loading screen instead of saving it as a frozen recording", async () => {
+  const { browser } = await launchAgentBrowser();
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<main aria-busy="true" style="position:fixed;inset:0">Loading workspace</main>');
+    await expect(waitForRecordingPage(page)).rejects.toThrow("网页仍在加载");
+  } finally { await browser.close(); }
+}, 25_000);
+
+it("allows a ready page with a small loading widget", async () => {
+  const { browser } = await launchAgentBrowser();
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<h1>Ready workspace</h1><span role="status" aria-label="Loading suggestions">Loading suggestions</span>');
+    await expect(waitForRecordingPage(page)).resolves.toBeUndefined();
+  } finally { await browser.close(); }
+}, 10_000);

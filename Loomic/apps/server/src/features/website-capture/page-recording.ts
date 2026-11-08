@@ -1,11 +1,23 @@
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
-import type { Page } from "playwright";
+import { errors, type Page } from "playwright";
 import { CAPTURE_FPS, frameEncoder } from "./video-encoder.js";
 
 const require = createRequire(import.meta.url);
 const CHECKPOINT_FRAMES = 15;
 const MAX_RENDER_MS = 17 * 60_000;
+const APP_READY_TIMEOUT_MS = 15_000;
+const APP_READY_SCRIPT = `(() => {
+  const loading = document.querySelectorAll('[aria-busy="true"],[role="status"],[role="progressbar"]');
+  return !Array.from(loading).some(el => {
+    const box = el.getBoundingClientRect(), css = getComputedStyle(el);
+    if (box.width < innerWidth * .5 || box.height < innerHeight * .5 ||
+        box.bottom <= 0 || box.right <= 0 || box.top >= innerHeight || box.left >= innerWidth ||
+        css.display === 'none' || css.visibility === 'hidden' || Number(css.opacity) === 0) return false;
+    const label = (el.getAttribute('aria-label') ?? '') + ' ' + (el.textContent ?? '').slice(0, 200);
+    return el.getAttribute('aria-busy') === 'true' || /loading|buffering|please wait|加载|载入|请稍候|初始化/i.test(label);
+  });
+})()`;
 
 export async function waitForRecordingPage(page: Page) {
   for (const state of ["load", "networkidle"] as const) {
@@ -14,6 +26,12 @@ export async function waitForRecordingPage(page: Page) {
     });
   }
   await page.evaluate("Promise.race([Promise.all([document.fonts.ready,...Array.from(document.images).filter(img=>img.getBoundingClientRect().top<innerHeight*2).map(img=>img.decode().catch(()=>undefined))]),new Promise(resolve=>setTimeout(resolve,3000))]).then(()=>undefined)");
+  try {
+    await page.waitForFunction(APP_READY_SCRIPT, undefined, { timeout: APP_READY_TIMEOUT_MS, polling: 100 });
+  } catch (error) {
+    if (!(error instanceof errors.TimeoutError)) throw error;
+    throw new Error("网页仍在加载，未开始录制。请稍后重试。", { cause: error });
+  }
   await page.waitForTimeout(500);
 }
 
