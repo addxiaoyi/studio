@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +20,8 @@ import {
 } from "./recording-approval.js";
 import { completeWebsiteCapture } from "./complete-capture.js";
 import { persistCaptureAsset } from "./isolated-browser.js";
+import { consumeWebsiteLogin } from "./login-vault.js";
+import { allowLoginRequest, signInWebsite, newAuthenticatedContext } from "./login-session.js";
 
 export async function createPresentationFixture(
   databaseUrl: string,
@@ -45,6 +47,8 @@ export async function createPresentationFixture(
     token = randomUUID();
   const app = Fastify(),
     work: Promise<void>[] = [];
+  const priorKey=process.env.WEBSITE_LOGIN_ENCRYPTION_KEY;
+  process.env.WEBSITE_LOGIN_ENCRYPTION_KEY=randomBytes(32).toString("base64");
   const { browser, engine } = await launchAgentBrowser();
   const storage = new LocalStorageProvider(root, "http://localhost:3315");
   async function close() {
@@ -55,6 +59,7 @@ export async function createPresentationFixture(
     await admin.query(`drop schema ${schema} cascade`);
     await admin.end();
     await rm(root, { recursive: true, force: true });
+    if(priorKey===undefined)delete process.env.WEBSITE_LOGIN_ENCRYPTION_KEY;else process.env.WEBSITE_LOGIN_ENCRYPTION_KEY=priorKey;
   }
   try {
     await db.query(
@@ -73,6 +78,7 @@ export async function createPresentationFixture(
       "20261103000000_website_recording_approvals",
       "20261107000001_agent_browser_views",
       "20261108000000_website_presentations",
+      "20261108000001_website_login",
     ]) {
       await db.query(
         await readFile(
@@ -178,16 +184,30 @@ export async function createPresentationFixture(
       let observer: Awaited<ReturnType<typeof observeAgentBrowser>> | undefined;
       try {
         await jobs.markRunning(jobId);
-        const page = await browser.newPage();
+        let sourceContext=await browser.newContext();
+        if(task.login){
+          const credentials=await consumeWebsiteLogin(db,task.id,workspaceId,userId,task.login);
+          const scope={origin:"https://8.8.8.8",submitting:false,username:credentials.username,password:credentials.password};
+          await sourceContext.route("**/*",async route=>{
+            if(!allowLoginRequest(route.request(),scope))return route.abort();
+            if(route.request().method()==="POST")return route.fulfill({status:200,contentType:"text/html; charset=utf-8",headers:{"set-cookie":"session=authorized; Path=/; Secure; HttpOnly"},body:"<h1>我的工作台</h1>"});
+            return route.fulfill({contentType:"text/html; charset=utf-8",body:route.request().url().endsWith('/dashboard')?'<h1>我的工作台</h1>':'<form action="/login" method="post"><input name="username"><input name="password" type="password"><button>登录</button></form>'});
+          });
+          const loginPage=await sourceContext.newPage();
+          await signInWebsite(loginPage,credentials,scope,async()=>{});
+          sourceContext=await newAuthenticatedContext(browser,sourceContext,undefined,[credentials.username,credentials.password]);
+        }
+        const page = await sourceContext.newPage();
         await page.route("https://8.8.8.8/", (route) =>
           route.fulfill({
-            contentType: "text/html",
+            contentType: "text/html; charset=utf-8",
             body: '<title>演示验收</title><body style="font:24px system-ui;background:#f5f5fa;padding:50px"><h1>让网站成为一段故事</h1><p>多个光标共同绘制布局与文字</p><section style="border:1px solid #ddd;padding:40px;background:white">素材、创作、发布</section></body>',
           }),
         );
         await page.goto("https://8.8.8.8/");
         const scene = await capturePresentationScene(page);
         await page.close();
+        await sourceContext.close();
         const assertActive = async () => {
           const row = (
             await db.query(

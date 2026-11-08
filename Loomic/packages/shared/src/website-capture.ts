@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { websitePresentationSchema } from "./website-presentation.js";
+import { sameWebsiteOrigin, websiteLoginRefSchema } from "./website-login.js";
 
 export const websiteCaptureModeSchema = z.enum(["isolated", "local"]);
 export const websiteCapturePromoSchema = z.object({
@@ -86,8 +87,10 @@ export const createWebsiteCaptureRequestSchema = z.object({
   promo: websiteCapturePromoSchema.optional(),
   presentation: websitePresentationSchema.optional(),
   idempotencyKey: z.string().trim().min(1).max(160),
+  login: websiteLoginRefSchema.optional(),
 }).superRefine((input,context)=>{
   if(input.presentation&&(input.mode!=="isolated"||!input.recordVideo||input.pageLimit>3))context.addIssue({code:"custom",path:["presentation"],message:"网站演示必须使用隔离浏览器、启用录制且最多3页。"});
+  if(input.login&&(input.mode!=="isolated"||!input.recordVideo||input.followExternal||!sameWebsiteOrigin(input.url,input.login.loginUrl)))context.addIssue({code:"custom",path:["login"],message:"登录体验需要隔离录制，并限定在登录站点内。"});
 });
 
 export const websiteCaptureTaskSchema = z.object({
@@ -102,6 +105,7 @@ export const websiteCaptureTaskSchema = z.object({
   error: z.string().nullable(),
   promoStatus: websiteCapturePromoStatusSchema.optional(),
   presentation: websitePresentationSchema.nullable().optional(),
+  login: websiteLoginRefSchema.nullable().optional(),
   promo: websiteCapturePromoSchema.nullable().optional(),
   promoApprovalId: z.string().uuid().nullable().optional(),
   promoJobId: z.string().uuid().nullable().optional(),

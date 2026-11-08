@@ -53,7 +53,7 @@ jobs:
           pnpm --filter @helstera/web exec vitest run test/agent-browser-dock.test.tsx test/canvas-bottom-bar.test.tsx
       - name: Website presentation parameters and recording approval
         run: |
-          pnpm --filter @helstera/shared exec vitest run src/website-presentation.test.ts
+          pnpm --filter @helstera/shared exec vitest run src/website-presentation.test.ts src/website-login.test.ts
           node scripts/test-local-postgres.mjs src/features/website-capture/recording-approval.postgres.test.ts src/features/website-capture/recording-approval.test.ts src/http/website-capture-create.test.ts src/http/website-recording-approval.test.ts
       - name: Try-on billing and shared form regressions
         run: |
@@ -126,7 +126,7 @@ jobs:
           pnpm --filter @helstera/web exec playwright test --config playwright.agent-browser.config.ts
       - name: Website presentation recording and playback
         run: |
-          pnpm --filter @helstera/server exec vitest run src/features/website-capture/presentation.integration.test.ts
+          pnpm --filter @helstera/server exec vitest run src/features/website-capture/presentation.integration.test.ts src/features/website-capture/login-session.test.ts src/features/website-capture/login-session.integration.test.ts
           pnpm --filter @helstera/web exec playwright test --config playwright.presentation.config.ts
       - uses: actions/upload-artifact@v4
         if: always()

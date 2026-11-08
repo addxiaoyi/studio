@@ -11,6 +11,8 @@ import { WebsiteAssistantHub, validateLocalExactUrl } from "../features/website-
 import { claimWebsiteCaptureRetry } from "../features/website-capture/retry.js";
 import { softDeleteWebsiteCaptureAssets } from "../features/website-capture/asset-cleanup.js";
 import { decideRecordingApproval, requestRecordingApproval } from "../features/website-capture/recording-approval.js";
+import { attachWebsiteLogin, assertWebsiteLoginReady, discardWebsiteLogin } from "../features/website-capture/login-vault.js";
+import { registerWebsiteLoginRoutes } from "./website-login.js";
 import type { JobService } from "../features/jobs/job-service.js";
 import type { CreditService } from "../features/credits/credit-service.js";
 import type { TierGuard } from "../features/credits/tier-guard.js";
@@ -39,6 +41,7 @@ type TaskRow = {
   assistant_connection_id: string | null;
   promo_status?: WebsiteCaptureTask["promoStatus"];
   presentation?: WebsitePresentation | null;
+  login?: import("@helstera/shared").WebsiteLoginRef | null;
   promo?: WebsiteCaptureTask["promo"];
   promo_approval_id?: string | null;
   promo_job_id?: string | null;
@@ -51,6 +54,7 @@ type TaskRow = {
 };
 
 export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: WebsiteCaptureRouteOptions) {
+  registerWebsiteLoginRoutes(app, options);
   app.post("/api/website-capture/pairings", async (request, reply) => {
     const user = await options.auth.authenticate(request);
     if (!user) return unauthorized(reply);
@@ -205,23 +209,24 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       }
       const inserted = await options.db.query<TaskRow>(
         `insert into website_capture_tasks
-          (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key, stage, presentation)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,case when $7 then 'waiting_recording_approval' else 'queued' end,$11::jsonb)
+          (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key, stage, presentation, login)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,case when $7 then 'waiting_recording_approval' else 'queued' end,$11::jsonb,$12::jsonb)
          on conflict (workspace_id, created_by, idempotency_key) do nothing
          returning id, background_job_id, status, mode, start_url, progress, stage, result,
                    error_message, created_at, updated_at`,
-        [viewer.workspace.id, user.id, input.sessionId ?? null, input.mode, startUrl.toString(), input.pageLimit, input.recordVideo, input.followExternal, input.promo?.enabled ? JSON.stringify(input.promo) : null, input.idempotencyKey,input.presentation?JSON.stringify(input.presentation):null],
+        [viewer.workspace.id, user.id, input.sessionId ?? null, input.mode, startUrl.toString(), input.pageLimit, input.recordVideo, input.followExternal, input.promo?.enabled ? JSON.stringify(input.promo) : null, input.idempotencyKey,input.presentation?JSON.stringify(input.presentation):null,input.login?JSON.stringify(input.login):null],
       );
       const task = inserted.rows[0] ?? (await options.db.query<TaskRow>(
           `select id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
                 error_message, created_at, updated_at, follow_external, assistant_connection_id
            from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3
              and start_url=$4 and mode=$5 and page_limit=$6 and record_video=$7 and follow_external=$8
-             and session_id is not distinct from $9::uuid and promo is not distinct from $10::jsonb and presentation is not distinct from $11::jsonb`,
-        [viewer.workspace.id, user.id, input.idempotencyKey, startUrl.toString(), input.mode, input.pageLimit, input.recordVideo, input.followExternal, input.sessionId ?? null, input.promo?.enabled ? JSON.stringify(input.promo) : null,input.presentation?JSON.stringify(input.presentation):null],
+             and session_id is not distinct from $9::uuid and promo is not distinct from $10::jsonb and presentation is not distinct from $11::jsonb and login is not distinct from $12::jsonb`,
+        [viewer.workspace.id, user.id, input.idempotencyKey, startUrl.toString(), input.mode, input.pageLimit, input.recordVideo, input.followExternal, input.sessionId ?? null, input.promo?.enabled ? JSON.stringify(input.promo) : null,input.presentation?JSON.stringify(input.presentation):null,input.login?JSON.stringify(input.login):null],
       )).rows[0];
       if (!task) return reply.code(409).send({ ok: false, error: { code: "idempotency_conflict", message: "该请求标识已用于其他浏览参数，请重新发起任务。" } });
 
+      if (input.login) await attachWebsiteLogin(options.db, viewer.workspace.id, user.id, task.id, input.login);
       if (input.recordVideo && task.status === "queued") {
         const recordingApproval = await requestRecordingApproval(options.db, task.id, viewer.workspace.id, user.id);
         return reply.code(inserted.rows[0] ? 202 : 200).send({ ok: true, data: { task: await loadTask(options.db, task.id, viewer.workspace.id), jobId: null, reused: !inserted.rows[0], recordingApproval } });
@@ -318,14 +323,15 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       const viewer = await options.viewerService.ensureViewer(user);
       const { approvalId } = z.object({ approvalId: z.string().uuid() }).parse(request.body);
       const decision = z.enum(["approve", "reject"]).parse(request.params.decision);
-      const task = (await options.db.query<{ id: string; mode: "local" | "isolated"; status: string; session_id: string | null; background_job_id: string | null }>(
-        `select t.id,t.mode,t.status,t.session_id,t.background_job_id from website_capture_tasks t
+      const task = (await options.db.query<{ id: string; mode: "local" | "isolated"; status: string; session_id: string | null; background_job_id: string | null; login: unknown }>(
+        `select t.id,t.mode,t.status,t.session_id,t.background_job_id,t.login from website_capture_tasks t
          join website_recording_approvals a on a.task_id=t.id
          where t.id=$1 and t.workspace_id=$2 and t.created_by=$3 and a.id=$4 and a.workspace_id=$2 and a.user_id=$3`,
         [request.params.taskId, viewer.workspace.id, user.id, approvalId],
       )).rows[0];
       if (!task || task.status !== "queued") return reply.code(409).send({ ok: false, error: { code: "recording_approval_invalid", message: "录制审批不存在或任务已结束。" } });
       if(decision==="approve")await assertConnectorEnabled(options.db,viewer.workspace.id,user.id,task.mode==="isolated"?"isolated-browser":"desktop-agent");
+      if(decision==="approve"&&task.login)await assertWebsiteLoginReady(options.db,task.id);
       const decided = await decideRecordingApproval(options.db, approvalId, viewer.workspace.id, user.id, decision === "approve");
       if (!decided) {
         const approved = decision === "approve" && (await options.db.query(
@@ -335,6 +341,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         if (!approved) return reply.code(409).send({ ok: false, error: { code: "recording_approval_invalid", message: "录制审批已过期、已处理或参数已改变。" } });
       }
       if (decision === "reject") {
+        if(task.login)await discardWebsiteLogin(options.db,task.id);
         await options.db.query("update website_capture_tasks set status='canceled',stage='canceled',updated_at=now() where id=$1 and status='queued'", [task.id]);
       } else if (task.mode === "local") {
         await options.assistantHub.startLocalTask(task.id, user.id);
@@ -391,6 +398,7 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
         [request.params.taskId, viewer.workspace.id, user.id],
       );
       if (!updated.rows[0]) return reply.code(409).send({ ok: false, error: { code: "task_not_cancelable", message: "任务不存在或已经结束。" } });
+      await discardWebsiteLogin(options.db,updated.rows[0].id);
       const cleaned = await cleanupCaptureAssets(options.db, updated.rows[0].id);
       await options.db.query("update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')", [updated.rows[0].id]);
       const jobId = updated.rows[0].background_job_id;
@@ -577,7 +585,7 @@ async function loadTask(db: Pool, taskId: string, workspaceId: string): Promise<
   const { rows } = await db.query<TaskRow>(
     `select id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
             error_message, created_at, updated_at, follow_external, assistant_connection_id,
-            promo, promo_status, promo_approval_id, promo_job_id, promo_video_url, promo_error, presentation
+            promo, promo_status, promo_approval_id, promo_job_id, promo_video_url, promo_error, presentation, login
        from website_capture_tasks where id=$1 and workspace_id=$2`,
     [taskId, workspaceId],
   );
@@ -595,6 +603,7 @@ function toTask(row: TaskRow): WebsiteCaptureTask {
     stage: row.stage,
     result: row.result,
     ...(row.presentation!==undefined?{presentation:row.presentation}:{}),
+    ...(row.login!==undefined?{login:row.login}:{}),
     error: row.error_message,
     ...(row.promo_status ? { promoStatus: row.promo_status } : {}),
     ...(row.promo !== undefined ? { promo: row.promo } : {}),

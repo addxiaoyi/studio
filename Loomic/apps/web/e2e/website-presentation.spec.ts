@@ -104,3 +104,41 @@ test("rejects then approves a real presentation, plays the recording and restore
   ).toBe(1);
   await page.screenshot({ path: info.outputPath("recording-restored.png") });
 });
+
+test("uses a secure login form and never persists raw credentials in browser recovery",async({page},info)=>{
+  if(process.env.HELT_TEST_CANDIDATE_PATH){
+    await desktop?.close();
+    const userData=await mkdtemp(join(tmpdir(),"loomic-login-desktop-"));
+    const env={...process.env,HELSTERA_ISOLATED_TEST:"1",HELSTERA_TEST_USER_DATA:userData,HELSTERA_DESKTOP_LOCAL_URL:"http://localhost:3228"};delete env.ELECTRON_RUN_AS_NODE;
+    desktop=await _electron.launch({executablePath:process.env.HELT_TEST_CANDIDATE_PATH,env:env as Record<string,string>,timeout:45000});page=await desktop.firstWindow();
+  }
+  await page.goto(`http://localhost:3228/home/?session=${fixture.sessionId}`);
+  await page.getByRole("button",{name:"展开 Agent 浏览器",exact:true}).click();
+  const card=page.getByRole("region",{name:"网站介绍演示",exact:true});
+  await card.getByRole("button",{name:/网站介绍演示与录制/}).click();
+  await card.getByRole("textbox",{name:"演示网址"}).fill("https://8.8.8.8/");
+  await card.getByRole("combobox",{name:"演示时长"}).click();
+  await page.getByRole("option",{name:"12 秒",exact:true}).click();
+  await card.getByRole("checkbox",{name:"需要登录后体验"}).check();
+  await card.getByLabel("登录地址",{exact:true}).fill("https://8.8.8.8/login");
+  await card.getByLabel("网站账号",{exact:true}).fill("private-user@example.test");
+  await card.getByLabel("网站密码",{exact:true}).fill("private-test-password");
+  await card.getByLabel("登录成功后可见的文字",{exact:true}).fill("我的工作台");
+  const jobsBefore=Number((await fixture.db.query("select count(*) from background_jobs")).rows[0].count);
+  await card.getByRole("button",{name:"查看录制方案"}).click();
+  await expect(card.getByLabel("网站演示录制确认")).toContainText("登录成功标记：我的工作台");
+  const browserState=await page.evaluate(()=>JSON.stringify(localStorage));
+  expect(browserState).not.toContain("private-test-password");expect(browserState).not.toContain("private-user@example.test");
+  expect(Number((await fixture.db.query("select count(*) from background_jobs")).rows[0].count)).toBe(jobsBefore);
+  await page.screenshot({path:info.outputPath("login-approval.png")});
+  await card.getByRole("button",{name:"确认演示并录制"}).click();
+  await expect(card).toContainText("演示录像已保存",{timeout:60000});
+  expect((await fixture.db.query("select ciphertext from website_login_secrets")).rows.every(row=>row.ciphertext===null)).toBe(true);
+  const video=card.getByLabel("网站介绍演示录像");await expect(video).toBeVisible();
+  await video.evaluate(async(el:HTMLVideoElement)=>{el.muted=true;await el.play();});
+  await expect.poll(()=>video.evaluate((el:HTMLVideoElement)=>el.currentTime)).toBeGreaterThan(.1);
+  await page.reload();await page.getByRole("button",{name:"展开 Agent 浏览器",exact:true}).click();
+  await expect(video).toBeVisible();
+  expect(Number((await fixture.db.query("select count(*) from background_jobs")).rows[0].count)).toBe(jobsBefore+1);
+  await page.screenshot({path:info.outputPath("authenticated-recording-restored.png")});
+});

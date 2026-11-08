@@ -52,9 +52,10 @@ describe("website capture creation idempotency scope", () => {
     const query = vi.fn(async (sql: string, values?: unknown[]) => {
       if (sql.includes("insert into website_capture_tasks")) return { rows: [] };
       if (sql.includes("from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3")) {
-        expect(values).toEqual([workspaceId, user.id, payload.idempotencyKey, payload.url, payload.mode, payload.pageLimit, payload.recordVideo, payload.followExternal, null, null, null]);
+        expect(values).toEqual([workspaceId, user.id, payload.idempotencyKey, payload.url, payload.mode, payload.pageLimit, payload.recordVideo, payload.followExternal, null, null, null, null]);
         expect(sql).toContain("record_video=$7");
         expect(sql).toContain("presentation is not distinct from $11::jsonb");
+        expect(sql).toContain("login is not distinct from $12::jsonb");
         return { rows: [currentTask] };
       }
       if (sql.includes("from website_capture_tasks where id=$1 and workspace_id=$2")) return { rows: [currentTask] };

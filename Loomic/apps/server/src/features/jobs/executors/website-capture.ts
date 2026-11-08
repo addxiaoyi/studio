@@ -40,10 +40,11 @@ registerExecutor("website_capture", async (jobId, _queueMessage, ctx: ExecutorCo
     page_limit: number;
     record_video: boolean;
     presentation: import("@helstera/shared").WebsitePresentation | null;
+    login: import("@helstera/shared").WebsiteLoginRef | null;
     follow_external: boolean;
     status: string;
   }>(
-    "select id, workspace_id, created_by, mode, session_id, assistant_connection_id, start_url, page_limit, record_video, presentation, follow_external, status from website_capture_tasks where id=$1",
+    "select id, workspace_id, created_by, mode, session_id, assistant_connection_id, start_url, page_limit, record_video, presentation, login, follow_external, status from website_capture_tasks where id=$1",
     [taskId],
   )).rows[0];
   if (!task) throw Object.assign(new Error("Website capture task was not found."), { code: "invalid_input" });

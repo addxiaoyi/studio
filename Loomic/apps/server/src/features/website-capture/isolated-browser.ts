@@ -13,6 +13,10 @@ import { observeAgentBrowser } from "../agent-browser/observer.js";
 import { websitePresentationSchema, type WebsitePresentation } from "@helstera/shared";
 import { capturePresentationScene, type PresentationScene } from "./presentation-snapshot.js";
 import { recordWebsitePresentation } from "./presentation.js";
+import { consumeWebsiteLogin, discardWebsiteLogin } from "./login-vault.js";
+import { allowLoginRequest, signInWebsite, newAuthenticatedContext, type LoginNetworkScope } from "./login-session.js";
+import { sameWebsiteOrigin, type WebsiteLoginRef } from "@helstera/shared";
+import { assertConnectorEnabled } from "../agent-goals/connector-gate.js";
 import type { Pool, PoolClient } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import type { WebsiteCaptureClaim, WebsiteCaptureEvidence, WebsiteCapturePage, WebsiteCaptureResult } from "@helstera/shared";
@@ -42,6 +46,7 @@ export type CaptureTask = {
   record_video: boolean;
   follow_external?: boolean;
   presentation?: WebsitePresentation | null;
+  login?: WebsiteLoginRef | null;
 };
 
 type CaptureProgress = (percent: number, stage: string, detail?: string) => Promise<void>;
@@ -119,29 +124,48 @@ export async function captureIsolatedWebsite(options: {
     const launched = await launchAgentBrowser();
     browser = launched.browser;
     options.signal?.throwIfAborted();
-    const context = await browser.newContext({
+    let context = await browser.newContext({
       acceptDownloads: false,
       ignoreHTTPSErrors: false,
       permissions: [],
       serviceWorkers: "block",
       ...(presentation ? { reducedMotion: "reduce" as const } : {}),
-      ...(options.task.record_video && !presentation
+      ...(options.task.record_video && !presentation && !options.task.login
         ? { recordVideo: { dir: tempDir, size: { width: 1280, height: 720 } } }
         : {}),
       viewport: { width: 1280, height: 720 },
     });
-    await context.routeWebSocket("**/*", blockIsolatedWebSocket);
     const budget = createCaptureByteBudget(MAX_TOTAL_BYTES);
     let requestCount = 0;
-
-    await context.route("**/*", async (route) => {
+    let loginScope: LoginNetworkScope | undefined;
+    const installNetwork = async () => {
+      await context.routeWebSocket("**/*", blockIsolatedWebSocket);
+      await context.route("**/*", async (route) => {
+      if(options.task.login)await assertConnectorEnabled(options.db,options.task.workspace_id,options.task.created_by,"isolated-browser");
+      await assertTaskIsRunning(options.db,options.task.id);
       requestCount += 1;
       if (requestCount > 180 || budget.exhausted()) {
         await route.abort("blockedbyclient");
         return;
       }
-      await fulfillPublicReadOnlyRequest(route, budget);
-    });
+      if(loginScope&&route.request().isNavigationRequest()&&!sameWebsiteOrigin(route.request().url(),options.task.start_url)){
+        await route.abort("blockedbyclient");return;
+      }
+      await fulfillPublicReadOnlyRequest(route, budget,loginScope);
+      });
+    };
+    await installNetwork();
+    if(options.task.login){
+      if(!options.task.record_video||options.task.follow_external||!sameWebsiteOrigin(startUrl.href,options.task.login.loginUrl))throw new Error("登录任务范围与审批不符。");
+      await options.onProgress(6,"signing_in","正在登录指定站点，登录画面不会录制。");
+      const credentials=await consumeWebsiteLogin(options.db,options.task.id,options.task.workspace_id,options.task.created_by,options.task.login);
+      loginScope={origin:startUrl.origin,submitting:false,username:credentials.username,password:credentials.password};
+      const loginPage=await context.newPage();
+      await signInWebsite(loginPage,credentials,loginScope,async()=>{options.signal?.throwIfAborted();await assertTaskIsRunning(options.db,options.task.id);});
+      context=await newAuthenticatedContext(browser,context,!presentation?{dir:tempDir,size:{width:1280,height:720}}:undefined,[credentials.username,credentials.password]);
+      await installNetwork();
+      await options.onProgress(9,"signed_in","登录成功，开始记录站内体验。账号密码已从服务端销毁。");
+    }
     context.on("page", (page) => {
       if (page !== context.pages()[0]) void page.close();
     });
@@ -154,6 +178,7 @@ export async function captureIsolatedWebsite(options: {
         workspaceId: options.task.workspace_id, userId: options.task.created_by,
         assertActive: () => assertTaskIsRunning(options.db,options.task.id),
         ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.task.login ? { sourceUrl:startUrl.origin+startUrl.pathname } : {}),
       });
     }
 
@@ -172,6 +197,14 @@ export async function captureIsolatedWebsite(options: {
         await view?.beforeAction(`正在打开 ${new URL(nextUrl).hostname}`,null);
         await page.goto(nextUrl, { waitUntil: "domcontentloaded" });
         await page.waitForTimeout(PAGE_SETTLE_MS);
+        if(options.task.login&&!presentation){
+          const bottom=await page.evaluate("Math.min(document.documentElement.scrollHeight-innerHeight,1440)") as number;
+          for(const top of [0,Math.max(0,bottom/2),Math.max(0,bottom),0]){
+            await assertTaskIsRunning(options.db,options.task.id);
+            await view?.beforeAction("浏览登录后页面");
+            await page.evaluate(`window.scrollTo(0,${Math.round(top)})`);await page.waitForTimeout(700);
+          }
+        }
         const scene=presentation?await capturePresentationScene(page):null;
         await view?.beforeAction("正在读取页面内容");
         await view?.pointAt("h1, h2, main, body", "读取页面内容");
@@ -180,11 +213,12 @@ export async function captureIsolatedWebsite(options: {
         );
 
         const responseUrl = await validatePublicHttpUrl(facts.url);
+        if(options.task.login&&!sameWebsiteOrigin(responseUrl.href,startUrl.href))throw new Error("体验页面已离开授权站点。");
         await view?.beforeAction("正在保存页面证据");
-        const screenshot = await page.screenshot({ type: "jpeg", quality: 76, fullPage: false });
+        const screenshot = await page.screenshot({ type: "jpeg", quality: 76, fullPage: false, ...(options.task.login?{mask:[page.locator('input,textarea,select,[contenteditable="true"]')]}:{}) });
         await view?.capture();
         captured.push({
-          url: responseUrl.toString(),
+          url: options.task.login?responseUrl.origin+responseUrl.pathname:responseUrl.toString(),
           title: facts.title,
           description: facts.description,
           headings: facts.headings,
@@ -198,6 +232,7 @@ export async function captureIsolatedWebsite(options: {
         for (const link of facts.links) {
           if (pending.length + captured.length >= options.task.page_limit * 3) break;
           const safeUrl = await validatePublicHttpUrl(link).catch(() => null);
+          if(options.task.login&&safeUrl&&(!sameWebsiteOrigin(safeUrl.href,startUrl.href)||/logout|signout|delete|remove|purchase|checkout|payment|退出|删除|支付/i.test(safeUrl.pathname)))continue;
           if (safeUrl && !options.task.follow_external && safeUrl.hostname !== startUrl.hostname) continue;
           if (safeUrl && !visited.has(safeUrl.toString()) && !pending.includes(safeUrl.toString())) {
             pending.push(safeUrl.toString());
@@ -295,6 +330,7 @@ export async function captureIsolatedWebsite(options: {
     const title = pages[0]?.title || startUrl.hostname;
     const evidence = buildWebsiteEvidence(pages);
     const claims = buildWebsiteClaims(startUrl.toString(), pages);
+    if(options.task.login)claims[claims.length-1]={text:"本次仅验证已登录账号中实际读取的页面；未执行业务表单、支付或其他修改。",sourceUrls:pages.map(page=>page.url),status:"observed"};
     const introduction = buildWebsiteIntroduction(startUrl.toString(), pages, claims);
     await options.onProgress(96, "writing_report", "Preparing the sourced website introduction");
     capturedSuccessfully = true;
@@ -314,6 +350,7 @@ export async function captureIsolatedWebsite(options: {
     await view?.close(capturedSuccessfully ? "completed" : "failed", capturedSuccessfully ? "浏览完成" : "浏览已停止，请查看任务结果").catch(error=>console.error("[agent-browser] failed to close preview",error));
     options.signal?.removeEventListener("abort", abort);
     await browser?.close().catch(() => undefined);
+    if(options.task.login)await discardWebsiteLogin(options.db,options.task.id);
     await rm(tempDir, { recursive: true, force: true });
   }
 }
@@ -474,10 +511,10 @@ export async function fulfillBoundedCaptureResponse(
   return total;
 }
 
-async function fulfillPublicReadOnlyRequest(route: Route, budget: ReturnType<typeof createCaptureByteBudget>): Promise<number> {
+export async function fulfillPublicReadOnlyRequest(route: Route, budget: ReturnType<typeof createCaptureByteBudget>, login?: LoginNetworkScope): Promise<number> {
   const request = route.request();
   const method = request.method().toUpperCase();
-  if (method !== "GET" && method !== "HEAD") {
+  if (login ? !allowLoginRequest(request,login) : method !== "GET" && method !== "HEAD") {
     await route.abort("blockedbyclient");
     return 0;
   }
@@ -511,18 +548,23 @@ async function fulfillPublicReadOnlyRequest(route: Route, budget: ReturnType<typ
   });
 
   try {
+    const sameOrigin = login && parsedUrl.origin===login.origin;
+    const browserHeaders = sameOrigin ? await request.allHeaders() : {};
     const response = await httpRequest(parsedUrl, {
       dispatcher,
-      method,
+      method:method as "GET"|"HEAD"|"POST",
+      ...(method==="POST"?{body:request.postDataBuffer()??null}:{}),
       headersTimeout: PAGE_TIMEOUT_MS,
       bodyTimeout: PAGE_TIMEOUT_MS,
       headers: {
         accept: request.headers().accept ?? "text/html,application/xhtml+xml,image/avif,image/webp,*/*;q=0.8",
         "accept-language": request.headers()["accept-language"] ?? "zh-CN,zh;q=0.9,en;q=0.8",
         "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/132 Safari/537.36 HelsteraCapture/1.0",
+        ...Object.fromEntries(["cookie","authorization","content-type","origin","referer","x-csrf-token","x-xsrf-token"].flatMap(key=>browserHeaders[key]?[[key,browserHeaders[key]!]]:[])),
       },
     });
     const headers = selectResponseHeaders(response.headers as Record<string, string | string[] | undefined>);
+    if(sameOrigin&&response.headers["set-cookie"])headers["set-cookie"]=[response.headers["set-cookie"]].flat().join("\n");
     if (method === "HEAD" || response.statusCode === 204 || response.statusCode === 304 || (response.statusCode >= 300 && response.statusCode < 400)) {
       await route.fulfill({ status: response.statusCode, headers, body: Buffer.alloc(0) });
       abortResponseBody(response.body);
@@ -539,7 +581,7 @@ async function fulfillPublicReadOnlyRequest(route: Route, budget: ReturnType<typ
   } catch (error) {
     console.warn("[website-capture] public request blocked", {
       host: parsedUrl.hostname,
-      reason: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+      reason: login ? "Authenticated request failed" : error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
     });
     await route.abort("failed").catch(() => undefined);
     return 0;

@@ -11,6 +11,7 @@ import { completeWebsiteCapture } from "./complete-capture.js";
 import { captureIsolatedWebsite } from "./isolated-browser.js";
 import { LocalStorageProvider } from "../../storage/local-storage.js";
 import { registerLocalAssetRoutes } from "../../http/local-assets.js";
+import { saveWebsiteLogin, attachWebsiteLogin, consumeWebsiteLogin, purgeWebsiteLogins, discardWebsiteLogin } from "./login-vault.js";
 
 const databaseUrl = process.env.HELT_TEST_DATABASE_URL ?? process.env.HELT_AUTH_DB_URL ?? "";
 const enabled = Boolean(databaseUrl)&&(process.env.HELT_AUTH_DB_TEST === "1"||Boolean(process.env.HELT_TEST_DATABASE_URL));
@@ -52,6 +53,7 @@ describe.skipIf(!enabled)("recording approvals with PostgreSQL", () => {
     await db.query(migration);
     await db.query(migration);
     await db.query(await readFile(new URL("../../local-db/migrations/20261108000000_website_presentations.sql",import.meta.url),"utf8"));
+    await db.query(await readFile(new URL("../../local-db/migrations/20261108000001_website_login.sql",import.meta.url),"utf8"));
   });
 
   afterAll(async () => {
@@ -79,6 +81,34 @@ describe.skipIf(!enabled)("recording approvals with PostgreSQL", () => {
     expect(claims.filter(Boolean)).toHaveLength(1);
     const { rows } = await db.query("select a.status as approval_status, t.status as task_status from website_recording_approvals a join website_capture_tasks t on t.id=a.task_id where a.id=$1", [approval.id]);
     expect(rows[0]).toEqual({ approval_status: "consumed", task_status: "running" });
+  });
+  it("encrypts, scopes and consumes login credentials once, with no secret in approval metadata",async()=>{
+    const prior=process.env.PROVIDER_CONFIG_ENCRYPTION_KEY;
+    process.env.PROVIDER_CONFIG_ENCRYPTION_KEY=Buffer.alloc(32,7).toString("base64");
+    try{
+      const task=await createTask();
+      const credentials={loginUrl:"https://example.com/login",successText:"工作台",username:"private-user",password:"private-password"};
+      const login=await saveWebsiteLogin(db,workspaceId,userId,credentials);
+      await db.query("update website_capture_tasks set login=$2 where id=$1",[task.id,login]);
+      await attachWebsiteLogin(db,workspaceId,userId,task.id,login);
+      await expect(attachWebsiteLogin(db,workspaceId,randomUUID(),task.id,login)).rejects.toThrow();
+      const stored=JSON.stringify((await db.query("select * from website_login_secrets where id=$1",[login.credentialId])).rows);
+      expect(stored).not.toContain(credentials.username);expect(stored).not.toContain(credentials.password);
+      const approval=await requestRecordingApproval(db,task.id,workspaceId,userId);
+      expect(JSON.stringify(approval)).not.toContain(credentials.password);
+      await db.query("update website_capture_tasks set login=jsonb_set(login,'{successText}','\"changed\"') where id=$1",[task.id]);
+      expect(await decideRecordingApproval(db,approval.id,workspaceId,userId,true)).toBe(false);
+      await db.query("update website_capture_tasks set login=$2 where id=$1",[task.id,login]);
+      expect(await decideRecordingApproval(db,approval.id,workspaceId,userId,true)).toBe(true);
+      const attempts=await Promise.allSettled(Array.from({length:5},()=>consumeWebsiteLogin(db,task.id,workspaceId,userId,login)));
+      expect(attempts.filter(attempt=>attempt.status==="fulfilled")).toHaveLength(1);
+      expect((await db.query("select ciphertext from website_login_secrets where id=$1",[login.credentialId])).rows[0].ciphertext).toBeNull();
+      const expired=await saveWebsiteLogin(db,workspaceId,userId,credentials);
+      await db.query("update website_login_secrets set expires_at=now()-interval '1 second' where id=$1",[expired.credentialId]);
+      await purgeWebsiteLogins(db);
+      expect((await db.query("select ciphertext from website_login_secrets where id=$1",[expired.credentialId])).rows[0].ciphertext).toBeNull();
+      await discardWebsiteLogin(db,task.id);
+    }finally{if(prior===undefined)delete process.env.PROVIDER_CONFIG_ENCRYPTION_KEY;else process.env.PROVIDER_CONFIG_ENCRYPTION_KEY=prior;}
   });
   it("binds duration, style and cursor count to the recording approval",async()=>{
     const task=await createTask();const presentation={style:"cursor-rebuild",durationSeconds:24,cursorCount:4};

@@ -4,6 +4,7 @@ import type {
   CreateWebsiteCaptureRequest,
   WebsiteCaptureTask,
   WebsitePresentation,
+  WebsiteLoginCredentials,
 } from "@helstera/shared";
 import {
   cancelWebsiteCapture,
@@ -13,6 +14,7 @@ import {
   type RecordingApproval,
 } from "@/lib/server-api";
 import { openAgentBrowser } from "@/lib/agent-browser-api";
+import { saveWebsiteLoginCredentials } from "@/lib/website-login-api";
 
 type Saved = {
   key: string;
@@ -38,7 +40,7 @@ export function useWebsitePresentation(userId: string, token: string) {
       const raw = localStorage.getItem(savedKey(userId));
       if (!raw) return;
       const prior = JSON.parse(raw) as Saved;
-      if (typeof prior.key !== "string" || !prior.input?.presentation)
+      if (typeof prior.key !== "string" || !prior.input?.recordVideo)
         throw new Error("演示恢复记录无效，请从任务记录核对。");
       setSaved(prior);
     } catch (cause) {
@@ -90,7 +92,7 @@ export function useWebsitePresentation(userId: string, token: string) {
       setBusy(false);
     }
   }
-  async function prepare(url: string, config: WebsitePresentation) {
+  async function prepare(url: string, config?: WebsitePresentation, credentials?: WebsiteLoginCredentials) {
     await exclusive(async () => {
       if (saved?.taskId) {
         setRevision((value) => value + 1);
@@ -99,13 +101,15 @@ export function useWebsitePresentation(userId: string, token: string) {
       const current = new URL(window.location.href);
       const sessionId = current.searchParams.get("session");
       const key = saved?.key ?? crypto.randomUUID();
+      const login = !saved&&credentials?await saveWebsiteLoginCredentials(token,credentials):undefined;
       const input = saved?.input ?? {
         url,
         mode: "isolated" as const,
-        pageLimit: 1,
+        pageLimit: config?1:3,
         recordVideo: true,
         followExternal: false,
-        presentation: config,
+        ...(config?{presentation:config}:{}),
+        ...(login?{login}:{}),
         idempotencyKey: key,
         ...(sessionId ? { sessionId } : {}),
       };
