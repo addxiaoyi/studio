@@ -43,7 +43,7 @@ export function WorkflowAssistantChat({
     // Loading saved history must not push the focused composer below the dock.
     const input = document.getElementById("workflow-ai-request");
     if (input && document.activeElement === input)
-      input.scrollIntoView({ block: "nearest" });
+      input.closest("form")?.scrollIntoView({ block: "end" });
   }, [messages, loading]);
   useEffect(() => {
     let active = true;

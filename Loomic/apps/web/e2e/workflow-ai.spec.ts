@@ -134,7 +134,8 @@ test("conversational AI previews edits, persists decisions, and controls the sam
     await page.getByRole("menuitem", { name: "让 AI 修改", exact: true }).click();
     await expect(dock.getByRole("region", { name: "AI 工作流操作" })).toHaveCount(4);
     await expect(dock.getByRole("textbox", { name: "让 AI 帮你搭建" })).toBeFocused();
-    await expect(dock.getByRole("textbox", { name: "让 AI 帮你搭建" })).toBeInViewport();
+    await expect(dock.getByRole("textbox", { name: "让 AI 帮你搭建" })).toBeInViewport({ ratio: 0.99 });
+    await expect(dock.getByRole("button", { name: "发送给 AI", exact: true })).toBeInViewport({ ratio: 0.99 });
     await page.screenshot({
       path: info.outputPath("workflow-ai-conversation.png"),
     });
