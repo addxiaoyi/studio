@@ -40,8 +40,8 @@ export function AuthenticatedRecording({ assetId, accessToken, maxBytes = MAX_RE
     };
   }, [assetId, accessToken, maxBytes, kind]);
 
-  if (error) return <p role="alert" className="text-xs text-destructive">{error}</p>;
-  if (!url) return <p role="status" className="text-xs text-muted-foreground">{kind === "image" ? "正在加载试穿图像…" : "正在加载网站录屏..."}</p>;
+  if (error) return <div className="space-y-2"><p role="alert" className="text-xs text-destructive">{error}</p>{url && kind === "video" && <a href={url} download={downloadName ?? "recording.webm"} className="inline-flex min-h-9 items-center rounded-md border px-3 text-xs">下载原始录像</a>}</div>;
+  if (!url) return <p role="status" className="text-xs text-muted-foreground">{kind === "image" ? "正在加载图像…" : "正在加载网站录屏..."}</p>;
   if (kind === "image") return <img src={url} alt={label} className="max-h-96 w-full rounded-lg object-contain" />;
-  return <div className="space-y-2"><video controls preload="metadata" src={url} className="w-full rounded-lg border border-border/40" aria-label={label} />{downloadName&&<a href={url} download={downloadName} className="inline-flex min-h-9 items-center rounded-md border border-border px-3 text-xs">下载 WebM 演示录像</a>}</div>;
+  return <div className="space-y-2"><video controls preload="metadata" src={url} onError={() => setError("当前播放器无法解码此录像。可下载原始文件，或使用新版录制重新生成。")} className="w-full rounded-lg border border-border/40" aria-label={label} />{downloadName&&<a href={url} download={downloadName} className="inline-flex min-h-9 items-center rounded-md border border-border px-3 text-xs">下载 WebM 演示录像</a>}</div>;
 }

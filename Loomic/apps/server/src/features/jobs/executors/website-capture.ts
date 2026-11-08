@@ -3,6 +3,7 @@ import { softDeleteWebsiteCaptureAssets } from "../../website-capture/asset-clea
 import { registerExecutor, type ExecutorContext } from "../job-executor.js";
 import { assertConnectorEnabled } from "../../agent-goals/connector-gate.js";
 import { completeWebsiteCapture } from "../../website-capture/complete-capture.js";
+import { finishCaptureCanvasDelivery } from "../../website-capture/canvas-delivery.js";
 import { claimApprovedRecording, recordingActionFromTask } from "../../website-capture/recording-approval.js";
 
 async function resolveCaptureTaskId(jobId: string, ctx: ExecutorContext): Promise<string> {
@@ -81,9 +82,11 @@ registerExecutor("website_capture", async (jobId, _queueMessage, ctx: ExecutorCo
       task,
       onProgress,
     });
+    result.canvasDelivery = { status: "pending", elementIds: [] };
     if (!await completeWebsiteCapture(ctx.localDb, taskId, result)) {
       throw Object.assign(new Error("Website capture is no longer running."), { code: "job_canceled" });
     }
+    await finishCaptureCanvasDelivery(ctx.localDb, ctx.storage, taskId);
     await appendEvent(ctx, taskId, "completed", "网站介绍与素材已保存").catch((eventError) => {
       console.error("[website-capture] failed to append completed event", eventError);
     });

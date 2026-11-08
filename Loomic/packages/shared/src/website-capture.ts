@@ -76,6 +76,14 @@ export const websiteCaptureResultSchema = z.object({
   completedAt: z.string(),
   promoVideoUrl: z.string().optional(),
   promoAssetId: z.string().uuid().optional(),
+  recordingDurationSeconds: z.number().positive().max(300).optional(),
+  skippedPages: z.array(z.object({ url: z.string().url(), reason: z.string().max(500) })).max(5).optional(),
+  canvasDelivery: z.object({
+    status: z.enum(["pending", "succeeded", "failed", "unlinked"]),
+    canvasId: z.string().uuid().optional(),
+    elementIds: z.array(z.string()).max(8).default([]),
+    error: z.string().max(500).optional(),
+  }).optional(),
 });
 
 export const createWebsiteCaptureRequestSchema = z.object({
@@ -106,6 +114,14 @@ export const websiteCaptureTaskSchema = z.object({
   mode: websiteCaptureModeSchema,
   startUrl: z.string().url(),
   progress: z.number().int().min(0).max(100),
+  recordingProgress: z.object({
+    renderedSeconds: z.number().nonnegative(),
+    totalSeconds: z.number().positive(),
+    elapsedSeconds: z.number().nonnegative(),
+    remainingSeconds: z.number().nonnegative().nullable(),
+    pageIndex: z.number().int().positive(),
+    pageCount: z.number().int().positive(),
+  }).optional(),
   stage: z.string(),
   result: websiteCaptureResultSchema.nullable(),
   error: z.string().nullable(),

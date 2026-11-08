@@ -21,6 +21,17 @@ vi.mock("@/lib/server-api", () => ({
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 describe("website recording in chat", () => {
+  it("renders website introductions as semantic Markdown", async () => {
+    api.fetchWebsiteCapture.mockResolvedValue({
+      task: { status: "succeeded", progress: 100, result: { introduction: "## Example Domain\n\n**网站定位**：公开示例\n\n- [访问网站](https://example.com)\n\n<script>alert(1)</script>", pages: [] } },
+      events: [],
+    });
+    const view = render(<ToolBlockView block={{ type: "tool", toolCallId: "capture-md", toolName: "website_capture", status: "completed", output: { taskId: "task-md" } }} />);
+    expect(await screen.findByRole("heading", { name: "Example Domain", level: 2 })).toBeInTheDocument();
+    expect(screen.getByText("网站定位").tagName).toBe("STRONG");
+    expect(screen.getByRole("link", { name: "访问网站" })).toHaveAttribute("href", "https://example.com");
+    expect(view.container.querySelector("script")).toBeNull();
+  });
   it("renders a saved video export using authenticated asset access", async () => {
     const fetchVideo = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "video/mp4" } }));
     const NativeURL = globalThis.URL;

@@ -48,6 +48,7 @@ it("keeps a changing 720p recording inside the upload budget without dropping fr
     expect(decoded.status, decoded.stderr ?? decoded.error?.message).toBe(0);
     expect(decoded.stderr).toMatch(new RegExp(`frame=\\s*${seconds * CAPTURE_FPS}\\b`));
     expect(decoded.stderr).toContain("60 fps");
+    expect(decoded.stderr).toContain("1280x720");
   } finally {
     if (!closed) await encoder.abort();
   }

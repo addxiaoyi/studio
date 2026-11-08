@@ -18,6 +18,7 @@ import {
   uploadThumbnail,
 } from "../lib/server-api";
 import { VideoCanvasElement } from "./canvas/video-canvas-element";
+import { VideoActionsToolbar } from "./canvas/video-actions-toolbar";
 import { createExcalidrawImageElement, isVideoUrl, scaleToFit, viewportPointToScene } from "../lib/canvas-elements";
 import { CanvasToolMenu } from "./canvas-tool-menu";
 import { normalizeCanvasElement, normalizeCanvasElements } from "../lib/canvas-normalize";
@@ -74,6 +75,8 @@ type CanvasEditorProps = {
   ws?: WebSocketHandle;
   leftPanelOpen?: boolean;
   onSelectionChange?: (elements: CanvasSelectedElement[]) => void;
+  onVideoAction?: ((elementId: string, action: "timeline" | "ai") => void) | undefined;
+  onSaveReady?: ((save: (() => Promise<void>) | null) => void) | undefined;
 };
 
 type CanvasSaveState = "saved" | "pending" | "saving" | "error";
@@ -360,6 +363,8 @@ export function CanvasEditor({
   ws,
   leftPanelOpen,
   onSelectionChange,
+  onVideoAction,
+  onSaveReady,
 }: CanvasEditorProps) {
   const initialElements = initialContent.elements.map((element) =>
     normalizeCanvasElement(element),
@@ -582,6 +587,42 @@ export function CanvasEditor({
     },
     [onApiReady],
   );
+
+  useEffect(() => {
+    if (!excalidrawApi) return;
+    let stopped = false;
+    let syncing = false;
+    let focusIds: string[] | null = null;
+    const refreshCapture = async (event: Event) => {
+      const detail = (event as CustomEvent<{ canvasId?: string; elementIds?: string[]; focus?: boolean }>).detail;
+      if (detail?.canvasId !== canvasId) return;
+      if (detail.focus) focusIds = detail.elementIds ?? [];
+      if (syncing) return;
+      syncing = true;
+      try {
+        const remote = await fetchCanvas(accessTokenRef.current, canvasId);
+        if (stopped) return;
+        const local = excalidrawApi.getSceneElements() as Record<string, unknown>[];
+        const byId = new Map(local.map(element => [element.id, element]));
+        const existingUnchanged = remote.canvas.content.elements.every(element => {
+          const prior = byId.get(element.id);
+          return !prior || prior.version === element.version && prior.versionNonce === element.versionNonce;
+        });
+        const additions = remote.canvas.content.elements.filter(element => !byId.has(element.id) && !element.isDeleted);
+        excalidrawApi.addFiles(Object.values(remote.canvas.content.files ?? {}));
+        if (existingUnchanged) knownVersionRef.current = remote.version;
+        if (additions.length) excalidrawApi.updateScene({ elements: [...local, ...additions], captureUpdate: "NEVER" });
+        if (focusIds) {
+          const targets = excalidrawApi.getSceneElements().filter((element: { id: string; isDeleted?: boolean }) => !element.isDeleted && focusIds?.includes(element.id));
+          if (targets.length) excalidrawApi.scrollToContent(targets, { fitToContent: true });
+          focusIds = null;
+        }
+      } catch (error) { console.error("[canvas-editor] capture delivery sync failed", error); setRecoveryError(true); }
+      finally { syncing = false; }
+    };
+    window.addEventListener("loomic:capture-canvas", refreshCapture);
+    return () => { stopped = true; window.removeEventListener("loomic:capture-canvas", refreshCapture); };
+  }, [canvasId, excalidrawApi]);
 
   // Normalize agent-created elements on initial load.
   // Uses DOM text measurement to fix server-side approximation errors.
@@ -1122,6 +1163,16 @@ export function CanvasEditor({
     if (typeof window !== "undefined") window.location.reload();
   }, []);
 
+  useEffect(() => {
+    if (!excalidrawApi) return;
+    onSaveReady?.(async () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      retrySave();
+      await saveQueueRef.current;
+    });
+    return () => onSaveReady?.(null);
+  }, [excalidrawApi, onSaveReady, retrySave]);
+
   // Flush pending save on page close (beforeunload) and component unmount
   useEffect(() => {
     const flushBeforeUnload = () => {
@@ -1327,6 +1378,7 @@ export function CanvasEditor({
           renderEmbeddable={renderEmbeddable}
           validateEmbeddable={validateEmbeddable}
         />
+        <VideoActionsToolbar api={excalidrawApi} root={canvasRootRef} onAction={onVideoAction} />
         <div className="pointer-events-auto absolute left-1/2 top-3 z-[125] flex -translate-x-1/2 items-center gap-2 rounded-full border border-border/60 bg-background/90 px-3 py-1.5 text-[11px] text-muted-foreground shadow-sm backdrop-blur" role="status" aria-live="polite">
           <span className={saveState === "error" ? "text-destructive" : saveState === "pending" || saveState === "saving" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}>
             {canvasSaveStateLabel(saveState)}

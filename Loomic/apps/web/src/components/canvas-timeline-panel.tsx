@@ -12,6 +12,7 @@ type TimelinePanelProps = {
   triggerRef?: React.RefObject<HTMLButtonElement | null>;
   accessToken: string;
   projectId: string;
+  onEditVideo?: ((elementId: string) => void) | undefined;
 };
 
 type TimelineItem = {
@@ -26,7 +27,7 @@ type TimelineItem = {
 
 function readItems(api: any): TimelineItem[] {
   return (api?.getSceneElements?.() ?? [])
-    .filter((element: any) => !element.isDeleted && (element.type === "image" || element.customData?.isVideo === true || element.customData?.isSubtitle === true || element.customData?.isAudio === true))
+    .filter((element: any) => !element.isDeleted && element.customData?.timelineIncluded !== false && (element.type === "image" || element.customData?.isVideo === true || element.customData?.isSubtitle === true || element.customData?.isAudio === true))
     .map((element: any, index: number) => ({
       id: element.id,
       label: element.customData?.title?.slice(0, 32) || element.text?.slice(0, 32) || `${element.type === "image" ? "图片" : "视频"} ${index + 1}`,
@@ -38,7 +39,7 @@ function readItems(api: any): TimelineItem[] {
     }));
 }
 
-export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, accessToken, projectId }: TimelinePanelProps) {
+export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, accessToken, projectId, onEditVideo }: TimelinePanelProps) {
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [subtitle, setSubtitle] = useState("");
   const [playhead, setPlayhead] = useState(0);
@@ -126,7 +127,7 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, 
     const nextStart = key === "trimStart" ? value : Number(current.trimStart) || 0;
     const nextEnd = key === "trimEnd" ? value : Number(current.trimEnd) || 5;
     if (nextStart >= nextEnd) return;
-    excalidrawApi.updateScene({ elements: elements.map((candidate: any) => candidate.id === id ? { ...candidate, customData: { ...current, [key]: value } } : candidate), captureUpdate: "IMMEDIATELY" });
+    excalidrawApi.updateScene({ elements: elements.map((candidate: any) => candidate.id === id ? { ...candidate, version: (candidate.version ?? 0) + 1, versionNonce: Math.floor(Math.random()*2_000_000_000), updated: Date.now(), customData: { ...current, [key]: value } } : candidate), captureUpdate: "IMMEDIATELY" });
   }, [excalidrawApi]);
 
   const updateSubtitle = useCallback((id: string, key: "trimStart" | "trimEnd", value: number) => {
@@ -295,6 +296,7 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, 
                 <span className="min-w-0 flex-1"><span className="block truncate text-xs text-foreground">{index + 1}. {item.label}</span><span className="mt-0.5 block text-[10px] text-muted-foreground">{item.kind === "video" ? `${item.duration}s 视频` : item.kind === "audio" ? `${item.trimStart.toFixed(1)}s - ${item.trimEnd.toFixed(1)}s 音频` : item.kind === "subtitle" ? `${item.trimStart.toFixed(1)}s - ${item.trimEnd.toFixed(1)}s 字幕` : "图片素材"}</span></span>
                 {item.kind === "video" && <Play className="size-3 text-muted-foreground" />}
               </button>
+              {item.kind === "video" && onEditVideo && <button type="button" className="mt-2 min-h-9 w-full rounded-md bg-foreground px-3 text-xs text-background focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onEditVideo(item.id)} aria-label={`让 AI 剪辑${item.label}`}>让 AI 剪辑</button>}
               {item.kind === "video" && <div className="mt-2 space-y-1"><div className="flex justify-between text-[10px] text-muted-foreground"><span>入点 {item.trimStart.toFixed(1)}s</span><span>出点 {item.trimEnd.toFixed(1)}s</span></div><input aria-label={`${item.label}入点`} type="range" min="0" max={Math.max(item.duration, 0.1)} step="0.1" value={item.trimStart} onChange={(event) => updateTrim(item.id, "trimStart", Number(event.target.value))} className="h-1 w-full accent-foreground" /><input aria-label={`${item.label}出点`} type="range" min="0" max={Math.max(item.duration, 0.1)} step="0.1" value={item.trimEnd} onChange={(event) => updateTrim(item.id, "trimEnd", Number(event.target.value))} className="h-1 w-full accent-foreground" /></div>}
               {item.kind === "subtitle" && <div className="mt-2 space-y-2"><div className="flex justify-between text-[10px] text-muted-foreground"><span>{item.trimStart.toFixed(1)}s</span><span>{item.trimEnd.toFixed(1)}s</span></div><input aria-label={`${item.label}字幕开始时间`} type="range" min="0" max="60" step="0.1" value={item.trimStart} onChange={(event) => updateSubtitle(item.id, "trimStart", Number(event.target.value))} className="h-1 w-full accent-foreground" /><input aria-label={`${item.label}字幕结束时间`} type="range" min="0" max="60" step="0.1" value={item.trimEnd} onChange={(event) => updateSubtitle(item.id, "trimEnd", Number(event.target.value))} className="h-1 w-full accent-foreground" /><div className="flex flex-wrap gap-1"><button type="button" onClick={() => applySubtitleStyle(item.id, "bottom")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">底部</button><button type="button" onClick={() => applySubtitleStyle(item.id, "title")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">标题</button><button type="button" onClick={() => applySubtitleStyle(item.id, "emphasis")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">强调</button></div></div>}
               {item.kind === "audio" && <div className="mt-2 space-y-1"><div className="flex justify-between text-[10px] text-muted-foreground"><span>起点 {item.trimStart.toFixed(1)}s</span><span>终点 {item.trimEnd.toFixed(1)}s</span></div>{item.sourceUrl && <div className="flex items-center gap-2"><button type="button" onClick={(event) => syncAudioPreview(item.id, event.currentTarget.parentElement?.querySelector("audio")!)} className="flex size-6 items-center justify-center rounded-full bg-foreground text-background" aria-label={activeAudioId === item.id ? "暂停音频" : "播放音频"}>{activeAudioId === item.id ? <Pause className="size-3" /> : <Play className="size-3" />}</button><audio data-timeline-audio src={item.sourceUrl} preload="metadata" onPause={() => { if (activeAudioId === item.id) setActiveAudioId(null); }} onTimeUpdate={(event) => { if (event.currentTarget.currentTime >= item.trimEnd) { event.currentTarget.pause(); event.currentTarget.currentTime = item.trimStart; } }} /></div>}<input aria-label={`${item.label}音频开始时间`} type="range" min="0" max="60" step="0.1" value={item.trimStart} onChange={(event) => updateTrim(item.id, "trimStart", Number(event.target.value))} className="h-1 w-full accent-foreground" /><input aria-label={`${item.label}音频结束时间`} type="range" min="0" max="60" step="0.1" value={item.trimEnd} onChange={(event) => updateTrim(item.id, "trimEnd", Number(event.target.value))} className="h-1 w-full accent-foreground" /></div>}

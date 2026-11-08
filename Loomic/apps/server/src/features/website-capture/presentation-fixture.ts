@@ -25,6 +25,13 @@ import { allowLoginRequest, signInWebsite, newAuthenticatedContext } from "./log
 import { waitForWebsiteLogin } from "./login-handoff.js";
 import { rememberWebsiteSession } from "./saved-login.js";
 import { registerWebsiteJourneyRoutes } from "../../http/website-journey.js";
+import { finishCaptureCanvasDelivery } from "./canvas-delivery.js";
+import { registerCanvasRoutes } from "../../http/canvases.js";
+import { registerChatRoutes } from "../../http/chat.js";
+import { registerProjectRoutes } from "../../http/projects.js";
+import { createLocalCanvasService } from "../../local-db/canvas-service.js";
+import { createLocalChatService } from "../../local-db/chat-service.js";
+import { createLocalProjectService } from "../../local-db/project-service.js";
 
 export async function createPresentationFixture(
   databaseUrl: string,
@@ -79,6 +86,8 @@ export async function createPresentationFixture(
       "20261020000003_website_capture_promo",
       "20261022000001_website_capture_asset_links",
       "20261022000002_scope_website_capture_idempotency",
+      "20261024000000_cloud_asset_retention_3_days",
+      "20261029000000_canvas_content_version",
       "20261103000000_website_recording_approvals",
       "20261107000001_agent_browser_views",
       "20261108000000_website_presentations",
@@ -140,8 +149,8 @@ export async function createPresentationFixture(
       reply
         .header("Access-Control-Allow-Origin", origin)
         .header("Access-Control-Allow-Credentials", "true")
-        .header("Access-Control-Allow-Headers", "authorization,content-type")
-        .header("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+        .header("Access-Control-Allow-Headers", "authorization,content-type,if-match")
+        .header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
       if (request.method === "OPTIONS") return reply.code(204).send();
     });
     app.get("/api/local-auth/session", async () => ({
@@ -268,19 +277,25 @@ export async function createPresentationFixture(
           title: "网站介绍演示",
           metadata: { presentation: task.presentation },
         });
+        const screenshot = await persistCaptureAsset({ db, storage, storageRoot: root, webOrigin: origin, task,
+          bytes: Buffer.from(scene.image.split(",")[1]!, "base64"), mimeType: "image/jpeg", mediaType: "image",
+          title: "页面截图", metadata: { width: scene.width, height: scene.height } });
         const result = {
           title: "演示验收",
-          introduction: "网站介绍演示已完成。",
+          introduction: "## 演示验收\n\n**网站定位**：网站介绍演示已完成。\n\n[来源页面](https://8.8.8.8/)",
           startUrl: task.start_url,
-          pages: [],
+          pages: [{ url: task.start_url, title: "演示验收", description: "网站介绍", headings: ["演示验收"], navigation: [], assetId: screenshot.id, screenshotUrl: screenshot.url }],
           claims: [],
           evidence: [],
           recordingAssetId: asset.id,
           recordingUrl: asset.url,
           completedAt: new Date().toISOString(),
           presentation: task.presentation,
+          recordingDurationSeconds: 12,
+          canvasDelivery: { status: "pending" as const, elementIds: [] },
         };
         await completeWebsiteCapture(db, task.id, result);
+        await finishCaptureCanvasDelivery(db, storage, task.id);
         await jobs.markSucceeded(jobId, result);
         await observer?.close("completed", "演示已保存");
       } catch (error) {
@@ -296,6 +311,7 @@ export async function createPresentationFixture(
       auth,
       viewerService,
       db,
+      storage,
       jobService: jobs,
       assistantHub: {} as never,
     });
@@ -308,8 +324,11 @@ export async function createPresentationFixture(
       enabled: true,
     });
     registerLocalAssetRoutes(app, { auth, db, root });
+    await registerCanvasRoutes(app, { auth, canvasService: createLocalCanvasService(db) });
+    await registerChatRoutes(app, { auth, chatService: createLocalChatService(db) });
+    await registerProjectRoutes(app, { auth, projectService: createLocalProjectService(db, root) });
     await app.listen({ port: 3315, host: "127.0.0.1" });
-    return { app, db, root, sessionId, userId, workspaceId, token, close };
+    return { app, db, root, sessionId, canvasId, userId, workspaceId, token, close };
   } catch (error) {
     await close();
     throw error;

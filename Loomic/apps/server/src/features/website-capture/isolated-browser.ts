@@ -22,7 +22,7 @@ import { rememberWebsiteSession,restoreWebsiteSession,assertWebsiteSessionActive
 import { resolveJourneyStep } from "./journey-navigation.js";
 import { mosaicScreenshot,installPrivacyMosaic } from "../agent-browser/privacy-mosaic.js";
 import { recordPageSegment } from "./page-recording.js";
-import { joinCaptureSegments } from "./video-encoder.js";
+import { CAPTURE_FPS, joinCaptureSegments } from "./video-encoder.js";
 import { closeCaptureContext } from "./capture-teardown.js";
 import { assertConnectorEnabled } from "../agent-goals/connector-gate.js";
 import type { Pool, PoolClient } from "pg";
@@ -217,6 +217,7 @@ export async function captureIsolatedWebsite(options: {
     let journeyIndex=0;
     const visited = new Set<string>();
     const captured: PageFacts[] = [];
+    const skippedPages: Array<{ url: string; reason: string }> = [];
     while (pending.length > 0 && captured.length < options.task.page_limit) {
       await assertTaskIsRunning(options.db, options.task.id);
       const plannedStep=journey?.steps[journeyIndex++];
@@ -234,7 +235,14 @@ export async function captureIsolatedWebsite(options: {
         if(options.task.record_video&&!presentation){
           const seconds=(journey?.durationSeconds??options.task.page_limit*6)/(journey?.steps.length??options.task.page_limit);
           const segment=join(tempDir,`page-${segments.length}.webm`);
-          await recordPageSegment(page,segment,seconds,plannedStep?.scroll!==false,async()=>{await assertCaptureActive();await view?.beforeAction('连续滚动展示当前页面');},async bytes=>view?.publishFrame(bytes));
+          await recordPageSegment(page,segment,seconds,plannedStep?.scroll!==false,async()=>{await assertCaptureActive();await view?.beforeAction('连续滚动展示当前页面');},async bytes=>view?.publishFrame(bytes),async (frames,totalFrames,elapsedMs)=>{
+            const pageCount=journey?.steps.length??options.task.page_limit;
+            const progress=10+Math.round(((captured.length+frames/totalFrames)/pageCount)*62);
+            const renderedSeconds=segmentDurations.reduce((total,value)=>total+value,0)+frames/CAPTURE_FPS;
+            const totalSeconds=journey?.durationSeconds??options.task.page_limit*6;
+            const remainingSeconds=frames<30?null:Math.ceil(elapsedMs/1000/frames*((totalFrames-frames)+totalFrames*Math.max(0,pageCount-captured.length-1)));
+            await options.onProgress(progress,'recording_progress',JSON.stringify({renderedSeconds,totalSeconds,elapsedSeconds:Math.round(elapsedMs/1000),remainingSeconds,pageIndex:captured.length+1,pageCount}));
+          });
           segments.push(segment);segmentDurations.push(seconds);
         }
         const scene=presentation?await capturePresentationScene(page):null;
@@ -278,6 +286,10 @@ export async function captureIsolatedWebsite(options: {
         }
       } catch (error) {
         if (journey||captured.length === 0) throw toCaptureError(error);
+        await assertCaptureActive();
+        const reason = error instanceof Error ? error.message.slice(0,500) : "页面未能加载，已跳过。";
+        skippedPages.push({ url: new URL(nextUrl).origin+new URL(nextUrl).pathname, reason });
+        await options.onProgress(percent,"page_skipped",`已跳过 ${new URL(nextUrl).hostname}：${reason}`);
       }
     }
 
@@ -381,6 +393,8 @@ export async function captureIsolatedWebsite(options: {
       claims,
       ...(recordingAssetId ? { recordingAssetId } : {}),
       ...(recordingUrl ? { recordingUrl } : {}),
+      ...(recordingUrl ? { recordingDurationSeconds: presentation?.durationSeconds ?? segmentDurations.reduce((total,value)=>total+value,0) } : {}),
+      ...(skippedPages.length ? { skippedPages } : {}),
       completedAt: new Date().toISOString(),
       ...(presentation?{presentation}:{}),
     };

@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import { errors, type Page } from "playwright";
 import { CAPTURE_FPS, frameEncoder } from "./video-encoder.js";
+import { openFrameCapture } from "./frame-capture.js";
 
 const require = createRequire(import.meta.url);
 const CHECKPOINT_FRAMES = 15;
@@ -20,11 +21,10 @@ const APP_READY_SCRIPT = `(() => {
 })()`;
 
 export async function waitForRecordingPage(page: Page) {
-  for (const state of ["load", "networkidle"] as const) {
-    await page.waitForLoadState(state, { timeout: state === "load" ? 10_000 : 8_000 }).catch(error => {
-      if (error.name !== "TimeoutError") throw error;
-    });
-  }
+  // Polling and analytics can keep a fully usable application network-busy forever.
+  await page.waitForLoadState("load", { timeout: 10_000 }).catch(error => {
+    if (!(error instanceof errors.TimeoutError)) throw error;
+  });
   await page.evaluate("Promise.race([Promise.all([document.fonts.ready,...Array.from(document.images).filter(img=>img.getBoundingClientRect().top<innerHeight*2).map(img=>img.decode().catch(()=>undefined))]),new Promise(resolve=>setTimeout(resolve,3000))]).then(()=>undefined)");
   try {
     await page.waitForFunction(APP_READY_SCRIPT, undefined, { timeout: APP_READY_TIMEOUT_MS, polling: 100 });
@@ -60,12 +60,16 @@ export async function recordPageSegment(
   scroll: boolean,
   checkpoint: () => Promise<unknown>,
   onFrame?: (bytes: Buffer) => Promise<void>,
+  onProgress?: (frames: number, totalFrames: number, elapsedMs: number) => Promise<void>,
 ) {
   if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 60) throw new Error("页面录制时长无效。");
   await waitForRecordingPage(page);
   await checkpoint();
   await prepareScroll(page, seconds, scroll);
   const encoder = frameEncoder(path);
+  const capture = await openFrameCapture(page);
+  const started = Date.now();
+  let lastProgress = 0;
   const count = Math.round(seconds * CAPTURE_FPS), deadline = Date.now() + MAX_RENDER_MS;
   let finished = false;
   try {
@@ -75,14 +79,19 @@ export async function recordPageSegment(
       if (Date.now() > deadline) throw new Error("页面录像渲染超时，请缩短时长后重试。");
       if (frame % CHECKPOINT_FRAMES === 0) await checkpoint();
       await page.evaluate(`(()=>{window.__loomicScroll.seek(${frame / CAPTURE_FPS},false);})()`);
-      const bytes = await page.screenshot({ type: "jpeg", quality: 85, timeout: 10_000 });
+      const bytes = await capture.frame();
       await encoder.frame(bytes);
       if (frame % CHECKPOINT_FRAMES === 0) await onFrame?.(bytes);
+      if (Date.now() - lastProgress > 1500 || frame === count - 1) {
+        await onProgress?.(frame + 1, count, Date.now() - started);
+        lastProgress = Date.now();
+      }
     }
     await encoder.close();
     finished = true;
   } finally {
     if (!finished) await encoder.abort();
+    await capture.close();
     if (!page.isClosed()) await page.evaluate("(()=>{window.__loomicScroll?.kill();})()");
   }
 }

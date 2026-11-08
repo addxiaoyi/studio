@@ -52,7 +52,7 @@ function scaleToFit(
   return { width: Math.round(width * ratio), height: Math.round(height * ratio) };
 }
 
-function calculateAutoPlacement(
+export function calculateAutoPlacement(
   elements: CanvasElement[],
   assetWidth: number,
   assetHeight: number,
@@ -101,7 +101,7 @@ function generateId(): string {
   ).slice(0, 20);
 }
 
-function buildImageElement(
+export function buildImageElement(
   fileId: string,
   placement: Placement,
   opts: ImageInsertOpts,
@@ -146,7 +146,7 @@ function buildImageElement(
   };
 }
 
-function buildVideoElement(
+export function buildVideoElement(
   placement: Placement,
   opts: VideoInsertOpts,
 ): CanvasElement {

@@ -576,6 +576,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   registerWebsiteCaptureRoutes(app, {
     auth,
     db: localDb,
+    storage: storageProvider,
     jobService,
     viewerService,
     assistantHub: websiteAssistantHub,

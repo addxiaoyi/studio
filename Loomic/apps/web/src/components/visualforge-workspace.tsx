@@ -1,7 +1,7 @@
 "use client";
 
 import { StudioAssetPicker } from "@/components/studio-asset-picker";
-import { CaptureRecordingImport } from "@/components/capture-recording-import";
+import { CanvasVideoImport, CaptureRecordingImport } from "@/components/capture-recording-import";
 import { StudioConversationPanel } from "@/components/studio-conversation-panel";
 import { StudioExportCard } from "@/components/studio-export-card";
 import { OneTakeWorkspace } from "@/components/onetake/workspace";
@@ -200,6 +200,7 @@ export function VisualForgeWorkspace() {
           </div>
         )}
         {userId&&token&&<CaptureRecordingImport userId={userId} token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
+        {token&&<CanvasVideoImport token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
         <div className={styles.body} hidden={transcriptOpen}>
           <div ref={container} data-testid="video-studio" className={styles.studio} />
           <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioConversationPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={exported} contextRequest={aiContext} active={aiOpen} onBusyChange={updateAiBusy} onViewTimeline={viewTimeline} onOpenPanel={openPanel} />}</div>

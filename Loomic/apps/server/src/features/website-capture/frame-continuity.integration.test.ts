@@ -66,3 +66,16 @@ it("allows a ready page with a small loading widget", async () => {
     await expect(waitForRecordingPage(page)).resolves.toBeUndefined();
   } finally { await browser.close(); }
 }, 10_000);
+
+it("starts a ready application without waiting for periodic background requests to stop", async () => {
+  const { browser } = await launchAgentBrowser();
+  try {
+    const page = await browser.newPage();
+    await page.route("https://ready.example/pulse", route => route.fulfill({ status: 204 }));
+    await page.setContent("<h1>Ready workspace</h1>");
+    await page.evaluate("setInterval(()=>fetch('https://ready.example/pulse').catch(()=>{}),80)");
+    const started = Date.now();
+    await waitForRecordingPage(page);
+    expect(Date.now() - started).toBeLessThan(4000);
+  } finally { await browser.close(); }
+}, 15_000);

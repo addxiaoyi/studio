@@ -1,4 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { completeWebsiteCapture } from "./complete-capture.js";
+import { finishCaptureCanvasDelivery } from "./canvas-delivery.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import type { WebSocket } from "ws";
@@ -2448,18 +2450,17 @@ export class WebsiteAssistantHub {
           }
         : {}),
       completedAt: new Date().toISOString(),
+      canvasDelivery: { status: "pending" as const, elementIds: [] },
     };
-    const completed = await this.options.db.query<{ id: string }>(
-      "update website_capture_tasks set status='succeeded', progress=100, stage='completed', result=$2::jsonb, completed_at=now(), updated_at=now() where id=$1 and status='running' returning id",
-      [task.id, JSON.stringify(result)],
-    );
-    if (!completed.rows[0]) {
+    const completed = await completeWebsiteCapture(this.options.db, task.id, result);
+    if (!completed) {
       await this.cleanupTaskAssets(task.id);
       this.pages.delete(task.id);
       this.lastProgressEventAt.delete(task.id);
       this.clearTaskTimer(task.id);
       return;
     }
+    await finishCaptureCanvasDelivery(this.options.db, this.options.storage, task.id);
     await this.options.db.query(
       "update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')",
       [task.id],

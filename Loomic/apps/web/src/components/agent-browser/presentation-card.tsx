@@ -8,6 +8,9 @@ import { WebsiteLoginFields } from "./website-login-fields";
 import { WebsiteJourneyComposer } from "./journey-composer";
 import type { WebsiteLoginCredentials } from "@helstera/shared";
 import { AuthenticatedRecording } from "@/components/chat/authenticated-recording";
+import { CaptureCanvasActions } from "@/components/chat/capture-canvas-actions";
+import { CaptureRecordingProgress } from "@/components/chat/capture-recording-progress";
+import { CaptureSkippedPages } from "@/components/chat/capture-skipped-pages";
 
 export function WebsitePresentationCard({
   userId,
@@ -20,13 +23,27 @@ export function WebsitePresentationCard({
     [cursors, setCursors] = useState("4");
   const form = useWebsitePresentation(userId, token);
   const [manual,setManual]=useState(false);
+  const [retryNotice,setRetryNotice]=useState("");
+  const [retrySinglePage,setRetrySinglePage]=useState(false);
+  useEffect(() => {
+    const preparePage = (event: Event) => {
+      const next = (event as CustomEvent<{ url?: string }>).detail?.url;
+      if (!next) return;
+      setExpanded(true);
+      if (form.task && ["queued","running"].includes(form.task.status)) { setRetryNotice("请先完成或取消当前任务，再重试该页面。"); return; }
+      form.reset(); setManual(true); setRecordingMode("browsing"); setNeedsLogin(false); setUrl(next); setRetrySinglePage(true);
+      setRetryNotice("请确认此页录制范围；如果需要登录，请重新选择登录方式。");
+    };
+    window.addEventListener("loomic:website-retry-page", preparePage);
+    return () => window.removeEventListener("loomic:website-retry-page", preparePage);
+  }, [form.task?.status]);
   const [needsLogin,setNeedsLogin]=useState(false),[recordingMode,setRecordingMode]=useState("presentation");
   const [credentials,setCredentials]=useState<WebsiteLoginCredentials>({loginUrl:"",username:"",password:"",successText:""});
   useEffect(()=>{if(form.saved)setCredentials(value=>({...value,username:"",password:""}));},[form.saved?.key]);
   useEffect(()=>{if(form.saved)setExpanded(true);},[form.saved?.key]);
   useEffect(() => {
-    if (!form.saved && sourceUrl) setUrl(sourceUrl);
-  }, [sourceUrl]);
+    if (!form.saved && sourceUrl && !retryNotice) setUrl(sourceUrl);
+  }, [sourceUrl, retryNotice]);
   const task = form.task,
     terminal =
       task && ["succeeded", "failed", "canceled"].includes(task.status);
@@ -37,7 +54,7 @@ export function WebsitePresentationCard({
       style: "cursor-rebuild",
       durationSeconds: Number(duration),
       cursorCount: Number(cursors),
-    }:undefined,needsLogin?{...credentials,loginUrl:credentials.loginUrl||url}:undefined);
+    }:undefined,needsLogin?{...credentials,loginUrl:credentials.loginUrl||url}:undefined,undefined,false,retrySinglePage?1:undefined);
   }
   return (
     <section className="website-presentation-card" aria-label="网站介绍演示">
@@ -53,6 +70,7 @@ export function WebsitePresentationCard({
       </button>
       {expanded && (
         <div className="website-presentation-body">
+          {retryNotice && <p role="status">{retryNotice}</p>}
           <p>
             多光标依次描绘网页布局、打出文字和铺放图片，自动录制为
             WebM。通过对话规划网站体验，登录验证时可接管，完成后继续剪辑。
@@ -173,17 +191,19 @@ export function WebsitePresentationCard({
                 · {task.progress}%
               </p>
               {task.error && <p className="text-destructive">{task.error}</p>}
+              <CaptureRecordingProgress task={task} />
             </div>
           )}
           {recording && (
             <>
+            {task?.result && <CaptureCanvasActions taskId={task.id} result={task.result} token={token} />}
+            {task?.result && <CaptureSkippedPages taskId={task.id} result={task.result} />}
             <AuthenticatedRecording
               assetId={recording}
               accessToken={token}
               label="网站介绍演示录像"
               downloadName="website-introduction.webm"
             />
-            <Button size="sm" variant="outline" onClick={()=>{window.location.assign(`/video/?capture=${encodeURIComponent(task!.id)}`);}}>导入视频工作区剪辑</Button>
             </>
           )}
           {task && !terminal && !form.approval && (

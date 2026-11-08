@@ -2318,6 +2318,14 @@ export async function fetchWebsiteCapture(
   return (await response.json() as { ok: true; data: WebsiteCaptureDetails }).data;
 }
 
+export async function addWebsiteCaptureToCanvas(accessToken: string, taskId: string) {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/${encodeURIComponent(taskId)}/canvas`, {
+    method: "POST", headers: authHeaders(accessToken),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return (await response.json() as { ok: true; data: NonNullable<NonNullable<WebsiteCaptureTask["result"]>["canvasDelivery"]> }).data;
+}
+
 export async function decideWebsiteRecording(accessToken: string, taskId: string, approvalId: string, decision: "approve" | "reject"): Promise<{ task: WebsiteCaptureTask }> {
   const response = await apiFetch(`${getServerBaseUrl()}/api/website-capture/${encodeURIComponent(taskId)}/recording-approval/${decision}`, {
     method: "POST", headers: authJsonHeaders(accessToken), body: JSON.stringify({ approvalId }),

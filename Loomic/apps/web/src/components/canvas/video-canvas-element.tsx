@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play } from "lucide-react";
+import { getServerBaseUrl } from "@/lib/env";
+import { boundedResponseBlob } from "@/lib/bounded-response-blob";
 
 type VideoCanvasElementProps = {
   src: string;
@@ -31,37 +33,46 @@ export function VideoCanvasElement({
 }: VideoCanvasElementProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
-  const [playbackSrc, setPlaybackSrc] = useState(src);
+  const [playbackSrc, setPlaybackSrc] = useState(src.includes("/api/uploads/") ? "" : src);
+  const [error, setError] = useState("");
+  const [revision, setRevision] = useState(0);
   const endRef = useRef(trimEnd ?? Number.POSITIVE_INFINITY);
   endRef.current = trimEnd ?? Number.POSITIVE_INFINITY;
 
   useEffect(() => {
-    if (!src.includes("/api/uploads/") || !accessToken) {
+    setError("");
+    if (!src.includes("/api/uploads/")) {
       setPlaybackSrc(src);
       return;
     }
-
+    setPlaybackSrc("");
+    if (!accessToken) { setError("登录后可播放此私有视频。"); return; }
+    const assetId = src.match(/\/api\/uploads\/([a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})\/file(?:[?#]|$)/i)?.[1];
+    if (!assetId) { setError("视频素材标识无效。"); return; }
+    const abort = new AbortController();
     let cancelled = false;
     let objectUrl: string | null = null;
-    void fetch(src, { headers: { Authorization: `Bearer ${accessToken}` } })
+    void fetch(`${getServerBaseUrl()}/api/uploads/${assetId}/file`, { headers: { Authorization: `Bearer ${accessToken}` }, signal: abort.signal, credentials: "include", redirect: "error" })
       .then((response) => {
         if (!response.ok) throw new Error(`视频加载失败（${response.status}）`);
-        return response.blob();
+        return boundedResponseBlob(response, 250 * 1024 * 1024);
       })
       .then((blob) => {
         if (cancelled) return;
+        if (!blob.size || !blob.type.startsWith("video/")) throw new Error("视频文件无效。");
         objectUrl = URL.createObjectURL(blob);
         setPlaybackSrc(objectUrl);
       })
       .catch((error) => {
-        if (!cancelled) console.warn("[canvas-video] failed to load video:", error);
+        if (!cancelled) setError(error instanceof Error ? error.message : "视频读取失败，请重试。");
       });
 
     return () => {
       cancelled = true;
+      abort.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [accessToken, src]);
+  }, [accessToken, src, revision]);
 
   const play = useCallback(() => {
     const video = videoRef.current;
@@ -115,10 +126,12 @@ export function VideoCanvasElement({
     }
   }, [trimStart]);
 
+
   return (
     <div
+      data-canvas-video
       style={{ width, height }}
-      className="relative flex items-center justify-center overflow-hidden rounded-lg bg-black"
+      className="group relative flex items-center justify-center overflow-hidden rounded-lg bg-black"
       onPointerDown={stopPropagation}
       onPointerUp={stopPropagation}
       onPointerMove={stopPropagation}
@@ -129,7 +142,7 @@ export function VideoCanvasElement({
     >
       <video
         ref={videoRef}
-        src={playbackSrc}
+        src={playbackSrc || undefined}
         muted
         loop
         playsInline
@@ -138,9 +151,12 @@ export function VideoCanvasElement({
         onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = trimStart; }}
         className="h-full w-full object-contain"
       />
+      {!playbackSrc && !error && <p role="status" className="absolute text-sm text-white">正在加载视频…</p>}
+      {error && <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-3 text-foreground"><p role="alert" className="text-sm">{error}</p><button type="button" onClick={event => { event.stopPropagation(); setRevision(value => value + 1); }} className="min-h-9 rounded-md border px-3 text-xs">重试加载</button></div>}
+
 
       {/* Play icon overlay — visible when paused */}
-      {!playing && (
+      {!playing && playbackSrc && !error && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20 transition-all duration-300 duration-200">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm">
             <Play className="h-5 w-5 text-white" fill="white" />

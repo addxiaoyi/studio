@@ -6,6 +6,7 @@ import type { WebsitePresentation } from "@helstera/shared";
 import type { PresentationScene } from "./presentation-snapshot.js";
 import { PRESENTATION_PLAYER } from "./presentation-player.js";
 import { frameEncoder,CAPTURE_FPS } from "./video-encoder.js";
+import { openFrameCapture } from "./frame-capture.js";
 
 const require = createRequire(import.meta.url);
 export async function preparePresentationPage(
@@ -43,6 +44,7 @@ export async function recordWebsitePresentation(options: {
   const page = await context.newPage();
   const path=join(options.directory,'website-presentation.webm');
   const encoder=frameEncoder(path);
+  const capture=await openFrameCapture(page);
   let encoded=false;
   try {
     await preparePresentationPage(page, options.scenes, options.config);
@@ -53,13 +55,14 @@ export async function recordWebsitePresentation(options: {
       if(Date.now()>deadline)throw new Error('网站演示渲染超时，请缩短时长重试。');
       if(frame%15===0)await options.checkpoint();
       await page.evaluate(`window.__loomicPresentation.seek(${frame/CAPTURE_FPS})`);
-      const bytes=await page.screenshot({type:'jpeg',quality:85,timeout:10000});
+      const bytes=await capture.frame();
       await encoder.frame(bytes);
       if(frame%15===0){await options.onFrame?.(bytes);await options.onProgress(Math.floor(frame/count*100));}
     }
     await encoder.close();encoded=true;await options.onProgress(100);return path;
   } finally {
     if(!encoded)await encoder.abort();
+    await capture.close();
     await context.close();
   }
 }

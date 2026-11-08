@@ -94,7 +94,7 @@ export function useWebsitePresentation(userId: string, token: string) {
       setBusy(false);
     }
   }
-  async function prepare(url: string, config?: WebsitePresentation, credentials?: WebsiteLoginCredentials,journey?:WebsiteJourney,startNow=false) {
+  async function prepare(url: string, config?: WebsitePresentation, credentials?: WebsiteLoginCredentials,journey?:WebsiteJourney,startNow=false,pageLimit?:number) {
     await exclusive(async () => {
       if (saved?.taskId) {
         setRevision((value) => value + 1);
@@ -107,7 +107,7 @@ export function useWebsitePresentation(userId: string, token: string) {
       const input = saved?.input ?? {
         url,
         mode: "isolated" as const,
-        pageLimit: journey?journey.steps.length:config?1:3,
+        pageLimit: journey?journey.steps.length:config?1:pageLimit??3,
         recordVideo: true,
         followExternal: false,
         ...(config?{presentation:config}:{}),

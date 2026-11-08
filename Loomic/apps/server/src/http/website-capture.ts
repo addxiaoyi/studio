@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool } from "pg";
+import type { StorageProvider } from "../storage/storage-provider.js";
+import { deliverCaptureToCanvas } from "../features/website-capture/canvas-delivery.js";
 import { z } from "zod";
 
 import { createWebsiteCaptureRequestSchema, desktopAgentTaskRequestSchema, type WebsiteCapturePromo, type WebsiteCaptureTask, type WebsitePresentation } from "@helstera/shared";
@@ -20,6 +22,7 @@ import type { createGenerationApprovalService } from "../features/generation/gen
 
 type WebsiteCaptureRouteOptions = {
   db: Pool;
+  storage?: StorageProvider;
   auth: RequestAuthenticator;
   viewerService: ViewerService;
   jobService: JobService;
@@ -56,6 +59,15 @@ type TaskRow = {
 
 export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: WebsiteCaptureRouteOptions) {
   registerWebsiteLoginRoutes(app, options);
+  app.post<{ Params: { taskId: string } }>("/api/website-capture/:taskId/canvas", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return unauthorized(reply);
+    try {
+      const taskId = z.string().uuid().parse(request.params.taskId);
+      if (!options.storage) return reply.code(503).send({ ok: false, error: { code: "storage_unavailable", message: "素材服务暂不可用，请稍后重试。" } });
+      return reply.send({ ok: true, data: await deliverCaptureToCanvas(options.db, options.storage, taskId, user.id) });
+    } catch (error) { return sendWebsiteCaptureError(error, reply); }
+  });
   app.post("/api/website-capture/pairings", async (request, reply) => {
     const user = await options.auth.authenticate(request);
     if (!user) return unauthorized(reply);
@@ -297,6 +309,14 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
          ) recent order by id`,
         [task.id],
       );
+      const recordingEvent = [...events.rows].reverse().find(event => event.stage === "recording_progress");
+      if (recordingEvent) {
+        const metrics = z.object({ renderedSeconds:z.number().nonnegative(),totalSeconds:z.number().positive(),elapsedSeconds:z.number().nonnegative(),remainingSeconds:z.number().nonnegative().nullable(),pageIndex:z.number().int().positive(),pageCount:z.number().int().positive() });
+        try {
+          const parsed = metrics.safeParse(JSON.parse(recordingEvent.detail));
+          if (parsed.success) task.recordingProgress = parsed.data;
+        } catch { /* Earlier workers wrote human-readable progress, which stays in the event list. */ }
+      }
       const approval = task.promoApprovalId
         ? (await options.db.query<{ id: string; job_type: "video_generation"; model: string; estimated_credits: number; expires_at: string; payload: { duration?: number; resolution?: string; input_asset_ids?: string[] } }>(
             `select id,job_type,model,estimated_credits,expires_at,payload from generation_approvals where id=$1 and workspace_id=$2 and user_id=$3 and status='pending' and expires_at>now()`,

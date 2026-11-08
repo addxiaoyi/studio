@@ -347,6 +347,33 @@ function CanvasPageContent() {
     await insertVideoOnCanvas(api, artifact);
   }, []);
 
+  const saveBeforeVideo = useRef<(() => Promise<void>) | null>(null);
+  const [videoActionError, setVideoActionError] = useState("");
+  const receiveCanvasSave = useCallback((save: (() => Promise<void>) | null) => { saveBeforeVideo.current = save; }, []);
+  const openCanvasVideo = useCallback(async (elementId: string, action: "timeline" | "ai") => {
+    const api = excalidrawApiRef.current;
+    const elements = api?.getSceneElements() ?? [];
+    const selected = elements.find((element: any) => element.id === elementId && !element.isDeleted && element.customData?.isVideo);
+    if (!selected) return;
+    setVideoActionError("");
+    api.updateScene({ elements: elements.map((element: any) => element.id === elementId && element.customData?.timelineIncluded !== true ? { ...element, version: (element.version ?? 0) + 1, versionNonce: Math.floor(Math.random()*2_000_000_000), updated: Date.now(), customData: { ...element.customData, timelineIncluded: true } } : element), captureUpdate: "IMMEDIATELY" });
+    setTimelineOpen(true);
+    if (action === "ai") {
+      const asset = selected.customData?.assetId ?? String(selected.link ?? "").match(/\/api\/uploads\/([a-f\d-]{36})\/file/i)?.[1];
+      if (!asset) { setVideoActionError("该视频没有可恢复的素材标识，请先从素材库导入。"); return; }
+      const query = new URLSearchParams({ assetId: asset, edit: "1", returnCanvas: canvasId ?? "" });
+      if (selected.customData?.title) query.set("title", String(selected.customData.title).slice(0, 100));
+      if (Number.isFinite(selected.customData?.trimStart)) query.set("start", String(selected.customData.trimStart));
+      if (Number.isFinite(selected.customData?.trimEnd)) query.set("end", String(selected.customData.trimEnd));
+      try {
+        if (!saveBeforeVideo.current) throw new Error("画布尚未就绪，请稍后重试。");
+        await saveBeforeVideo.current();
+        window.location.assign(`/video/?${query}`);
+      } catch (cause) { setVideoActionError(cause instanceof Error ? cause.message : "画布保存失败，已保留当前素材，请重试。"); }
+    }
+  }, [canvasId]);
+  const editTimelineVideo = useCallback((elementId: string) => openCanvasVideo(elementId, "ai"), [openCanvasVideo]);
+
   // Must be defined BEFORE useJobFallbackPolling which references it
   const handleCanvasSync = useCallback(async () => {
     const api = excalidrawApiRef.current;
@@ -579,6 +606,8 @@ function CanvasPageContent() {
           ws={ws}
           leftPanelOpen={layersOpen || filesOpen}
           onSelectionChange={setSelectedCanvasElements}
+          onVideoAction={openCanvasVideo}
+          onSaveReady={receiveCanvasSave}
         />
         <CanvasEmptyHint
           excalidrawApi={excalidrawApi}
@@ -609,7 +638,9 @@ function CanvasPageContent() {
           triggerRef={timelineToggleRef}
           accessToken={accessToken}
           projectId={canvasData.projectId}
+          onEditVideo={editTimelineVideo}
         />
+        {videoActionError && <p role="alert" className="absolute bottom-20 left-4 z-50 max-w-md rounded-lg border border-destructive/30 bg-background p-3 text-sm text-destructive">{videoActionError}</p>}
         <CanvasLayersPanel
           excalidrawApi={excalidrawApi}
           open={layersOpen}

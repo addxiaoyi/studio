@@ -15,6 +15,10 @@ import { DesktopMcpToolCard } from "./desktop-mcp-tool-card";
 import { AgentWorkflowCard } from "./agent-workflow-card";
 import { GenerationApprovalCard } from "./generation-approval-card";
 import { AuthenticatedRecording } from "./authenticated-recording";
+import { MarkdownRenderer } from "./markdown-renderer";
+import { CaptureCanvasActions } from "./capture-canvas-actions";
+import { CaptureRecordingProgress, captureEventDetail } from "./capture-recording-progress";
+import { CaptureSkippedPages } from "./capture-skipped-pages";
 import { formatWebsiteCaptureEventTime, formatWebsiteCaptureStage } from "./website-capture-progress";
 import {
   formatModelDisplayName,
@@ -739,6 +743,7 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
         <div className={`h-full rounded-full transition-[width] ${task?.status === "failed" ? "bg-destructive" : "bg-foreground/60"}`} style={{ width: `${progress}%` }} />
       </div>
       {task?.stage ? <p className="mt-2 text-[11px] text-muted-foreground">阶段：{formatWebsiteCaptureStage(task.stage)}</p> : null}
+      {task && <CaptureRecordingProgress task={task} />}
       {recordingApproval ? <div className="mt-3 rounded border border-amber-500/40 p-3" aria-label="网站录制审批">
         <p className="text-xs font-medium">确认网站录制</p>
         {recordingApproval.action.presentation&&<p className="text-xs">多光标网站演示 · {recordingApproval.action.presentation.durationSeconds} 秒 · {recordingApproval.action.presentation.cursorCount} 个光标 · WebM</p>}
@@ -754,7 +759,7 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
               <time className="tabular-nums text-muted-foreground" dateTime={event.created_at}>{formatWebsiteCaptureEventTime(event.created_at)}</time>
               <span className="min-w-0 break-words text-foreground">
                 <span className="font-medium">{formatWebsiteCaptureStage(event.stage)}</span>
-                {event.detail ? <span className="ml-1 text-muted-foreground">{event.detail}</span> : null}
+                {event.detail ? <span className="ml-1 text-muted-foreground">{captureEventDetail(event.stage,event.detail)}</span> : null}
               </span>
             </li>
           ))}
@@ -781,9 +786,11 @@ function WebsiteCaptureProgressCard({ taskId }: { taskId: string }) {
       {task?.status === "failed" && task.error ? <p role="alert" className="mt-2 text-[11px] text-destructive">{task.error}</p> : null}
       {task?.status === "succeeded" && task.result ? (
         <div className="mt-3 space-y-3">
-          <div className="whitespace-pre-wrap text-xs leading-5 text-foreground">{task.result.introduction}</div>
+          <MarkdownRenderer text={task.result.introduction} />
+          <CaptureSkippedPages taskId={taskId} result={task.result} />
+          {session?.access_token && <CaptureCanvasActions taskId={taskId} result={task.result} token={session.access_token} />}
           <div className="grid grid-cols-2 gap-2">
-            {task.result.pages.map((page) => <a key={page.assetId} href={page.screenshotUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-border/40"><img src={page.screenshotUrl} alt={`页面截图：${page.title}`} className="aspect-video w-full object-cover" /></a>)}
+            {task.result.pages.map((page) => <div key={page.assetId} className="overflow-hidden rounded-lg border border-border/40">{session?.access_token ? <AuthenticatedRecording assetId={page.assetId} accessToken={session.access_token} kind="image" label={`页面截图：${page.title}`} maxBytes={8 * 1024 * 1024} /> : <img src={page.screenshotUrl} alt={`页面截图：${page.title}`} className="aspect-video w-full object-cover" />}</div>)}
           </div>
           {task.result.recordingAssetId && session?.access_token ? <AuthenticatedRecording assetId={task.result.recordingAssetId} accessToken={session.access_token} /> : task.result.recordingUrl ? <video controls preload="metadata" src={task.result.recordingUrl} className="w-full rounded-lg border border-border/40" aria-label="网站浏览录屏" /> : null}
           {promoApproval ? <GenerationApprovalCard approvalId={promoApproval.approvalId} jobType="video_generation" model={promoApproval.model} estimatedCredits={promoApproval.estimatedCredits} hasReferenceImage={promoApproval.hasReferenceImage} expiresAt={promoApproval.expiresAt} {...(promoApproval.duration !== undefined ? { duration: promoApproval.duration } : {})} {...(promoApproval.resolution !== undefined ? { resolution: promoApproval.resolution } : {})} /> : null}
