@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { WorkflowProposal } from "@helstera/shared";
 import {
   askWorkflowAssistant,
@@ -39,6 +39,12 @@ export function WorkflowAssistantChat({
     [error, setError] = useState("");
   const latest = useRef(0),
     key = useRef({ prompt: "", id: crypto.randomUUID() });
+  useLayoutEffect(() => {
+    // Loading saved history must not push the focused composer below the dock.
+    const input = document.getElementById("workflow-ai-request");
+    if (input && document.activeElement === input)
+      input.scrollIntoView({ block: "nearest" });
+  }, [messages, loading]);
   useEffect(() => {
     let active = true;
     latest.current++;

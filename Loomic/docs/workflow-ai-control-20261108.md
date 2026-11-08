@@ -34,3 +34,7 @@
 `workflow-context-menu.spec.ts` 增加真实 Chromium/Electron 回归：修复前在“节点操作菜单可见”断言失败；修复后覆盖四入口、节点上下文、键盘、窄窗口、草稿恢复及无后台运行。Windows 0.2.21 候选版同时复查 AI 操作与节点拖拽；Web 工作树和生产候选类型检查、静态构建通过。候选构建使用的 Shared 符号已与类型声明对齐。
 
 相关日志：`workflow-menu-before.log`、`workflow-menu-after.log`、`workflow-menu-desktop.log`、`workflow-menu-desktop-final.log`、`workflow-menu-types.log`、`workflow-menu-candidate-types.log`、`workflow-menu-web-build.log`。正式安装包的下一轮 CI 结果不等同于这次本地候选版验收。
+
+菜单修复 `9c62f8c` 已发布，136 个变化文件、3251 个候选文件校验通过，画布、视频、女装及桌面入口均返回 200。登录的原画布已验证节点菜单显示在卡片上方，连接操作生效，“让 AI 修改”带入“录制网站”并聚焦输入。当前草稿已保存，运行按钮可用，未点击运行。发布日志 `publish-workflow-menu.log`。
+
+另补充历史记录异步加载后的输入框定位：用户从节点进入 AI 时，加载旧消息不会把已聚焦输入框挤出可视范围。Windows 候选版 E2E 使用四条真实持久化提案验证焦点与可见性，通过日志 `workflow-menu-ai-focus.log`。完整菜单 Chromium 最终验证通过日志 `workflow-menu-browser-final.log`。
