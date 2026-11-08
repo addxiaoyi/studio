@@ -31,3 +31,23 @@
 - Shared、Server、Web、Desktop类型检查通过。生产已检查Python运行环境及PNG编码器存在。
 
 日志位于 `M:/loomic-builds/`：`creative-workflow-browser.log`、`creative-workflow-desktop-final.log`、`creative-workflow-preparation.log`。生产发布与真实模型验收完成后补记。
+
+## 生产真实模型验收
+
+2026-11-08已发布创作节点、模板和执行器，健康检查返回 `ok:true`，画布、视频、女装和桌面路由均为200。
+
+- 在原画布建立“融光创作设计 · 机器人花园分镜”，工作流 `943fc8ea-346b-43da-aacd-b906f702d46c`，目标 `3d1b416d-2848-4abb-97f3-14328b57ef0d`。
+- 生产模型实际生成《清晨屋顶的绿色信号》，3个镜头分别为“街角的微光”“穿过城市”“屋顶花园”，每镜头5秒，含景别、动作、运镜和对白。3个执行步骤全部成功，每步attempt=1，1次运行；可编辑文字元素 `x2rj6d7f9sfo62of6q0t` 已写入原画布。
+- 再使用真实规划模型，把图片创作要求转换为资料→图片生成→交付3节点，选择真实目录中的 `gpt-image-2.5-2k`。生产报价为0.1600，展示实际提示词与16:9参数。取消确认后，审批 `20330d66-eadf-41db-b3ae-38d59ed31d8b` 为rejected、job_id和consumed_at均为空；未创建或扣费生成任务。生产付费生成验收停在报价与取消，未将此测试描述为供应商已产图。
+- 验收中修复了图像方案误填视频分辨率造成的拒绝：仅规范图片执行不使用的视频字段，保留实际模型与画幅；不支持的视频分辨率仍拒绝。大画布新增节点的坐标范围扩展，保留节点间距；对应回归先失败后通过。
+- 费用确认等待期间不再重复领取执行租约；取消报价将新运行明确终止为canceled。原历史失败记录保留，不改写测试历史。
+
+证据：`M:/loomic-builds/creative-workflow-live-storyboard.png`、`creative-workflow-live-quote.png`、`creative-workflow-production-verification.log`。发布日志为 `deploy-creative-workflow-server.log`、`publish-creative-workflow-web.log`，随后参数/状态补丁各自保留发布日志。
+
+核心创作代码提交 `fc77925`，后续修复包括 `a078d23`、`9e598aa`。`0ec59a9` 的Agent Closure CI `42467221866`全部通过；Website Capture CI `42467127678`通过。Desktop Candidate CI `42467221839`在3次重试后仍遭遇Electron/打包工具下载HTTP504，本机Windows端到端验收通过与新的安装包CI未完成分别记录，不混为“所有平台构建通过”。
+
+17:45第二次报价取消验收：目标 `429f0406-a084-4bf0-9b6b-315070c3dfc1` 为canceled，生成步骤canceled、下游交付canceled且attempt=0；审批 `ded566d4-ae0c-453c-a52e-3f6b985e8da2` 为rejected、job_id/consumed_at为空。费用等待状态固定为“等待确认”，没有伪装成正在生成。最终证据：`M:/loomic-builds/creative-workflow-final-production.log`。
+
+最后生产发布日志 `deploy-workflow-state.log`、`publish-workflow-state-web.log`均成功，所有检查路由200且服务健康。已留在用户原画布的“融光创作设计 · 机器人花园分镜”，可切换到已完成运行并定位可编辑正文。
+
+`a078d23` 的Agent Closure CI `42467794265`通过；`9e598aa` 的Website Capture CI `42468281789`通过。最新Agent CI `42468652704`及桌面候选 `42468281744`尚在运行。契约/浏览器CI已禁用不需要的Electron二进制下载；桌面构建仍需要官方二进制，保留缓存与有限重试，不跳过真实桌面测试。
