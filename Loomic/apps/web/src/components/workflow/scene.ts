@@ -35,6 +35,7 @@ export type CanvasState = {
   selectedElementsAreBeingDragged?: boolean;
   resizingElement?: unknown;
   activeTool?: {type:string};
+  contextMenu?: unknown;
 };
 export type WorkflowCanvasApi = {
   onPointerDown?: ExcalidrawImperativeAPI["onPointerDown"];

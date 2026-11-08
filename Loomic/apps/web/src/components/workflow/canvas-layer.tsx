@@ -11,6 +11,7 @@ import { workflowBinding, type WorkflowCanvasApi } from "./scene";
 import { useNodeConnect } from "./use-node-connect";
 import "./node-interactions.css";
 import { useWorkflowLayerView, useWorkflowNodeEdit } from "./layer-view";
+import { useWorkflowContextMenu, WorkflowNodeContextMenu } from "./node-context-menu";
 
 type Props = {
   api: WorkflowCanvasApi | null;
@@ -19,6 +20,7 @@ type Props = {
   graph: WorkflowGraph;
   disabled: boolean;
   onEdit(workflowId: string, nodeId: string): void;
+  onAsk(workflowId: string, nodeId: string): void;
   onConnect(source: string, target: string): void;
   onDisconnect(edgeId: string): void;
   onAdd(nodeId: string): void;
@@ -27,6 +29,7 @@ type Props = {
 export function WorkflowCanvasLayer(props: Props) {
   const { view, hover } = useWorkflowLayerView(props.api);
   useWorkflowNodeEdit(props.api, props.onEdit);
+  const context = useWorkflowContextMenu(props.api);
   const connect = useNodeConnect({
     api: props.api,
     workflowId: props.workflowId,
@@ -77,6 +80,9 @@ export function WorkflowCanvasLayer(props: Props) {
       : null;
   return createPortal(
     <div className="workflow-canvas-layer" data-workflow-layer>
+      {context.menu && <WorkflowNodeContextMenu menu={context.menu} close={context.close}
+        current={workflowBinding(context.menu.element)?.workflowId === props.workflowId} disabled={props.disabled}
+        onEdit={props.onEdit} onAsk={props.onAsk} onConnect={connect.start} onAdd={props.onAdd} />}
       <svg className="workflow-wire-targets" aria-hidden="true">
         {elements
           .filter(
@@ -150,7 +156,7 @@ export function WorkflowCanvasLayer(props: Props) {
         const show =
           current &&
           (hover === element.id || selected || Boolean(connect.connection)) &&
-          !state.selectedElementsAreBeingDragged &&
+          !state.selectedElementsAreBeingDragged && !state.contextMenu && !context.menu &&
           state.activeTool?.type === "selection";
         const issue = connect.connection
           ? connectionIssue(

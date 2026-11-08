@@ -87,6 +87,7 @@ export function VideoPlayerPanel({
   return createPortal(
     <div
       ref={panelRef}
+      data-canvas-floating-panel="video-player"
       style={{ left: screenX, top: screenY }}
       role="dialog"
       aria-modal="false"

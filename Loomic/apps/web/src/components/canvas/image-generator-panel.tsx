@@ -261,6 +261,7 @@ export function ImageGeneratorPanel({
   return createPortal(
     <div
       ref={panelRef}
+      data-canvas-floating-panel="image-generator"
       style={{ left: screenX, top: screenY }}
       className="fixed z-[100] w-[450px] rounded-2xl border border-border/60 glass-soft p-2 shadow-card-hover backdrop-blur-lg"
       onKeyDown={(e) => e.stopPropagation()}

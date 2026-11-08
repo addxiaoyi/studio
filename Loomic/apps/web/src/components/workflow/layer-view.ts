@@ -12,7 +12,7 @@ type View = {
   root: HTMLElement;
 };
 
-function hitCard(
+export function hitWorkflowCard(
   api: WorkflowCanvasApi,
   root: HTMLElement,
   event: MouseEvent,
@@ -48,6 +48,7 @@ function viewSignature(elements: readonly SceneElement[], state: CanvasState) {
     state.selectedElementIds,
     state.selectedElementsAreBeingDragged,
     state.activeTool?.type,
+    Boolean(state.contextMenu),
   ]);
 }
 export function useWorkflowLayerView(api: WorkflowCanvasApi | null) {
@@ -72,7 +73,7 @@ export function useWorkflowLayerView(api: WorkflowCanvasApi | null) {
     });
     update();
     const over = (event: PointerEvent) => {
-      if (!event.buttons) setHover(hitCard(api, root, event, 25)?.id ?? null);
+      if (!event.buttons) setHover(hitWorkflowCard(api, root, event, 25)?.id ?? null);
     };
     const leave = () => setHover(null);
     root.addEventListener("pointermove", over);
@@ -104,7 +105,7 @@ export function useWorkflowNodeEdit(
     };
     const doubleClick = (event: MouseEvent) => {
       if (!(event.target instanceof HTMLCanvasElement)) return;
-      const element = hitCard(api, root, event);
+      const element = hitWorkflowCard(api, root, event);
       if (element) edit(element, event);
     };
     const key = (event: KeyboardEvent) => {

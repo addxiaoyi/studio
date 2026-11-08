@@ -393,6 +393,7 @@ export function VideoGeneratorPanel({
   return createPortal(
     <div
       ref={panelRef}
+      data-canvas-floating-panel="video-generator"
       style={{ left: screenX, top: screenY }}
       className="fixed z-[100] w-[520px] rounded-[24px] border border-border/60 glass-soft shadow-card-hover backdrop-blur-lg"
       onKeyDown={(e) => e.stopPropagation()}

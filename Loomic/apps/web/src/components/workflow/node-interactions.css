@@ -5,6 +5,14 @@
   overflow: hidden;
   pointer-events: none;
 }
+.workflow-context-positioner { z-index: 110; pointer-events: auto; }
+.workflow-context-menu { width: 232px; max-width: calc(100vw - 24px); max-height: var(--available-height); overflow-y: auto; padding: 5px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: 0 10px 32px #0002; outline: none; }
+.workflow-context-heading { display: grid; gap: 3px; padding: 8px 9px 10px; }
+.workflow-context-heading small, .workflow-context-hint { color: var(--muted-foreground); font-size: 11px; }
+.workflow-context-heading strong { font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.workflow-context-hint { padding: 6px 9px; }
+[data-canvas-surface] .excalidraw .popover:has(.context-menu) { z-index: 60; }
+body:has(.context-menu, .workflow-context-menu) [data-canvas-floating-panel] { visibility: hidden; pointer-events: none; }
 .workflow-node-position {
   position: absolute;
   left: 0;

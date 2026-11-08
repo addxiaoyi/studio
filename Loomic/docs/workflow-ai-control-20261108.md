@@ -18,3 +18,19 @@
 新增迁移20261108000006_workflow_assistant仅创建提案记录及索引。前后端按生产现有版本增量发布，保留视频、登录、七牛云和当前未确认费用任务。
 
 日志在M:/loomic-builds：workflow-ai-browser.log、workflow-ai-desktop.log、workflow-ai-production-types.log、workflow-ai-web-build.log。
+
+## 线上真实模型与发布
+
+`f9b052c` 已推送并增量发布。生产迁移 `20261108000006_workflow_assistant` 校验值为 `05c9aa2d4cd26da3378d770e89db6d9c13e49fc5475db3b747da03592003ec6a`；服务健康，未登录访问助手路由返回 401。该提交的 Website Capture、Agent Closure、Desktop Candidate 三项 CI 全部通过。
+
+已在登录的生产画布请求真实模型搭建“网站录制到剪辑”：本站网址 → 最多录制一页 → 前五秒竖屏裁剪 → 输出到画布。模型返回四节点与三连接方案；点击“应用到画布”后提案状态为 applied，工作流修订为 3，active_goal_id 仍为空。验证记录为 `M:/loomic-builds/workflow-ai-production.log`。这次验证证明真实推理、预览确认及保存；没有启动该流程或调用收费图片/视频模型，原 0.16 积分待确认任务保持未批准。
+
+## 节点操作层级
+
+节点右键和 Shift+F10 使用原生工作区菜单，按“编辑节点、让 AI 修改、连接下一步、添加后续节点”排列。菜单展示节点名称与类型，输出节点不显示后续连接。AI 入口带上所选节点并聚焦对话输入，不自动发送或执行。
+
+菜单浮于节点上方；生成与视频预览面板在菜单打开时暂时隐藏，关闭后恢复，保留未提交文本。Esc、外部点击、方向键与回焦由现有 Base UI 菜单处理。Windows 窄窗口聊天和节点菜单避让桌面标题栏，防止关闭按钮被遮挡。
+
+`workflow-context-menu.spec.ts` 增加真实 Chromium/Electron 回归：修复前在“节点操作菜单可见”断言失败；修复后覆盖四入口、节点上下文、键盘、窄窗口、草稿恢复及无后台运行。Windows 0.2.21 候选版同时复查 AI 操作与节点拖拽；Web 工作树和生产候选类型检查、静态构建通过。候选构建使用的 Shared 符号已与类型声明对齐。
+
+相关日志：`workflow-menu-before.log`、`workflow-menu-after.log`、`workflow-menu-desktop.log`、`workflow-menu-desktop-final.log`、`workflow-menu-types.log`、`workflow-menu-candidate-types.log`、`workflow-menu-web-build.log`。正式安装包的下一轮 CI 结果不等同于这次本地候选版验收。

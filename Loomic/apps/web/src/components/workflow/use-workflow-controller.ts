@@ -179,17 +179,18 @@ export function useWorkflowController({
   };
   const selectNode = (workflowId: string, nodeId: string, openEditor=false) => {
     if (workflowId !== flow.selected?.id) {
-      if(!openEditor)return;
+      if(!openEditor)return false;
       if (flow.dirty) {
         setPendingSwitch(flow.documents.find(item=>item.id===workflowId)??null);
-        return;
+        return false;
       }
       const document = flow.documents.find((item) => item.id === workflowId);
-      if (!document) return;
+      if (!document) return false;
       flow.select(document,api?workflowWithScenePositions(document.graph,document.id,api.getSceneElements()):undefined);
     }
     setSelectedId(nodeId);
     if(openEditor){setTab("nodes");if(!open)onOpen();}
+    return true;
   };
   const previews = useMemo<Record<string,NodePreview>>(()=>Object.fromEntries((currentRun ? run.goal?.executionSteps ?? [] : []).map(step=>{
     const assets = step.output?.assets as Array<{id?:unknown;mediaType?:unknown}> | undefined;
@@ -295,9 +296,15 @@ export function useWorkflowController({
   const requestSwitch=(doc:WorkflowDocument)=>{if(flow.dirty){setPendingSwitch(doc);return;}flow.select(doc);setSelectedId(null);};
   const confirmSwitch=async(persist:boolean)=>{if(!pendingSwitch)return;if(persist&&!(await save()))return;flow.select(pendingSwitch,api?workflowWithScenePositions(pendingSwitch.graph,pendingSwitch.id,api.getSceneElements()):undefined);setSelectedId(null);setPendingSwitch(null);};
   const editNode=(workflowId:string,nodeId:string)=>{
-    selectNode(workflowId,nodeId,true);
+    if(!selectNode(workflowId,nodeId,true))return false;
     const doc=flow.documents.find(item=>item.id===workflowId),node=doc?.id===flow.selected?.id?flow.graph.nodes.find(item=>item.id===nodeId):doc?.graph.nodes.find(item=>item.id===nodeId);
     if(node)api?.updateScene({appState:{selectedElementIds:{[nodeElementId(workflowId,node)]:true}},captureUpdate:"NEVER"});
+    return true;
+  };
+  const askNode=(workflowId:string,nodeId:string)=>{
+    if(!editNode(workflowId,nodeId))return;
+    setTab("ai");
+    requestAnimationFrame(()=>document.getElementById("workflow-ai-request")?.focus());
   };
   const deselectNode=()=>{setSelectedId(null);api?.updateScene({appState:{selectedElementIds:{}},captureUpdate:"NEVER"});};
   const disconnect=(edgeId:string)=>{if(locked)return;flow.edit({...flow.graph,edges:flow.graph.edges.filter(edge=>edge.id!==edgeId)});const picked=api?.getSceneElements().some(el=>api.getAppState().selectedElementIds[el.id]&&(el.customData?.workflowEdge as {edgeId?:string}|undefined)?.edgeId===edgeId);if(picked)api?.updateScene({appState:{selectedElementIds:{}},captureUpdate:"NEVER"});flow.setError("");};
@@ -445,6 +452,6 @@ export function useWorkflowController({
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
     materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
     pendingSwitch,setPendingSwitch,requestSwitch,confirmSwitch,editNode,deselectNode,disconnect,prepareRun,addingAfter,setAddingAfter,
-    prepareAssistant,
+    prepareAssistant,askNode,
   };
 }

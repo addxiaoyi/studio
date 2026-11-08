@@ -106,6 +106,7 @@
 .desktop-feature__content--development { height: 100%; min-height: 0; }
 .desktop-feature__content--development .local-workbench { height: 100%; min-height: 0; }
 .desktop-canvas-workspace { width: 100%; height: calc(100dvh - 46px); min-height: 0; overflow: hidden; }
+html[data-helstera-desktop="true"] #canvas-chat-panel[role="dialog"] { top: 46px; }
 .desktop-canvas-surface { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: color-mix(in srgb, var(--background) 96%, var(--foreground)); color: var(--foreground); }
 .desktop-canvas-surface > div:first-child { top: 12px; left: 14px; right: auto; max-width: calc(100% - 28px); padding: 5px 7px; border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--background) 88%, transparent); box-shadow: 0 5px 18px color-mix(in srgb, var(--foreground) 7%, transparent); }
 .desktop-canvas-surface > div:first-child > * { max-width: 180px; }
