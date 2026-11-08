@@ -14,7 +14,13 @@ export async function recordPageSegment(page:Page,path:string,seconds:number,scr
   let publish=Promise.resolve();
   await page.screencast.start({path,size:{width:1280,height:720},quality:85,onFrame:frame=>{if(onFrame)publish=publish.then(()=>onFrame(frame.data));}});
   try{
-    await page.evaluate(`(()=>{const state={y:0},end=${scroll?'Math.min(Math.max(0,Math.max(document.body.scrollHeight,document.documentElement.scrollHeight)-innerHeight),1440)':'0'};window.__loomicScroll=gsap.timeline({paused:true});window.__loomicScroll.to(state,{y:end,duration:${seconds}*.72,ease:'sine.inOut',onUpdate:()=>scrollTo(0,state.y)},${seconds}*.06).to(state,{y:0,duration:${seconds}*.16,ease:'sine.inOut',onUpdate:()=>scrollTo(0,state.y)},${seconds}*.82);window.__loomicScroll.play();})()`);
+    await page.evaluate(`(()=>{
+      const candidates=Array.from(document.querySelectorAll('main,[role="main"],div,section')).filter(el=>{const box=el.getBoundingClientRect(),css=getComputedStyle(el);return box.width>innerWidth*.4&&box.height>innerHeight*.4&&el.scrollHeight>el.clientHeight+40&&/auto|scroll/.test(css.overflowY);});
+      candidates.sort((a,b)=>(Number(b.matches('main,[role="main"]'))-Number(a.matches('main,[role="main"]')))||b.clientWidth*b.clientHeight-a.clientWidth*a.clientHeight);
+      const target=candidates[0]??document.scrollingElement,state={y:0},end=${scroll?'Math.min(Math.max(0,target.scrollHeight-target.clientHeight),1440)':'0'};
+      target.scrollTop=0;window.__loomicScroll=gsap.timeline({paused:true});const update=()=>{target.scrollTop=state.y;};
+      window.__loomicScroll.to(state,{y:end,duration:${seconds}*.72,ease:'sine.inOut',onUpdate:update},${seconds}*.06).to(state,{y:0,duration:${seconds}*.16,ease:'sine.inOut',onUpdate:update},${seconds}*.82);window.__loomicScroll.play();
+    })()`);
     const until=Date.now()+seconds*1000;
     while(Date.now()<until){await page.waitForTimeout(Math.min(350,until-Date.now()));await checkpoint();}
   }finally{await page.screencast.stop();await publish;await page.evaluate('window.__loomicScroll?.kill()');}

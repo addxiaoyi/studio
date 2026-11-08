@@ -21,19 +21,19 @@ it('uses a value-independent mosaic and retains editability',async()=>{
  }finally{await browser.close();}
 });
 async function writePreview(bytes:Buffer){const {writeFile}=await import('node:fs/promises');const path=join(evidence,'mosaic-source.jpg');await writeFile(path,bytes);return path;}
-it('records continuous movement after page readiness and exports the exact target duration at 30fps',async()=>{
+it.each([false,true])('records continuous movement after page readiness with nested scroll=%s',async nested=>{
  const {browser}=await launchAgentBrowser();const directory=await mkdtemp(join(tmpdir(),'capture-quality-'));
  try{
   const context=await browser.newContext({viewport:{width:1280,height:720}});await installPrivacyMosaic(context);const page=await context.newPage();
-  await page.setContent('<body style="margin:0;background:#eee">'+Array.from({length:20},(_,i)=>`<section style="height:180px;background:hsl(${i*17} 60% 60%);font:60px sans-serif">Section ${i}</section>`).join('')+'</body>');
+  await page.setContent('<body style="margin:0;background:#eee">'+(nested?'<main style="height:720px;overflow:auto">':'')+Array.from({length:20},(_,i)=>`<section style="height:180px;background:hsl(${i*17} 60% 60%);font:60px sans-serif">Section ${i}</section>`).join('')+(nested?'</main>':'')+'</body>');
   const frames:number[]=[];await page.exposeFunction('sampleScroll',(y:number)=>frames.push(y));
-  await page.evaluate("(()=>{let last=0;function sample(){if(scrollY!==last){window.sampleScroll(scrollY);last=scrollY;}requestAnimationFrame(sample);}requestAnimationFrame(sample);})()");
+  await page.evaluate(`(()=>{let last=0;const target=${nested?"document.querySelector('main')":"document.scrollingElement"};function sample(){const y=target.scrollTop;if(y!==last){window.sampleScroll(y);last=y;}requestAnimationFrame(sample);}requestAnimationFrame(sample);})()`);
   const segment=join(directory,'source.webm');await recordPageSegment(page,segment,3,true,async()=>{});
   expect(frames.length).toBeGreaterThan(35);
   const deltas=frames.slice(1).map((y,i)=>Math.abs(y-frames[i]!));expect(deltas.filter(d=>d>400)).toHaveLength(0);
   const file=await joinCaptureSegments([segment],[3],directory);
   const decoded=spawnSync(ffmpegBinary(),['-hide_banner','-xerror','-i',file,'-f','null','-'],{windowsHide:true,encoding:'utf8'});
   expect(decoded.status,decoded.stderr).toBe(0);expect(decoded.stderr).toContain('00:00:03.00');expect(decoded.stderr).toContain('30 fps');
-  await mkdir(evidence,{recursive:true});await copyFile(file,join(evidence,'smooth-scrolling.webm'));
+  await mkdir(evidence,{recursive:true});await copyFile(file,join(evidence,nested?'smooth-nested-scrolling.webm':'smooth-scrolling.webm'));
  }finally{await browser.close();}
 },60000);
