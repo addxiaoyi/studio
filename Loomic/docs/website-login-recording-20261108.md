@@ -27,4 +27,12 @@ Windows 候选 `full-desktop-FFwE5y` 使用隔离用户目录连接本地测试�
 
 首帧遮挡在 DOM 解析期间生效，浏览录屏与多光标演示均通过 FFmpeg 完整解码。另补充短账号名及 `/admin/login` 路径回归，避免把站点路径误判为凭据泄露；凭据 URL 检查限定查询参数和片段。
 
+最终生产前端为 `full-web-nGO50e`，服务端代码 `280f43ca`。线上真实浏览器已看到登录表单；未认证的凭据接口返回 401，增量迁移版本仅 1 条，过期未清理密文为 0，Server/Worker 均 online。验收截图为 `.creative-test-results/website-login-production-form.jpg`，生产检查日志 `website-login-production-check.log`。
+
+主功能提交 `6bbfe43e` 的 [Agent Closure CI 42435975076](https://github.com/addxiaoyi/studio/actions/runs/42435975076) 全部成功。后续补丁的 CI 状态以最终提交对应运行记录为准。
+
+最终代码 `280f43ca` 的 [Agent Closure CI 42436365598](https://github.com/addxiaoyi/studio/actions/runs/42436365598) 与 [Website Capture CI 42436365629](https://github.com/addxiaoyi/studio/actions/runs/42436365629) 全部成功。包括四包类型检查、PostgreSQL 凭据和审批、真实 Chromium 私有登录、两种录像解码、Web 确认和刷新恢复。记录与截图不包含真实用户的第三方账号密码。
+
+[Desktop Candidate CI 42436365566](https://github.com/addxiaoyi/studio/actions/runs/42436365566) 全部成功：Windows 视频工具、Windows x64、macOS arm64、Linux x64 候选打包与启动回归。候选构建和上述 Windows 实际登录录制验收分别保留证据。
+
 证据目录：`.creative-test-results/website-login/`；日志 `website-login-tests-final.log`、`website-login-db.log`、`website-login-web-e2e-final.log`、`website-login-mask.log`。
