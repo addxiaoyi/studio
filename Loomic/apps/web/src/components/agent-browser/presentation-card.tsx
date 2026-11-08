@@ -68,7 +68,7 @@ export function WebsitePresentationCard({
                 />
               </label>
               <label>录制方式<StyledSelect aria-label="录制方式" value={recordingMode} onChange={setRecordingMode} options={[{value:"presentation",label:"多光标介绍演示"},{value:"browsing",label:"真实浏览录屏"}]} /></label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={needsLogin} onChange={e=>{setNeedsLogin(e.target.checked);if(!e.target.checked)setCredentials(value=>({...value,username:"",password:""}));}} />需要登录后体验</label>
+              <label className="!flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2"><input className="size-4 shrink-0 accent-primary" type="checkbox" checked={needsLogin} onChange={e=>{setNeedsLogin(e.target.checked);if(!e.target.checked)setCredentials(value=>({...value,username:"",password:""}));}} /><span>需要登录后体验</span></label>
               {needsLogin&&<WebsiteLoginFields value={credentials} onChange={setCredentials} />}
               {recordingMode==="browsing"&&<p>录制目标页面及最多 3 个站内页面，自动滚动查看内容；不会提交业务表单或支付。</p>}
               {recordingMode==="presentation"&&
