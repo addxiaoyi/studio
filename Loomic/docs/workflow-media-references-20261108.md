@@ -23,4 +23,14 @@
 
 测试发现小视频悬浮操作条挡住原生拖动，已移到视频外侧；底部画布工具栏避让左侧工作流面板。减少动态效果偏好下保持相同的绑定和保存逻辑。
 
-生产发布及真实模型验收另行记录，以实际回执为准。
+## 生产发布与录像抽帧
+
+提交 `5345581d86991e7380c00cef1d918302e2d6b72f` 已推送 `codex/agent-workspace-ci` 并发布。服务端仅更新5个源码文件，Web在保留现有视频、登录和七牛云功能的候选上增量发布；画布、视频、女装、桌面Web路由均返回200，Server及Worker在线。发布前 `/www` 剩余6.5GiB，本轮无数据库迁移。
+
+生产原画布 `356a4a1a-71d5-4d19-a4dd-59a398e236b8` 中，将真实网站录像嵌入“生成16:9参考图”节点并保存为第4版。运行 `d9c62da0-67e8-43c7-92f0-91638480ed33` 已完成原素材验证和第0.4秒抽帧，回执为1280×720、64194字节PNG，素材 `695a1a3f-7d73-4096-8117-1d511ed756b7` 已展示在节点预览中。
+
+随后生成的GPT Image 2.5 2K费用确认精确绑定该PNG、提示词与16:9参数，报价0.16积分。当前确认 `3caf4af6-fa57-44f1-aac2-cc6200257a30` 处于pending，生产查询确认 `job_id=null`、无生成任务、无本次账本扣费。用户明确选择“保留待确认任务，暂不扣费”，因此保留同一任务，不触发付费模型；真实模型生成和最终结果回流尚未执行验收。此限制不影响已部署的功能与隔离回归。
+
+生产证据：`M:/loomic-builds/deploy-workflow-materials.log`、`publish-workflow-materials-web.log`、`workflow-materials-production-verification.log`（最终退出码0）、`workflow-reference-live-approval.png`。线上画布HTML与候选SHA256一致：`f2bd60d6f14d53c382134ef751985b5161379dc64bd1b93c67614d1ed63723ee`。
+
+提交5345581的 [Agent Closure CI](https://github.com/addxiaoyi/studio/actions/runs/42476586893) 与 [Website Capture CI](https://github.com/addxiaoyi/studio/actions/runs/42476586899) 已通过；[Desktop Candidate CI](https://github.com/addxiaoyi/studio/actions/runs/42476586914) 截至记录仍在运行。
