@@ -154,6 +154,7 @@ test("conversational AI previews edits, persists decisions, and controls the sam
     await expect(dock.getByRole("textbox",{name:"让 AI 帮你搭建"})).toBeInViewport();
     await expect(dock.getByRole("button",{name:"发送给 AI",exact:true})).toBeInViewport({ratio:0.99});
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    expect((await dock.locator(".workflow-assistant-history").boundingBox())!.height).toBeGreaterThanOrEqual(80);
     await page.screenshot({path:info.outputPath("workflow-dark-narrow.png")});
   } finally {
     await desktop?.close();

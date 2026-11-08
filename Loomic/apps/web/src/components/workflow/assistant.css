@@ -207,6 +207,9 @@
   .workflow-dock[data-workflow-surface] .workflow-assistant-examples { flex: none; overflow: visible; }
 }
 @media (max-width: 760px) {
+  .workflow-dock[data-workflow-surface]:has(.workflow-assistant) { max-height: 70%; }
+  .workflow-dock[data-workflow-surface] .workflow-assistant { padding: 12px; gap: 10px; }
+  .workflow-dock[data-workflow-surface] .workflow-assistant > header { display: none; }
   .workflow-assistant-compose .workflow-compose-field textarea {
     font-size: 16px;
   }
