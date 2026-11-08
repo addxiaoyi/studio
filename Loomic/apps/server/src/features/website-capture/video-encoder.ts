@@ -4,9 +4,18 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export const CAPTURE_FPS=60;
+// Leave room below the 40 MiB / 60 s upload limit for keyframes and container overhead.
+const VIDEO_BITRATE = '3M';
+const VIDEO_BUFFER = '6M';
 export function ffmpegBinary(){return process.env.HELSTERA_FFMPEG??'ffmpeg';}
 export function frameEncoder(path:string){
-  const child=spawn(ffmpegBinary(),['-hide_banner','-loglevel','error','-y','-f','image2pipe','-vcodec','mjpeg','-framerate',String(CAPTURE_FPS),'-i','pipe:0','-an','-c:v','libvpx-vp9','-deadline','realtime','-cpu-used','6','-threads','2','-row-mt','1','-b:v','0','-crf','28','-pix_fmt','yuv420p',path],{windowsHide:true,stdio:['pipe','ignore','pipe']});
+  const child=spawn(ffmpegBinary(),[
+    '-hide_banner','-loglevel','error','-y','-f','image2pipe','-vcodec','mjpeg',
+    '-framerate',String(CAPTURE_FPS),'-i','pipe:0','-an','-c:v','libvpx-vp9',
+    '-deadline','realtime','-cpu-used','6','-threads','2','-row-mt','1',
+    '-b:v',VIDEO_BITRATE,'-minrate',VIDEO_BITRATE,'-maxrate',VIDEO_BITRATE,'-bufsize',VIDEO_BUFFER,
+    '-qmin','0','-qmax','63','-drop-threshold','0','-g',String(CAPTURE_FPS*2),'-pix_fmt','yuv420p',path,
+  ],{windowsHide:true,stdio:['pipe','ignore','pipe']});
   let diagnostic='',failure:Error|undefined;child.stderr.on('data',chunk=>diagnostic=(diagnostic+String(chunk)).slice(-1000));child.stdin.on('error',error=>{failure=error;});
   const done=new Promise<void>((resolve,reject)=>{child.once('error',reject);child.once('close',code=>code===0?resolve():reject(new Error(`网站视频编码失败（${code}）：${diagnostic}`)));});
   void done.catch(()=>undefined);
