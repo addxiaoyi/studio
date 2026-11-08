@@ -16,3 +16,13 @@
 生产修复前读取28个元素，服务器画布版本289的完整快照保存在 `M:/loomic-builds/node-drag-server-copy.json`，SHA256 `aa247d0d296d964ee2dce36a7a4779c5dc391fd9b569a663ef5e2106d6561dbd`。其中包含用户素材内容，未提交Git。
 
 日志：`M:/loomic-builds/node-drag-static-desktop.log`、`node-drag-full-desktop-review.log`、`node-drag-web-build.log`。生产发布和用户草稿恢复结果随后补记。
+
+## 生产恢复与验收
+
+实现 `b70e27e`、空副本保护 `9448a86`、撤销回到已保存状态后清理过时流程草稿 `f2eebcf` 均已推送并发布。最新画布HTML和候选SHA256一致：`ea7c7661fac8652e8c8f0f9aced66a138fe17b56c492686d008c1e012f970d25`；画布、视频、女装、桌面Web路由均200，Server健康。额外两项恢复保护回归先失败再通过，最终相关组10项通过；没有放宽现有版本冲突保护。
+
+通过站内“下载本机副本”保全了用户28个元素、6份素材文件，保存在 `M:/loomic-builds/node-drag-user-recovery.json`。与服务器快照比较确认参数一致，主要是本机位置变化。关闭旧版重复标签时发现旧代码将空恢复记录写回，已保留先前下载的完整副本，并新增禁止空记录覆盖有效副本的保护。
+
+恢复脚本先只读核对，再在事务中验证元素ID集合、素材文件和节点参数一致，恢复用户的位置及1个非运行中工作流布局。完整28个元素与6份文件保留，未改动等待费用确认的执行计划。脚本记录：`M:/loomic-builds/node-drag-restore-check.log`、`node-drag-restored.log`。
+
+在用户原画布实际拖动“故事与创作要求”，屏幕位置增加49px/66px；拖动截图反馈的“浏览首页并截图”，增加52px/72px。分别撤销还原，最终选中节点的参数可编辑、无画布保存冲突、无恢复提示、状态为已保存。最终页面更新到 `release=f2eebcf`，旧版重复画布标签已关闭。截图：`M:/loomic-builds/node-drag-fixed-live.png`。用户原始恢复副本保留在下载目录和本地证据目录，未提交Git；本轮未确认任何付费生成。
