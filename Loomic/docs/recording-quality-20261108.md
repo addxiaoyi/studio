@@ -22,3 +22,25 @@
 本轮构建输出在 M 盘。复制校验后删除旧构建目录的操作被自动审批策略阻止，未执行清理；原安装包、缓存、备份及用户素材保留。
 
 证据：`.creative-test-results/old-video-freezes.log`、`recording-quality-tests.log`、`quality-db-final.log`、`quality-login-tests.log`；视频与马赛克图在 `M:/loomic-builds/recording-quality-evidence/`。最终生产验收随后追加。
+
+## 生产验证
+
+实际工作台使用内部 `main` 滚动容器，首轮线上试录暴露出只滚动 window 的遗漏，已增加主内容容器识别和专门回归。最终文件 `production-smooth-final.webm` 为 1280×720、30fps、12.00 秒、360 帧，FFmpeg 完整解码。按相同 `freezedetect=n=-45dB:d=0.5` 检测，旧片两段 7.2/7.48 秒静止，新片仅开头 0.933 秒及转向 0.5 秒停留；第5秒画面已进入工作台下方内容。SHA-256：`ce14388d921b4afa743a248d0e507079e8354dcba3b8cd3eae7c2eaa8f6fdd1a`。
+
+生产真实模型返回配音确认卡，确认后本地 eSpeak NG 1.51 生成普通话 WAV，11.03483 秒，FFmpeg 音量分析非静音（mean -20.5dB / peak -0.6dB）。试听可加载，确认后实际导入编辑器。随后模型返回5项待确认方案：两段剪辑、0.5秒转场、两条字幕、配音音轨；未勾选时应用按钮禁用。该方案保留给用户审核，没有覆盖原合成。
+
+Windows 正式候选使用隔离用户目录完成接管、刷新恢复、视频导入和集中会话撤销 UI 流程，1 passed（42.7秒）。原录制 Web 流程3项通过。所有输入改为马赛克，且抑制可能包含输入值的浏览器原生校验气泡。
+
+生产系统已安装本地基础语音引擎，服务端增量迁移与模块导入、API健康通过；前端候选 `M:/loomic-builds/recording-quality-20261108/full-web-eeyRym` 的3248个文件验证后原子发布。原视频与用户素材保留。
+
+跨站来源自动发现与允许流程通过受控双站真实Chromium验证。真实第三方 SSO、手机扫码仍需对应登录入口及用户完成身份验证；不能把受控测试记为真实 Google/微信账号验收。首次Linux CI发现拦截导航与下一次导航存在竞争，改成稳定的本地来源确认页，未允许前不向该来源发请求。
+
+最终生产任务 `e4b8d98b-7403-42e4-bb55-6084d849f009` succeeded，视频资产1、聊天结果1；配音请求 `a0187120-13bd-4944-af7d-70067633dd5e` succeeded。本站登录页自动观察结果没有外部登录链接。Windows 正式候选的接管、刷新、导入和会话撤销流程1项通过（42.7秒）。
+
+代码提交 `243a2c07` 的 [Agent Closure CI 42445344472](https://github.com/addxiaoyi/studio/actions/runs/42445344472) 已成功，验证了SSO导航竞争修复。最终隐私气泡补丁 `c4466a33` 对应CI另行记录。
+
+最终代码 `c4466a33` 的 [Agent Closure CI 42445516157](https://github.com/addxiaoyi/studio/actions/runs/42445516157) 全部成功，包含四包类型检查、真实PostgreSQL、Chromium录制与播放、马赛克、SSO来源门禁及Web工作区联合流程。
+
+[Desktop Candidate CI 42445516163](https://github.com/addxiaoyi/studio/actions/runs/42445516163) 全部成功：Windows 视频工具、Windows x64、macOS arm64、Linux x64 候选打包与启动检查。生产服务健康正常，本机Windows实际功能流程与CI构建分别保留证据。
+
+由于D盘已满，交付记录在M盘的隔离检出提交；D盘原工作区及未提交改动保持原状。机器可读验收为 `M:/loomic-builds/recording-quality-evidence/acceptance.json`。
