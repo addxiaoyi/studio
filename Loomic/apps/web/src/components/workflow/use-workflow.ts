@@ -101,13 +101,14 @@ export function useCanvasWorkflow(
     };
   }, [token, canvasId, initialId]);
   useEffect(() => {
-    if (!selected || !dirty) return;
+    if (!selected) return;
     try {
+      if(!dirty){if(!recovery)localStorage.removeItem(draftKey(selected.id));return;}
       localStorage.setItem(draftKey(selected.id), JSON.stringify(graph));
     } catch {
       setError("本机草稿写入失败，请保存到工作区后再关闭页面。");
     }
-  }, [graph, dirty, selected?.id, userId]);
+  }, [graph, dirty, selected?.id, userId, recovery]);
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
       if (dirty) {

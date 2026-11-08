@@ -26,6 +26,15 @@ afterEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
 });
+it("clears a stale local draft after undo returns to the saved workflow",async()=>{
+  api.listCanvasWorkflows.mockResolvedValue({workflows:[doc],executionEnabled:true});
+  const hook=renderHook(()=>useCanvasWorkflow("token",doc.canvasId,"user"));await waitFor(()=>expect(hook.result.current.selected).toBeTruthy());
+  act(()=>hook.result.current.edit({...doc.graph,title:"Temporary drag"}));
+  expect(localStorage.getItem(`loomic:workflow:user:${doc.id}`)).not.toBeNull();
+  act(()=>hook.result.current.undoEdit());
+  expect(hook.result.current.dirty).toBe(false);
+  expect(localStorage.getItem(`loomic:workflow:user:${doc.id}`)).toBeNull();
+});
 it("places new steps below occupied space and preserves ordered composition inputs",()=>{
   expect(nextNodePosition({x:0,y:0},[{x:390,y:0,width:300,height:184}],184)).toEqual({x:390,y:254});
   expect(workflowGraphKey(doc.graph)).not.toBe(workflowGraphKey({...doc.graph,edges:[...doc.graph.edges].reverse()}));
