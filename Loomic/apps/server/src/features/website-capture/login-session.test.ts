@@ -16,3 +16,7 @@ it("supports form encoding without forwarding a second login POST",()=>{
   expect(allowLoginRequest(request("https://site.example/login","POST",new URLSearchParams({password}).toString()),login)).toBe(true);
   expect(login.submissions).toBe(1);
 });
+it("does not mistake a short account name or admin path for leaked credentials",()=>{
+  expect(allowLoginRequest(request("https://site.example/admin/login","GET"),{...scope,username:"admin",submitting:false})).toBe(true);
+  expect(allowLoginRequest(request("https://site.example/login","GET"),{...scope,username:"l",submitting:false})).toBe(true);
+});

@@ -19,4 +19,12 @@
 
 本轮测试凭据只属于受控测试站点。用户尚未提供具体业务网站的专用测试账号，因此不将测试站点成功等同于任意第三方网站兼容。生产与桌面验收结果在发布后追加。
 
+## 发布与桌面验收
+
+2026-11-08，服务端增量迁移、模块导入检查和服务健康检查通过。Web 候选 `full-web-CwBTac` 叠加本轮 4 个界面文件，3248 个文件逐一验证哈希后原子切换，线上路由与 `/api/health` 正常。
+
+Windows 候选 `full-desktop-FFwE5y` 使用隔离用户目录连接本地测试服务，真实 Electron 完成凭据表单、录制审批、已登录录像播放、刷新恢复；测试 1 passed（44.9 秒），记录在 `website-login-desktop.log` 与 `presentation-desktop/`。未修改用户已有桌面配置。
+
+首帧遮挡在 DOM 解析期间生效，浏览录屏与多光标演示均通过 FFmpeg 完整解码。另补充短账号名及 `/admin/login` 路径回归，避免把站点路径误判为凭据泄露；凭据 URL 检查限定查询参数和片段。
+
 证据目录：`.creative-test-results/website-login/`；日志 `website-login-tests-final.log`、`website-login-db.log`、`website-login-web-e2e-final.log`、`website-login-mask.log`。

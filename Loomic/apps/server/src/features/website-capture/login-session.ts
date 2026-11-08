@@ -6,8 +6,8 @@ export function allowLoginRequest(request: Pick<Request, "url" | "method" | "pos
   const url = new URL(request.url());
   const sameOrigin = url.origin === scope.origin;
   const method = request.method().toUpperCase();
-  const decodedUrl = (() => { try { return decodeURIComponent(url.href); } catch { return url.href; } })();
-  if ([scope.username, scope.password].some(secret => secret && decodedUrl.includes(secret))) return false;
+  const urlValues=[...url.searchParams.values(),url.hash.slice(1)].filter(Boolean);
+  if(urlValues.some(value=>value===scope.username||value.includes(scope.password)))return false;
   if (method === "GET" || method === "HEAD") return !sameOrigin || !/logout|signout|delete|remove|purchase|checkout|payment|退出|删除|支付/i.test(url.pathname+url.search);
   if (!sameOrigin || !scope.submitting || method !== "POST" || (scope.submissions??0)>0) return false;
   const body = request.postData() ?? "";
