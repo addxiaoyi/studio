@@ -8,6 +8,7 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { AuthenticatedRecording } from "@/components/chat/authenticated-recording";
 import { GenerationApprovalCard, type GenerationApprovalCardProps } from "@/components/chat/generation-approval-card";
 import { workflowStepState } from "./step-state";
+import { WorkflowGenerationInputs } from "./generation-inputs";
 
 const statusLabels: Record<string, string> = {
   draft: "待确认",
@@ -166,7 +167,7 @@ export function WorkflowRunPanel({
               <p className="mt-2 text-destructive">{step.error}</p>
             )}
             {step.executor === "media.generate" && Boolean(step.output?.generationApproval) && <div className="mt-3"><GenerationApprovalCard {...step.output!.generationApproval as GenerationApprovalCardProps} onJobCreated={()=>void onRefresh()} /></div>}
-            {step.executor === "media.generate" && Boolean(step.output?.generationPreview) && <details className="mt-2"><summary>查看实际生成内容与参考素材</summary><p className="mt-2 whitespace-pre-wrap max-h-48 overflow-auto">{String((step.output!.generationPreview as {prompt?:string}).prompt ?? "")}</p><p className="mt-2 text-muted-foreground">参考图片 {(step.output!.generationPreview as {inputAssetIds?:string[]}).inputAssetIds?.length??0} 张 · 画幅 {String((step.output!.generationPreview as {aspectRatio?:string}).aspectRatio??"")}</p></details>}
+            {step.executor === "media.generate" && <WorkflowGenerationInputs preview={step.output?.generationPreview} token={token} />}
             {Boolean(step.output?.generationJob) && <p className="mt-2 text-muted-foreground">{String((step.output!.generationJob as {stage?:string}).stage || "生成任务处理中")} · {Number((step.output!.generationJob as {progress?:number}).progress)||0}%</p>}
             {Array.isArray(step.output?.shots) && <ol className="mt-3 space-y-2">{(step.output.shots as Array<{title:string;description:string;duration:number}>).map((shot,index)=><li key={index}><strong>镜头 {index+1} · {shot.title}</strong><p className="mt-1 text-muted-foreground">{shot.description}</p><span>{shot.duration}秒</span></li>)}</ol>}
             {step.state === "waiting_approval" && (
@@ -174,6 +175,8 @@ export function WorkflowRunPanel({
                 <p>
                   {step.command.executor === "web.capture"
                     ? `录制 ${step.command.url ?? "搜索结果网址"}，最多${step.command.pageLimit}页`
+                    : step.command.executor === "media.frame"
+                      ? `从已连接视频的第 ${step.command.at} 秒提取参考图，供后续模型使用`
                     : step.command.executor === "media.trim"
                       ? `剪辑已生成录像 ${step.command.start}–${step.command.end}秒，${step.command.aspect}画幅`
                       : step.title}

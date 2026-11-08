@@ -25,7 +25,9 @@ export function VideoActionsToolbar({ api, root, onAction }: { api: SceneApi | n
       const x = (video.x + (state.scrollX ?? 0)) * zoom;
       const y = (video.y + (state.scrollY ?? 0)) * zoom;
       if (x + video.width * zoom < 0 || x > bounds.width || y + video.height * zoom < 0 || y > bounds.height) { setTarget(null); return; }
-      const next = { id: video.id, left: Math.max(8, Math.min(x + 8, bounds.width - 250)), top: Math.max(64, Math.min(y + 8, bounds.height - 52)) };
+      // Keep hover actions outside the media so small videos can still be dragged.
+      const toolbarY = y >= 116 ? y - 48 : y + video.height * zoom + 8;
+      const next = { id: video.id, left: Math.max(8, Math.min(x + 8, bounds.width - 250)), top: Math.max(64, Math.min(toolbarY, bounds.height - 52)) };
       setTarget(prior => prior?.id === next.id && prior.left === next.left && prior.top === next.top ? prior : next);
     };
     const point = (event: PointerEvent) => {

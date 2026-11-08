@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 import type { WorkflowDocument, WorkflowGraph } from "@helstera/shared";
 import {focusCanvasContent,stopCanvasView} from "./viewport";
 import {
@@ -29,6 +29,7 @@ type Options = {
   locked: boolean;
   open: boolean;
   previews?: Record<string,NodePreview>;
+  suspendSync?: RefObject<boolean>;
   edit(graph: WorkflowGraph, checkpoint?: boolean): void;
   select(workflowId: string, nodeId: string): void;
   error(message: string): void;
@@ -118,7 +119,7 @@ export function useCanvasWorkflowScene(options: Options) {
     let lastSelection = "";
     const sync = () => {
       const { document, graph, locked, edit, error } = current.current;
-      if (!document || locked || projecting.current) return;
+      if (!document || locked || projecting.current || current.current.suspendSync?.current) return;
       const before = api.getSceneElementsIncludingDeleted();
       const scene = adoptWorkflowCopies(before, document.id);
       if (JSON.stringify(before) !== JSON.stringify(scene)) {

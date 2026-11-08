@@ -14,6 +14,7 @@ import { insertLocalImageElement } from "../canvas/canvas-element-writer.js";
 import { CreativeLibraryService } from "./library.js";
 import { workflowReferences } from "./references.js";
 import { workflowResults,reuseWorkflowResult } from "./results.js";
+import { assertWorkflowJobGenerationActive } from "./approval-access.js";
 
 const connectionString = process.env.HELT_TEST_DATABASE_URL;
 const schema = `canvas_flow_${randomUUID().replaceAll("-", "")}`;
@@ -338,5 +339,45 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
     await db.query("update generation_approvals set status='rejected' where id=$1",[quote.request.approvalId]);
     await new GoalStepWorker(db,async()=>{throw new StepCanceled("用户取消费用确认");}).tick();
     expect((await db.query("select status from agent_goals where id=$1",[run.goalId])).rows[0].status).toBe("canceled");
+  });
+  it("revalidates embedded references at fee confirmation without charging deleted or expired media", async () => {
+    const asset = randomUUID(), generated = randomUUID(), path = `workflow/${asset}.png`;
+    await db.query("insert into asset_objects(id,workspace_id,created_by,bucket,object_path,mime_type) values($1,$2,$3,'project-assets',$4,'image/png')", [asset,workspace,user,path]);
+    await db.query("insert into generated_assets(id,workspace_id,created_by,media_type,object_path,mime_type,retention_until) values($1,$2,$3,'image',$4,'image/png',now()+interval '1 day')", [generated,workspace,user,path]);
+    const element = { id: "billing-reference", type: "image", customData: { assetId: asset } };
+    await db.query("update canvases set content=$2::jsonb where id=$1", [canvas, JSON.stringify({elements:[element]})]);
+    const graph: WorkflowGraph = {title:"参考图费用确认",nodes:[
+      {id:"reference",title:"参考照片",position:{x:0,y:0},config:{kind:"asset",elementId:element.id,assetId:asset,mediaType:"image"}},
+      {id:"generate",title:"生成",position:{x:400,y:0},config:{kind:"generate",mediaType:"image",model:"chosen-model",prompt:"保持角色",aspectRatio:"16:9",duration:5,resolution:"720p"}},
+      {id:"deliver",title:"交付",position:{x:800,y:0},config:{kind:"deliver"}},
+    ],edges:[{id:"ref-gen",source:"reference",target:"generate"},{id:"gen-out",source:"generate",target:"deliver"}]};
+    const draft = await service.create(user,canvas,graph,randomUUID());
+    const run = await service.run(user,canvas,draft.id,1,randomUUID(),session);
+    const step = (await db.query("select id from agent_goal_steps where goal_id=$1 and step_id='generate'",[run.goalId])).rows[0].id;
+    await db.query("update agent_goal_steps set state='waiting_desktop' where id=$1",[step]);
+    const approvals=createGenerationApprovalService(db);
+    const quote=await approvals.gate({workspaceId:workspace,userId:user,jobType:"image_generation",model:"chosen-model",payload:{prompt:"保持角色",input_asset_ids:[asset],workflow_step_id:step},estimatedCredits:1,forceConfirmation:true,context:{canvasId:canvas,workflowGoalId:run.goalId,workflowStepId:step}});
+    if(quote.state!=="confirmation_required")throw new Error("Missing quote");
+    const request={approvalId:quote.request.approvalId,workspaceId:workspace,userId:user};
+    const before=(await db.query("select count(*)::int as n from credit_transactions")).rows[0].n;
+    await db.query("update canvases set content=$2::jsonb where id=$1",[canvas,JSON.stringify({elements:[{...element,isDeleted:true}]})]);
+    await expect(approvals.approve(request)).rejects.toThrow("已删除");
+    await db.query("update canvases set content=$2::jsonb where id=$1",[canvas,JSON.stringify({elements:[element]})]);
+    await db.query("update generated_assets set retention_until=now()-interval '1 second' where id=$1",[generated]);
+    await expect(approvals.approve(request)).rejects.toThrow("到期");
+    expect((await db.query("select status,job_id from generation_approvals where id=$1",[request.approvalId])).rows[0]).toMatchObject({status:"pending",job_id:null});
+    expect((await db.query("select count(*)::int as n from credit_transactions")).rows[0].n).toBe(before);
+    await db.query("update generated_assets set retention_until=now()+interval '1 day' where id=$1",[generated]);
+    expect((await approvals.approve(request)).parameters.input_asset_ids).toEqual([asset]);
+    const jobId=randomUUID();
+    await db.query("insert into background_jobs(id,workspace_id,canvas_id,created_by,queue_name,job_type,idempotency_key,payload,credits_cost) values($1,$2,$3,$4,'image_generation_jobs','image_generation',$5,$6::jsonb,1)",[jobId,workspace,canvas,user,`approval:${request.approvalId}`,JSON.stringify(quote.request.parameters)]);
+    const queued={jobId,stepId:step,workspaceId:workspace,userId:user};
+    await expect(assertWorkflowJobGenerationActive(db,queued)).rejects.toThrow("已消费费用确认");
+    await db.query("update background_jobs set credits_transaction_id=$2 where id=$1",[jobId,randomUUID()]);
+    await assertWorkflowJobGenerationActive(db,queued);
+    await assertWorkflowJobGenerationActive(db,queued);
+    expect((await approvals.approve(request)).jobId).toBe(jobId);
+    expect((await db.query("select count(*)::int as n from credit_transactions")).rows[0].n).toBe(before);
+    await db.query("update agent_goals set status='canceled' where id=$1",[run.goalId]);
   });
 });

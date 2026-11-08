@@ -330,7 +330,7 @@ export async function createPresentationFixture(
     await registerProjectRoutes(app, { auth, projectService: createLocalProjectService(db, root) });
     await configure?.({app,db,auth,viewerService,browser,storage,root,userId,workspaceId,canvasId,sessionId});
     await app.listen({ port: 3315, host: "127.0.0.1" });
-    return { app, db, root, sessionId, canvasId, userId, workspaceId, token, close };
+    return { app, db, root, storage, sessionId, canvasId, userId, workspaceId, token, close };
   } catch (error) {
     await close();
     throw error;

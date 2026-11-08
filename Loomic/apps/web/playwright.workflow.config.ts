@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "canvas-workflow.spec.ts",
+  testMatch: ["canvas-workflow.spec.ts", "workflow-materials.spec.ts"],
   workers: 1,
   timeout: 180000,
   outputDir: "../../.creative-test-results/workflow",

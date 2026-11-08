@@ -4,6 +4,8 @@ import {
   type WorkflowGraph,
   type WorkflowNode,
 } from "@helstera/shared";
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+import { workflowInputReferences, type WorkflowReference } from "./material-references";
 
 export type SceneElement = {
   id: string;
@@ -26,8 +28,12 @@ export type CanvasState = {
   height: number;
   zoom: { value: number };
   selectedElementIds: Record<string, boolean>;
+  offsetLeft?: number;
+  offsetTop?: number;
 };
 export type WorkflowCanvasApi = {
+  onPointerDown?: ExcalidrawImperativeAPI["onPointerDown"];
+  onPointerUp?: ExcalidrawImperativeAPI["onPointerUp"];
   getSceneElements(): readonly SceneElement[];
   getSceneElementsIncludingDeleted(): readonly SceneElement[];
   getAppState(): CanvasState;
@@ -56,6 +62,7 @@ type NodeBinding = {
   state: string;
   issue?: string;
   preview?: NodePreview;
+  references?: WorkflowReference[];
 };
 export type NodePreview = { text?: string; assetId?: string; mediaType?: "image" | "video" };
 export const NODE_WIDTH = 300,
@@ -78,6 +85,7 @@ export function workflowBinding(element: SceneElement): NodeBinding | null {
     state: typeof value.state === "string" ? value.state : "draft",
     ...(typeof value.issue === "string" ? { issue: value.issue } : {}),
     ...(value.preview ? {preview:value.preview} : {}),
+    ...(Array.isArray(value.references) ? { references: value.references } : {}),
   };
 }
 export function nodeElementId(workflowId: string, node: WorkflowNode) {
@@ -221,7 +229,8 @@ export function projectWorkflow(
     const boundAsset = node.config.kind === "asset" && Boolean(node.config.elementId);
     if (boundAsset && (!prior || prior.isDeleted)) continue;
     const body = prior ?? baseElement(id, "embeddable");
-    const snapshot = { workflowId, node:{...node,position:{...node.position},config:{...node.config}}, state: states[node.id] ?? "draft", ...(previews[node.id] ? {preview:previews[node.id]} : {}) };
+    const references = workflowInputReferences(graph, node.id, previews);
+    const snapshot = { workflowId, node:{...node,position:{...node.position},config:{...node.config}}, state: states[node.id] ?? "draft", references, ...(previews[node.id] ? {preview:previews[node.id]} : {}) };
     next.set(
       id,
       revise(prior, {
@@ -233,7 +242,7 @@ export function projectWorkflow(
           ? {
               link: "https://studio.0st.top/#workflow-node",
               width: Math.max(240, body.width),
-              height: Math.max(164, body.height),
+              height: Math.max(node.config.kind === "generate" ? 280 : 164, body.height),
               strokeColor: "transparent",
               roundness: null,
             }

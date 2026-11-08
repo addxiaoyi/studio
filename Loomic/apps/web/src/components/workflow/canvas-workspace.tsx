@@ -29,6 +29,8 @@ import {
   type CanvasWorkflowProps,
 } from "./use-workflow-controller";
 import "./workflow.css";
+import { WorkflowMaterialDropCue } from "./material-drop-cue";
+import { WorkflowReferenceEditor } from "./reference-media";
 export function WorkflowWorkspace(props: CanvasWorkflowProps) {
   const { token, api, open, onOpen, onClose } = props;
   const floating=useFloatingPanel(open);
@@ -62,9 +64,11 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
     refreshRun,
     selection,references,setReferences,attachReferences,askAi,openLibrary,libraryPrompt,applyPrompt,libraryMode,
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
+    materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
   } = useWorkflowController(props);
   return (
     <>
+      <WorkflowMaterialDropCue cue={materialDrop.cue} onComplete={materialDrop.clearCue} />
       {!open && flow.selected && (
         <button
           className="canvas-workflow-launch"
@@ -317,7 +321,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                   {materials.length ? `（${materials.length}）` : ""}
                 </Button>
                 <p>
-                  在画布选中已上传的图片或视频，再接入流程。也可画箭头把视频连到裁剪节点。
+                  图片、视频可直接拖入生成节点作为参考。也可选中素材后接入，或画箭头连接处理节点。
                 </p>
               </div>
               {selected && (
@@ -337,6 +341,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                   onPromptLibrary={()=>openLibrary(true)}
                   materials={materials}
                   onBindMaterial={bindSelectedMaterial}
+                  referenceEditor={<WorkflowReferenceEditor graph={flow.graph} node={selected} api={api} token={token} disabled={locked} previews={previews} onEmbed={embedMaterials} onRemove={removeReference} onFrame={setReferenceFrame} />}
                   onDisconnect={(id) =>
                     flow.edit({
                       ...flow.graph,

@@ -22,6 +22,8 @@ import {
 import { useCanvasWorkflowScene } from "./use-canvas-scene";
 import { workflowStepState } from "./step-state";
 import { useSceneContext, type CanvasReference } from "./use-scene-context";
+import { useWorkflowMaterialDrop } from "./use-material-drop";
+import { embedWorkflowMaterials, removeWorkflowReference } from "./material-inputs";
 export type CanvasWorkflowProps = {
   token: string;
   canvasId: string;
@@ -188,6 +190,18 @@ export function useWorkflowController({
     const asset = assets?.find(item=>typeof item.id==="string" && ["image","video"].includes(String(item.mediaType)));
     return [step.stepId,{...(typeof step.output?.text==="string"?{text:step.output.text.slice(0,300)}:{}),...(asset?{assetId:String(asset.id),mediaType:asset.mediaType as "image"|"video"}:{})}];
   })),[run.goal,currentRun]);
+  const materialDrop = useWorkflowMaterialDrop({ api, workflowId: flow.selected?.id, graph: flow.graph, locked, edit: flow.edit, select: id => { setSelectedId(id); setTab("nodes"); }, error: flow.setError });
+  const embedMaterials = (elementIds: string[]) => {
+    if (!api || !selected || locked) return;
+    try {
+      const elements = elementIds.map(id => api.getSceneElements().find(el => el.id === id));
+      if (elements.some(el => !el)) throw new Error("素材已删除，请重新选择。");
+      flow.edit(embedWorkflowMaterials(flow.graph, elements.filter(el => !!el), selected.id));
+      flow.setError("");
+    } catch (cause) { flow.setError(cause instanceof Error ? cause.message : "无法嵌入素材。"); }
+  };
+  const removeReference = (sourceId: string) => { if (selected && !locked) flow.edit(removeWorkflowReference(flow.graph, selected.id, sourceId)); };
+  const setReferenceFrame = (sourceId: string, at: number) => { if (!locked) flow.edit({ ...flow.graph, nodes: flow.graph.nodes.map(node => node.id === sourceId && node.config.kind === "frame" ? { ...node, config: { ...node.config, at } } : node) }); };
   const scene = useCanvasWorkflowScene({
     api,
     document: flow.selected,
@@ -199,6 +213,7 @@ export function useWorkflowController({
     edit: flow.edit,
     select: selectNode,
     error: flow.setError,
+    suspendSync: materialDrop.dragging,
   });
   const materialSignature = useRef("");
   useEffect(() => {
@@ -401,5 +416,6 @@ export function useWorkflowController({
     refreshRun,
     selection,references,setReferences,attachReferences,askAi,openLibrary,libraryPrompt,applyPrompt,libraryMode,
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
+    materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
   };
 }

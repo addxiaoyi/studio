@@ -1,4 +1,5 @@
 "use client";
+import type { ReactNode } from "react";
 import {
   WORKFLOW_LABELS,
   connectionIssue,
@@ -8,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { StyledSelect } from "@/components/ui/styled-select";
 import { CreativeInspector } from "./creative-inspector";
+import { workflowInputReferences } from "./material-references";
 type Props = {
   node: WorkflowNode;
   graph: WorkflowGraph;
@@ -20,6 +22,7 @@ type Props = {
   onPromptLibrary?: (()=>void)|undefined;
   materials?: WorkflowNode[]|undefined;
   onBindMaterial?: (()=>void)|undefined;
+  referenceEditor?: ReactNode;
 };
 export function NodeInspector({
   node,
@@ -30,7 +33,7 @@ export function NodeInspector({
   onDisconnect,
   onDelete,
   onReorder,
-  onPromptLibrary,materials=[],onBindMaterial,
+  onPromptLibrary,materials=[],onBindMaterial,referenceEditor,
 }: Props) {
   const config = node.config;
   const field = "workflow-field";
@@ -75,7 +78,8 @@ export function NodeInspector({
           />
         </label>
       )}
-      <CreativeInspector node={node} disabled={disabled} onChange={onChange} />
+      <CreativeInspector node={node} disabled={disabled} onChange={onChange} referenceCount={workflowInputReferences(graph,node.id).length} />
+      {referenceEditor}
       {["text","write","generate"].includes(config.kind)&&onPromptLibrary&&<Button size="sm" variant="outline" disabled={disabled} onClick={onPromptLibrary}>提示词库 · 保存与套用</Button>}
       {config.kind === "search" && (
         <label>

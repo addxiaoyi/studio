@@ -10,6 +10,7 @@ import { decodeVideoDataUri, readVideoBody, resolveVideoMimeType } from "./video
 import type { GeneratedVideo } from "../../../generation/types.js";
 import { getModelCallProfile } from "../../../local-db/model-call-profiles.js";
 import { assertConnectorEnabled } from "../../agent-goals/connector-gate.js";
+import { assertWorkflowJobGenerationActive } from "../../canvas-workflows/approval-access.js";
 
 const VIDEO_DOWNLOAD_TIMEOUT_MS = 60_000;
 const MIN_MINIMAX_FRAME_EDGE = 300;
@@ -73,6 +74,7 @@ registerExecutor("video_generation", async (jobId, _rawPayload, ctx: ExecutorCon
     input_images?: string[];
     input_asset_ids?: string[];
     input_video?: string;
+    workflow_step_id?: string;
     enable_audio?: boolean;
     routing?: Record<string, unknown>;
   };
@@ -170,6 +172,7 @@ registerExecutor("video_generation", async (jobId, _rawPayload, ctx: ExecutorCon
       : null;
     if (!generated) {
     if (ctx.localDb) await assertConnectorEnabled(ctx.localDb, workspaceId, createdBy!, "media-generation");
+    if (ctx.localDb && payload.workflow_step_id) await assertWorkflowJobGenerationActive(ctx.localDb, {jobId,stepId:payload.workflow_step_id,workspaceId,userId:createdBy!});
     const configuredVideo = ctx.localDb
       ? await generateConfiguredVideo(ctx.localDb, model, {
           prompt: payload.prompt,

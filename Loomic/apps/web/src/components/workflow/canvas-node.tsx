@@ -14,6 +14,7 @@ import { workflowBinding, type SceneElement } from "./scene";
 import { AuthenticatedRecording } from "@/components/chat/authenticated-recording";
 import {MarkdownRenderer} from "@/components/chat/markdown-renderer";
 import "./workflow.css";
+import { WorkflowReferenceThumb } from "./reference-media";
 
 export const workflowStateLabel: Record<string, string> = {
   draft: "草稿",
@@ -63,6 +64,7 @@ export function WorkflowCanvasNode({ element, accessToken }: { element: SceneEle
     <article
       className="canvas-workflow-node"
       data-state={state}
+      data-workflow-node={node.id}
       aria-label={`${node.title}，${workflowStateLabel[state] ?? state}`}
     >
       <header>
@@ -75,6 +77,9 @@ export function WorkflowCanvasNode({ element, accessToken }: { element: SceneEle
         </div>
       </header>
       {binding.preview?.assetId && binding.preview.mediaType ? <div className="workflow-node-preview"><AuthenticatedRecording assetId={binding.preview.assetId} accessToken={accessToken} kind={binding.preview.mediaType} label={node.title} /></div> : binding.preview?.text ? <div className="workflow-node-text"><MarkdownRenderer text={binding.preview.text}/></div> : <p>{detail}</p>}
+      {config.kind === "generate" && <div className="workflow-reference-strip" aria-label="嵌入的参考素材">
+        {binding.references?.length ? <><small>参考素材 · {binding.references.length}</small><div>{binding.references.map(reference => <figure key={reference.sourceId}><WorkflowReferenceThumb reference={reference} token={accessToken} /><figcaption>{reference.frameAt !== undefined ? `${reference.frameAt}s 参考帧` : reference.title}</figcaption></figure>)}</div></> : <span><ImageIcon size={16} /> 拖入图片 / 视频作为参考</span>}
+      </div>}
       <footer>
         <span className="workflow-state-dot" />
         <span>{workflowStateLabel[state] ?? state}</span>

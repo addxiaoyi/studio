@@ -13,10 +13,12 @@ export function CreativeInspector({
   node,
   disabled,
   onChange,
+  referenceCount = 0,
 }: {
   node: WorkflowNode;
   disabled: boolean;
   onChange(node: WorkflowNode): void;
+  referenceCount?: number;
 }) {
   const config = node.config;
   const [models, setModels] = useState<Array<ImageModelInfo | VideoModelInfo>>(
@@ -234,6 +236,8 @@ export function CreativeInspector({
     );
   if (config.kind !== "generate") return null;
   const chosen = models.find((model) => model.id === config.model);
+  const supportsReferences = (model: ImageModelInfo | VideoModelInfo) => config.mediaType === "image" ? (model.capabilities as ImageModelInfo["capabilities"])?.imageToImage !== false : model.capabilities?.imageToVideo !== false;
+  const compatibleModels = referenceCount ? models.filter(supportsReferences) : models;
   return (
     <>
       <label>
@@ -266,7 +270,7 @@ export function CreativeInspector({
           disabled={disabled || loading}
           options={[
             { value: "", label: loading ? "正在加载模型…" : "选择本站模型" },
-            ...models.map((model) => ({
+            ...compatibleModels.map((model) => ({
               value: model.id,
               label: model.displayName || model.id,
             })),
@@ -276,6 +280,8 @@ export function CreativeInspector({
           }
         />
       </label>
+      {chosen && referenceCount > 0 && !supportsReferences(chosen) && <p role="alert" className="text-xs text-destructive">当前模型不支持参考图片，请更换模型后运行；不会忽略已嵌入的素材。</p>}
+      {!loading && !error && referenceCount > 0 && !compatibleModels.length && <p role="alert" className="text-xs text-destructive">暂无支持参考图的模型，请配置支持图生图或图生视频的模型。</p>}
       {error && (
         <p role="alert" className="text-xs text-destructive">
           模型目录读取失败。
@@ -375,7 +381,7 @@ export function CreativeInspector({
       )}
       <p className="text-xs text-muted-foreground">
         {chosen ? `已选 ${chosen.displayName}。` : "请选择模型。"}
-        运行到此节点时展示实际报价，逐次确认后才生成。上游图片用作参考素材。
+        {chosen?.creditCost != null ? `目录参考价 ${chosen.creditCost} 积分；` : ""}运行到此节点时按实际素材、模型与参数报价，逐次确认后才生成。
       </p>
     </>
   );

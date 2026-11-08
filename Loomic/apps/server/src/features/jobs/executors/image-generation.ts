@@ -12,6 +12,7 @@ import { createProviderAssetUrl } from "../../uploads/provider-asset-url.js";
 import { isRemovedImageModelId } from "../../../generation/removed-models.js";
 import type { GeneratedImage } from "../../../generation/types.js";
 import { assertConnectorEnabled } from "../../agent-goals/connector-gate.js";
+import { assertWorkflowJobGenerationActive } from "../../canvas-workflows/approval-access.js";
 
 registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorContext) => {
   const t0 = Date.now();
@@ -47,6 +48,7 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
     input_images?: string[];
     purpose?: "try-on";
     routing?: Record<string, unknown>;
+    workflow_step_id?: string;
   };
 
   if (!payload.prompt) throw new Error(`Job ${jobId} has no prompt in payload`);
@@ -71,6 +73,7 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
     ? await resolveConfiguredModel(ctx.localDb, "image", requestedModel, {
         requiresInputImage: Boolean(inputImages?.length),
         allowUnverified: isManualSelection,
+        strictRequested: isManualSelection,
         excludeModelIds: [
           "nano-banana-2-1k",
           "nano-banana-2-2k",
@@ -108,6 +111,7 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
       if (generated) lap("provider_checkpoint_restored");
       else {
       if (ctx.localDb) await assertConnectorEnabled(ctx.localDb, workspaceId, createdBy!, "media-generation");
+      if (ctx.localDb && payload.workflow_step_id) await assertWorkflowJobGenerationActive(ctx.localDb, {jobId,stepId:payload.workflow_step_id,workspaceId,userId:createdBy!});
       generated = ctx.localDb
         ? await generateConfiguredImage(ctx.localDb, model, {
             prompt: payload.prompt,

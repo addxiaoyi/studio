@@ -14,6 +14,7 @@ import {
   type StepExecution,
 } from "../agent-goals/goal-step-worker.js";
 import { createLocalCostGuard } from "../credits/tier-guard.js";
+import { assertWorkflowReferenceAssets } from "./reference-access.js";
 
 type Generate = Extract<GoalCommand, { executor: "media.generate" }>;
 export async function executeWorkflowGeneration(
@@ -109,9 +110,13 @@ export async function executeWorkflowGeneration(
       ...step.output,
       generationPending: "正在创建已确认任务",
     });
-  const sources = command.sources.map(
-    (id) => previous.find((item) => item.step_id === id)?.output,
-  );
+  const sources = command.sources.map(id => {
+    const source = previous.find(item => item.step_id === id)?.output;
+    if (!source) throw new Error("上游参考资料缺少完成回执，生成已停止。");
+    if (Array.isArray(source.assets) && source.assets.some((asset: { mediaType?: unknown }) => asset.mediaType === "video"))
+      throw new Error("视频参考需要先连接抽帧节点，不能忽略视频直接生成。");
+    return source;
+  });
   const text = sources
     .map((source) => (typeof source?.text === "string" ? source.text : ""))
     .filter(Boolean)
@@ -131,6 +136,7 @@ export async function executeWorkflowGeneration(
     ),
   ];
   if (imageIds.length > 6) throw new Error("当前生成节点最多接入6张参考图片。");
+  await assertWorkflowReferenceAssets(db, { workspaceId: goal.workspace_id, userId: goal.created_by }, imageIds);
   const model = await resolveConfiguredModel(
     db,
     command.mediaType,
@@ -169,6 +175,7 @@ export async function executeWorkflowGeneration(
       enableAudio: false,
       requestedModel: model.model_id,
       selectionMode: "manual",
+      ...(command.mediaType === "video" ? { durationSeconds: command.duration, resolution: command.resolution } : {}),
     },
     selected: model,
     candidates: [model.model_id],
@@ -189,6 +196,7 @@ export async function executeWorkflowGeneration(
         }
       : {}),
   };
+  await input.assertActive();
   const gate = await createGenerationApprovalService(db).gate({
     workspaceId: goal.workspace_id,
     userId: goal.created_by,
