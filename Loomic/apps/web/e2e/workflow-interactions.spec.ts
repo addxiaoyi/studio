@@ -202,14 +202,20 @@ test("nodes support direct ports, stable dragging, visible settings and save-bef
     await expect(dock.getByRole("textbox",{name:"搜索主题"})).toHaveCount(0);
     if(await dock.getByRole("button",{name:"保存草稿",exact:true}).isVisible())await dock.getByRole("button",{name:"保存草稿",exact:true}).click();
     await dock.getByRole("button",{name:"新建流程",exact:true}).click();
-    await expect(dock.getByRole("textbox",{name:"流程名称"})).toHaveValue("网站研究与截图");
-    await dock.getByRole("textbox",{name:"流程名称"}).fill("保留我的草稿");
+    await expect(dock.getByRole("combobox",{name:"选择工作流"})).toContainText("网站研究与截图");
+    await dock.getByRole("button",{name:"重命名流程",exact:true}).click();
+    const rename=page.getByRole("dialog",{name:"重命名流程",exact:true});
+    await expect(rename.getByRole("textbox",{name:"流程名称"})).toHaveValue("网站研究与截图");
+    await rename.getByRole("textbox",{name:"流程名称"}).fill("保留我的草稿");
+    await rename.getByRole("button",{name:"完成",exact:true}).click();
     await dock.getByRole("combobox",{name:"选择工作流"}).click();await page.getByRole("option",{name:"节点交互验收",exact:true}).click();
     await expect(page.getByRole("dialog",{name:"切换前保留当前修改"})).toBeVisible();
     await page.getByRole("button",{name:"保留本机草稿并切换"}).click();
     await dock.getByRole("combobox",{name:"选择工作流"}).click();await page.getByRole("option",{name:"网站研究与截图",exact:true}).click();
     await expect(dock).toContainText("本机有尚未保存的草稿");await dock.getByRole("button",{name:"恢复草稿",exact:true}).click();
-    await expect(dock.getByRole("textbox",{name:"流程名称"})).toHaveValue("保留我的草稿");
+    await dock.getByRole("button",{name:"重命名流程",exact:true}).click();
+    await expect(rename.getByRole("textbox",{name:"流程名称"})).toHaveValue("保留我的草稿");
+    await rename.getByRole("button",{name:"取消",exact:true}).click();
     await dock.getByRole("button",{name:"保存草稿",exact:true}).click();await expect(dock.getByRole("button",{name:"已保存",exact:true})).toBeDisabled();
     expect((await fixture.db.query("select count(*)::int as n from agent_goals")).rows[0].n).toBe(0);
   } catch (cause) {

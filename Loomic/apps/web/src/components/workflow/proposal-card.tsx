@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { ChevronDown, Check, Clock3 } from "lucide-react";
 import {
   workflowChanges,
   WORKFLOW_ACTION_LABELS,
@@ -109,10 +110,11 @@ export function WorkflowProposalCard({
     changes = workflowChanges(proposal.before, proposal.graph),
     issues = proposal.graph ? validateWorkflow(proposal.graph) : [];
   return (
-    <section className="workflow-proposal" aria-label="AI 工作流操作">
+    <section className="workflow-proposal" data-status={proposal.status === "pending" && expired ? "expired" : proposal.status} aria-label="AI 工作流操作">
       <header>
         <strong>{WORKFLOW_ACTION_LABELS[proposal.action]}</strong>
         <span>
+          {proposal.status === "applied" ? <Check size={12} aria-hidden /> : proposal.status === "pending" ? <Clock3 size={12} aria-hidden /> : null}
           {proposal.status === "applied"
             ? proposal.action === "inspect"
               ? "已读取"
@@ -124,10 +126,12 @@ export function WorkflowProposalCard({
                 : "等待确认"}
         </span>
       </header>
-      <MarkdownRenderer text={proposal.summary} />
       {proposal.graph && (
         <strong className="text-xs">{proposal.graph.title}</strong>
       )}
+      <details className="workflow-proposal-details" open={proposal.status === "pending" || proposal.action === "inspect"}>
+      <summary><span>{changes.length ? `${changes.length} 项修改` : "操作说明"}</span><ChevronDown size={14} aria-hidden /></summary>
+      <div className="workflow-proposal-summary"><MarkdownRenderer text={proposal.summary} /></div>
       {proposal.revision !== null && (
         <p className="workflow-proposal-version">
           基于第 {proposal.revision} 版
@@ -213,6 +217,7 @@ export function WorkflowProposalCard({
             : "确认仅作用于这次流程及运行；生成费用和录制动作仍需逐项确认。"}
         </p>
       )}
+      </details>
       {error && (
         <p role="alert" className="text-xs text-destructive">
           {error}

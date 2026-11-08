@@ -13,8 +13,9 @@ import {
   ArrowUpRight,
   ImagePlus,
   ChevronLeft,
+  Pencil,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { WORKFLOW_LABELS, creativeWorkflow } from "@helstera/shared";
 import { Button } from "@/components/ui/button";
 import { StyledSelect } from "@/components/ui/styled-select";
@@ -36,10 +37,13 @@ import { WorkflowReferenceEditor } from "./reference-media";
 import { WorkflowCanvasLayer } from "./canvas-layer";
 import { WorkflowNodePicker } from "./node-picker";
 import {WorkflowAssistantChat} from "./assistant-chat";
+import { WorkflowRenameDialog } from "./rename-dialog";
+import "./surface.css";
 import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogFooter } from "@/components/ui/dialog";
 export function WorkflowWorkspace(props: CanvasWorkflowProps) {
   const { token, api, open, onOpen, onClose } = props;
   const floating=useFloatingPanel(open);
+  const [renaming, setRenaming] = useState(false);
   const {
     flow,
     run,
@@ -82,6 +86,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
       <WorkflowCanvasLayer api={api} token={token} workflowId={flow.selected?.id} graph={flow.graph} disabled={locked} onEdit={editNode} onAsk={askNode} onConnect={connect} onDisconnect={disconnect} onAdd={setAddingAfter} onError={flow.setError}/>
       <WorkflowNodePicker open={addingAfter!==null} onClose={()=>setAddingAfter(null)} onAdd={addNode} disabled={locked} anchor={flow.graph.nodes.find(node=>node.id===addingAfter)?.title}/>
       <WorkflowMaterialDropCue cue={materialDrop.cue} onComplete={materialDrop.clearCue} />
+      {renaming && <WorkflowRenameDialog title={flow.graph.title} close={()=>setRenaming(false)} rename={title=>flow.edit({...flow.graph,title})} />}
       {!open && flow.selected && (
         <button
           className="canvas-workflow-launch"
@@ -95,6 +100,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
       )}
       <section
         className="workflow-dock"
+        data-workflow-surface
         aria-label="可视化工作流"
         hidden={!floating.present}
         aria-hidden={!open}
@@ -107,7 +113,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
               <GitBranch size={18} />
               画布流程
             </h2>
-            <p>素材与节点，同一张画布</p>
+            <p>{flow.selected ? `${flow.graph.nodes.length} 个节点 · ${flow.graph.edges.length} 条连线` : "从一个想法开始"}</p>
           </div>
           <Button
             size="icon"
@@ -128,7 +134,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                 { value: "", label: "选择流程" },
                 ...flow.documents.map((doc) => ({
                   value: doc.id,
-                  label: doc.graph.title,
+                  label: doc.id === flow.selected?.id ? flow.graph.title : doc.graph.title,
                 })),
               ]}
               onChange={(id) => {
@@ -178,18 +184,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
         )}
         {flow.selected && (
           <div className="workflow-project-bar">
-            <input
-              aria-label="流程名称"
-              value={flow.graph.title}
-              disabled={locked}
-              maxLength={120}
-              onChange={(event) =>
-                flow.edit({
-                  ...flow.graph,
-                  title: event.target.value || "未命名流程",
-                })
-              }
-            />
+            <Button size="sm" variant="ghost" disabled={locked} onClick={()=>setRenaming(true)} aria-label="重命名流程"><Pencil size={13}/>重命名</Button>
             <div className="flex gap-1">
               <Button
                 size="icon"
@@ -301,6 +296,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                       <li key={node.id}>
                         <button
                           aria-pressed={selectedId === node.id}
+                          aria-label={`${WORKFLOW_LABELS[node.config.kind]} ${node.title} ${workflowStateLabel[states[node.id] ?? "draft"]}`}
                           onClick={() => {
                             if(flow.selected){editNode(flow.selected.id,node.id);requestAnimationFrame(revealInspector);}
                           }}
@@ -453,7 +449,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                   ? "流程正在执行"
                   : run.goal?.status === "completed"
                     ? "最近运行已完成"
-                    : flow.notice || "节点与普通素材可共同编辑"}
+                    : flow.notice || (flow.selected ? "所有更改已保存" : "选择流程开始创作")}
           </span>
           <Button
             size="sm"

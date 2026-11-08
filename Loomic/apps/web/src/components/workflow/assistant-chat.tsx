@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowUp, Sparkles, ShieldCheck } from "lucide-react";
 import type { WorkflowProposal } from "@helstera/shared";
 import {
   askWorkflowAssistant,
@@ -105,7 +106,7 @@ export function WorkflowAssistantChat({
   return (
     <section className="workflow-assistant" aria-label="工作流 AI 对话">
       <header>
-        <h3>和 AI 一起搭建与操控</h3>
+        <h3><Sparkles size={16} aria-hidden />和 AI 一起搭建</h3>
         <p>
           {workflowId
             ? "正在操作当前流程，可指定选中节点。"
@@ -130,18 +131,19 @@ export function WorkflowAssistantChat({
       <div className="workflow-assistant-history">
         {messages.map((message) => (
           <div key={message.id}>
-            <p className="workflow-user-request">{message.prompt}</p>
+            <div className="workflow-user-message"><small>你的要求</small><p className="workflow-user-request">{message.prompt}</p></div>
             <WorkflowProposalCard
               canvasId={canvasId}
               id={message.id}
               initial={message}
-              onApplied={onApplied}
+              onApplied={applied => {setMessages(items=>items.map(item=>item.id===applied.id?applied:item));onApplied(applied);}}
             />
           </div>
         ))}
       </div>
       <form className="workflow-assistant-compose" onSubmit={submit}>
         {children}
+        <div className="workflow-compose-field">
         <label htmlFor="workflow-ai-request">让 AI 帮你搭建</label>
         <textarea
           id="workflow-ai-request"
@@ -149,17 +151,16 @@ export function WorkflowAssistantChat({
           disabled={busy}
           onChange={(event) => setPrompt(event.target.value)}
           placeholder="例如：把选中节点改成录制，再连接一个 5 秒裁剪节点"
-          rows={4}
+          rows={3}
         />
-        <p>方案先预览确认；运行、生成费用与录制仍逐项确认。</p>
+        <div className="workflow-compose-actions"><span><ShieldCheck size={13} aria-hidden />先确认，再执行</span><Button type="submit" aria-label={busy ? "AI 正在检查流程…" : "发送给 AI"} disabled={busy || !prompt.trim()}><ArrowUp size={16} aria-hidden /><span>{busy ? "思考中…" : "发送"}</span></Button></div>
+        </div>
+        <p className="workflow-compose-note">运行、生成费用与录制仍需逐项确认。</p>
         {error && (
           <p role="alert" className="text-destructive">
             {error}
           </p>
         )}
-        <Button type="submit" disabled={busy || !prompt.trim()}>
-          {busy ? "AI 正在检查流程…" : "发送给 AI"}
-        </Button>
       </form>
     </section>
   );

@@ -156,8 +156,46 @@
   gap: 7px;
   flex-wrap: wrap;
 }
+.workflow-assistant { padding: 16px; gap: 20px; }
+.workflow-assistant > header h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; letter-spacing: -.015em; }
+.workflow-assistant > header h3 svg { color: var(--primary); }
+.workflow-assistant > header p { margin-top: 7px; }
+.workflow-assistant-examples { gap: 0; padding: 3px 0; border-block: 1px solid var(--border); }
+.workflow-assistant-examples button { border: 0; border-radius: 6px; padding: 10px 8px; font-size: 12px; }
+.workflow-user-message { margin: 0 0 14px 16px; }
+.workflow-user-message > small { display: block; margin-bottom: 7px; font-size: 10px; text-align: right; color: var(--muted-foreground); }
+.workflow-user-request { border-radius: 11px 3px 11px 11px; padding: 12px 13px; background: color-mix(in srgb, var(--primary) 5%, var(--card)); border: 1px solid color-mix(in srgb, var(--primary) 8%, transparent); color: var(--foreground); }
+.workflow-proposal { border-color: color-mix(in srgb, var(--foreground) 11%, transparent); background: var(--card); border-radius: 12px; padding: 14px; gap: 12px; box-shadow: 0 2px 7px #00000003; }
+.workflow-proposal > header strong { font-size: 12px; font-weight: 650; }
+.workflow-proposal > header > span { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 5px; background: var(--muted); white-space: nowrap; }
+.workflow-proposal[data-status=applied] > header > span { color: var(--success); background: color-mix(in srgb, var(--success) 7%, var(--card)); }
+.workflow-proposal[data-status=pending] > header > span { color: var(--primary); background: color-mix(in srgb, var(--primary) 7%, var(--card)); }
+.workflow-proposal-details > summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 30px; list-style: none; color: var(--muted-foreground); font-size: 11px; cursor: pointer; }
+.workflow-proposal-details > summary::-webkit-details-marker { display: none; }
+.workflow-proposal-details[open] > summary svg { transform: rotate(180deg); }
+.workflow-proposal-details > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 3px; }
+.workflow-proposal-details > :not(summary) { margin-top: 12px; }
+.workflow-proposal-summary .markdown-content { line-height: 1.75; }
+.workflow-proposal[data-status=applied] { box-shadow: none; }
+.workflow-change-list { gap: 0; max-height: 240px; border-left: 1px solid var(--border); margin-left: 4px; }
+.workflow-change-list li { padding: 7px 9px; border-radius: 0; background: transparent; gap: 7px; }
+.workflow-change-list li + li { border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent); }
+.workflow-change-list li > span { font-size: 12px; }
+.workflow-change-list strong { font-weight: 500; font-size: 11px; }
+.workflow-proposal > button { align-self: flex-start; min-height: 28px; height: auto; padding: 3px 0; border: 0; box-shadow: none; color: var(--muted-foreground); font-size: 11px; background: transparent; }
+.workflow-assistant-compose { padding-top: 16px; border-top: 1px solid var(--border); }
+.workflow-compose-field { padding: 12px; border: 1px solid color-mix(in srgb, var(--foreground) 17%, transparent); border-radius: 12px; background: var(--card); box-shadow: 0 3px 12px #00000003; }
+.workflow-compose-field:focus-within { border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 8%, transparent); }
+.workflow-assistant-compose .workflow-compose-field label { font-size: 11px; margin-bottom: 7px; }
+.workflow-assistant-compose .workflow-compose-field textarea { padding: 0; background: transparent; min-height: 76px; border: 0; border-radius: 0; font-size: 13px; outline: none; box-shadow: none; line-height: 1.7; resize: vertical; }
+.workflow-compose-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; }
+.workflow-compose-actions > span { display: flex; gap: 4px; align-items: center; color: var(--muted-foreground); font-size: 10px; }
+.workflow-compose-actions > button { gap: 3px; min-height: 30px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 11px; }
+.workflow-assistant-compose .workflow-compose-note { font-size: 10px; line-height: 1.6; margin-top: 8px; }
+.workflow-assistant .workflow-ai-references { gap: 4px; margin-bottom: 10px; }
+.workflow-assistant .workflow-ai-references > button { min-height: 26px; height: auto; padding: 3px 7px; border-radius: 6px; font-size: 10px; }
 @media (max-width: 760px) {
-  .workflow-assistant-compose textarea {
+  .workflow-assistant-compose .workflow-compose-field textarea {
     font-size: 16px;
   }
 }

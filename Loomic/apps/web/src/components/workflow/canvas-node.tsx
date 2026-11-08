@@ -36,7 +36,7 @@ const icons = {
   deliver: PackageCheck,
   asset: ImageIcon,
 };
-export function WorkflowCanvasNode({ element, accessToken, selected = false, connecting = false, issue }: { element: SceneElement; accessToken: string; selected?:boolean; connecting?:boolean; issue?:string|undefined }) {
+export function WorkflowCanvasNode({ element, accessToken, selected = false, connecting = false, issue, outputs }: { element: SceneElement; accessToken: string; selected?:boolean; connecting?:boolean; issue?:string|undefined; outputs?:number|undefined }) {
   const binding = workflowBinding(element);
   if (!binding) return null;
   const { node, state } = binding,
@@ -64,6 +64,8 @@ export function WorkflowCanvasNode({ element, accessToken, selected = false, con
     <article
       className="canvas-workflow-node"
       data-state={state}
+      data-kind={config.kind}
+      data-has-issue={Boolean(issue)}
       data-selected={selected}
       data-connectable={connecting}
       data-workflow-node={node.id}
@@ -83,10 +85,9 @@ export function WorkflowCanvasNode({ element, accessToken, selected = false, con
         {binding.references?.length ? <><small>参考素材 · {binding.references.length}</small><div>{binding.references.map(reference => <figure key={reference.sourceId}><WorkflowReferenceThumb reference={reference} token={accessToken} /><figcaption>{reference.frameAt !== undefined ? `${reference.frameAt}s 参考帧` : reference.title}</figcaption></figure>)}</div></> : <span><ImageIcon size={16} /> 拖入图片 / 视频作为参考</span>}
       </div>}
       <footer>
-        <span className="workflow-state-dot" />
-        <span title={issue}>{issue?"需要完善":workflowStateLabel[state] ?? state}</span>
+        <span className="workflow-node-status" title={issue}><span className="workflow-state-dot" />{issue?"需要完善":workflowStateLabel[state] ?? state}</span>
         <span className="ml-auto flex items-center gap-1">
-          {config.kind === "deliver" ? "交付" : "连接下一步"}
+          {config.kind === "deliver" ? "交付到画布" : outputs ? `${outputs} 个后续步骤` : "连接下一步"}
           <ArrowRight size={13} />
         </span>
       </footer>

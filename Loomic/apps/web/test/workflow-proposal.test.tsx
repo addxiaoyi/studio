@@ -80,3 +80,15 @@ it("keeps expired plans readable while disabling execution", async () => {
   expect(screen.getByRole("button", { name: "应用到画布" })).toBeDisabled();
   expect(requests.decideWorkflowProposal).not.toHaveBeenCalled();
 });
+it("collapses applied changes without hiding the receipt or workflow entry", async () => {
+  const applied:WorkflowProposal={...proposal,status:"applied",result:{workflowId:"workflow"}};
+  requests.getWorkflowProposal.mockResolvedValue(applied);
+  const {container}=render(<WorkflowProposalCard canvasId={applied.canvasId} id={applied.id} initial={applied}/>);
+  await waitFor(()=>expect(screen.getByText("已应用")).toBeVisible());
+  const details=container.querySelector<HTMLDetailsElement>(".workflow-proposal-details")!;
+  expect(details.open).toBe(false);
+  expect(screen.queryByRole("button",{name:"应用到画布"})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button",{name:"查看画布流程"}));
+  expect(requests.openCanvasWorkflow).toHaveBeenCalledWith("workflow");
+  expect(requests.decideWorkflowProposal).not.toHaveBeenCalled();
+});

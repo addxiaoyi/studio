@@ -139,6 +139,20 @@ test("conversational AI previews edits, persists decisions, and controls the sam
     await page.screenshot({
       path: info.outputPath("workflow-ai-conversation.png"),
     });
+    await page.evaluate(()=>localStorage.setItem("theme","dark"));
+    await page.reload();
+    await page.getByRole("button",{name:"打开可视化工作流",exact:true}).click();
+    await dock.getByRole("button",{name:"AI 搭建",exact:true}).click();
+    await expect(page.locator("html")).toHaveClass(/dark/);
+    await expect(dock.getByRole("region",{name:"AI 工作流操作"})).toHaveCount(4);
+    await page.screenshot({path:info.outputPath("workflow-dark.png")});
+    await page.setViewportSize({width:760,height:900});
+    const closeChat=page.getByRole("button",{name:"关闭 AI 对话面板",exact:true});
+    if(await closeChat.isVisible())await closeChat.click();
+    await dock.getByRole("textbox",{name:"让 AI 帮你搭建"}).focus();
+    await expect(dock.getByRole("textbox",{name:"让 AI 帮你搭建"})).toBeInViewport();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.screenshot({path:info.outputPath("workflow-dark-narrow.png")});
   } finally {
     await desktop?.close();
     await fixture.close();

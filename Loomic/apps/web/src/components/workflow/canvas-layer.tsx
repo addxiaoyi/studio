@@ -109,6 +109,7 @@ export function WorkflowCanvasLayer(props: Props) {
                 key={el.id}
                 d={path}
                 className="workflow-wire-hit"
+                data-active={Boolean(state.selectedElementIds[el.id] || state.selectedElementIds[el.startBinding?.elementId ?? ""] || state.selectedElementIds[el.endBinding?.elementId ?? ""])}
                 style={{
                   pointerEvents:
                     state.activeTool?.type === "selection" ? "stroke" : "none",
@@ -194,6 +195,7 @@ export function WorkflowCanvasLayer(props: Props) {
                   selected={selected}
                   connecting={Boolean(valid)}
                   issue={nodeIssue}
+                  outputs={current ? props.graph.edges.filter(edge=>edge.source===binding.node.id).length : undefined}
                 />
               )}
               {show && (
