@@ -202,6 +202,7 @@ export function writeCanvasRecoveryCopy(
 ): boolean {
   const target = resolveStorage(storage);
   if (!target) return false;
+  if(!content.elements.length&&readCanvasRecoveryCopy(canvasId,target)?.content.elements.length)return false;
   try {
     target.setItem(
       canvasRecoveryKey(canvasId),

@@ -44,6 +44,11 @@ const payload: CanvasSavePayload = {
 };
 
 describe("canvas local recovery copy", () => {
+  it("does not let an empty stale tab replace an existing recoverable scene",()=>{
+    const storage=new MemoryStorage();writeCanvasRecoveryCopy("canvas-1",payload,storage);
+    expect(writeCanvasRecoveryCopy("canvas-1",{elements:[],appState:{},files:{}},storage)).toBe(false);
+    expect(readCanvasRecoveryCopy("canvas-1",storage)?.content).toEqual(payload);
+  });
   it("round-trips the newest payload so a refresh can restore it", () => {
     const storage = new MemoryStorage();
 
