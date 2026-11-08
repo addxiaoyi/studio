@@ -6,6 +6,7 @@ import {
   nodeElementId,
   adoptWorkflowCopies,
   retainWorkflowLayout,
+  placeWorkflow,
   type SceneElement,
 } from "@/components/workflow/scene";
 
@@ -19,6 +20,12 @@ const note: SceneElement = {
   text: "普通画布备注",
 };
 describe("workflows on the existing canvas", () => {
+  it("preserves spacing beside a large existing canvas", () => {
+    const graph=websiteWorkflow();
+    const placed=placeWorkflow(graph,[{...note,x:20000}],{scrollX:0,scrollY:0,width:1000,height:800,zoom:{value:1},selectedElementIds:{}});
+    expect(placed.nodes[1]!.position.x-placed.nodes[0]!.position.x).toBe(390);
+    expect(placed.nodes[0]!.position.x).toBeGreaterThan(20000);
+  });
   it("keeps AI revisions beside existing work instead of resetting nodes to the canvas origin", () => {
     const before = websiteWorkflow();
     before.nodes = before.nodes.map(node => ({ ...node, position: { x: node.position.x + 2000, y: 700 } }));

@@ -348,8 +348,8 @@ export function readSceneWorkflow(
     const binding = workflowBinding(el);
     if (binding?.workflowId !== workflowId) continue;
     const position = {
-      x: Math.max(-10000, Math.min(10000, el.x)),
-      y: Math.max(-10000, Math.min(10000, el.y)),
+      x: Math.max(-1000000, Math.min(1000000, el.x)),
+      y: Math.max(-1000000, Math.min(1000000, el.y)),
     };
     nodes.push({ ...binding.node, position });
     ids.set(el.id, binding.node.id);
@@ -416,8 +416,8 @@ export function placeWorkflow(
     nodes: graph.nodes.map((node) => ({
       ...node,
       position: {
-        x: Math.min(9000, right + node.position.x),
-        y: Math.min(9000, top + node.position.y),
+        x: Math.min(990000, right + node.position.x),
+        y: Math.min(990000, top + node.position.y),
       },
     })),
   };
@@ -428,7 +428,7 @@ export function retainWorkflowLayout(proposed: WorkflowGraph, previous: Workflow
   const origin = { x: Math.min(...previous.nodes.map(node => node.position.x)), y: Math.min(...previous.nodes.map(node => node.position.y)) };
   return { ...proposed, nodes: proposed.nodes.map(node => {
     const saved = previous.nodes.find(item => item.id === node.id);
-    return { ...node, position: saved?.position ?? { x: Math.max(-10000, Math.min(10000, origin.x + node.position.x)), y: Math.max(-10000, Math.min(10000, origin.y + node.position.y)) } };
+    return { ...node, position: saved?.position ?? { x: Math.max(-1000000, Math.min(1000000, origin.x + node.position.x)), y: Math.max(-1000000, Math.min(1000000, origin.y + node.position.y)) } };
   }) };
 }
 

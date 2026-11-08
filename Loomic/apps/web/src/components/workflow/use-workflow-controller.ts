@@ -235,7 +235,7 @@ export function useWorkflowController({
       title: WORKFLOW_LABELS[config.kind],
       config: structuredClone(config),
       position: {
-        x: Math.min(9600, (anchor?.position.x ?? 0) + 390),
+        x: Math.min(990600, (anchor?.position.x ?? 0) + 390),
         y: anchor?.position.y ?? 0,
       },
     };
@@ -298,8 +298,8 @@ export function useWorkflowController({
         nodes: positioned.nodes.map((node) => ({
           ...node,
           position: {
-            x: Math.min(9800, node.position.x + anchor.x),
-            y: Math.min(9800, node.position.y + anchor.y),
+            x: Math.min(990800, node.position.x + anchor.x),
+            y: Math.min(990800, node.position.y + anchor.y),
           },
         })),
       });

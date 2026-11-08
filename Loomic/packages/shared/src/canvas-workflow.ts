@@ -12,8 +12,8 @@ export const workflowNodeSchema = z
     id: nodeId,
     title: z.string().trim().min(1).max(100),
     position: z.object({
-      x: z.number().finite().min(-10000).max(10000),
-      y: z.number().finite().min(-10000).max(10000),
+      x: z.number().finite().min(-1000000).max(1000000),
+      y: z.number().finite().min(-1000000).max(1000000),
     }),
     config: z.discriminatedUnion("kind", [
       ...creativeNodeConfigs,

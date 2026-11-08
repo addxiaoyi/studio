@@ -22,6 +22,13 @@ export function parseGoalPlan(content: string): GoalExecutionPlan {
   try { plan = JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")); }
   catch { throw new Error("模型未返回有效的 JSON 计划，请重新生成。尚未执行目标。"); }
   if (plan && typeof plan === "object" && "error" in plan && typeof plan.error === "string") throw new Error(plan.error.slice(0, 1000));
+  // Image execution does not use duration/resolution; the selected image model defines its size.
+  if (plan && typeof plan === "object" && "steps" in plan && Array.isArray(plan.steps)) {
+    plan = { ...plan, steps: plan.steps.map(step => {
+      if (!step || typeof step !== "object" || !step.command || typeof step.command !== "object" || step.command.executor !== "media.generate" || step.command.mediaType !== "image") return step;
+      return { ...step, command: { ...step.command, duration: 5, resolution: "720p" } };
+    }) };
+  }
   const checked = goalExecutionPlanSchema.safeParse(plan);
   if (!checked.success) {
     console.warn("[goal-planner] invalid structured plan", checked.error.issues.map(issue => ({ path: issue.path.join("."), code: issue.code })));
