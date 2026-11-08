@@ -26,6 +26,7 @@ type Row = {
   cursor: AgentBrowserCursor | null;
   detail: string;
   handoff?:boolean;
+  login_origins?:string[];
   heartbeat_at: Date;
   updated_at: Date;
   expires_at: Date;
@@ -64,6 +65,7 @@ export function browserViewStore(db: Pool, storageRoot: string) {
       cursor: row.cursor,
       detail: row.detail,
       handoff:row.handoff??false,
+      loginOrigins:row.login_origins??[],
       updatedAt: new Date(row.updated_at).toISOString(),
       expiresAt: new Date(row.expires_at).toISOString(),
     });
@@ -109,6 +111,7 @@ export function browserViewStore(db: Pool, storageRoot: string) {
       return readFile(join(directory(id), "frame.jpg"));
     },
     async enableHandoff(id:string){await db.query("update agent_browser_views set handoff=true where id=$1",[id]);},
+    async loginOrigins(id:string,origins:string[]){await db.query('update agent_browser_views set login_origins=$2::jsonb where id=$1 and handoff=true',[id,JSON.stringify(origins)]);},
     async eraseLoginView(id:string){
       await db.query("update agent_browser_views set handoff=false,state='completed',expires_at=now(),updated_at=now() where id=$1",[id]);
       await rm(directory(id),{recursive:true,force:true});

@@ -1,4 +1,5 @@
 import { errors, type Page } from "playwright";
+import { mosaicScreenshot } from "../agent-browser/privacy-mosaic.js";
 
 export type PresentationLayer = {
   x: number;
@@ -84,13 +85,10 @@ export async function capturePresentationScene(
   >;
   if (!snapshot.layers?.length)
     throw new Error("此页面没有可用于演示的可见内容。");
-  const image = await page.screenshot({
-    type: "jpeg",
+  const image = await mosaicScreenshot(page,true,{
     quality: 82,
     fullPage: true,
     clip: { x: 0, y: 0, width: snapshot.width, height: snapshot.height },
-    mask: [page.locator('input,textarea,select,[contenteditable="true"]')],
-    maskColor: "#d8dee8",
     timeout: 10_000,
   });
   if (image.length > 4 * 1024 * 1024)

@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Page } from "playwright";
 import type { AgentBrowserCursor } from "@helstera/shared";
 import type { BrowserViewStore } from "./store.js";
+import { mosaicScreenshot } from "./privacy-mosaic.js";
 
 const FRAME_INTERVAL_MS = 750;
 const MAX_PAUSE_MS = 15 * 60_000;
@@ -18,6 +19,7 @@ export async function observeAgentBrowser(options: {
   name?: string;
   sourceUrl?: string;
   maskAllInputs?:boolean;
+  externalFrames?:boolean;
 }) {
   const { page, store } = options;
   const id = await store.create({ ...options, name: options.name??"浏览 Agent" });
@@ -30,17 +32,7 @@ export async function observeAgentBrowser(options: {
   async function frame() {
     if (stopped || page.isClosed()) return;
     try {
-      const bytes = await page.screenshot({
-        type: "jpeg",
-        quality: 62,
-        maskColor: "#d8dee8",
-        timeout: 3000,
-        mask: [
-          page.locator(
-            options.maskAllInputs?'input,textarea,select,[contenteditable="true"]':'input[type="password"],input[autocomplete="one-time-code"],input[autocomplete="cc-number"],input[autocomplete="cc-csc"]',
-          ),
-        ],
-      });
+      const bytes = await mosaicScreenshot(page,options.maskAllInputs,{quality:62,timeout:3000});
       const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
       await store.writeFrame(id, bytes, {
         url: options.sourceUrl??page.url(),
@@ -77,10 +69,17 @@ export async function observeAgentBrowser(options: {
       console.error("[agent-browser/observer] preview update failed", error),
     );
   }
-  tick();
+  if(!options.externalFrames)tick();
+  let publishing=false,lastPublished=0;
 
   return {
     id,
+    async publishFrame(bytes:Buffer){
+      if(stopped||publishing||Date.now()-lastPublished<FRAME_INTERVAL_MS)return;
+      publishing=true;
+      try{await store.writeFrame(id,bytes,{url:options.sourceUrl??page.url(),title:options.name??'浏览器实时画面',...(page.viewportSize()??{width:1280,height:720})});lastPublished=Date.now();}
+      finally{publishing=false;}
+    },
     async beforeAction(detail: string, cursor?: AgentBrowserCursor | null) {
       const started = Date.now();
       let paused=false;

@@ -2,24 +2,26 @@ import type { Browser, BrowserContext, Locator, Page, Request } from "playwright
 import { sameWebsiteOrigin, type WebsiteLoginCredentials } from "@helstera/shared";
 import { setTimeout as delay } from "node:timers/promises";
 import { discoverLoginPage,loginComplete,loginSignature } from "./login-detection.js";
+import { installPrivacyMosaic } from "../agent-browser/privacy-mosaic.js";
 
-export type LoginNetworkScope = { origin: string; submitting: boolean; username: string; password: string; submissions?: number;human?:boolean };
+export type LoginNetworkScope = { origin: string; submitting: boolean; username: string; password: string; submissions?: number;human?:boolean;allowedOrigins?:string[];proposedOrigins?:Map<string,string> };
 export function redactLoginText(text: string, scope: Pick<LoginNetworkScope,"username"|"password">) {
   return [scope.username,scope.password].filter(Boolean).reduce((value,secret)=>value.split(secret).join("••••"),text);
 }
 export function isLoginVerificationUrl(url:URL){
   return url.protocol==='https:'&&(/(^|\.)hcaptcha\.com$|(^|\.)recaptcha\.net$/.test(url.hostname)||url.hostname==='challenges.cloudflare.com'||(/(^|\.)google\.com$/.test(url.hostname)&&url.pathname.startsWith('/recaptcha/')));
 }
-export function isAllowedLoginNavigation(url:string,origin:string,subframe:boolean){return sameWebsiteOrigin(url,origin)||(subframe&&isLoginVerificationUrl(new URL(url)));}
+export function isAllowedLoginNavigation(url:string,origin:string,subframe:boolean,allowedOrigins:string[]=[]){const parsed=new URL(url);return sameWebsiteOrigin(url,origin)||(parsed.protocol==='https:'&&allowedOrigins.includes(parsed.origin))||(subframe&&isLoginVerificationUrl(parsed));}
 export function allowLoginRequest(request: Pick<Request, "url" | "method" | "postData">, scope: LoginNetworkScope) {
   const url = new URL(request.url());
   const sameOrigin = url.origin === scope.origin;
+  const approvedIdentity=scope.human&&scope.allowedOrigins?.includes(url.origin)&&url.protocol==='https:';
   const method = request.method().toUpperCase();
   const urlValues=[...url.searchParams.values(),url.hash.slice(1)].filter(Boolean);
   if(urlValues.some(value=>(Boolean(scope.username)&&value===scope.username)||(Boolean(scope.password)&&value.includes(scope.password))))return false;
   if (method === "GET" || method === "HEAD") return !sameOrigin || !/logout|signout|delete|remove|purchase|checkout|payment|退出|删除|支付/i.test(url.pathname+url.search);
   const verification=scope.human&&isLoginVerificationUrl(url);
-  const authEndpoint=sameOrigin&&/login|auth|captcha|verify|verification|challenge|session|otp|qrcode/i.test(url.pathname);
+  const authEndpoint=(sameOrigin||approvedIdentity)&&/login|signin|auth|oauth|saml|captcha|verify|verification|challenge|session|otp|qrcode|consent/i.test(url.pathname);
   if(scope.human&&['POST','OPTIONS'].includes(method)&&Buffer.byteLength(request.postData()??'')<=16384&&(verification||authEndpoint)){
     if(verification&&scope.password&&(request.postData()??'').includes(scope.password))return false;
     return true;
@@ -53,7 +55,10 @@ export async function signInWebsite(page: Page, credentials: WebsiteLoginCredent
   try {
     await assertActive();
     await page.goto(credentials.loginUrl, {waitUntil:"load",timeout:20_000});
-    if (!sameWebsiteOrigin(page.url(),credentials.loginUrl)) throw new Error("登录页跳转到了其他站点，请提供实际登录站点或使用本地浏览器。");
+    if (!sameWebsiteOrigin(page.url(),credentials.loginUrl)) {
+      if(credentials.method==='interactive'&&isAllowedLoginNavigation(page.url(),credentials.loginUrl,false,credentials.allowedLoginOrigins)){await takeOver();return;}
+      throw new Error("登录页跳转到了其他站点，请提供实际登录站点或使用本地浏览器。");
+    }
     await discoverLoginPage(page,credentials.loginUrl,credentials.method!=='interactive');
     initialUrl=page.url();signature=await loginSignature(page);
     if(credentials.method==='interactive'){await takeOver();return;}
@@ -87,7 +92,7 @@ export async function signInWebsite(page: Page, credentials: WebsiteLoginCredent
     }
     await takeOver();
   } catch {
-    if(handoff&&!takeoverUsed&&!page.isClosed()&&sameWebsiteOrigin(page.url(),credentials.loginUrl)){await assertActive();await takeOver();return;}
+    if(handoff&&!takeoverUsed&&!page.isClosed()&&(scope.proposedOrigins?.size||isAllowedLoginNavigation(page.url(),credentials.loginUrl,false,credentials.allowedLoginOrigins))){await assertActive();await takeOver();return;}
     // Playwright call logs can include fill values and selectors. Never persist those errors.
     throw new Error(`登录未完成（${phase}）：请核对账号密码、登录后可见文字或高级控件设置；验证码、扫码、二次验证请使用本地已登录浏览器。凭据已销毁，需重新填写。`);
   } finally {
@@ -96,6 +101,7 @@ export async function signInWebsite(page: Page, credentials: WebsiteLoginCredent
 }
 
 export async function addCredentialMask(context: BrowserContext, secrets: string[]) {
+  await installPrivacyMosaic(context,true);
   await context.addInitScript(`(() => {
     const secrets=${JSON.stringify(secrets.filter(Boolean))};
     const hide=text=>secrets.reduce((value,secret)=>value.split(secret).join('••••'),text);

@@ -17,6 +17,7 @@ import { StyledSelect } from "@/components/ui/styled-select";
 import { AgentCursor } from "./cursor";
 import { WebsitePresentationCard } from "./presentation-card";
 import { WebsiteHandoffView } from "./handoff-view";
+import { WebsiteSessionManager } from "./session-manager";
 import "./style.css";
 
 export function AgentBrowserDock() {
@@ -164,6 +165,7 @@ function BrowserSessionDock() {
           </header>
           <div className="agent-browser-content">
             {session&&<WebsitePresentationCard userId={session.user.id} token={session.access_token} sourceUrl={selected?.url??""}/>}
+            <WebsiteSessionManager token={session.access_token}/>
             {view.error && (
               <div role="alert" className="agent-browser-error">
                 <p>{view.error}</p>

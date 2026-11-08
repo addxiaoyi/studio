@@ -7,6 +7,7 @@ import type { ViewerService } from "../features/bootstrap/ensure-user-foundation
 import { assertConnectorEnabled } from "../features/agent-goals/connector-gate.js";
 import { validatePublicHttpUrl } from "../features/website-capture/isolated-browser.js";
 import { saveWebsiteLogin, purgeWebsiteLogins } from "../features/website-capture/login-vault.js";
+import { revokeWebsiteSession } from "../features/website-capture/saved-login.js";
 
 export function registerWebsiteLoginRoutes(app: FastifyInstance, options: {db: Pool; auth: RequestAuthenticator; viewerService: ViewerService}) {
   const timer = setInterval(() => { void Promise.all([purgeWebsiteLogins(options.db),options.db.query("update website_handoff_commands set ciphertext=null,status='expired' where expires_at<=now() and status in ('pending','claimed')"),options.db.query("update website_browser_sessions set ciphertext=null where expires_at<=now() and ciphertext is not null")]).catch(() => console.error("[website-login] Expired credential cleanup failed")); }, 60_000);
@@ -15,13 +16,13 @@ export function registerWebsiteLoginRoutes(app: FastifyInstance, options: {db: P
   app.get('/api/website-capture/login-sessions',async(request,reply)=>{
     reply.header('Cache-Control','no-store');const user=await options.auth.authenticate(request);if(!user)return reply.code(401).send({ok:false});
     const viewer=await options.viewerService.ensureViewer(user);await assertConnectorEnabled(options.db,viewer.workspace.id,user.id,'isolated-browser');
-    const {rows}=await options.db.query("select id,origin,expires_at as \"expiresAt\" from website_browser_sessions where workspace_id=$1 and user_id=$2 and expires_at>now() and ciphertext is not null",[viewer.workspace.id,user.id]);
+    const {rows}=await options.db.query(`select s.id,s.origin,s.expires_at as "expiresAt",s.updated_at as "updatedAt",(select count(*)::int from website_capture_tasks t where t.browser_session_id=s.id and t.status in ('queued','running')) as "activeTasks" from website_browser_sessions s where s.workspace_id=$1 and s.user_id=$2 and s.expires_at>now() and s.ciphertext is not null order by s.updated_at desc`,[viewer.workspace.id,user.id]);
     return {ok:true,data:rows};
   });
   app.delete<{Params:{id:string}}>('/api/website-capture/login-sessions/:id',async(request,reply)=>{
     const user=await options.auth.authenticate(request);if(!user)return reply.code(401).send({ok:false});
     const id=z.string().uuid().parse(request.params.id),viewer=await options.viewerService.ensureViewer(user);
-    await options.db.query("update website_browser_sessions set ciphertext=null,expires_at=now() where id=$1 and workspace_id=$2 and user_id=$3",[id,viewer.workspace.id,user.id]);return {ok:true};
+    try{return {ok:true,data:await revokeWebsiteSession(options.db,{workspaceId:viewer.workspace.id,userId:user.id},id)};}catch{return reply.code(404).send({ok:false,error:{code:'session_missing',message:'网站会话不存在或已被清除。'}});}
   });
   app.post("/api/website-capture/login-credentials", {bodyLimit: 8192}, async (request, reply) => {
     reply.header("Cache-Control", "no-store");

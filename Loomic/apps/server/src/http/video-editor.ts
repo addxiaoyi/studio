@@ -20,6 +20,7 @@ import { assertPlannerCredential, EditorPlannerError, invokeEditorPlanner } from
 import { registerVideoChatRoute } from "./video-editor-chat.js";
 import { extractText, extractJson } from "../features/video-editor/model-json.js";
 import { registerWebsiteJourneyRoutes } from "./website-journey.js";
+import { registerNarrationRoutes } from "./video-narration.js";
 
 type PlanModelFactory = (config: { model: string; baseUrl?: string; apiKey?: string }) => BaseLanguageModel;
 
@@ -45,6 +46,7 @@ export function registerVideoEditorRoutes(app: FastifyInstance, options: VideoEd
 
   registerVideoChatRoute(app,{...options,createPlanModel});
   registerWebsiteJourneyRoutes(app,{...options,createPlanModel});
+  registerNarrationRoutes(app,options);
 
   app.post("/api/video/editor/plan", async (request, reply) => {
     try {

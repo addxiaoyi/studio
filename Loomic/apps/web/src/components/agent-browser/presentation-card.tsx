@@ -167,7 +167,7 @@ export function WebsitePresentationCard({
                     ? "演示已取消"
                     : task.status === "failed"
                       ? "演示未完成"
-                      : task.stage === "waiting_login" ? "需要你完成登录验证，请在下方画面接管" : task.stage === "signing_in" ? "正在登录，登录画面不会录制" : task.stage === "signed_in" ? "登录成功，准备录制" : task.stage === "presentation_recording"
+                      : task.stage === 'processing_recording'?'正在去除加载等待并整理成片':task.stage === "waiting_login" ? "需要你完成登录验证，请在下方画面接管" : task.stage === "signing_in" ? "正在登录，登录画面不会录制" : task.stage === "signed_in" ? "登录成功，准备录制" : task.stage === "presentation_recording"
                         ? "多光标演示正在播放并录制"
                         : "正在准备网页与演示场景"}{" "}
                 · {task.progress}%

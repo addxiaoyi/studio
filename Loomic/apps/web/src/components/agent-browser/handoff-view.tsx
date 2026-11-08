@@ -27,6 +27,7 @@ export function WebsiteHandoffView({token,session,frame,ready}:{token:string;ses
   return <section className="website-handoff" aria-label="人工接管登录">
     <div><h3 className="text-sm font-semibold">需要你完成登录验证</h3><p className="mt-1 text-xs text-muted-foreground">点击或拖动下面的真实画面，或用手机扫码。密码和验证码内容已隐藏，登录画面不会进入录像；完成后继续同一任务。</p></div>
     {frame?<div className="website-handoff-preview" role="group" tabIndex={0} aria-label="登录页面操作区域" onPointerDown={begin} onPointerUp={finish} onPointerCancel={()=>{down.current=null;}} onKeyDown={key}><img src={frame} alt="待接管的登录页面" draggable={false}/></div>:<p role="status">正在读取登录页面…</p>}
+    {(session.loginOrigins??[]).map(origin=><div key={origin} className="rounded-lg border p-3 text-xs"><p>网站请求跳转至登录提供方：<strong className="break-all">{origin}</strong></p><p className="mt-1 text-muted-foreground">允许后在该提供方页面由你完成登录，再回到原网站。原网站密码不会自动填入其他站点。</p><Button className="mt-2" size="sm" variant="outline" disabled={busy||!ready} onClick={()=>void send({kind:'approve_origin',origin})}>允许此登录来源</Button></div>)}
     <label className="text-xs">输入到页面选中的控件<input className="website-presentation-input mt-1" type="password" value={text} maxLength={256} onChange={event=>setText(event.target.value)} autoComplete="off" placeholder="先点击页面输入框，确认下方焦点提示，再输入"/></label>
     <div className="website-handoff-toolbar">
       <Button size="sm" variant="outline" disabled={busy||!ready||!text} onClick={insert}>输入文字</Button>

@@ -21,6 +21,7 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
   const saving=useRef(Promise.resolve<unknown>(undefined));
   const loaded=useRef(false);
   const acting=useRef(false);
+  useEffect(()=>{const draftEvent=(event:Event)=>setDraft(String((event as CustomEvent).detail??''));window.addEventListener('loomic:video-draft',draftEvent);return()=>window.removeEventListener('loomic:video-draft',draftEvent);},[]);
   function updateTurns(update:(current:StudioChatTurn[])=>StudioChatTurn[]) {
     const next=update(history.current);if(next===history.current)return;
     history.current=next;setTurns(next);

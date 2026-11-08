@@ -4,6 +4,7 @@ import { videoStudioControlSchema, videoStudioStateSchema } from "./video-editor
 export const videoMaterialRequestSchema=z.discriminatedUnion("type",[
   z.strictObject({type:z.literal("library"),query:z.string().max(160).default(""),mediaType:z.enum(["image","video"]).optional()}),
   z.strictObject({type:z.literal("generate"),prompt:z.string().trim().min(1).max(4000),duration:z.number().int().min(1).max(60).optional(),aspectRatio:z.enum(["16:9","9:16"]).optional()}),
+  z.strictObject({type:z.literal("narration"),text:z.string().trim().min(1).max(2000),voice:z.enum(['cmn','en-us']).default('cmn'),rate:z.number().int().min(100).max(220).default(150)}),
 ]);
 export type VideoMaterialRequest=z.infer<typeof videoMaterialRequestSchema>;
 

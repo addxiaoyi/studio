@@ -26,5 +26,5 @@ export function CaptureRecordingImport({runtime,token,userId,onImported}:{runtim
     return()=>{active=false;};
   },[runtime,token,taskId,userId,revision,onImported]);
   if(!taskId)return null;
-  return <div className="flex flex-wrap items-center gap-3 border-b bg-muted/20 px-4 py-3 text-sm" aria-label="网站录像导入"><p className="min-w-0 flex-1" role={error?'alert':'status'}>{error||state||'正在等待编辑器就绪…'}</p>{error&&<Button size="sm" variant="outline" onClick={()=>setRevision(n=>n+1)}>重试导入</Button>}</div>;
+  return <div className="flex flex-wrap items-center gap-3 border-b bg-muted/20 px-4 py-3 text-sm" aria-label="网站录像导入"><p className="min-w-0 flex-1" role={error?'alert':'status'}>{error||state||'正在等待编辑器就绪…'}</p>{error?<Button size="sm" variant="outline" onClick={()=>setRevision(n=>n+1)}>重试导入</Button>:state.startsWith('已导入')&&<Button size="sm" variant="outline" onClick={()=>window.dispatchEvent(new CustomEvent('loomic:video-draft',{detail:'为刚导入的网站录像准备简短中文介绍配音，先给出完整文稿供确认；随后再添加对应字幕和淡入淡出转场，逐项确认。'}))}>用对话添加字幕、配音和转场</Button>}</div>;
 }

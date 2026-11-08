@@ -11,7 +11,7 @@ export function WebsiteJourneyComposer({token,sourceUrl,busy,onStart}:{token:str
   const [url,setUrl]=useState(sourceUrl),[goal,setGoal]=useState(''),[planning,setPlanning]=useState(false),[error,setError]=useState('');
   const [plan,setPlan]=useState<WebsiteJourneyPlan|null>(null),[plannedGoal,setPlannedGoal]=useState(''),[method,setMethod]=useState('none');
   const [sessions,setSessions]=useState<SavedWebsiteSession[]>([]),[credentials,setCredentials]=useState<WebsiteLoginCredentials>({loginUrl:sourceUrl,username:'',password:''});
-  useEffect(()=>{void listWebsiteSessions(token).then(setSessions).catch(()=>setSessions([]));},[token]);
+  useEffect(()=>{const refresh=()=>{void listWebsiteSessions(token).then(setSessions).catch(()=>setError('无法读取已保存的网站会话，请重试。'));};refresh();window.addEventListener('loomic:website-sessions-changed',refresh);return()=>window.removeEventListener('loomic:website-sessions-changed',refresh);},[token]);
   let origin='';try{origin=new URL(url).origin;}catch{}
   const remembered=sessions.find(session=>session.origin===origin);
   async function planRoute(event:FormEvent){

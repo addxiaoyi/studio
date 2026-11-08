@@ -37,6 +37,7 @@ export const agentBrowserSessionSchema = z.object({
   cursor: agentBrowserCursorSchema.nullable(),
   detail: z.string().max(500),
   handoff:z.boolean().optional(),
+  loginOrigins:z.array(z.string()).optional(),
   updatedAt: z.string(),
   expiresAt: z.string(),
 });

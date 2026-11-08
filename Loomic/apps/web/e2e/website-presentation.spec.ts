@@ -188,4 +188,9 @@ test('plans from conversation, resumes human verification after refresh and reme
   await card.getByRole('button',{name:'导入视频工作区剪辑'}).click();
   await expect(page.getByLabel('网站录像导入')).toContainText('已导入',{timeout:45000});
   await page.screenshot({path:info.outputPath('recording-in-video-workspace.png')});
+  await page.getByRole('button',{name:'展开 Agent 浏览器',exact:true}).click();
+  await page.getByRole('button',{name:'网站登录会话 · 管理',exact:true}).click();
+  const sessions=page.getByRole('region',{name:'网站登录会话管理'});await expect(sessions).toContainText('https://8.8.8.8');
+  await sessions.getByRole('button',{name:'立即撤销',exact:true}).click();await expect(sessions).toContainText('没有已保存的网站会话。');
+  expect((await fixture.db.query('select count(*)::int as n from website_browser_sessions where user_id=$1 and ciphertext is not null',[fixture.userId])).rows[0].n).toBe(0);
 });

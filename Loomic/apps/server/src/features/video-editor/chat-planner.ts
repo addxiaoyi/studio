@@ -26,6 +26,7 @@ export function studioChatPrompt() {
     "control只用于页面操作：{type:'play'}、{type:'pause'}、{type:'seek',seconds}、{type:'mute',muted}、{type:'select',compositionId}、{type:'export'}、{type:'undo',actionIndex?}、{type:'panel',panel:'assets'|'transcript'|'timeline'}。只能使用studio.controls提供的能力。undo不带actionIndex撤销最新方案全部修改；带index为0起始动作序号，只能来自undoable。",
     "用户在pendingPlan期间补充要求时，返回一份完整替代方案，不要把未执行方案当成现状。用户询问建议可以只回复message，必要时澄清。",
     "material:{type:'library',query:'搜索词',mediaType?:'image'|'video'}打开用户私有素材搜索与导入卡；不要假装知道尚未查询的素材。material:{type:'generate',prompt:'镜头描述',duration?:5,aspectRatio?:'16:9'|'9:16'}准备视频生成卡，由用户选择真实可用模型、查看精确费用后确认。生成草稿不是已启动任务。导入完成后工程会提供真实素材名，再引用它剪辑或插入图片。",
+    "material:{type:'narration',text:'完整配音文稿',voice:'cmn'或'en-us',rate:100..220}准备本地基础语音配音，用户先确认文稿和0积分费用才生成。生成后再用真实导入音频名返回audio动作，逐项确认后插入当前合成。需要字幕和转场时分阶段：先配音素材，再字幕/转场编辑计划。不得把文稿准备称作已生成配音。",
     "不支持的能力直接说明，不编造素材、上传、已完成生成、转写或导出文件。不得生成代码、路径、URL或运行任意工具。",
     '输出例子：{"message":"我会保留画面，把标题改为新品。确认后应用。","plan":{"summary":"修改标题","actions":[{"type":"layer","layerId":"l1","changes":{"text":"新品"}}]}}。纯对话：{"message":"..."}。定位：{"message":"准备定位到1秒。","control":{"type":"seek","seconds":1}}。',
   ].join("\n");

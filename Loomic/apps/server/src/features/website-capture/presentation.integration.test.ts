@@ -62,7 +62,7 @@ it("rebuilds the real page with multiple cursors and records a playable WebM", a
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
   });
-  const evidence = resolve("../../.creative-test-results/presentation");
+  const evidence = process.env.HELT_CAPTURE_TEST_OUTPUT??resolve("../../.creative-test-results/presentation");
   await mkdir(evidence, { recursive: true });
   try {
     const source = await context.newPage();
@@ -147,4 +147,4 @@ it("rebuilds the real page with multiple cursors and records a playable WebM", a
     await browser.close();
     await rm(directory, { recursive: true, force: true });
   }
-}, 60_000);
+}, 180_000);

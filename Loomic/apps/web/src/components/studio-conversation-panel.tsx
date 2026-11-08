@@ -10,6 +10,7 @@ import { useVideoText } from "@/lib/video-copy";
 import type { VideoStudioControl } from "@helstera/shared";
 import {StudioMaterialLibrary} from "./studio-material-library";
 import {StudioMaterialGeneration} from "./studio-material-generation";
+import {StudioNarration} from './studio-narration';
 
 type Props=StudioWorkflowProps & {onOpenPanel?(panel:"assets"|"transcript"|"timeline"):void;onViewTimeline?():void};
 function controlLabel(control:VideoStudioControl,english:boolean){
@@ -49,6 +50,7 @@ export function StudioConversationPanel(props:Props){
           {turn===inlinePlan&&<StudioChatPlan flow={flow} locked={locked}/>}
           {turn.material?.type==="library"&&<StudioMaterialLibrary token={props.token} runtime={props.runtime} compositionId={turn.compositionId} query={turn.material.query} mediaType={turn.material.mediaType} onImported={name=>chat.materialImported(turn.compositionId,name)}/>}
           {turn===activeGeneration&&turn.material?.type==="generate"&&<StudioMaterialGeneration request={turn.material} userId={props.userId} token={props.token} runtime={props.runtime} compositionId={turn.compositionId} onImported={name=>chat.materialImported(turn.compositionId,name)}/>}
+          {turn.material?.type==='narration'&&<StudioNarration request={turn.material} token={props.token} userId={props.userId} turnId={turn.id} runtime={props.runtime} compositionId={turn.compositionId} onImported={name=>chat.materialImported(turn.compositionId,name)}/>}
           {turn.planId&&turn!==inlinePlan&&<p className="text-xs text-muted-foreground">{turn.status==="applied"?english?"Applied":"已应用":turn.status==="undone"?english?"Undone":"已撤销":english?"Previous proposal":"历史方案，以当前工程为准"}</p>}
           {turn.control&&<Button size="sm" variant="outline" disabled={locked||turn.status!=="pending"} onClick={()=>void chat.executeControl(turn)}>{turn.status==="applied"?english?"Completed":"已完成":turn.status==="failed"?english?"Failed — send again":"操作失败，请重新发送":turn.status==="superseded"?english?"Previous action":"历史操作":controlLabel(turn.control,english)}</Button>}
         </article>)}

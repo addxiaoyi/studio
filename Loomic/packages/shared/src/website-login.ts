@@ -14,6 +14,7 @@ export const websiteLoginSettingsSchema = z.object({
   method: z.enum(["password","interactive","saved"]).optional(),
   savedSessionId:z.string().uuid().optional(),
   rememberSession:z.boolean().optional(),
+  allowedLoginOrigins:z.array(httpsUrl.refine(value=>new URL(value).origin===value.replace(/\/$/,''),'请填写登录来源的完整 HTTPS 域名，不包含路径。')).max(3).optional(),
   usernameSelector: selector,
   passwordSelector: selector,
   submitSelector: selector,

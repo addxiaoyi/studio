@@ -37,6 +37,7 @@ export const websiteHandoffInputSchema=z.discriminatedUnion("kind",[
   z.object({kind:z.literal("key"),key:z.enum(["Tab","Enter","Backspace","Escape","ArrowDown","ArrowUp","ArrowLeft","ArrowRight"])}).strict(),
   z.object({kind:z.literal("scroll"),delta:z.number().int().min(-720).max(720)}).strict(),
   z.object({kind:z.literal("resume")}).strict(),
+  z.object({kind:z.literal("approve_origin"),origin:z.string().url().max(2048)}).strict(),
 ]);
 export type WebsiteHandoffInput=z.infer<typeof websiteHandoffInputSchema>;
 export const websiteHandoffRequestSchema=z.object({id:z.string().uuid(),viewId:z.string().uuid(),frameRevision:z.number().int().nonnegative(),pageUrl:z.string().max(2048),input:websiteHandoffInputSchema}).strict();

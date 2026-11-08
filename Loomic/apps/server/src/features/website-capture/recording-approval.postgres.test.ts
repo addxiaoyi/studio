@@ -14,7 +14,7 @@ import { registerLocalAssetRoutes } from "../../http/local-assets.js";
 import { saveWebsiteLogin, attachWebsiteLogin, consumeWebsiteLogin, purgeWebsiteLogins, discardWebsiteLogin } from "./login-vault.js";
 import { queueHandoffInput,takeHandoffInput,finishHandoffInput,handoffReceipt,endHandoff } from "./handoff-store.js";
 import { browserViewStore } from "../agent-browser/store.js";
-import { rememberWebsiteSession,restoreWebsiteSession } from "./saved-login.js";
+import { rememberWebsiteSession,restoreWebsiteSession,revokeWebsiteSession,assertWebsiteSessionActive } from "./saved-login.js";
 import { launchAgentBrowser } from "../agent-browser/engine.js";
 
 const databaseUrl = process.env.HELT_TEST_DATABASE_URL ?? process.env.HELT_AUTH_DB_URL ?? "";
@@ -60,6 +60,7 @@ describe.skipIf(!enabled)("recording approvals with PostgreSQL", () => {
     await db.query(await readFile(new URL("../../local-db/migrations/20261108000001_website_login.sql",import.meta.url),"utf8"));
     await db.query(await readFile(new URL("../../local-db/migrations/20261107000001_agent_browser_views.sql",import.meta.url),"utf8"));
     await db.query(await readFile(new URL("../../local-db/migrations/20261108000002_website_journeys.sql",import.meta.url),"utf8"));
+    await db.query(await readFile(new URL("../../local-db/migrations/20261108000003_website_session_revocation.sql",import.meta.url),"utf8"));
   });
 
   afterAll(async () => {
@@ -125,9 +126,13 @@ describe.skipIf(!enabled)("recording approvals with PostgreSQL", () => {
       expect(JSON.stringify(row)).not.toContain('private-cookie');expect(JSON.stringify(row)).not.toContain('private-session');
       const restored=await browser.newContext();await restoreWebsiteSession(db,{workspaceId,userId},'https://8.8.8.8',row.id,restored);
       expect((await restored.cookies())[0]?.value).toBe('private-cookie');
+      const activeTask=await createTask();await db.query("update website_capture_tasks set status='running',browser_session_id=$2 where id=$1",[activeTask.id,row.id]);
+      await assertWebsiteSessionActive(db,row.id,{workspaceId,userId});
       await expect(restoreWebsiteSession(db,{workspaceId,userId:randomUUID()},'https://8.8.8.8',row.id,restored)).rejects.toThrow();
       await expect(restoreWebsiteSession(db,{workspaceId,userId},'https://example.com',row.id,restored)).rejects.toThrow();
-      await db.query('update website_browser_sessions set ciphertext=null where id=$1',[row.id]);
+      expect((await revokeWebsiteSession(db,{workspaceId,userId},row.id)).canceledTasks).toBe(1);
+      expect((await db.query('select status from website_capture_tasks where id=$1',[activeTask.id])).rows[0].status).toBe('canceled');
+      await expect(assertWebsiteSessionActive(db,row.id,{workspaceId,userId})).rejects.toThrow();
       await expect(restoreWebsiteSession(db,{workspaceId,userId},'https://8.8.8.8',row.id,restored)).rejects.toThrow();
     }finally{await browser.close();if(prior===undefined)delete process.env.WEBSITE_LOGIN_ENCRYPTION_KEY;else process.env.WEBSITE_LOGIN_ENCRYPTION_KEY=prior;}
   });

@@ -84,6 +84,7 @@ export async function createPresentationFixture(
       "20261108000000_website_presentations",
       "20261108000001_website_login",
       "20261108000002_website_journeys",
+      "20261108000003_website_session_revocation",
     ]) {
       await db.query(
         await readFile(
@@ -239,6 +240,7 @@ export async function createPresentationFixture(
               engine,
               sourceUrl: task.start_url,
               name: "网站介绍演示",
+              externalFrames:true,
               assertActive,
             });
           },
@@ -246,6 +248,7 @@ export async function createPresentationFixture(
             await assertActive();
             return await observer?.beforeAction("正在录制网站演示", null);
           },
+          onFrame:async bytes=>observer?.publishFrame(bytes),
           onProgress: async (progress) => {
             await db.query(
               "update website_capture_tasks set stage='presentation_recording',progress=$2 where id=$1",

@@ -18,8 +18,11 @@ import { allowLoginRequest, signInWebsite, newAuthenticatedContext, redactLoginT
 import { sameWebsiteOrigin, type WebsiteLoginRef } from "@helstera/shared";
 import { validateWebsiteJourney,type WebsiteJourney } from "@helstera/shared";
 import { waitForWebsiteLogin } from "./login-handoff.js";
-import { rememberWebsiteSession,restoreWebsiteSession } from "./saved-login.js";
+import { rememberWebsiteSession,restoreWebsiteSession,assertWebsiteSessionActive } from "./saved-login.js";
 import { resolveJourneyStep } from "./journey-navigation.js";
+import { mosaicScreenshot,installPrivacyMosaic } from "../agent-browser/privacy-mosaic.js";
+import { recordPageSegment } from "./page-recording.js";
+import { joinCaptureSegments } from "./video-encoder.js";
 import { assertConnectorEnabled } from "../agent-goals/connector-gate.js";
 import type { Pool, PoolClient } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
@@ -120,6 +123,10 @@ export async function captureIsolatedWebsite(options: {
   const presentation=options.task.presentation?websitePresentationSchema.parse(options.task.presentation):null;
   if(presentation&&!options.task.record_video)throw new Error("网站演示需要先确认录制。");
   const scenes:PresentationScene[]=[];
+  const segments:string[]=[],segmentDurations:number[]=[];
+  let savedSessionId:string|undefined;
+  const sessionOwner={workspaceId:options.task.workspace_id,userId:options.task.created_by};
+  const assertCaptureActive=async()=>{options.signal?.throwIfAborted();await assertTaskIsRunning(options.db,options.task.id);if(savedSessionId)await assertWebsiteSessionActive(options.db,savedSessionId,sessionOwner);};
   if(options.task.journey)validateWebsiteJourney(options.task.start_url,options.task.journey);
   const abort = () => { void browser?.close().catch(error => console.error("[capture] cancellation close failed", error)); };
   options.signal?.throwIfAborted();
@@ -136,11 +143,9 @@ export async function captureIsolatedWebsite(options: {
       permissions: [],
       serviceWorkers: "block",
       ...(presentation ? { reducedMotion: "reduce" as const } : {}),
-      ...(options.task.record_video && !presentation && !options.task.login
-        ? { recordVideo: { dir: tempDir, size: { width: 1280, height: 720 } } }
-        : {}),
       viewport: { width: 1280, height: 720 },
     });
+    await installPrivacyMosaic(context,true);
     const budget = createCaptureByteBudget(MAX_TOTAL_BYTES);
     let requestCount = 0;
     let loginScope: LoginNetworkScope | undefined;
@@ -149,14 +154,16 @@ export async function captureIsolatedWebsite(options: {
       await context.route("**/*", async (route) => {
       try{
         if(options.task.login)await assertConnectorEnabled(options.db,options.task.workspace_id,options.task.created_by,"isolated-browser");
-        await assertTaskIsRunning(options.db,options.task.id);
+        await assertCaptureActive();
       }catch{await route.abort('blockedbyclient');return;}
       requestCount += 1;
       if (requestCount > (loginScope?.human?1000:180) || budget.exhausted()) {
         await route.abort("blockedbyclient");
         return;
       }
-      if(loginScope&&route.request().isNavigationRequest()&&!isAllowedLoginNavigation(route.request().url(),options.task.start_url,Boolean(route.request().frame().parentFrame()))){
+      if(loginScope&&route.request().isNavigationRequest()&&!isAllowedLoginNavigation(route.request().url(),options.task.start_url,Boolean(route.request().frame().parentFrame()),loginScope.human?loginScope.allowedOrigins:[])){
+        const target=await validatePublicHttpUrl(route.request().url()).catch(()=>null);
+        if(target?.protocol==='https:'&&!route.request().frame().parentFrame()&&(loginScope.proposedOrigins?.size??0)<3)loginScope.proposedOrigins?.set(target.origin,target.href);
         await route.abort("blockedbyclient");return;
       }
       await fulfillPublicReadOnlyRequest(route, budget,loginScope);
@@ -167,16 +174,18 @@ export async function captureIsolatedWebsite(options: {
       if(!options.task.record_video||options.task.follow_external||!sameWebsiteOrigin(startUrl.href,options.task.login.loginUrl))throw new Error("登录任务范围与审批不符。");
       await options.onProgress(6,"signing_in","正在登录指定站点，登录画面不会录制。");
       const credentials=await consumeWebsiteLogin(options.db,options.task.id,options.task.workspace_id,options.task.created_by,options.task.login);
-      loginScope={origin:startUrl.origin,submitting:false,username:credentials.username,password:credentials.password};
+      loginScope={origin:startUrl.origin,submitting:false,username:credentials.username,password:credentials.password,allowedOrigins:credentials.allowedLoginOrigins??[],proposedOrigins:new Map(),human:credentials.method==='interactive'};
       const loginPage=await context.newPage();
       const assertLogin=async()=>{options.signal?.throwIfAborted();await assertConnectorEnabled(options.db,options.task.workspace_id,options.task.created_by,'isolated-browser');await assertTaskIsRunning(options.db,options.task.id);};
       if(credentials.method==='saved'&&credentials.savedSessionId){
+        savedSessionId=credentials.savedSessionId;
+        await options.db.query('update website_capture_tasks set browser_session_id=$2 where id=$1',[options.task.id,savedSessionId]);
         await restoreWebsiteSession(options.db,{workspaceId:options.task.workspace_id,userId:options.task.created_by},startUrl.origin,credentials.savedSessionId,context);
         await loginPage.goto(credentials.loginUrl,{waitUntil:'domcontentloaded',timeout:15000});
         if(!sameWebsiteOrigin(loginPage.url(),credentials.loginUrl)||/login|signin|sign-in|verify|challenge/i.test(new URL(loginPage.url()).pathname)||await loginPage.locator('input[type="password"]').filter({visible:true}).count())throw new Error('记住的会话已失效，请重新登录。');
-      }else await signInWebsite(loginPage,credentials,loginScope,assertLogin,check=>waitForWebsiteLogin({page:loginPage,db:options.db,storageRoot:options.storageRoot,taskId:options.task.id,workspaceId:options.task.workspace_id,userId:options.task.created_by,engine:launched.engine,assertActive:assertLogin,check,heartbeat:()=>options.onProgress(8,'waiting_login','等待你完成登录验证，原任务将继续。')}));
-      if(credentials.rememberSession)await rememberWebsiteSession(options.db,{workspaceId:options.task.workspace_id,userId:options.task.created_by},startUrl.origin,context,loginPage);
-      context=await newAuthenticatedContext(browser,context,!presentation?{dir:tempDir,size:{width:1280,height:720}}:undefined,[credentials.username,credentials.password]);
+      }else await signInWebsite(loginPage,credentials,loginScope,assertLogin,check=>waitForWebsiteLogin({page:loginPage,db:options.db,storageRoot:options.storageRoot,taskId:options.task.id,workspaceId:options.task.workspace_id,userId:options.task.created_by,engine:launched.engine,assertActive:assertLogin,check,loginScope:loginScope!,heartbeat:()=>options.onProgress(8,'waiting_login','等待你完成登录验证，原任务将继续。')}));
+      if(credentials.rememberSession){savedSessionId=await rememberWebsiteSession(options.db,sessionOwner,startUrl.origin,context,loginPage,loginScope.allowedOrigins);await options.db.query('update website_capture_tasks set browser_session_id=$2 where id=$1',[options.task.id,savedSessionId]);}
+      context=await newAuthenticatedContext(browser,context,undefined,[credentials.username,credentials.password]);
       requestCount=0;
       await installNetwork();
       await options.onProgress(9,"signed_in","登录成功，开始记录站内体验。账号密码已从服务端销毁。");
@@ -192,6 +201,7 @@ export async function captureIsolatedWebsite(options: {
         store: browserViewStore(options.db,options.storageRoot), taskId: options.task.id,
         workspaceId: options.task.workspace_id, userId: options.task.created_by,
         assertActive: () => assertTaskIsRunning(options.db,options.task.id),
+        externalFrames:options.task.record_video,
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.task.login ? { sourceUrl:startUrl.origin+startUrl.pathname } : {}),
       });
@@ -215,15 +225,12 @@ export async function captureIsolatedWebsite(options: {
       try {
         await view?.beforeAction(`正在打开 ${new URL(nextUrl).hostname}`,null);
         await page.goto(nextUrl, { waitUntil: "domcontentloaded" });
-        const stepStarted=Date.now();
         await page.waitForTimeout(PAGE_SETTLE_MS);
-        if((options.task.login||journey)&&!presentation&&plannedStep?.scroll!==false){
-          const bottom=await page.evaluate("Math.min(document.documentElement.scrollHeight-innerHeight,1440)") as number;
-          for(const top of [0,Math.max(0,bottom/2),Math.max(0,bottom),0]){
-            await assertTaskIsRunning(options.db,options.task.id);
-            await view?.beforeAction("浏览登录后页面");
-            await page.evaluate(`window.scrollTo(0,${Math.round(top)})`);await page.waitForTimeout(700);
-          }
+        if(options.task.record_video&&!presentation){
+          const seconds=(journey?.durationSeconds??options.task.page_limit*6)/(journey?.steps.length??options.task.page_limit);
+          const segment=join(tempDir,`page-${segments.length}.webm`);
+          await recordPageSegment(page,segment,seconds,plannedStep?.scroll!==false,async()=>{await assertCaptureActive();await view?.beforeAction('连续滚动展示当前页面');},async bytes=>view?.publishFrame(bytes));
+          segments.push(segment);segmentDurations.push(seconds);
         }
         const scene=presentation?await capturePresentationScene(page):null;
         await view?.beforeAction("正在读取页面内容");
@@ -241,12 +248,8 @@ export async function captureIsolatedWebsite(options: {
         const responseUrl = await validatePublicHttpUrl(facts.url);
         if(options.task.login&&!sameWebsiteOrigin(responseUrl.href,startUrl.href))throw new Error("体验页面已离开授权站点。");
         await view?.beforeAction("正在保存页面证据");
-        const screenshot = await page.screenshot({ type: "jpeg", quality: 76, fullPage: false, ...(options.task.login?{mask:[page.locator('input,textarea,select,[contenteditable="true"]')]}:{}) });
+        const screenshot = await mosaicScreenshot(page,true,{quality:76,fullPage:false});
         await view?.capture();
-        if(journey?.durationSeconds&&!presentation){
-          const until=stepStarted+journey.durationSeconds*1000/journey.steps.length;
-          while(Date.now()<until){await assertTaskIsRunning(options.db,options.task.id);await view?.beforeAction('停留展示当前页面');await page.waitForTimeout(Math.min(350,until-Date.now()));}
-        }
         captured.push({
           url: options.task.login?responseUrl.origin+responseUrl.pathname:responseUrl.toString(),
           title: facts.title,
@@ -279,9 +282,8 @@ export async function captureIsolatedWebsite(options: {
     await closeView("completed", "浏览完成，显示最后画面；证据正在回写任务。");
     await page.close();
     if (options.task.record_video && !presentation) {
-      const video = page.video();
-      if (!video) throw new WebsiteCaptureError("recording_missing", "The browser did not produce a recording.");
-      videoPath = await video.path();
+      await options.onProgress(74,'processing_recording','正在去除加载等待并按目标时长整理录像');
+      videoPath=await joinCaptureSegments(segments,segmentDurations,tempDir);
     }
     await context.close();
 
@@ -293,10 +295,12 @@ export async function captureIsolatedWebsite(options: {
           view=await observeAgentBrowser({page:demo,engine:launched.engine,store:browserViewStore(options.db,options.storageRoot),
             taskId:options.task.id,workspaceId:options.task.workspace_id,userId:options.task.created_by,
             name:"网站介绍演示",sourceUrl:startUrl.toString(),assertActive:()=>assertTaskIsRunning(options.db,options.task.id),
+            externalFrames:true,
             ...(options.signal?{signal:options.signal}:{}),});
         },
-        checkpoint:async()=>{options.signal?.throwIfAborted();await assertTaskIsRunning(options.db,options.task.id);return await view?.beforeAction("多光标网页重建 · 正在录制",null);},
+        checkpoint:async()=>{await assertCaptureActive();return await view?.beforeAction("多光标网页重建 · 正在录制",null);},
         onProgress:async progress=>{await options.onProgress(74+Math.round(progress*.18),"presentation_recording",`多光标网页重建演示 ${progress}%`);},
+        onFrame:async bytes=>{await view?.publishFrame(bytes);},
       });
       await closeView("completed","网站演示录制完成，视频正在保存。");
     }
@@ -578,7 +582,7 @@ export async function fulfillPublicReadOnlyRequest(route: Route, budget: ReturnT
   });
 
   try {
-    const sameOrigin = login && parsedUrl.origin===login.origin;
+    const sameOrigin = login && (parsedUrl.origin===login.origin||login.human&&login.allowedOrigins?.includes(parsedUrl.origin));
     const verification=login?.human&&isLoginVerificationUrl(parsedUrl);
     const browserHeaders = sameOrigin||verification ? await request.allHeaders() : {};
     const response = await httpRequest(parsedUrl, {

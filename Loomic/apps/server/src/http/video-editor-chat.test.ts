@@ -17,6 +17,10 @@ it("answers questions without saving or executing a plan",async()=>{
   const {app,save}=setup({message:"当前视频2秒，有一条欢迎标题。"});
   try{const response=await app.inject({method:"POST",url:"/api/video/editor/chat",payload:input});expect(response.statusCode).toBe(200);expect(save).not.toHaveBeenCalled();}finally{await app.close();}
 });
+it('prepares a narration script without synthesizing or applying media',async()=>{
+ const {app,save}=setup({message:'请先确认配音文稿。',material:{type:'narration',text:'欢迎来到创作工作台。',voice:'cmn',rate:150}});
+ try{const response=await app.inject({method:'POST',url:'/api/video/editor/chat',payload:input});expect(response.statusCode).toBe(200);expect(response.json().reply.material.type).toBe('narration');expect(save).not.toHaveBeenCalled();}finally{await app.close();}
+});
 it("uses provider JSON output when the configured model supports it",async()=>{
   const {app,model,save}=setup({message:"unused"});
   const structured=vi.fn(()=>({invoke:vi.fn().mockResolvedValue({parsed:{message:"当前视频2秒。"},raw:{content:"unused"}})}));
