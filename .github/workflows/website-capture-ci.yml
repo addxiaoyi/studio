@@ -22,6 +22,8 @@ permissions:
 jobs:
   chromium:
     runs-on: ubuntu-24.04
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     timeout-minutes: 20
     defaults:
       run:
