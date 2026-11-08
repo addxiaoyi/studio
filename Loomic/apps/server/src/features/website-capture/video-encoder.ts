@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-export const CAPTURE_FPS=30;
+export const CAPTURE_FPS=60;
 export function ffmpegBinary(){return process.env.HELSTERA_FFMPEG??'ffmpeg';}
 export function frameEncoder(path:string){
   const child=spawn(ffmpegBinary(),['-hide_banner','-loglevel','error','-y','-f','image2pipe','-vcodec','mjpeg','-framerate',String(CAPTURE_FPS),'-i','pipe:0','-an','-c:v','libvpx-vp9','-deadline','realtime','-cpu-used','6','-threads','2','-row-mt','1','-b:v','0','-crf','28','-pix_fmt','yuv420p',path],{windowsHide:true,stdio:['pipe','ignore','pipe']});
@@ -29,7 +29,7 @@ export async function joinCaptureSegments(paths:string[],durations:number[],dire
   for(const [index,path] of paths.entries()){
     const seconds=durations[index]!;if(!Number.isFinite(seconds)||seconds<=0||seconds>60)throw new Error('录制时长无效。');
     const target=join(directory,`ready-${index}.webm`);
-    await runCaptureFfmpeg(['-i',path,'-an','-vf',`fps=${CAPTURE_FPS},tpad=stop_mode=clone:stop_duration=${seconds},trim=duration=${seconds},setpts=PTS-STARTPTS`,'-c:v','libvpx-vp9','-deadline','realtime','-cpu-used','6','-threads','2','-row-mt','1','-b:v','0','-crf','28','-pix_fmt','yuv420p',target]);normalized.push(target);
+    await runCaptureFfmpeg(['-i',path,'-an','-t',String(seconds),'-c:v','copy',target]);normalized.push(target);
   }
   const manifest=join(directory,'segments.txt');await writeFile(manifest,normalized.map(path=>`file '${path.replaceAll('\\','/').replaceAll("'","'\\''")}'`).join('\n'));
   const output=join(directory,'website-recording.webm');await runCaptureFfmpeg(['-f','concat','-safe','0','-i',manifest,'-c','copy',output]);return output;

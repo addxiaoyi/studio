@@ -127,10 +127,10 @@ it("rebuilds the real page with multiple cursors and records a playable WebM", a
     const bytes = await readFile(file);
     expect(bytes.length).toBeGreaterThan(10_000);
     expect(bytes.subarray(0, 4).toString("hex")).toBe("1a45dfa3");
-    const ffmpeg =
+    const ffmpeg = process.env.HELSTERA_FFMPEG ?? (
       process.platform === "win32"
         ? resolve("../desktop/resources/ffmpeg/win-x64/ffmpeg.exe")
-        : "ffmpeg";
+        : "ffmpeg");
     const decode=spawnSync(
       ffmpeg,
       ["-hide_banner", "-xerror", "-i", file, "-f", "null", "-"],

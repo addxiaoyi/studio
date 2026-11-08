@@ -35,7 +35,7 @@ it.each([false,true])('records continuous movement after page readiness with nes
   const deltas=frames.slice(1).map((y,i)=>Math.abs(y-frames[i]!));expect(deltas.filter(d=>d>400)).toHaveLength(0);
   const file=await joinCaptureSegments([segment],[3],directory);
   const decoded=spawnSync(ffmpegBinary(),['-hide_banner','-xerror','-i',file,'-f','null','-'],{windowsHide:true,encoding:'utf8'});
-  expect(decoded.status,decoded.stderr).toBe(0);expect(decoded.stderr).toContain('00:00:03.00');expect(decoded.stderr).toContain('30 fps');
+  expect(decoded.status,decoded.stderr).toBe(0);expect(decoded.stderr).toContain('00:00:03.00');expect(decoded.stderr).toContain('60 fps');
   await mkdir(evidence,{recursive:true});await copyFile(file,join(evidence,nested?'smooth-nested-scrolling.webm':'smooth-scrolling.webm'));
  }finally{await browser.close();}
 },60000);
