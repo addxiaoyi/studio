@@ -4,6 +4,7 @@ import http.server
 import json
 import pathlib
 import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -331,6 +332,28 @@ class DeployCandidateTests(unittest.TestCase):
         self.assertIn("Candidate runtime contains preinstalled dependencies", command)
         self.assertLess(command.index("-name node_modules"), command.index("pnpm install"))
         self.assertIn("cd deploy/server-runtime && CI=true pnpm install", command)
+
+    def test_runtime_gate_rejects_shared_without_workflow_exports(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is not installed")
+        command = self.deploy.prepare_candidate_runtime_command("/srv/candidate")
+        probe = command.split('node --import tsx --input-type=module -e "', 1)[1][:-1]
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for name in ("pg", "@helstera/shared"):
+                package = root / "node_modules" / name
+                package.mkdir(parents=True)
+                (package / "package.json").write_text(json.dumps({"type": "module", "exports": "./index.js"}), encoding="utf-8")
+                (package / "index.js").write_text("export {};", encoding="utf-8")
+            shared = root / "node_modules/@helstera/shared/index.js"
+            legacy = "export function validateVideoEditorPlan(){}; export function createTranscriptEdit(){};"
+            shared.write_text(legacy, encoding="utf-8")
+            stale = subprocess.run([node, "--input-type=module", "-e", probe], cwd=root, capture_output=True, text=True)
+            self.assertNotEqual(stale.returncode, 0, "A stale shared runtime must block deployment")
+            shared.write_text(legacy + "export function compileWorkflow(){}; export const workflowGraphSchema={parse(){}};", encoding="utf-8")
+            current = subprocess.run([node, "--input-type=module", "-e", probe], cwd=root, capture_output=True, text=True)
+            self.assertEqual(current.returncode, 0, current.stderr)
 
     def test_candidate_shared_overwrites_existing_runtime_without_nesting_dist(self):
         bash = pathlib.Path("C:/Program Files/Git/bin/bash.exe") if sys.platform == "win32" else pathlib.Path("/bin/bash")

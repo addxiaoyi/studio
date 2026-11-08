@@ -362,9 +362,11 @@ def prepare_candidate_runtime_command(staging: str) -> str:
         "ln -s ../../deploy/server-runtime/apps/server/node_modules apps/server/node_modules; "
         "test -f deploy/server-runtime/packages/shared/dist/index.js; "
         "cd apps/server; node --import tsx --input-type=module -e \""
-        "import 'pg'; import { validateVideoEditorPlan, createTranscriptEdit } from '@helstera/shared'; "
+        "import 'pg'; import { validateVideoEditorPlan, createTranscriptEdit, compileWorkflow, workflowGraphSchema } from '@helstera/shared'; "
         "if (typeof validateVideoEditorPlan !== 'function' || typeof createTranscriptEdit !== 'function') "
         "throw new Error('Candidate video contracts are missing'); "
+        "if (typeof compileWorkflow !== 'function' || typeof workflowGraphSchema?.parse !== 'function') "
+        "throw new Error('Candidate workflow contracts are missing'); "
         "console.log('candidate runtime ready')\""
     )
 

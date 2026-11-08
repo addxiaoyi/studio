@@ -297,7 +297,13 @@ export function useWorkflowRun(
         if (next.status === "completed" && !done) {
           done = true;
           onComplete?.();
+          if (next.chatSessionId) {
+            window.dispatchEvent(new CustomEvent("helstera:desktop-agent-result", {
+              detail: { sessionId: next.chatSessionId },
+            }));
+          }
         }
+        if (["completed", "failed", "canceled"].includes(next.status)) return;
       } catch (cause) {
         if (!stopped)
           setError(
