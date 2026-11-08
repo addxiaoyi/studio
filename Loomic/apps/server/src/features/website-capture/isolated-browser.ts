@@ -23,6 +23,7 @@ import { resolveJourneyStep } from "./journey-navigation.js";
 import { mosaicScreenshot,installPrivacyMosaic } from "../agent-browser/privacy-mosaic.js";
 import { recordPageSegment } from "./page-recording.js";
 import { joinCaptureSegments } from "./video-encoder.js";
+import { closeCaptureContext } from "./capture-teardown.js";
 import { assertConnectorEnabled } from "../agent-goals/connector-gate.js";
 import type { Pool, PoolClient } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
@@ -123,12 +124,13 @@ export async function captureIsolatedWebsite(options: {
   const presentation=options.task.presentation?websitePresentationSchema.parse(options.task.presentation):null;
   if(presentation&&!options.task.record_video)throw new Error("网站演示需要先确认录制。");
   const scenes:PresentationScene[]=[];
+  const networkRequests = new AbortController();
   const segments:string[]=[],segmentDurations:number[]=[];
   let savedSessionId:string|undefined;
   const sessionOwner={workspaceId:options.task.workspace_id,userId:options.task.created_by};
   const assertCaptureActive=async()=>{options.signal?.throwIfAborted();await assertTaskIsRunning(options.db,options.task.id);if(savedSessionId)await assertWebsiteSessionActive(options.db,savedSessionId,sessionOwner);};
   if(options.task.journey)validateWebsiteJourney(options.task.start_url,options.task.journey);
-  const abort = () => { void browser?.close().catch(error => console.error("[capture] cancellation close failed", error)); };
+  const abort = () => { networkRequests.abort();void browser?.close().catch(error => console.error("[capture] cancellation close failed", error)); };
   options.signal?.throwIfAborted();
   options.signal?.addEventListener("abort", abort, { once: true });
 
@@ -169,7 +171,7 @@ export async function captureIsolatedWebsite(options: {
         }
         await route.abort("blockedbyclient");return;
       }
-      await fulfillPublicReadOnlyRequest(route, budget,loginScope);
+      await fulfillPublicReadOnlyRequest(route, budget,loginScope,networkRequests.signal);
       });
     };
     await installNetwork();
@@ -283,12 +285,11 @@ export async function captureIsolatedWebsite(options: {
       throw new WebsiteCaptureError("no_pages_captured", "No pages could be captured from this website.");
     }
     await closeView("completed", "浏览完成，显示最后画面；证据正在回写任务。");
-    await page.close();
+    await closeCaptureContext(context, networkRequests);
     if (options.task.record_video && !presentation) {
       await options.onProgress(74,'processing_recording','正在去除加载等待并按目标时长整理录像');
       videoPath=await joinCaptureSegments(segments,segmentDurations,tempDir);
     }
-    await context.close();
 
     if(presentation){
       await options.onProgress(74,"presentation_recording","正在录制多光标网页重建演示");
@@ -384,6 +385,7 @@ export async function captureIsolatedWebsite(options: {
       ...(presentation?{presentation}:{}),
     };
   } finally {
+    networkRequests.abort();
     await view?.close(capturedSuccessfully ? "completed" : "failed", capturedSuccessfully ? "浏览完成" : "浏览已停止，请查看任务结果").catch(error=>console.error("[agent-browser] failed to close preview",error));
     options.signal?.removeEventListener("abort", abort);
     await browser?.close().catch(() => undefined);
@@ -548,7 +550,7 @@ export async function fulfillBoundedCaptureResponse(
   return total;
 }
 
-export async function fulfillPublicReadOnlyRequest(route: Route, budget: ReturnType<typeof createCaptureByteBudget>, login?: LoginNetworkScope): Promise<number> {
+export async function fulfillPublicReadOnlyRequest(route: Route, budget: ReturnType<typeof createCaptureByteBudget>, login?: LoginNetworkScope, signal?: AbortSignal): Promise<number> {
   const request = route.request();
   const method = request.method().toUpperCase();
   if (login ? !allowLoginRequest(request,login) : method !== "GET" && method !== "HEAD") {
@@ -590,6 +592,7 @@ export async function fulfillPublicReadOnlyRequest(route: Route, budget: ReturnT
     const browserHeaders = sameOrigin||verification ? await request.allHeaders() : {};
     const response = await httpRequest(parsedUrl, {
       dispatcher,
+      ...(signal ? { signal } : {}),
       method:method as "GET"|"HEAD"|"POST"|"OPTIONS",
       ...(method==="POST"?{body:request.postDataBuffer()??null}:{}),
       headersTimeout: PAGE_TIMEOUT_MS,

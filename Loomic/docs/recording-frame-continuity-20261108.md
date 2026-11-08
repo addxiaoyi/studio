@@ -35,3 +35,11 @@
 新增真实Chromium用例在旧实现下2项失败，修复后延迟就绪、持续加载、小型异步部件及连续性/马赛克共7项通过，Server类型检查通过。证据：`M:/loomic-builds/frame-readiness-before.log`、`frame-readiness-final.log`、`frame-readiness-types.log`。
 
 编码预算提交 `aa88c53` 的 Website Capture CI `42448479706`、Agent Closure CI `42448479783`、Desktop Candidate CI `42448479707` 全部成功。
+
+## 录制收尾
+
+生产任务 `f32ab2b2-c7a7-409a-bf3f-b2ed7655e86a` 在已生成两段录像、预览关闭后停于 `page.close()`，未进入拼接保存。路由代理响应体属于Node进程，单独关闭Chromium页面不会取消它们。关闭前主动取消资源流、移除路由，再关闭整个隔离上下文，避免留下资源请求。取消及异常退出同样终止资源请求。
+
+真实HTTP持续流回归在旧关闭实现中失败（响应体未关闭），修复后5项Chromium/HTTP集成测试全部通过，Server类型检查通过。证据：`M:/loomic-builds/capture-close-before.log`、`capture-close-final.log`、`capture-close-types.log`。此回归证明资源释放，不单独作为生产任务完成的证据。
+
+`ffadbdc` 的 Website Capture CI `42449335950`、Agent Closure CI `42449335997`、Desktop Candidate CI `42449336014` 全部成功。

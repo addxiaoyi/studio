@@ -8,6 +8,7 @@ import { request } from "undici";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { abortResponseBody, createCaptureByteBudget, fulfillBoundedCaptureResponse, PAGE_FACTS_SCRIPT } from "./isolated-browser.js";
+import { closeCaptureContext } from "./capture-teardown.js";
 
 describe("website capture runtime integration", () => {
   let browser: Browser;
@@ -61,6 +62,37 @@ describe("website capture runtime integration", () => {
     abortResponseBody(response.body);
     await expect(closed).resolves.toBeUndefined();
   });
+
+  it("closes pending resource streams before completing browser capture", async () => {
+    const context = await browser.newContext();
+    const requests = new AbortController();
+    let resourceClosed = false;
+    let resourceStarted!: () => void;
+    const started = new Promise<void>(resolve => { resourceStarted = resolve; });
+    await context.route("**/stream", async route => {
+      const response = await request(`${origin}/stream`, { signal: requests.signal });
+      response.body.once("close", () => { resourceClosed = true; });
+      resourceStarted();
+      try {
+        await fulfillBoundedCaptureResponse(route, response.body, 200, { "content-type": "text/plain" }, createCaptureByteBudget(1024));
+      } catch (error) {
+        if (!requests.signal.aborted) throw error;
+      }
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(origin);
+      // The request belongs to the disposable page and rejects when that page closes.
+      const pending = page.evaluate("fetch('/stream').catch(()=>null)").catch(() => undefined);
+      await started;
+      await closeCaptureContext(context, requests);
+      await expect.poll(() => resourceClosed, { timeout: 1500 }).toBe(true);
+      await pending;
+    } finally {
+      requests.abort();
+      await context.close();
+    }
+  }, 15_000);
 
   it("aborts an over-budget concurrent response before it reaches Chromium", async () => {
     const context = await browser.newContext();
