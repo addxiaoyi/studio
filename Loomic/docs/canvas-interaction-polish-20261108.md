@@ -12,8 +12,16 @@
 
 新增回归先失败后通过：旧Markdown文稿转换、普通文字不变、空白点击/图形点击/拖动区别、文稿排版和编辑回执。Shared相关5项、时间线与文稿组件5项通过，Server/Web类型检查通过。
 
-真实Chromium四条端到端通过（约1.1分钟）：原流程执行与刷新、分镜文稿、左流程与右聊天共存、时间线空白收起并保留字幕、Inspire资源库和选区引用。Windows候选重复相同流程，最终结果记入 `M:/loomic-builds/canvas-natural-desktop-final.log`。
+真实Chromium四条端到端通过（约1.1分钟）：原流程执行与刷新、分镜文稿、左流程与右聊天共存、时间线空白收起并保留字幕、Inspire资源库和选区引用。Windows 0.2.21候选在隔离用户目录重复相同流程，4项全部通过（1.1分钟），日志为 `M:/loomic-builds/canvas-natural-desktop-final.log`。
 
 代码路径：`components/canvas/workflow-document.tsx`、`hooks/use-canvas-dismiss.ts`、`hooks/use-floating-panel.ts`、`components/workflow/viewport.ts`、`packages/shared/src/canvas-document.ts`。动效使用已安装GSAP，未引入新的运行依赖。
 
-本轮继续保留Inspire-Studio个人资源库、提示词库、AI引用和历史结果对比；没有回退前一轮功能。生产发布与真实页面验收完成后补记。
+本轮继续保留Inspire-Studio个人资源库、提示词库、AI引用和历史结果对比；没有回退前一轮功能。
+
+## 生产发布与实际验收
+
+- 实现提交 `e802184e61bdab66a752c22db04176af365d701c` 已推送 `codex/agent-workspace-ci`。在生产现有版本上增量发布，保留线上视频、登录和七牛云配置；Server及Web发布脚本分别返回 `FUSION_SERVER_DEPLOYED`、`WORKFLOW_WEB_DEPLOYED`。
+- 在用户已登录的原画布验证：旧分镜正常显示标题和段落；编辑按钮打开原始文稿，取消不会改写内容；1703px宽屏下左侧流程与右侧AI对话共存；定位结果后文稿不被左面板遮住；打开媒体时间线后点击画布空白处，时间线关闭。临时浏览器尺寸已恢复。
+- 生产截图：`M:/loomic-builds/canvas-polish-live.png`。部署日志：`M:/loomic-builds/deploy-canvas-natural.log`、`M:/loomic-builds/publish-canvas-natural-web.log`。最终只读检查：`M:/loomic-builds/inspire-production-final.log`，退出码0，Server/Worker均为 `online`，健康接口 `ok:true`。
+- `/canvas/`、`/video/`、`/fashion-gallery/`、`/desktop-app/` 均返回200。生产画布HTML SHA256为 `8e8158abc3a3706d15984a82c1de22cc7bb17a57a39b3b1de566bfea5fc1c332`。
+- 当前实现的 [Agent Closure CI](https://github.com/addxiaoyi/studio/actions/runs/42473412057) 与 [Website Capture CI](https://github.com/addxiaoyi/studio/actions/runs/42473412004) 已通过。[Desktop Candidate CI](https://github.com/addxiaoyi/studio/actions/runs/42473412017) 截至记录时仍在安装构建依赖，不能将本地Windows验收当作此次跨平台打包通过的证据。

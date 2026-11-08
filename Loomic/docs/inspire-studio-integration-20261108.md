@@ -24,9 +24,17 @@
 - PostgreSQL工作流11项通过，新增个人库隔离/幂等/归档恢复、引用删除和撤权、历史结果复用不增加运行/到期拒绝。
 - 画布场景回归8项、显式引用选择1项及原有节点/运行测试通过，素材槽绑定后旧占位移除。
 - Chromium完整3条通过（56.4秒），包含两次真实流程运行的结果并排对比、结果复用、模板保存与撤销、提示词追加与保存、刷新恢复、620px窄屏无横向溢出、手动选中文字后AI规划确实收到该引用。
-- Windows 0.2.21独立用户目录的3条基础流程通过（58.5秒），最终追加引用与双版本对比的同版测试结果以最终日志为准。
+- Windows 0.2.21独立用户目录的3条基础流程通过（58.5秒）；随后包含面板修复、文稿编辑、显式引用与双版本对比的最终4条流程全部通过（1.1分钟），记录在 `M:/loomic-builds/canvas-natural-desktop-final.log`。
 - Shared、Server、Web、Desktop类型检查通过，生产兼容Server类型检查通过。
 
 日志位于 `M:/loomic-builds/`：`inspire-final-browser.log`、`inspire-final-desktop.log`、`inspire-production-server-types.log`、`inspire-final-web-build.log`。浏览器截图位于 `Loomic/.creative-test-results/workflow/canvas-workflow-reuses-com-e1f31-cipes-without-running-again/`。
 
-生产发布和真实工作区验收完成后补记。本轮没有接入参考项目的电商独立应用、多平台发布账号或图像局部编辑执行器。
+## 生产验收
+
+实现提交 `71443948b2846f0fdccaf103032f13e28b2cefa0` 与后续画布修复 `e802184e61bdab66a752c22db04176af365d701c` 已推送并增量发布到生产。迁移 `20261108000005_creative_library` 已安装，数据库记录的校验值为 `847d50c252c4bf34de2c012335f0ca248854c817510b639248af5dec8cf3bdd0`，与候选一致。
+
+已在用户当前登录的画布中保存个人模板“故事到三镜头分镜”（3节点、2连线），服务端查询确认保存为未归档的工作流模板；历史记录可打开已有分镜的参数、格式化正文与复用入口。验收前后该画布运行数量均为5，没有新建生成任务。最终检查日志 `M:/loomic-builds/inspire-production-final.log` 退出码0，服务健康、Server/Worker在线，未登录访问个人库路由返回401。
+
+功能回归中的模板插入、提示词复用、权限撤销和双版本对比由隔离PostgreSQL及Chromium/Windows测试覆盖；生产此次验证了模板保存和已有结果查看，没有在生产重复付费生成。当前实现的Agent Closure与Website Capture CI已通过；跨平台桌面打包状态见[画布修复验收](canvas-interaction-polish-20261108.md)。
+
+本轮没有接入参考项目的电商独立应用、多平台发布账号或图像局部编辑执行器。
