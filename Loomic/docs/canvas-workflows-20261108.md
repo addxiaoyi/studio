@@ -30,8 +30,12 @@ AI面板调用现有真实目标规划模型，仅返回结构化计划，转换
 - 真实截图对象 `0cfadde7-f3f2-490f-916d-88188d16d475`，结果交付返回画布元素 `665zkmagpkump1ie6qkq`；刷新原画布后聊天中的网站介绍仍存在，工作流可从数据库恢复。
 - 生产操作截图：`M:/loomic-builds/workflow-production-complete.png`；发布日志：`deploy-workflow-server-repair.log`、`publish-workflow-web.log`；执行日志：`workflow-production-persistence.log`（均位于 `M:/loomic-builds/`）。
 
-首次服务发布在健康检查时失败：服务器实际从 `.server-runtime/packages/shared` 加载共享契约，工作流新导出只上传到源码目录。恢复原服务后，对源码与实际运行时分别保留既有导出并增加工作流模块，先验证 `compileWorkflow` 与已有视频契约，再重启，通过健康检查。后续完整候选发布门禁补充工作流导出检查；真实Node回归先复现旧运行时被错误放行，修复后29项发布测试通过（Windows不适用的2项跳过）。
+首次服务发布在健康检查时失败：服务器实际从 `.server-runtime/packages/shared` 加载共享契约，工作流新导出只上传到源码目录。恢复原服务后，对源码与实际运行时分别保留既有导出并增加工作流模块，先验证 `compileWorkflow` 与已有视频契约，再重启，通过健康检查。后续完整候选发布门禁补充工作流导出检查；真实Node回归先复现旧运行时被错误放行，修复后29项发布测试中27项通过、Windows不适用的2项跳过。
 
 线上验收还发现目标结果已入库但聊天未立即更新。工作流完成现在发送带会话ID的既有结果通知，由聊天模块在不覆盖流式回复的条件下加载；终态停止轮询。新增回归覆盖完成通知、终态停止轮询、切换流程后忽略旧响应。
 
+16:00在生产页面再次手动确认运行，完成后直接返回画布，未刷新页面即可看到16:00的新聊天结果。新目标 `2e4d2b7a-a990-4af0-ab61-af6a6d6b6205` 的两个步骤仍各执行1次，1条聊天消息、1个画布截图元素。此时共2条运行记录，分别对应两次明确确认。日志为 `M:/loomic-builds/workflow-production-final.log`，即时回流补丁发布日志为 `publish-workflow-chat-web.log`。新增及相关Web组件回归7项通过，Web类型检查和生产构建通过。
+
 主功能提交 `2ee5ab3` 的 GitHub Actions 已全部通过：Agent Closure CI `42459814716`、Website Capture CI `42459814694`、Desktop Candidate CI `42459814697`。后续聊天通知与运行时门禁补丁另行提交，不将前一提交的CI结果算作新提交结果。
+
+补丁提交 `ca848d8` 已推送到 `codex/agent-workspace-ci`。Agent Closure CI `42460950536` 的契约与数据库任务已通过，浏览器任务仍在运行；Desktop Candidate CI `42460950527` 仍在运行。本记录未将尚未结束的CI标记为通过。
