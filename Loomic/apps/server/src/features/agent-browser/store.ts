@@ -25,6 +25,7 @@ type Row = {
   frame_revision: string | number;
   cursor: AgentBrowserCursor | null;
   detail: string;
+  handoff?:boolean;
   heartbeat_at: Date;
   updated_at: Date;
   expires_at: Date;
@@ -62,6 +63,7 @@ export function browserViewStore(db: Pool, storageRoot: string) {
       frameRevision: Number(row.frame_revision),
       cursor: row.cursor,
       detail: row.detail,
+      handoff:row.handoff??false,
       updatedAt: new Date(row.updated_at).toISOString(),
       expiresAt: new Date(row.expires_at).toISOString(),
     });
@@ -105,6 +107,11 @@ export function browserViewStore(db: Pool, storageRoot: string) {
     },
     async frame(id: string) {
       return readFile(join(directory(id), "frame.jpg"));
+    },
+    async enableHandoff(id:string){await db.query("update agent_browser_views set handoff=true where id=$1",[id]);},
+    async eraseLoginView(id:string){
+      await db.query("update agent_browser_views set handoff=false,state='completed',expires_at=now(),updated_at=now() where id=$1",[id]);
+      await rm(directory(id),{recursive:true,force:true});
     },
     async writeFrame(
       id: string,

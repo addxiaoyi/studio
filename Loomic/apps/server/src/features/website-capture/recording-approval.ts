@@ -16,7 +16,9 @@ const taskAction = `(jsonb_build_object(
 ) || case when to_jsonb(t)->'presentation' is not null and to_jsonb(t)->'presentation' <> 'null'::jsonb
   then jsonb_build_object('presentation',to_jsonb(t)->'presentation') else '{}'::jsonb end
  || case when to_jsonb(t)->'login' is not null and to_jsonb(t)->'login' <> 'null'::jsonb
-  then jsonb_build_object('login',to_jsonb(t)->'login') else '{}'::jsonb end)`;
+  then jsonb_build_object('login',to_jsonb(t)->'login') else '{}'::jsonb end
+ || case when to_jsonb(t)->'journey' is not null and to_jsonb(t)->'journey' <> 'null'::jsonb
+  then jsonb_build_object('journey',to_jsonb(t)->'journey') else '{}'::jsonb end)`;
 
 export function recordingActionFromTask(task: {
   start_url: string;
@@ -27,6 +29,7 @@ export function recordingActionFromTask(task: {
   assistant_connection_id: string | null;
   presentation?: Record<string, unknown> | null;
   login?: Record<string, unknown> | null;
+  journey?: Record<string, unknown> | null;
 }): Record<string, unknown> {
   return {
     kind: "website_recording",
@@ -38,6 +41,7 @@ export function recordingActionFromTask(task: {
     connectionId: task.assistant_connection_id,
     ...(task.presentation?{presentation:task.presentation}:{}),
     ...(task.login?{login:task.login}:{}),
+    ...(task.journey?{journey:task.journey}:{}),
   };
 }
 

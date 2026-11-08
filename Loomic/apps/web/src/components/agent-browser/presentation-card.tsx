@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { StyledSelect } from "@/components/ui/styled-select";
 import { useWebsitePresentation } from "@/hooks/use-website-presentation";
 import { WebsiteLoginFields } from "./website-login-fields";
+import { WebsiteJourneyComposer } from "./journey-composer";
 import type { WebsiteLoginCredentials } from "@helstera/shared";
 import { AuthenticatedRecording } from "@/components/chat/authenticated-recording";
 
@@ -18,6 +19,7 @@ export function WebsitePresentationCard({
     [duration, setDuration] = useState("24"),
     [cursors, setCursors] = useState("4");
   const form = useWebsitePresentation(userId, token);
+  const [manual,setManual]=useState(false);
   const [needsLogin,setNeedsLogin]=useState(false),[recordingMode,setRecordingMode]=useState("presentation");
   const [credentials,setCredentials]=useState<WebsiteLoginCredentials>({loginUrl:"",username:"",password:"",successText:""});
   useEffect(()=>{if(form.saved)setCredentials(value=>({...value,username:"",password:""}));},[form.saved?.key]);
@@ -35,7 +37,7 @@ export function WebsitePresentationCard({
       style: "cursor-rebuild",
       durationSeconds: Number(duration),
       cursorCount: Number(cursors),
-    }:undefined,needsLogin?credentials:undefined);
+    }:undefined,needsLogin?{...credentials,loginUrl:credentials.loginUrl||url}:undefined);
   }
   return (
     <section className="website-presentation-card" aria-label="网站介绍演示">
@@ -53,9 +55,11 @@ export function WebsitePresentationCard({
         <div className="website-presentation-body">
           <p>
             多光标依次描绘网页布局、打出文字和铺放图片，自动录制为
-            WebM。也可选择登录后录制站内浏览，任务限定在确认的网站内。
+            WebM。通过对话规划网站体验，登录验证时可接管，完成后继续剪辑。
           </p>
-          {!form.saved ? (
+          {!form.saved&&!manual&&<WebsiteJourneyComposer token={token} sourceUrl={sourceUrl} busy={form.busy} onStart={form.prepare}/>}
+          {!form.saved&&<button type="button" className="justify-self-start text-xs text-muted-foreground underline" onClick={()=>setManual(value=>!value)}>{manual?'返回对话规划':'使用手动录制参数'}</button>}
+          {!form.saved&&manual ? (
             <>
               <label>
                 演示网址
@@ -101,18 +105,19 @@ export function WebsitePresentationCard({
               }
               <Button
                 size="sm"
-                disabled={form.busy || !url.trim() || (needsLogin&&(!credentials.loginUrl||!credentials.username||!credentials.password||!credentials.successText))}
+                disabled={form.busy || !url.trim() || (needsLogin&&(!credentials.username||!credentials.password))}
                 onClick={prepare}
               >
                 {form.busy ? "正在准备…" : "查看录制方案"}
               </Button>
             </>
-          ) : !task ? (
+          ) : form.saved&&!task ? (
             <>
               <p>正在恢复上一次请求，重试会沿用同一任务。</p>
               <Button size="sm" disabled={form.busy} onClick={prepare}>
                 恢复演示请求
               </Button>
+              {!form.saved.taskId&&<Button size="sm" variant="outline" onClick={form.reset}>重新填写</Button>}
             </>
           ) : null}
           {form.approval && (
@@ -132,7 +137,8 @@ export function WebsitePresentationCard({
                 个光标 · 1280 × 720 · WebM
                 </> : "真实站内浏览录屏 · 1280 × 720 · WebM"}
               </p>
-              {form.saved?.input.login&&<p>将使用本次提供的账号登录 {new URL(form.saved.input.login.loginUrl).origin}，确认后读取并录制账号内页面。登录成功标记：{form.saved.input.login.successText}。凭据使用后销毁。</p>}
+              {form.saved?.input.login&&<p>将登录 {new URL(form.saved.input.login.loginUrl).origin}，确认后读取并录制账号内页面。{form.saved.input.login.successText?`登录成功标记：${form.saved.input.login.successText}`:'自动判断登录结果，需要时请你接管。'} 凭据使用后销毁。</p>}
+              {form.saved?.input.journey&&<ol className="list-decimal pl-4">{form.saved.input.journey.steps.map((step,index)=><li key={index}>{step.title}</li>)}</ol>}
               <p>
                 不调用付费生成模型，不扣生成积分。确认后访问指定网页，录制副本进入素材库
                 {form.saved?.input.sessionId ? "并回写当前聊天" : ""}。
@@ -161,7 +167,7 @@ export function WebsitePresentationCard({
                     ? "演示已取消"
                     : task.status === "failed"
                       ? "演示未完成"
-                      : task.stage === "signing_in" ? "正在登录，登录画面不会录制" : task.stage === "signed_in" ? "登录成功，准备录制" : task.stage === "presentation_recording"
+                      : task.stage === "waiting_login" ? "需要你完成登录验证，请在下方画面接管" : task.stage === "signing_in" ? "正在登录，登录画面不会录制" : task.stage === "signed_in" ? "登录成功，准备录制" : task.stage === "presentation_recording"
                         ? "多光标演示正在播放并录制"
                         : "正在准备网页与演示场景"}{" "}
                 · {task.progress}%
@@ -170,12 +176,15 @@ export function WebsitePresentationCard({
             </div>
           )}
           {recording && (
+            <>
             <AuthenticatedRecording
               assetId={recording}
               accessToken={token}
               label="网站介绍演示录像"
               downloadName="website-introduction.webm"
             />
+            <Button size="sm" variant="outline" onClick={()=>{window.location.assign(`/video/?capture=${encodeURIComponent(task!.id)}`);}}>导入视频工作区剪辑</Button>
+            </>
           )}
           {task && !terminal && !form.approval && (
             <Button

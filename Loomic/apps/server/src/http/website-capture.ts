@@ -42,6 +42,7 @@ type TaskRow = {
   promo_status?: WebsiteCaptureTask["promoStatus"];
   presentation?: WebsitePresentation | null;
   login?: import("@helstera/shared").WebsiteLoginRef | null;
+  journey?: import("@helstera/shared").WebsiteJourney | null;
   promo?: WebsiteCaptureTask["promo"];
   promo_approval_id?: string | null;
   promo_job_id?: string | null;
@@ -209,20 +210,20 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
       }
       const inserted = await options.db.query<TaskRow>(
         `insert into website_capture_tasks
-          (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key, stage, presentation, login)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,case when $7 then 'waiting_recording_approval' else 'queued' end,$11::jsonb,$12::jsonb)
+          (workspace_id, created_by, session_id, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key, stage, presentation, login, journey)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,case when $7 then 'waiting_recording_approval' else 'queued' end,$11::jsonb,$12::jsonb,$13::jsonb)
          on conflict (workspace_id, created_by, idempotency_key) do nothing
          returning id, background_job_id, status, mode, start_url, progress, stage, result,
                    error_message, created_at, updated_at`,
-        [viewer.workspace.id, user.id, input.sessionId ?? null, input.mode, startUrl.toString(), input.pageLimit, input.recordVideo, input.followExternal, input.promo?.enabled ? JSON.stringify(input.promo) : null, input.idempotencyKey,input.presentation?JSON.stringify(input.presentation):null,input.login?JSON.stringify(input.login):null],
+        [viewer.workspace.id, user.id, input.sessionId ?? null, input.mode, startUrl.toString(), input.pageLimit, input.recordVideo, input.followExternal, input.promo?.enabled ? JSON.stringify(input.promo) : null, input.idempotencyKey,input.presentation?JSON.stringify(input.presentation):null,input.login?JSON.stringify(input.login):null,input.journey?JSON.stringify(input.journey):null],
       );
       const task = inserted.rows[0] ?? (await options.db.query<TaskRow>(
           `select id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
                 error_message, created_at, updated_at, follow_external, assistant_connection_id
            from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3
              and start_url=$4 and mode=$5 and page_limit=$6 and record_video=$7 and follow_external=$8
-             and session_id is not distinct from $9::uuid and promo is not distinct from $10::jsonb and presentation is not distinct from $11::jsonb and login is not distinct from $12::jsonb`,
-        [viewer.workspace.id, user.id, input.idempotencyKey, startUrl.toString(), input.mode, input.pageLimit, input.recordVideo, input.followExternal, input.sessionId ?? null, input.promo?.enabled ? JSON.stringify(input.promo) : null,input.presentation?JSON.stringify(input.presentation):null,input.login?JSON.stringify(input.login):null],
+             and session_id is not distinct from $9::uuid and promo is not distinct from $10::jsonb and presentation is not distinct from $11::jsonb and login is not distinct from $12::jsonb and journey is not distinct from $13::jsonb`,
+        [viewer.workspace.id, user.id, input.idempotencyKey, startUrl.toString(), input.mode, input.pageLimit, input.recordVideo, input.followExternal, input.sessionId ?? null, input.promo?.enabled ? JSON.stringify(input.promo) : null,input.presentation?JSON.stringify(input.presentation):null,input.login?JSON.stringify(input.login):null,input.journey?JSON.stringify(input.journey):null],
       )).rows[0];
       if (!task) return reply.code(409).send({ ok: false, error: { code: "idempotency_conflict", message: "该请求标识已用于其他浏览参数，请重新发起任务。" } });
 
@@ -585,7 +586,7 @@ async function loadTask(db: Pool, taskId: string, workspaceId: string): Promise<
   const { rows } = await db.query<TaskRow>(
     `select id, background_job_id, status, mode, start_url, page_limit, record_video, progress, stage, result,
             error_message, created_at, updated_at, follow_external, assistant_connection_id,
-            promo, promo_status, promo_approval_id, promo_job_id, promo_video_url, promo_error, presentation, login
+            promo, promo_status, promo_approval_id, promo_job_id, promo_video_url, promo_error, presentation, login, journey
        from website_capture_tasks where id=$1 and workspace_id=$2`,
     [taskId, workspaceId],
   );
@@ -604,6 +605,7 @@ function toTask(row: TaskRow): WebsiteCaptureTask {
     result: row.result,
     ...(row.presentation!==undefined?{presentation:row.presentation}:{}),
     ...(row.login!==undefined?{login:row.login}:{}),
+    ...(row.journey!==undefined?{journey:row.journey}:{}),
     error: row.error_message,
     ...(row.promo_status ? { promoStatus: row.promo_status } : {}),
     ...(row.promo !== undefined ? { promo: row.promo } : {}),

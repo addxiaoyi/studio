@@ -1,6 +1,7 @@
 import {
   agentBrowserSessionsSchema,
   type AgentBrowserSession,
+  type WebsiteHandoffInput,
 } from "@helstera/shared";
 import { getServerBaseUrl } from "./env";
 import { boundedResponseBlob } from "./bounded-response-blob";
@@ -84,3 +85,7 @@ export function openAgentBrowser(taskId?: string) {
     new CustomEvent("loomic:show-agent-browser", { detail: { taskId } }),
   );
 }
+export async function sendBrowserHandoff(token:string,session:AgentBrowserSession,input:WebsiteHandoffInput,id:string){
+  return (await (await request(token,'handoff/input',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,viewId:session.id,frameRevision:session.frameRevision,pageUrl:session.url,input})})).json()).data as {id:string;status:string};
+}
+export async function readHandoffReceipt(token:string,id:string){return (await (await request(token,`handoff/receipts/${id}`)).json()).data as {id:string;status:string};}

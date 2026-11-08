@@ -1,17 +1,28 @@
 import type { Browser, BrowserContext, Locator, Page, Request } from "playwright";
 import { sameWebsiteOrigin, type WebsiteLoginCredentials } from "@helstera/shared";
+import { setTimeout as delay } from "node:timers/promises";
+import { discoverLoginPage,loginComplete,loginSignature } from "./login-detection.js";
 
-export type LoginNetworkScope = { origin: string; submitting: boolean; username: string; password: string; submissions?: number };
+export type LoginNetworkScope = { origin: string; submitting: boolean; username: string; password: string; submissions?: number;human?:boolean };
 export function redactLoginText(text: string, scope: Pick<LoginNetworkScope,"username"|"password">) {
   return [scope.username,scope.password].filter(Boolean).reduce((value,secret)=>value.split(secret).join("••••"),text);
+}
+export function isLoginVerificationUrl(url:URL){
+  return /(^|\.)hcaptcha\.com$|(^|\.)recaptcha\.net$/.test(url.hostname)||url.hostname==='challenges.cloudflare.com'||(/(^|\.)google\.com$/.test(url.hostname)&&url.pathname.startsWith('/recaptcha/'));
 }
 export function allowLoginRequest(request: Pick<Request, "url" | "method" | "postData">, scope: LoginNetworkScope) {
   const url = new URL(request.url());
   const sameOrigin = url.origin === scope.origin;
   const method = request.method().toUpperCase();
   const urlValues=[...url.searchParams.values(),url.hash.slice(1)].filter(Boolean);
-  if(urlValues.some(value=>value===scope.username||value.includes(scope.password)))return false;
+  if(urlValues.some(value=>(Boolean(scope.username)&&value===scope.username)||(Boolean(scope.password)&&value.includes(scope.password))))return false;
   if (method === "GET" || method === "HEAD") return !sameOrigin || !/logout|signout|delete|remove|purchase|checkout|payment|退出|删除|支付/i.test(url.pathname+url.search);
+  const verification=scope.human&&isLoginVerificationUrl(url);
+  const authEndpoint=sameOrigin&&/login|auth|captcha|verify|verification|challenge|session|otp|qrcode/i.test(url.pathname);
+  if(scope.human&&['POST','OPTIONS'].includes(method)&&Buffer.byteLength(request.postData()??'')<=16384&&(verification||authEndpoint)){
+    if(verification&&scope.password&&(request.postData()??'').includes(scope.password))return false;
+    return true;
+  }
   if (!sameOrigin || !scope.submitting || method !== "POST" || (scope.submissions??0)>0) return false;
   const body = request.postData() ?? "";
   if (Buffer.byteLength(body) > 16_384) return false;
@@ -27,17 +38,30 @@ async function uniqueVisible(locator: Locator, label: string) {
   return visible;
 }
 
-export async function signInWebsite(page: Page, credentials: WebsiteLoginCredentials, scope: LoginNetworkScope, assertActive: () => Promise<void>) {
+export async function signInWebsite(page: Page, credentials: WebsiteLoginCredentials, scope: LoginNetworkScope, assertActive: () => Promise<void>,handoff?: (check:()=>Promise<boolean>)=>Promise<void>) {
   let phase="打开登录页";
+  let initialUrl=credentials.loginUrl,signature='';
+  let takeoverUsed=false;
+  const confirmManual=()=>loginComplete(page,{originUrl:credentials.loginUrl,initialUrl,signature,...(credentials.successText?{successText:credentials.successText}:{}),manual:true});
+  async function takeOver(){
+    if(!handoff)throw new Error('需要人工登录');
+    takeoverUsed=true;
+    scope.submitting=false;scope.human=true;
+    try{await handoff(confirmManual);}finally{scope.human=false;}
+  }
   try {
     await assertActive();
     await page.goto(credentials.loginUrl, {waitUntil:"load",timeout:20_000});
     if (!sameWebsiteOrigin(page.url(),credentials.loginUrl)) throw new Error("登录页跳转到了其他站点，请提供实际登录站点或使用本地浏览器。");
+    await discoverLoginPage(page,credentials.loginUrl,credentials.method!=='interactive');
+    initialUrl=page.url();signature=await loginSignature(page);
+    if(credentials.method==='interactive'){await takeOver();return;}
     phase="识别登录控件";
     const password = await uniqueVisible(page.locator(credentials.passwordSelector ?? 'input[type="password"]'), "密码框");
-    if(await page.getByText(credentials.successText,{exact:false}).filter({visible:true}).count())throw new Error("成功标记在登录前已可见，请选择仅登录后出现的文字。");
+    if(credentials.successText&&await page.getByText(credentials.successText,{exact:false}).filter({visible:true}).count())throw new Error("成功标记在登录前已可见，请选择仅登录后出现的文字。");
     const form = password.locator("xpath=ancestor::form[1]");
-    const username = await uniqueVisible(page.locator(credentials.usernameSelector ?? 'input[autocomplete="username"],input[type="email"],input[name="username"],input[name="email"],input[name="account"]'), "账号框");
+    const preferred=page.locator(credentials.usernameSelector ?? 'input[autocomplete="username"],input[type="email"],input[name="username"],input[name="email"],input[name="account"],input[name="login"]');
+    const username = await uniqueVisible(await preferred.filter({visible:true}).count()?preferred:(await form.count()===1?form:page).locator('input:not([type]),input[type="text"],input[type="tel"]'), "账号框");
     const submit = await uniqueVisible(credentials.submitSelector
       ? page.locator(credentials.submitSelector)
       : (await form.count() === 1 ? form : page).getByRole("button", {name:/^(登录|登錄|登入|sign in|log in|login|登录账号)$/i}), "登录按钮");
@@ -54,11 +78,15 @@ export async function signInWebsite(page: Page, credentials: WebsiteLoginCredent
     phase="提交登录";
     await submit.click({timeout:8000,noWaitAfter:true});
     phase="确认登录结果";
-    await page.getByText(credentials.successText,{exact:false}).filter({visible:true}).first().waitFor({state:"visible",timeout:15_000});
-    if(await password.isVisible())throw new Error("登录表单仍然可见，无法确认登录成功。");
-    if (!sameWebsiteOrigin(page.url(),credentials.loginUrl)) throw new Error("登录后跳转到了未经确认的站点。");
-    await assertActive();
+    const deadline=Date.now()+10000;
+    while(Date.now()<deadline){
+      await assertActive();
+      if(await loginComplete(page,{originUrl:credentials.loginUrl,initialUrl,signature,...(credentials.successText?{successText:credentials.successText}:{})}))return;
+      await delay(250);
+    }
+    await takeOver();
   } catch {
+    if(handoff&&!takeoverUsed&&!page.isClosed()&&sameWebsiteOrigin(page.url(),credentials.loginUrl)){await assertActive();await takeOver();return;}
     // Playwright call logs can include fill values and selectors. Never persist those errors.
     throw new Error(`登录未完成（${phase}）：请核对账号密码、登录后可见文字或高级控件设置；验证码、扫码、二次验证请使用本地已登录浏览器。凭据已销毁，需重新填写。`);
   } finally {

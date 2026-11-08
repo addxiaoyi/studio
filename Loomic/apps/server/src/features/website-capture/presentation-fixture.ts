@@ -22,6 +22,9 @@ import { completeWebsiteCapture } from "./complete-capture.js";
 import { persistCaptureAsset } from "./isolated-browser.js";
 import { consumeWebsiteLogin } from "./login-vault.js";
 import { allowLoginRequest, signInWebsite, newAuthenticatedContext } from "./login-session.js";
+import { waitForWebsiteLogin } from "./login-handoff.js";
+import { rememberWebsiteSession } from "./saved-login.js";
+import { registerWebsiteJourneyRoutes } from "../../http/website-journey.js";
 
 export async function createPresentationFixture(
   databaseUrl: string,
@@ -52,6 +55,7 @@ export async function createPresentationFixture(
   const { browser, engine } = await launchAgentBrowser();
   const storage = new LocalStorageProvider(root, "http://localhost:3315");
   async function close() {
+    await db.query("update website_capture_tasks set status='canceled' where status in ('queued','running')");
     await Promise.allSettled(work);
     await browser.close();
     await app.close();
@@ -79,6 +83,7 @@ export async function createPresentationFixture(
       "20261107000001_agent_browser_views",
       "20261108000000_website_presentations",
       "20261108000001_website_login",
+      "20261108000002_website_journeys",
     ]) {
       await db.query(
         await readFile(
@@ -135,7 +140,7 @@ export async function createPresentationFixture(
         .header("Access-Control-Allow-Origin", origin)
         .header("Access-Control-Allow-Credentials", "true")
         .header("Access-Control-Allow-Headers", "authorization,content-type")
-        .header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+        .header("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
       if (request.method === "OPTIONS") return reply.code(204).send();
     });
     app.get("/api/local-auth/session", async () => ({
@@ -190,11 +195,13 @@ export async function createPresentationFixture(
           const scope={origin:"https://8.8.8.8",submitting:false,username:credentials.username,password:credentials.password};
           await sourceContext.route("**/*",async route=>{
             if(!allowLoginRequest(route.request(),scope))return route.abort();
-            if(route.request().method()==="POST")return route.fulfill({status:200,contentType:"text/html; charset=utf-8",headers:{"set-cookie":"session=authorized; Path=/; Secure; HttpOnly"},body:"<h1>我的工作台</h1>"});
-            return route.fulfill({contentType:"text/html; charset=utf-8",body:route.request().url().endsWith('/dashboard')?'<h1>我的工作台</h1>':'<form action="/login" method="post"><input name="username"><input name="password" type="password"><button>登录</button></form>'});
+            if(route.request().method()==="POST")return route.fulfill({status:200,contentType:"text/html; charset=utf-8",headers:{"set-cookie":"session=authorized; Path=/; Secure; HttpOnly"},body:"<h1>我的工作台</h1><a href='/logout'>退出登录</a>"});
+            const interactive='<h1>请输入验证码</h1><form action="/verify" method="post"><input name="otp" autocomplete="one-time-code" style="position:absolute;left:50px;top:120px;width:240px;height:40px"><button style="position:absolute;left:50px;top:200px;width:120px;height:40px">验证</button></form>';
+            return route.fulfill({contentType:"text/html; charset=utf-8",body:credentials.method==='interactive'?interactive:route.request().url().endsWith('/dashboard')?'<h1>我的工作台</h1>':'<form action="/login" method="post"><input name="username"><input name="password" type="password"><button>登录</button></form>'});
           });
           const loginPage=await sourceContext.newPage();
-          await signInWebsite(loginPage,credentials,scope,async()=>{});
+          await signInWebsite(loginPage,credentials,scope,async()=>{},check=>waitForWebsiteLogin({page:loginPage,db,storageRoot:root,taskId:task.id,workspaceId,userId,engine,check,assertActive:async()=>{const row=(await db.query('select status from website_capture_tasks where id=$1',[task.id])).rows[0];if(row.status!=='running')throw new Error('Task canceled');},heartbeat:async()=>{await jobs.updateProgress(jobId,8,'waiting_login');}}));
+          if(credentials.rememberSession)await rememberWebsiteSession(db,{workspaceId,userId},'https://8.8.8.8',sourceContext,loginPage);
           sourceContext=await newAuthenticatedContext(browser,sourceContext,undefined,[credentials.username,credentials.password]);
         }
         const page = await sourceContext.newPage();
@@ -221,7 +228,7 @@ export async function createPresentationFixture(
           browser,
           directory: root,
           scenes: [scene],
-          config: task.presentation,
+          config: task.presentation??{style:'cursor-rebuild',durationSeconds:12,cursorCount:4},
           onPage: async (preview) => {
             observer = await observeAgentBrowser({
               page: preview,
@@ -289,6 +296,7 @@ export async function createPresentationFixture(
       jobService: jobs,
       assistantHub: {} as never,
     });
+    registerWebsiteJourneyRoutes(app,{auth,viewerService,browserDb:db,env:{} as never,settingsService:{getChatModelConfig:async()=>({model:'fixture-model'})} as never,observeSite:async()=>({title:'演示验收',links:[]}),createPlanModel:()=>({invoke:async()=>({content:JSON.stringify({summary:'查看首页内容并完成登录后录制。',steps:[{title:'查看首页',url:'https://8.8.8.8/',scroll:true}],recording:'presentation',durationSeconds:12,loginSuggested:true})})}) as never});
     registerAgentBrowserRoutes(app, {
       auth,
       viewerService,

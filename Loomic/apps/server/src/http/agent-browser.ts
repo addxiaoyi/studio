@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Pool } from "pg";
 import { z } from "zod";
-import { agentBrowserControlSchema } from "@helstera/shared";
+import { agentBrowserControlSchema,websiteHandoffRequestSchema } from "@helstera/shared";
+import { queueHandoffInput,handoffReceipt } from "../features/website-capture/handoff-store.js";
 import type { RequestAuthenticator } from "../auth/types.js";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
 import { browserViewStore } from "../features/agent-browser/store.js";
@@ -83,6 +84,15 @@ export function registerAgentBrowserRoutes(
       if (!identity) throw new Error("Authenticated browser owner is missing.");
       return identity;
     }
+    scope.post('/api/agent/browser/handoff/input',async(request,reply)=>{
+      const input=websiteHandoffRequestSchema.parse(request.body);
+      try{return {ok:true,data:await queueHandoffInput(options.db,owner(request),input)};}
+      catch{return reply.code(409).send({ok:false,error:{code:'handoff_unavailable',message:'登录画面已变化或操作已结束，请刷新画面后重试。'}});}
+    });
+    scope.get<{Params:{id:string}}>('/api/agent/browser/handoff/receipts/:id',async(request,reply)=>{
+      try{return {ok:true,data:await handoffReceipt(options.db,z.string().uuid().parse(request.params.id),owner(request).userId)};}
+      catch{return reply.code(404).send({ok:false,error:{code:'receipt_missing',message:'人工操作回执不可用。'}});}
+    });
     scope.get("/api/agent/browser/sessions", async (request, reply) =>
       reply.send({
         enabled: options.enabled,

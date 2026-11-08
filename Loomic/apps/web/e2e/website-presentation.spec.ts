@@ -34,6 +34,7 @@ test("rejects then approves a real presentation, plays the recording and restore
     .click();
   const card = page.getByRole("region", { name: "网站介绍演示", exact: true });
   await card.getByRole("button", { name: /网站介绍演示与录制/ }).click();
+  await card.getByRole('button',{name:'使用手动录制参数'}).click();
   await card
     .getByRole("textbox", { name: "演示网址" })
     .fill("https://8.8.8.8/");
@@ -116,10 +117,12 @@ test("uses a secure login form and never persists raw credentials in browser rec
   await page.getByRole("button",{name:"展开 Agent 浏览器",exact:true}).click();
   const card=page.getByRole("region",{name:"网站介绍演示",exact:true});
   await card.getByRole("button",{name:/网站介绍演示与录制/}).click();
+  await card.getByRole('button',{name:'使用手动录制参数'}).click();
   await card.getByRole("textbox",{name:"演示网址"}).fill("https://8.8.8.8/");
   await card.getByRole("combobox",{name:"演示时长"}).click();
   await page.getByRole("option",{name:"12 秒",exact:true}).click();
   await card.getByRole("checkbox",{name:"需要登录后体验"}).check();
+  await card.getByText('高级登录设置（可选）',{exact:true}).click();
   await card.getByLabel("登录地址",{exact:true}).fill("https://8.8.8.8/login");
   await card.getByLabel("网站账号",{exact:true}).fill("private-user@example.test");
   await card.getByLabel("网站密码",{exact:true}).fill("private-test-password");
@@ -141,4 +144,43 @@ test("uses a secure login form and never persists raw credentials in browser rec
   await expect(video).toBeVisible();
   expect(Number((await fixture.db.query("select count(*) from background_jobs")).rows[0].count)).toBe(jobsBefore+1);
   await page.screenshot({path:info.outputPath("authenticated-recording-restored.png")});
+});
+
+test('plans from conversation, resumes human verification after refresh and remembers the session',async({page},info)=>{
+  await page.goto(`http://localhost:3228/home/?session=${fixture.sessionId}`);
+  await page.getByRole('button',{name:'展开 Agent 浏览器',exact:true}).click();
+  const card=page.getByRole('region',{name:'网站介绍演示',exact:true});
+  await card.getByRole('button',{name:/网站介绍演示与录制/}).click();
+  await card.getByRole('textbox',{name:'网站',exact:true}).fill('https://8.8.8.8/');
+  await card.getByRole('textbox',{name:'想体验什么'}).fill('请让我接管登录，再录制首页介绍');
+  await card.getByRole('button',{name:'让 Agent 规划'}).click();
+  await expect(card.getByRole('region',{name:'AI 网站体验路线'})).toBeVisible();
+  await card.getByRole('checkbox',{name:'记住此网站会话 24 小时'}).check();
+  await card.getByRole('button',{name:'确认路线并录制'}).click();
+  const handoff=page.getByRole('region',{name:'人工接管登录'});
+  await expect(handoff).toBeVisible({timeout:30000});
+  const task=(await fixture.db.query("select id from website_capture_tasks where stage='waiting_login'")).rows[0].id;
+  await page.reload();await page.getByRole('button',{name:'展开 Agent 浏览器',exact:true}).click();
+  await expect(handoff.getByRole('img',{name:'待接管的登录页面'})).toBeVisible();
+  const screen=handoff.getByRole('group',{name:'登录页面操作区域'}),bounds=await screen.boundingBox();
+  if(!bounds)throw new Error('Handoff preview missing');
+  await screen.click({position:{x:bounds.width*160/1280,y:bounds.height*140/720}});
+  await expect(handoff).toContainText('已操作，请查看当前画面。');
+  await handoff.getByLabel('输入到页面选中的控件').fill('123456');
+  await handoff.getByRole('button',{name:'输入文字',exact:true}).click();
+  await expect(handoff.getByRole('button',{name:'确认输入',exact:true})).toBeEnabled();
+  await handoff.getByRole('button',{name:'确认输入',exact:true}).click();
+  await expect(page.getByText('https://8.8.8.8/verify',{exact:true})).toBeVisible();
+  await expect(handoff.getByRole('button',{name:'验证完成，继续录制'})).toBeEnabled();
+  await page.screenshot({path:info.outputPath('handoff-verified.png')});
+  await handoff.getByRole('button',{name:'验证完成，继续录制'}).click();
+  await expect(card).toContainText('演示录像已保存',{timeout:60000});
+  expect((await fixture.db.query('select status from website_capture_tasks where id=$1',[task])).rows[0].status).toBe('succeeded');
+  expect((await fixture.db.query('select count(*)::int as n from website_handoff_commands where task_id=$1 and ciphertext is not null',[task])).rows[0].n).toBe(0);
+  expect((await fixture.db.query('select count(*)::int as n from website_browser_sessions where user_id=$1 and ciphertext is not null',[fixture.userId])).rows[0].n).toBe(1);
+  await expect(card.getByRole('button',{name:'导入视频工作区剪辑'})).toBeVisible();
+  await page.screenshot({path:info.outputPath('journey-complete.png')});
+  await card.getByRole('button',{name:'导入视频工作区剪辑'}).click();
+  await expect(page.getByLabel('网站录像导入')).toContainText('已导入',{timeout:45000});
+  await page.screenshot({path:info.outputPath('recording-in-video-workspace.png')});
 });

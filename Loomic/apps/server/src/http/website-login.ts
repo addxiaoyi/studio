@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
+import { z } from "zod";
 import { websiteLoginCredentialsSchema } from "@helstera/shared";
 import type { RequestAuthenticator } from "../auth/types.js";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
@@ -8,9 +9,20 @@ import { validatePublicHttpUrl } from "../features/website-capture/isolated-brow
 import { saveWebsiteLogin, purgeWebsiteLogins } from "../features/website-capture/login-vault.js";
 
 export function registerWebsiteLoginRoutes(app: FastifyInstance, options: {db: Pool; auth: RequestAuthenticator; viewerService: ViewerService}) {
-  const timer = setInterval(() => { void purgeWebsiteLogins(options.db).catch(() => console.error("[website-login] Expired credential cleanup failed")); }, 60_000);
+  const timer = setInterval(() => { void Promise.all([purgeWebsiteLogins(options.db),options.db.query("update website_handoff_commands set ciphertext=null,status='expired' where expires_at<=now() and status in ('pending','claimed')"),options.db.query("update website_browser_sessions set ciphertext=null where expires_at<=now() and ciphertext is not null")]).catch(() => console.error("[website-login] Expired credential cleanup failed")); }, 60_000);
   timer.unref();
   app.addHook("onClose", async () => clearInterval(timer));
+  app.get('/api/website-capture/login-sessions',async(request,reply)=>{
+    reply.header('Cache-Control','no-store');const user=await options.auth.authenticate(request);if(!user)return reply.code(401).send({ok:false});
+    const viewer=await options.viewerService.ensureViewer(user);await assertConnectorEnabled(options.db,viewer.workspace.id,user.id,'isolated-browser');
+    const {rows}=await options.db.query("select id,origin,expires_at as \"expiresAt\" from website_browser_sessions where workspace_id=$1 and user_id=$2 and expires_at>now() and ciphertext is not null",[viewer.workspace.id,user.id]);
+    return {ok:true,data:rows};
+  });
+  app.delete<{Params:{id:string}}>('/api/website-capture/login-sessions/:id',async(request,reply)=>{
+    const user=await options.auth.authenticate(request);if(!user)return reply.code(401).send({ok:false});
+    const id=z.string().uuid().parse(request.params.id),viewer=await options.viewerService.ensureViewer(user);
+    await options.db.query("update website_browser_sessions set ciphertext=null,expires_at=now() where id=$1 and workspace_id=$2 and user_id=$3",[id,viewer.workspace.id,user.id]);return {ok:true};
+  });
   app.post("/api/website-capture/login-credentials", {bodyLimit: 8192}, async (request, reply) => {
     reply.header("Cache-Control", "no-store");
     const user = await options.auth.authenticate(request);

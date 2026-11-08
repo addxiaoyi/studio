@@ -38,3 +38,10 @@ html[data-helstera-desktop="true"] .agent-browser-panel { inset-block-start: 46p
 .website-presentation-options { display:grid;grid-template-columns:1fr 1fr;gap:10px; }
 .website-presentation-approval { display:grid;gap:8px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--background); }
 .website-presentation-buttons { display:flex;gap:8px;flex-wrap:wrap; }
+.website-journey-composer { display:grid;gap:16px;min-width:0; }
+.website-journey-composer textarea { min-height:108px; }
+.website-handoff { display:grid;gap:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--card); }
+.website-handoff-preview { position:relative;width:100%;touch-action:none;border:1px solid var(--border);border-radius:8px;overflow:hidden; }
+.website-handoff-preview img { display:block;width:100%;height:auto;user-select:none; }
+.website-handoff-preview:focus-visible { outline:2px solid var(--ring);outline-offset:2px; }
+.website-handoff-toolbar { display:flex;flex-wrap:wrap;gap:8px; }

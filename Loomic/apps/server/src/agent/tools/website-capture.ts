@@ -1,6 +1,6 @@
 import { tool } from "langchain";
 import { z } from "zod";
-import type { WebsitePresentation } from "@helstera/shared";
+import { websiteJourneySchema,type WebsiteJourney,type WebsitePresentation } from "@helstera/shared";
 
 export type SubmitWebsiteCaptureFn = (input: {
   url: string;
@@ -11,6 +11,7 @@ export type SubmitWebsiteCaptureFn = (input: {
   promo?: { enabled: boolean; durationSeconds: number; aspectRatio: "9:16" | "16:9" | "1:1"; narrationLanguage: "zh-CN" | "none"; model?: string | undefined } | undefined;
   idempotencyKey?: string | undefined;
   presentation?: WebsitePresentation | undefined;
+  journey?: WebsiteJourney | undefined;
 }) => Promise<{
   taskId: string;
   jobId?: string | null;
@@ -35,13 +36,14 @@ const websiteCaptureSchema = z.object({
     model: z.string().trim().min(1).max(160).optional(),
   }).optional().describe("Optional promotional video configuration. Generation always requires a separate cost approval."),
   idempotencyKey: z.string().trim().min(1).max(160).optional(),
+  journey:z.object({goal:z.string().min(1).max(2000),summary:z.string().min(1).max(500),steps:z.array(z.object({title:z.string().min(1).max(100),url:z.string().url().optional(),linkText:z.string().min(1).max(100).optional(),scroll:z.boolean().default(true)})).min(1).max(5),durationSeconds:z.number().int().min(12).max(60).optional()}).optional().describe("Ordered website experience requested in conversation. Each step uses an explicit same-origin URL or a navigation linkText from the user's request. Requires isolated mode, recording approval and pageLimit >= steps.length. Never include credentials or business form actions."),
 });
 
 export function createWebsiteCaptureTool(deps: { submitWebsiteCapture: SubmitWebsiteCaptureFn }) {
   return tool(
     async (input) => {
       try {
-        const result = await deps.submitWebsiteCapture(input);
+        const result = await deps.submitWebsiteCapture(input.journey?{...input,journey:websiteJourneySchema.parse(input.journey)}:input);
         if (result.status === "failed" || result.status === "canceled") {
           return JSON.stringify({
             ...result,

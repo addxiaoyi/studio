@@ -10,16 +10,19 @@ const httpsUrl = z.string().trim().url().max(2048).refine(value => {
 const selector = z.string().trim().min(1).max(300).optional();
 export const websiteLoginSettingsSchema = z.object({
   loginUrl: httpsUrl,
-  successText: z.string().trim().min(1).max(120),
+  successText: z.string().trim().max(120).optional(),
+  method: z.enum(["password","interactive","saved"]).optional(),
+  savedSessionId:z.string().uuid().optional(),
+  rememberSession:z.boolean().optional(),
   usernameSelector: selector,
   passwordSelector: selector,
   submitSelector: selector,
 });
 export const websiteLoginRefSchema = websiteLoginSettingsSchema.extend({ credentialId: z.string().uuid() });
 export const websiteLoginCredentialsSchema = websiteLoginSettingsSchema.extend({
-  username: z.string().min(1).max(320),
-  password: z.string().min(1).max(2048),
-}).strict();
+  username: z.string().max(320),
+  password: z.string().max(2048),
+}).strict().refine(value=>value.method==="interactive"||(value.method==="saved"&&Boolean(value.savedSessionId))||Boolean(value.username&&value.password),"请填写账号密码或选择扫码/手动登录。");
 export type WebsiteLoginSettings = z.infer<typeof websiteLoginSettingsSchema>;
 export type WebsiteLoginRef = z.infer<typeof websiteLoginRefSchema>;
 export type WebsiteLoginCredentials = z.infer<typeof websiteLoginCredentialsSchema>;

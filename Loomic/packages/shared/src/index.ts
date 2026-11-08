@@ -30,3 +30,4 @@ export * from "./goal-execution.js";
 export * from "./agent-browser.js";
 export * from "./website-presentation.js";
 export * from "./website-login.js";
+export * from "./website-journey.js";

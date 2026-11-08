@@ -21,6 +21,7 @@ export function useAgentBrowsers(
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [frame, setFrame] = useState("");
+  const [frameInfo,setFrameInfo]=useState({revision:0,url:''});
   const [frameError, setFrameError] = useState("");
   const ownedUrl = useRef("");
   const selected =
@@ -84,6 +85,7 @@ export function useAgentBrowsers(
     if (ownedUrl.current) URL.revokeObjectURL(ownedUrl.current);
     ownedUrl.current = "";
     setFrame("");
+    setFrameInfo({revision:0,url:''});
     setFrameError("");
     return () => {
       if (ownedUrl.current) URL.revokeObjectURL(ownedUrl.current);
@@ -105,7 +107,7 @@ export function useAgentBrowsers(
         if(abort.signal.aborted)return;
         const url=URL.createObjectURL(blob),previous=ownedUrl.current;
         ownedUrl.current=url;deliveredRevision=current.frameRevision;
-        setFrame(url);setFrameError("");if(previous)URL.revokeObjectURL(previous);
+        setFrame(url);setFrameInfo({revision:current.frameRevision,url:current.url});setFrameError("");if(previous)URL.revokeObjectURL(previous);
       }catch(cause){
         if(!abort.signal.aborted){
           setFrameError(cause instanceof Error?cause.message:"画面读取失败。");
@@ -142,6 +144,7 @@ export function useAgentBrowsers(
     error,
     frameError,
     frame,
+    frameInfo,
     busy,
     setControl,
     retry: () => setRefresh((value) => value + 1),

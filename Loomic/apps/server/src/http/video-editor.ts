@@ -1,6 +1,7 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import type { FastifyInstance, FastifyReply } from "fastify";
+import type { Pool } from "pg";
 import {
   unauthenticatedErrorResponseSchema,
   videoEditorPlanRequestSchema,
@@ -18,10 +19,12 @@ import { EditorApprovalError, type EditorPlanStore } from "../features/video-edi
 import { assertPlannerCredential, EditorPlannerError, invokeEditorPlanner } from "../features/video-editor/planner.js";
 import { registerVideoChatRoute } from "./video-editor-chat.js";
 import { extractText, extractJson } from "../features/video-editor/model-json.js";
+import { registerWebsiteJourneyRoutes } from "./website-journey.js";
 
 type PlanModelFactory = (config: { model: string; baseUrl?: string; apiKey?: string }) => BaseLanguageModel;
 
 export type VideoEditorServices = {
+  browserDb?:Pool;
   auth: RequestAuthenticator;
   env: ServerEnv;
   settingsService: SettingsService;
@@ -41,6 +44,7 @@ export function registerVideoEditorRoutes(app: FastifyInstance, options: VideoEd
   });
 
   registerVideoChatRoute(app,{...options,createPlanModel});
+  registerWebsiteJourneyRoutes(app,{...options,createPlanModel});
 
   app.post("/api/video/editor/plan", async (request, reply) => {
     try {

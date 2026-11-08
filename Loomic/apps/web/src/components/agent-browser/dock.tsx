@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { StyledSelect } from "@/components/ui/styled-select";
 import { AgentCursor } from "./cursor";
 import { WebsitePresentationCard } from "./presentation-card";
+import { WebsiteHandoffView } from "./handoff-view";
 import "./style.css";
 
 export function AgentBrowserDock() {
@@ -139,7 +140,7 @@ function BrowserSessionDock() {
         <aside
           data-select-portal
           id="agent-browser-panel"
-          className={`agent-browser-panel${expanded ? " agent-browser-panel-expanded" : ""}`}
+          className={`agent-browser-panel${expanded||selected?.handoff ? " agent-browser-panel-expanded" : ""}`}
           aria-label={labels.title}
         >
           <header className="agent-browser-header">
@@ -208,7 +209,7 @@ function BrowserSessionDock() {
                 <p className="agent-browser-url" title={selected.url}>
                   {selected.url || labels.waiting}
                 </p>
-                <div className="agent-browser-viewport">
+                {selected.handoff?<WebsiteHandoffView token={session.access_token} session={{...selected,frameRevision:view.frameInfo.revision,url:view.frameInfo.url}} frame={view.frame} ready={Boolean(view.frame)&&view.frameInfo.url===selected.url&&selected.frameRevision-view.frameInfo.revision<=5}/>:<div className="agent-browser-viewport">
                   {view.frame ? (
                     <img
                       src={view.frame}
@@ -229,7 +230,7 @@ function BrowserSessionDock() {
                       height={selected.height}
                     />
                   )}
-                </div>
+                </div>}
                 {view.frameError && view.frame && (
                   <p role="alert" className="agent-browser-error">
                     {view.frameError}
@@ -239,7 +240,7 @@ function BrowserSessionDock() {
                   {selected.detail}
                 </p>
                 <div className="agent-browser-actions">
-                  {!terminal && (
+                  {!terminal && !selected.handoff && (
                     <Button
                       size="sm"
                       variant="outline"

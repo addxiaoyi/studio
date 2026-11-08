@@ -5,6 +5,7 @@ import type {
   WebsiteCaptureTask,
   WebsitePresentation,
   WebsiteLoginCredentials,
+  WebsiteJourney,
 } from "@helstera/shared";
 import {
   cancelWebsiteCapture,
@@ -59,6 +60,7 @@ export function useWebsitePresentation(userId: string, token: string) {
         if (stopped) return;
         setTask(details.task);
         setApproval(details.recordingApproval ?? null);
+        setError("");
         if (["queued", "running"].includes(details.task.status))
           timer = setTimeout(poll, 1500);
       } catch (cause) {
@@ -92,7 +94,7 @@ export function useWebsitePresentation(userId: string, token: string) {
       setBusy(false);
     }
   }
-  async function prepare(url: string, config?: WebsitePresentation, credentials?: WebsiteLoginCredentials) {
+  async function prepare(url: string, config?: WebsitePresentation, credentials?: WebsiteLoginCredentials,journey?:WebsiteJourney,startNow=false) {
     await exclusive(async () => {
       if (saved?.taskId) {
         setRevision((value) => value + 1);
@@ -105,11 +107,12 @@ export function useWebsitePresentation(userId: string, token: string) {
       const input = saved?.input ?? {
         url,
         mode: "isolated" as const,
-        pageLimit: config?1:3,
+        pageLimit: journey?journey.steps.length:config?1:3,
         recordVideo: true,
         followExternal: false,
         ...(config?{presentation:config}:{}),
         ...(login?{login}:{}),
+        ...(journey?{journey}:{}),
         idempotencyKey: key,
         ...(sessionId ? { sessionId } : {}),
       };
@@ -119,6 +122,10 @@ export function useWebsitePresentation(userId: string, token: string) {
       setTask(created.task);
       const details = await fetchWebsiteCapture(token, created.task.id);
       setApproval(details.recordingApproval ?? null);
+      if(startNow&&details.recordingApproval){
+        const accepted=await decideWebsiteRecording(token,created.task.id,details.recordingApproval.id,'approve');
+        setTask(accepted.task);setApproval(null);openAgentBrowser(created.task.id);
+      }
     });
   }
   async function decide(accepted: boolean) {

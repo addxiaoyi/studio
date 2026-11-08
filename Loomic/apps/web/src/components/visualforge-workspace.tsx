@@ -1,6 +1,7 @@
 "use client";
 
 import { StudioAssetPicker } from "@/components/studio-asset-picker";
+import { CaptureRecordingImport } from "@/components/capture-recording-import";
 import { StudioConversationPanel } from "@/components/studio-conversation-panel";
 import { StudioExportCard } from "@/components/studio-export-card";
 import { OneTakeWorkspace } from "@/components/onetake/workspace";
@@ -41,6 +42,7 @@ export function VisualForgeWorkspace() {
   const exportsRef = useRef<HTMLElement>(null);
   const exportStartedAt = useRef(Date.now());
   const updateAiBusy = useCallback((value: boolean) => { aiBusy.current = value; }, []);
+  const recordingImported=useCallback(()=>{setMediaRevision(value=>value+1);setAiOpen(true);},[]);
   const viewTimeline = useCallback(() => setAiOpen(false), []);
   const receiveAi = useRef<(context: StudioAiContext) => boolean>(() => false);
   receiveAi.current = context => {
@@ -197,6 +199,7 @@ export function VisualForgeWorkspace() {
             </Button>
           </div>
         )}
+        {userId&&token&&<CaptureRecordingImport userId={userId} token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
         <div className={styles.body} hidden={transcriptOpen}>
           <div ref={container} data-testid="video-studio" className={styles.studio} />
           <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioConversationPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={exported} contextRequest={aiContext} active={aiOpen} onBusyChange={updateAiBusy} onViewTimeline={viewTimeline} onOpenPanel={openPanel} />}</div>

@@ -14,8 +14,12 @@ import { websitePresentationSchema, type WebsitePresentation } from "@helstera/s
 import { capturePresentationScene, type PresentationScene } from "./presentation-snapshot.js";
 import { recordWebsitePresentation } from "./presentation.js";
 import { consumeWebsiteLogin, discardWebsiteLogin } from "./login-vault.js";
-import { allowLoginRequest, signInWebsite, newAuthenticatedContext, redactLoginText, type LoginNetworkScope } from "./login-session.js";
+import { allowLoginRequest, signInWebsite, newAuthenticatedContext, redactLoginText,isLoginVerificationUrl, type LoginNetworkScope } from "./login-session.js";
 import { sameWebsiteOrigin, type WebsiteLoginRef } from "@helstera/shared";
+import { validateWebsiteJourney,type WebsiteJourney } from "@helstera/shared";
+import { waitForWebsiteLogin } from "./login-handoff.js";
+import { rememberWebsiteSession,restoreWebsiteSession } from "./saved-login.js";
+import { resolveJourneyStep } from "./journey-navigation.js";
 import { assertConnectorEnabled } from "../agent-goals/connector-gate.js";
 import type { Pool, PoolClient } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
@@ -47,6 +51,7 @@ export type CaptureTask = {
   follow_external?: boolean;
   presentation?: WebsitePresentation | null;
   login?: WebsiteLoginRef | null;
+  journey?: WebsiteJourney | null;
 };
 
 type CaptureProgress = (percent: number, stage: string, detail?: string) => Promise<void>;
@@ -115,6 +120,7 @@ export async function captureIsolatedWebsite(options: {
   const presentation=options.task.presentation?websitePresentationSchema.parse(options.task.presentation):null;
   if(presentation&&!options.task.record_video)throw new Error("网站演示需要先确认录制。");
   const scenes:PresentationScene[]=[];
+  if(options.task.journey)validateWebsiteJourney(options.task.start_url,options.task.journey);
   const abort = () => { void browser?.close().catch(error => console.error("[capture] cancellation close failed", error)); };
   options.signal?.throwIfAborted();
   options.signal?.addEventListener("abort", abort, { once: true });
@@ -141,10 +147,12 @@ export async function captureIsolatedWebsite(options: {
     const installNetwork = async () => {
       await context.routeWebSocket("**/*", blockIsolatedWebSocket);
       await context.route("**/*", async (route) => {
-      if(options.task.login)await assertConnectorEnabled(options.db,options.task.workspace_id,options.task.created_by,"isolated-browser");
-      await assertTaskIsRunning(options.db,options.task.id);
+      try{
+        if(options.task.login)await assertConnectorEnabled(options.db,options.task.workspace_id,options.task.created_by,"isolated-browser");
+        await assertTaskIsRunning(options.db,options.task.id);
+      }catch{await route.abort('blockedbyclient');return;}
       requestCount += 1;
-      if (requestCount > 180 || budget.exhausted()) {
+      if (requestCount > (loginScope?.human?1000:180) || budget.exhausted()) {
         await route.abort("blockedbyclient");
         return;
       }
@@ -161,8 +169,15 @@ export async function captureIsolatedWebsite(options: {
       const credentials=await consumeWebsiteLogin(options.db,options.task.id,options.task.workspace_id,options.task.created_by,options.task.login);
       loginScope={origin:startUrl.origin,submitting:false,username:credentials.username,password:credentials.password};
       const loginPage=await context.newPage();
-      await signInWebsite(loginPage,credentials,loginScope,async()=>{options.signal?.throwIfAborted();await assertTaskIsRunning(options.db,options.task.id);});
+      const assertLogin=async()=>{options.signal?.throwIfAborted();await assertConnectorEnabled(options.db,options.task.workspace_id,options.task.created_by,'isolated-browser');await assertTaskIsRunning(options.db,options.task.id);};
+      if(credentials.method==='saved'&&credentials.savedSessionId){
+        await restoreWebsiteSession(options.db,{workspaceId:options.task.workspace_id,userId:options.task.created_by},startUrl.origin,credentials.savedSessionId,context);
+        await loginPage.goto(credentials.loginUrl,{waitUntil:'domcontentloaded',timeout:15000});
+        if(!sameWebsiteOrigin(loginPage.url(),credentials.loginUrl)||/login|signin|sign-in|verify|challenge/i.test(new URL(loginPage.url()).pathname)||await loginPage.locator('input[type="password"]').filter({visible:true}).count())throw new Error('记住的会话已失效，请重新登录。');
+      }else await signInWebsite(loginPage,credentials,loginScope,assertLogin,check=>waitForWebsiteLogin({page:loginPage,db:options.db,storageRoot:options.storageRoot,taskId:options.task.id,workspaceId:options.task.workspace_id,userId:options.task.created_by,engine:launched.engine,assertActive:assertLogin,check,heartbeat:()=>options.onProgress(8,'waiting_login','等待你完成登录验证，原任务将继续。')}));
+      if(credentials.rememberSession)await rememberWebsiteSession(options.db,{workspaceId:options.task.workspace_id,userId:options.task.created_by},startUrl.origin,context,loginPage);
       context=await newAuthenticatedContext(browser,context,!presentation?{dir:tempDir,size:{width:1280,height:720}}:undefined,[credentials.username,credentials.password]);
+      requestCount=0;
       await installNetwork();
       await options.onProgress(9,"signed_in","登录成功，开始记录站内体验。账号密码已从服务端销毁。");
     }
@@ -182,22 +197,27 @@ export async function captureIsolatedWebsite(options: {
       });
     }
 
-    const pending = [startUrl.toString()];
+    const journey=options.task.journey;
+    const pending = journey?journey.steps.map(step=>step.url??''):[startUrl.toString()];
+    let journeyIndex=0;
     const visited = new Set<string>();
     const captured: PageFacts[] = [];
     while (pending.length > 0 && captured.length < options.task.page_limit) {
       await assertTaskIsRunning(options.db, options.task.id);
-      const nextUrl = pending.shift();
-      if (!nextUrl || visited.has(nextUrl)) continue;
+      const plannedStep=journey?.steps[journeyIndex++];
+      const queuedUrl = pending.shift();
+      const nextUrl=plannedStep?await resolveJourneyStep(page,startUrl.href,plannedStep):queuedUrl;
+      if (!nextUrl || (!journey&&visited.has(nextUrl))) continue;
       visited.add(nextUrl);
       const percent = 10 + Math.round((captured.length / options.task.page_limit) * 62);
-      await options.onProgress(percent, "page_loading", `Opening ${new URL(nextUrl).hostname}`);
+      await options.onProgress(percent, "page_loading", plannedStep?`${journeyIndex}/${journey!.steps.length} · ${plannedStep.title}`:`Opening ${new URL(nextUrl).hostname}`);
 
       try {
         await view?.beforeAction(`正在打开 ${new URL(nextUrl).hostname}`,null);
         await page.goto(nextUrl, { waitUntil: "domcontentloaded" });
+        const stepStarted=Date.now();
         await page.waitForTimeout(PAGE_SETTLE_MS);
-        if(options.task.login&&!presentation){
+        if((options.task.login||journey)&&!presentation&&plannedStep?.scroll!==false){
           const bottom=await page.evaluate("Math.min(document.documentElement.scrollHeight-innerHeight,1440)") as number;
           for(const top of [0,Math.max(0,bottom/2),Math.max(0,bottom),0]){
             await assertTaskIsRunning(options.db,options.task.id);
@@ -223,6 +243,10 @@ export async function captureIsolatedWebsite(options: {
         await view?.beforeAction("正在保存页面证据");
         const screenshot = await page.screenshot({ type: "jpeg", quality: 76, fullPage: false, ...(options.task.login?{mask:[page.locator('input,textarea,select,[contenteditable="true"]')]}:{}) });
         await view?.capture();
+        if(journey?.durationSeconds&&!presentation){
+          const until=stepStarted+journey.durationSeconds*1000/journey.steps.length;
+          while(Date.now()<until){await assertTaskIsRunning(options.db,options.task.id);await view?.beforeAction('停留展示当前页面');await page.waitForTimeout(Math.min(350,until-Date.now()));}
+        }
         captured.push({
           url: options.task.login?responseUrl.origin+responseUrl.pathname:responseUrl.toString(),
           title: facts.title,
@@ -235,7 +259,7 @@ export async function captureIsolatedWebsite(options: {
         });
         if(scene)scenes.push(scene);
 
-        for (const link of facts.links) {
+        for (const link of journey?[]:facts.links) {
           if (pending.length + captured.length >= options.task.page_limit * 3) break;
           const safeUrl = await validatePublicHttpUrl(link).catch(() => null);
           if(options.task.login&&safeUrl&&(!sameWebsiteOrigin(safeUrl.href,startUrl.href)||/logout|signout|delete|remove|purchase|checkout|payment|退出|删除|支付/i.test(safeUrl.pathname)))continue;
@@ -245,7 +269,7 @@ export async function captureIsolatedWebsite(options: {
           }
         }
       } catch (error) {
-        if (captured.length === 0) throw toCaptureError(error);
+        if (journey||captured.length === 0) throw toCaptureError(error);
       }
     }
 
@@ -555,10 +579,11 @@ export async function fulfillPublicReadOnlyRequest(route: Route, budget: ReturnT
 
   try {
     const sameOrigin = login && parsedUrl.origin===login.origin;
-    const browserHeaders = sameOrigin ? await request.allHeaders() : {};
+    const verification=login?.human&&isLoginVerificationUrl(parsedUrl);
+    const browserHeaders = sameOrigin||verification ? await request.allHeaders() : {};
     const response = await httpRequest(parsedUrl, {
       dispatcher,
-      method:method as "GET"|"HEAD"|"POST",
+      method:method as "GET"|"HEAD"|"POST"|"OPTIONS",
       ...(method==="POST"?{body:request.postDataBuffer()??null}:{}),
       headersTimeout: PAGE_TIMEOUT_MS,
       bodyTimeout: PAGE_TIMEOUT_MS,
@@ -570,7 +595,8 @@ export async function fulfillPublicReadOnlyRequest(route: Route, budget: ReturnT
       },
     });
     const headers = selectResponseHeaders(response.headers as Record<string, string | string[] | undefined>);
-    if(sameOrigin&&response.headers["set-cookie"])headers["set-cookie"]=[response.headers["set-cookie"]].flat().join("\n");
+    if((sameOrigin||verification)&&response.headers["set-cookie"])headers["set-cookie"]=[response.headers["set-cookie"]].flat().join("\n");
+    if(verification)for(const key of ['access-control-allow-origin','access-control-allow-credentials','access-control-allow-headers','access-control-allow-methods']){const value=response.headers[key];if(typeof value==='string')headers[key]=value;}
     if (method === "HEAD" || response.statusCode === 204 || response.statusCode === 304 || (response.statusCode >= 300 && response.statusCode < 400)) {
       await route.fulfill({ status: response.statusCode, headers, body: Buffer.alloc(0) });
       abortResponseBody(response.body);

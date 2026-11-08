@@ -18,7 +18,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import type { Pool } from "pg";
 
 import type { BillingErrorCode, ImageQualityLevel } from "@helstera/shared";
-import { resolveVideoResolution, type VideoResolution } from "@helstera/shared";
+import { resolveVideoResolution,validateWebsiteJourney, type VideoResolution } from "@helstera/shared";
 import type { AuthenticatedUser, DataClient } from "../auth/types.js";
 import type { ServerEnv } from "../config/env.js";
 import type { AgentRunMetadataService } from "../features/agent-runs/agent-run-service.js";
@@ -1652,6 +1652,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         };
 
         submitWebsiteCapture = async (input) => {
+          if(input.journey){validateWebsiteJourney(input.url,input.journey);if(input.mode!=="isolated"||!input.recordVideo||input.followExternal||input.journey.steps.length>(input.pageLimit??3))throw new Error('按路线体验需要同站隔离录制，并确认全部步骤。');}
           if(input.presentation&&(input.mode!=="isolated"||!input.recordVideo||(input.pageLimit??3)>3))throw new Error("多光标网站演示需要隔离模式、开启录制且最多3页。");
           if (!options.localDb || !options.jobService || !userId) {
             throw new Error("网站浏览后台任务当前不可用。");
@@ -1753,8 +1754,8 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             progress: number;
           }>(
             `insert into website_capture_tasks
-              (workspace_id, created_by, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key, session_id, stage, presentation)
-             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,case when $6 then 'waiting_recording_approval' else 'queued' end,$11::jsonb)
+              (workspace_id, created_by, mode, start_url, page_limit, record_video, follow_external, promo, idempotency_key, session_id, stage, presentation, journey)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,case when $6 then 'waiting_recording_approval' else 'queued' end,$11::jsonb,$12::jsonb)
              on conflict (workspace_id, created_by, idempotency_key) do nothing
              returning id, background_job_id, status, progress`,
             [
@@ -1769,6 +1770,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               idempotencyKey,
               sessionId,
               input.presentation?JSON.stringify(input.presentation):null,
+              input.journey?JSON.stringify(input.journey):null,
             ],
           );
           let task = taskResult.rows[0];
@@ -1782,8 +1784,8 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
               }>(
                 `select id, background_job_id, status, progress from website_capture_tasks where workspace_id=$1 and created_by=$2 and idempotency_key=$3
                    and start_url=$4 and mode=$5 and page_limit=$6 and record_video=$7 and follow_external=$8
-                   and session_id is not distinct from $9::uuid and promo is not distinct from $10::jsonb and presentation is not distinct from $11::jsonb`,
-                [workspaceId, userId, idempotencyKey, startUrl.toString(), input.mode, input.pageLimit ?? 3, input.recordVideo ?? false, input.followExternal ?? false, sessionId ?? null, input.promo?.enabled ? JSON.stringify(input.promo) : null,input.presentation?JSON.stringify(input.presentation):null],
+                   and session_id is not distinct from $9::uuid and promo is not distinct from $10::jsonb and presentation is not distinct from $11::jsonb and journey is not distinct from $12::jsonb`,
+                [workspaceId, userId, idempotencyKey, startUrl.toString(), input.mode, input.pageLimit ?? 3, input.recordVideo ?? false, input.followExternal ?? false, sessionId ?? null, input.promo?.enabled ? JSON.stringify(input.promo) : null,input.presentation?JSON.stringify(input.presentation):null,input.journey?JSON.stringify(input.journey):null],
               )
             ).rows[0];
           }

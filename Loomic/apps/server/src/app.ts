@@ -482,7 +482,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     threadService,
     viewerService,
   });
-  registerVideoEditorRoutes(app, { auth, env, settingsService, viewerService, planStore: createEditorPlanStore(localDb) });
+  registerVideoEditorRoutes(app, { auth, env, settingsService, viewerService, browserDb:localDb, planStore: createEditorPlanStore(localDb) });
   registerOneTakeRoutes(app, { auth, viewerService, db: localDb, storage: storageProvider, storageRoot: env.storageRoot ?? "/www/helstera/uploads" });
   registerAgentWorkflowRoutes(app, {
     db: localDb,
