@@ -24,3 +24,11 @@
 - 生产静态构建通过。日志：`M:/loomic-builds/workflow-ux-full-browser.log`、`workflow-ux-full-desktop.log`、`workflow-ux-web-build.log`。截图：`Loomic/.creative-test-results/workflow/workflow-interactions-node-39128-ettings-and-save-before-run/node-ports-and-inspector.png`、`node-inspector-narrow.png`。
 
 用户此前选择保留待确认任务、不扣费。本轮只验证编辑交互和隔离测试任务，生产不执行费用确认。
+
+## 生产验收
+
+实现提交 `9d4eb19` 已推送当前开发分支并增量发布。静态文件校验3251项通过，画布、视频、女装和桌面Web入口均返回200，Server健康正常；无需Server重启或数据库迁移。线上与候选画布HTML SHA256一致：`80c862b557b1b4d4d23f477c5bd397e41961ca1ac847632dd11645981457b6ad`。
+
+在用户已登录的原画布中选择“首页截图工作流”，确认节点设置直接展示、显式定位、输出端口启动连线、Esc取消，以及“＋”打开分类节点选择并按“视频”过滤。未在生产添加验收节点，未运行或确认付费任务。独立标签验收保留原标签的未保存草稿。
+
+发布日志：`M:/loomic-builds/publish-workflow-ux-web.log`；哈希检查：`workflow-ux-production-check.json`；实际界面截图：`workflow-ux-node-picker-live.png`。本次验证覆盖鼠标、键盘、窄窗口和Windows候选，未宣称完整屏幕阅读器或触控设备验收。
