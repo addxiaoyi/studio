@@ -8,6 +8,7 @@ import {
   retainWorkflowLayout,
   placeWorkflow,
   upgradeWorkflowCards,
+  workflowWithScenePositions,
   type SceneElement,
 } from "@/components/workflow/scene";
 
@@ -21,6 +22,15 @@ const note: SceneElement = {
   text: "普通画布备注",
 };
 describe("workflows on the existing canvas", () => {
+  it("switches to a dragged workflow without snapping back or replacing newer saved parameters",()=>{
+    const graph=websiteWorkflow();const scene=projectWorkflow([],"other",graph,{},false);
+    const moved=scene.map(el=>el.id==="wf:other:site"?{...el,x:800,y:900}:el);
+    const saved={...graph,nodes:graph.nodes.map(node=>node.id==="site"?{...node,config:{kind:"url" as const,url:"https://new.example.com"}}:node)};
+    const selected=workflowWithScenePositions(saved,"other",moved);
+    expect(selected.nodes[0]!.position).toEqual({x:800,y:900});
+    expect(selected.nodes[0]!.config).toEqual({kind:"url",url:"https://new.example.com"});
+    expect(saved.nodes[0]!.position).toEqual({x:0,y:0});
+  });
   it("upgrades old workflow embeds without changing identities, saved node parameters or ordinary links",()=>{
     const graph=websiteWorkflow(),scene=projectWorkflow([note],"flow",graph,{},false);
     const old=scene.map(el=>el.customData?.workflow?{...el,type:"embeddable",link:"https://studio.0st.top/#workflow-node"}:el);

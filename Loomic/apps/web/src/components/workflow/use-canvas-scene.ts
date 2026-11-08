@@ -23,6 +23,7 @@ type Options = {
   graph: WorkflowGraph;
   states: Record<string, string>;
   locked: boolean;
+  executionLocked?:boolean;
   open: boolean;
   previews?: Record<string,NodePreview>;
   suspendSync?: RefObject<boolean>;
@@ -62,7 +63,7 @@ export function useCanvasWorkflowScene(options: Options) {
       });
   }, []);
   useEffect(() => {
-    const { api, document, graph, states, locked } = options;
+    const { api, document, graph, states } = options;
     if (!api || !document || options.recoveryPending) return;
     const first = initialized.current !== document.id;
     if (first) needsFocus.current = true;
@@ -85,7 +86,7 @@ export function useCanvasWorkflowScene(options: Options) {
       document.id,
       graph,
       states,
-      locked,
+      Boolean(options.executionLocked),
       options.previews,
     );
     if (JSON.stringify(projected) !== JSON.stringify(scene)) {
@@ -105,6 +106,7 @@ export function useCanvasWorkflowScene(options: Options) {
     options.states,
     options.previews,
     options.locked,
+    options.executionLocked,
     options.recoveryPending,
     focus,
   ]);
@@ -168,9 +170,10 @@ export function useCanvasWorkflowScene(options: Options) {
       timer = setTimeout(sync, 120);
     });
     const pointerUp = api.onPointerUp?.((_tool, press) => {
-      if(press.drag.hasOccurred||press.resize.isResizing||press.boxSelection.hasOccurred)return;
+      if(press.resize.isResizing||press.boxSelection.hasOccurred)return;
       const selected=api.getSceneElements().filter(el=>api.getAppState().selectedElementIds[el.id]);
       const binding=selected.length===1?workflowBinding(selected[0]!):null;
+      if(press.drag.hasOccurred){if(binding&&binding.workflowId!==current.current.document?.id)current.current.select(binding.workflowId,binding.node.id,true);return;}
       if(binding)current.current.select(binding.workflowId,binding.node.id,true);
     });
     return () => {

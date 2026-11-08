@@ -17,6 +17,7 @@ import { useWorkflowRun } from "./run-panel";
 import {
   materialNode,
   nodeElementId,
+  workflowWithScenePositions,
   linkWorkflowResults,
   type WorkflowCanvasApi,
   type NodePreview,
@@ -185,7 +186,7 @@ export function useWorkflowController({
       }
       const document = flow.documents.find((item) => item.id === workflowId);
       if (!document) return;
-      flow.select(document);
+      flow.select(document,api?workflowWithScenePositions(document.graph,document.id,api.getSceneElements()):undefined);
     }
     setSelectedId(nodeId);
     if(openEditor){setTab("nodes");if(!open)onOpen();}
@@ -215,6 +216,7 @@ export function useWorkflowController({
     previews,
     locked,
     open,
+    executionLocked:active,
     edit: flow.edit,
     select: selectNode,
     error: flow.setError,
@@ -291,7 +293,7 @@ export function useWorkflowController({
     flow.setError("");
   };
   const requestSwitch=(doc:WorkflowDocument)=>{if(flow.dirty){setPendingSwitch(doc);return;}flow.select(doc);setSelectedId(null);};
-  const confirmSwitch=async(persist:boolean)=>{if(!pendingSwitch)return;if(persist&&!(await save()))return;flow.select(pendingSwitch);setSelectedId(null);setPendingSwitch(null);};
+  const confirmSwitch=async(persist:boolean)=>{if(!pendingSwitch)return;if(persist&&!(await save()))return;flow.select(pendingSwitch,api?workflowWithScenePositions(pendingSwitch.graph,pendingSwitch.id,api.getSceneElements()):undefined);setSelectedId(null);setPendingSwitch(null);};
   const editNode=(workflowId:string,nodeId:string)=>{
     selectNode(workflowId,nodeId,true);
     const doc=flow.documents.find(item=>item.id===workflowId),node=doc?.id===flow.selected?.id?flow.graph.nodes.find(item=>item.id===nodeId):doc?.graph.nodes.find(item=>item.id===nodeId);

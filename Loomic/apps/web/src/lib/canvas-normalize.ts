@@ -21,6 +21,7 @@ export function normalizeCanvasElement(element: CanvasElement): CanvasElement {
   if (normalized.roundness === undefined) normalized.roundness = null;
   if (normalized.link === undefined) normalized.link = null;
   if (normalized.locked === undefined) normalized.locked = false;
+  if ((normalized.customData as {workflow?:unknown;workflowEdge?:unknown}|undefined)?.workflow || (normalized.customData as {workflowEdge?:unknown}|undefined)?.workflowEdge) normalized.locked = false;
   if (normalized.opacity === undefined) normalized.opacity = 100;
   if (normalized.angle === undefined) normalized.angle = 0;
   if (normalized.scale === undefined) normalized.scale = [1, 1];

@@ -570,7 +570,7 @@ function CanvasPageContent() {
   return (
     <div className={`flex ${desktopMode ? "h-full w-full" : "h-screen w-screen"} overflow-hidden ${desktopMode ? "desktop-canvas-surface" : ""}`}>
       {/* Top-left navigation bar */}
-      <div className="absolute left-3 right-3 top-3 z-20 flex max-w-[calc(100vw-5rem)] flex-wrap items-center gap-1.5">
+      <div data-canvas-navigation className="pointer-events-none [&>*]:pointer-events-auto absolute left-3 right-3 top-3 z-20 flex max-w-[calc(100vw-5rem)] flex-wrap items-center gap-1.5">
         <CanvasLogoMenu
           accessToken={accessToken}
           projectId={canvasData.projectId}

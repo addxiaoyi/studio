@@ -46,10 +46,10 @@ export function useCanvasWorkflow(
     ? workflowGraphKey(graph) !== workflowGraphKey(selected.graph)
     : false;
   const draftKey = (id: string) => `loomic:workflow:${userId}:${id}`;
-  function select(document: WorkflowDocument) {
+  function select(document: WorkflowDocument,positions?:WorkflowGraph) {
     setError("");
     setSelected(document);
-    setGraph(document.graph);
+    setGraph(positions??document.graph);
     setGoalId(document.activeGoalId);
     setUndo([]);
     setRedo([]);

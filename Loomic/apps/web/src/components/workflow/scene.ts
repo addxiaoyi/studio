@@ -98,6 +98,10 @@ export function nodeElementId(workflowId: string, node: WorkflowNode) {
     ? node.config.elementId
     : `wf:${workflowId}:${node.id}`;
 }
+export function workflowWithScenePositions(graph:WorkflowGraph,workflowId:string,scene:readonly SceneElement[]):WorkflowGraph{
+  const elements=new Map(scene.filter(el=>!el.isDeleted).map(el=>[el.id,el]));
+  return {...graph,nodes:graph.nodes.map(node=>{const element=elements.get(nodeElementId(workflowId,node));return element?{...node,position:{x:element.x,y:element.y}}:node;})};
+}
 export function upgradeWorkflowCards(scene: readonly SceneElement[]): readonly SceneElement[] {
   let changed=false;
   const upgraded=scene.map(element=>{

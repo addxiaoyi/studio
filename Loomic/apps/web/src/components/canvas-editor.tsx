@@ -28,6 +28,7 @@ import { WorkflowCanvasNode } from "./workflow/canvas-node";
 import { workflowBinding } from "./workflow/scene";
 import { CanvasWorkflowDocument } from "./canvas/workflow-document";
 import { readWorkflowDocument } from "@helstera/shared";
+import {CanvasChangeTracker,canvasElementsForSave,canvasRecoveryIsSaved} from "../lib/canvas-change-tracker";
 
 const Excalidraw = dynamic(
   () => import("@excalidraw/excalidraw").then((mod) => mod.Excalidraw),
@@ -410,6 +411,10 @@ export function CanvasEditor({
   const thumbnailRefreshCanvasRef = useRef<string | null>(null);
   const conflictRef = useRef<{ version: number; content: CanvasSavePayload } | null>(null);
   conflictRef.current = conflict;
+  const changesRef=useRef<CanvasChangeTracker|null>(null);
+  if(!changesRef.current)changesRef.current=new CanvasChangeTracker(initialElements,initialContent.appState);
+  const recoveryHeldRef=useRef(false);
+  const recoveryFromOtherPageRef=useRef(false);
 
   // 打开画布时记下服务端版本（保存时的 If-Match 基线）。
   // 拿不到就保持 null：保存会退回「无版本」的老行为，而不是假装自己是最新的。
@@ -647,41 +652,9 @@ export function CanvasEditor({
           console.log("[canvas-editor] normalized agent-created elements");
           excalidrawApi.updateScene({
             elements: mutableElements,
-            captureUpdate: "NONE",
+            captureUpdate: "NEVER",
           });
-          // Persist normalized elements to DB
-          const files: Record<string, Record<string, unknown>> = {};
-          const rawFiles = excalidrawApi.getFiles() as Record<string, any>;
-          for (const [id, file] of Object.entries(rawFiles)) {
-            files[id] = {
-              id: file.id,
-              dataURL: file.dataURL,
-              mimeType: file.mimeType,
-              created: file.created,
-            };
-          }
-          const appState = excalidrawApi.getAppState();
-          saveCanvas(
-            accessTokenRef.current,
-            canvasIdRef.current,
-            {
-              elements: mutableElements,
-              appState: {
-                viewBackgroundColor: appState.viewBackgroundColor,
-                gridModeEnabled: appState.gridModeEnabled,
-              },
-              files,
-            },
-            { baseVersion: knownVersionRef.current },
-          )
-            .then((result) => {
-              if (typeof result.version === "number") {
-                knownVersionRef.current = result.version;
-              }
-            })
-            .catch((err: Error) =>
-              console.warn("[canvas-editor] normalization save failed:", err),
-            );
+          // Normalization shares the normal versioned save queue; opening a tab must not race it.
         }
       } catch (err) {
         console.warn("[canvas-editor] normalization failed:", err);
@@ -691,6 +664,7 @@ export function CanvasEditor({
       // Before this point, onChange may fire with incomplete element lists
       // during Excalidraw's internal initialization, which would cause a
       // FULL REPLACE with empty content and silently wipe existing data.
+      changesRef.current=new CanvasChangeTracker(excalidrawApi.getSceneElementsIncludingDeleted(),excalidrawApi.getAppState());
       hydratedRef.current = true;
       onReadyRef.current?.();
     });
@@ -704,6 +678,7 @@ export function CanvasEditor({
       // which would wipe the persisted canvas via FULL REPLACE.
       if (!hydratedRef.current) return;
 
+      if(changesRef.current!.observe(elements,appState)){
       // --- 1. Debounced save ---
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
@@ -730,10 +705,10 @@ export function CanvasEditor({
           }
         }
         const content = {
-          elements: (excalidrawApi?.getSceneElementsIncludingDeleted() ?? elements) as Record<
+          elements: canvasElementsForSave((excalidrawApi?.getSceneElementsIncludingDeleted() ?? elements) as Record<
             string,
             unknown
-          >[],
+          >[]),
           appState: {
             viewBackgroundColor: appState.viewBackgroundColor,
             gridModeEnabled: appState.gridModeEnabled,
@@ -741,6 +716,10 @@ export function CanvasEditor({
           files,
         };
         pendingSaveRef.current = content;
+        if(recoveryHeldRef.current){
+          if(!recoveryFromOtherPageRef.current&&writeCanvasRecoveryCopy(canvasIdRef.current,content)){setRecoveryCopy(readCanvasRecoveryCopy(canvasIdRef.current));setConflict(current=>current?{...current,content}:null);}
+          setSaveState("error");return;
+        }
         setSaveState("saving");
 
         const save = async () => {
@@ -760,6 +739,7 @@ export function CanvasEditor({
           // 版本冲突：本地改动绝不静默覆盖别人。
           // 冲突态 + 本地恢复副本都留着，等用户点「重新加载」或「覆盖保存」。
           setConflict({ version: outcome.version, content });
+          recoveryHeldRef.current=true;
           if (writeCanvasRecoveryCopy(canvasIdRef.current, content)) {
             setRecoveryCopy(readCanvasRecoveryCopy(canvasIdRef.current));
           }
@@ -817,6 +797,7 @@ export function CanvasEditor({
           );
         }
       }, THUMBNAIL_DEBOUNCE_MS);
+      }
 
       // --- 3. Selection change detection ---
       // Cheap string comparison avoids unnecessary downstream re-renders.
@@ -1005,7 +986,7 @@ export function CanvasEditor({
         };
       }
       return {
-        elements: excalidrawApi.getSceneElementsIncludingDeleted(),
+        elements: canvasElementsForSave(excalidrawApi.getSceneElementsIncludingDeleted()),
         appState: {
           viewBackgroundColor: appState.viewBackgroundColor,
           gridModeEnabled: appState.gridModeEnabled,
@@ -1026,6 +1007,7 @@ export function CanvasEditor({
   buildSavePayloadRef.current = buildSavePayload;
 
   const retrySave = useCallback(() => {
+    if(recoveryHeldRef.current){setRecoveryError(true);return;}
     const payload = buildSavePayloadRef.current();
     if (!payload) return;
     pendingSaveRef.current = payload;
@@ -1045,6 +1027,7 @@ export function CanvasEditor({
         return;
       }
       setConflict({ version: outcome.version, content: payload });
+      recoveryHeldRef.current=true;
       if (writeCanvasRecoveryCopy(canvasIdRef.current, payload)) {
         setRecoveryCopy(readCanvasRecoveryCopy(canvasIdRef.current));
       }
@@ -1083,7 +1066,10 @@ export function CanvasEditor({
   // debounce window that could not be flushed before the page closed.
   useEffect(() => {
     const copy = readCanvasRecoveryCopy(canvasId);
+    if(copy&&canvasRecoveryIsSaved(copy.content,initialContent)){clearCanvasRecoveryCopy(canvasId);return;}
     if (copy) {
+      recoveryHeldRef.current=true;
+      recoveryFromOtherPageRef.current=true;
       setRecoveryCopy(copy);
       setRecoveryError(false);
     }
@@ -1097,17 +1083,21 @@ export function CanvasEditor({
     }
     setRecoveryBusy(true);
     setRecoveryError(false);
+    if(saveTimerRef.current)clearTimeout(saveTimerRef.current);
     try {
       const remote = await fetchCanvas(accessTokenRef.current, canvasIdRef.current);
       // 用户显式点了「恢复」：以刚读到的版本为基线写回；读-写之间若被人抢先，
       // 服务端会 409，这里报错并保留本地副本，不会静默覆盖。
-      await saveCanvas(
+      const restored=await saveCanvas(
         accessTokenRef.current,
         canvasIdRef.current,
-        mergeCanvasSaveWithRemoteContent(copy.content, remote.canvas.content),
+        mergeCanvasSaveWithRemoteContent({...copy.content,elements:canvasElementsForSave(copy.content.elements)}, remote.canvas.content),
         { baseVersion: remote.version },
       );
-      knownVersionRef.current = remote.version;
+      knownVersionRef.current = restored.version;
+      recoveryHeldRef.current=false;
+      recoveryFromOtherPageRef.current=false;
+      pendingSaveRef.current=null;
       clearCanvasRecoveryCopy(canvasIdRef.current);
       setRecoveryCopy(null);
       // Reload so the editor hydrates from the restored server content.
@@ -1119,8 +1109,15 @@ export function CanvasEditor({
       setRecoveryBusy(false);
     }
   }, []);
+  const downloadRecoveryCopy=useCallback(()=>{
+    const copy=readCanvasRecoveryCopy(canvasIdRef.current);if(!copy)return;
+    const bytes=new Blob([JSON.stringify({canvasId:canvasIdRef.current,...copy},null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(bytes),link=document.createElement("a");link.href=url;link.download=`canvas-recovery-${canvasIdRef.current}.json`;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);
+  },[]);
 
   const discardRecoveryCopy = useCallback(() => {
+    recoveryHeldRef.current=false;
+    recoveryFromOtherPageRef.current=false;
     clearCanvasRecoveryCopy(canvasIdRef.current);
     setRecoveryCopy(null);
     setRecoveryError(false);
@@ -1144,6 +1141,8 @@ export function CanvasEditor({
         }
         setConflict(null);
         setSaveState("saved");
+        recoveryHeldRef.current=false;
+        recoveryFromOtherPageRef.current=false;
         pendingSaveRef.current = null;
         clearCanvasRecoveryCopy(canvasIdRef.current);
         setRecoveryCopy(null);
@@ -1172,6 +1171,7 @@ export function CanvasEditor({
   useEffect(() => {
     if (!excalidrawApi) return;
     onSaveReady?.(async () => {
+      if(recoveryHeldRef.current)throw new Error("先恢复或下载本机未保存副本，再保存画布。");
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       retrySave();
       await saveQueueRef.current;
@@ -1183,6 +1183,7 @@ export function CanvasEditor({
   useEffect(() => {
     const flushBeforeUnload = () => {
       if (!pendingSaveRef.current) return;
+      if(recoveryHeldRef.current&&recoveryFromOtherPageRef.current)return;
 
       // Build the real payload since pendingSaveRef may hold a placeholder
       const payload = buildSavePayloadRef.current();
@@ -1191,6 +1192,7 @@ export function CanvasEditor({
       // Persist locally first: keepalive bodies over 64 KiB are rejected by
       // the browser, and a rejected flush must not silently drop the edits.
       writeCanvasRecoveryCopy(canvasIdRef.current, payload);
+      if(recoveryHeldRef.current)return;
 
       // Use fetch with keepalive to ensure the request survives page teardown.
       // keepalive requests are limited to 64 KiB total in-flight per page; for
@@ -1230,6 +1232,7 @@ export function CanvasEditor({
       // Flush pending save on component unmount (e.g. SPA navigation)
       if (pendingSaveRef.current) {
         const payload = buildSavePayloadRef.current();
+        if(recoveryHeldRef.current){if(payload&&!recoveryFromOtherPageRef.current)writeCanvasRecoveryCopy(canvasIdRef.current,payload);return;}
         if (payload) {
           saveQueueRef.current = saveQueueRef.current
             .catch((error) => console.warn("[canvas-editor] previous save failed:", error))
@@ -1406,6 +1409,7 @@ export function CanvasEditor({
               <button type="button" onClick={discardRecoveryCopy} disabled={recoveryBusy} className="rounded-full px-2 py-0.5 text-muted-foreground underline decoration-dotted underline-offset-2 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">
                 丢弃
               </button>
+              <button type="button" onClick={downloadRecoveryCopy} className="rounded-full px-2 py-0.5 font-medium underline decoration-dotted underline-offset-2">下载本机副本</button>
             </span>
           )}
           {recoveryError && <span className="text-destructive">恢复失败，请重试</span>}
