@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { allowLoginRequest, redactLoginText } from "./login-session.js";
+import { allowLoginRequest, redactLoginText,isAllowedLoginNavigation } from "./login-session.js";
 const scope={origin:"https://site.example",submitting:true,username:"viewer@example.test",password:"Secret+123!"};
 function request(url:string,method:string,body:string|null=null){return{url:()=>url,method:()=>method,postData:()=>body};}
 it("permits only the exact origin's login POST while submitting",()=>{
@@ -23,4 +23,10 @@ it("does not mistake a short account name or admin path for leaked credentials",
 it("redacts reflected credentials in page metadata before result writeback",()=>{
   const description=`Welcome ${scope.username}. Secret: ${scope.password}`;
   expect(redactLoginText(description,scope)).toBe("Welcome ••••. Secret: ••••");
+});
+it('permits verification frames without allowing cross-site top-level navigation',()=>{
+  expect(isAllowedLoginNavigation('https://challenges.cloudflare.com/turnstile','https://site.example',true)).toBe(true);
+  expect(isAllowedLoginNavigation('https://challenges.cloudflare.com/turnstile','https://site.example',false)).toBe(false);
+  expect(isAllowedLoginNavigation('http://hcaptcha.com/check','https://site.example',true)).toBe(false);
+  expect(isAllowedLoginNavigation('https://hcaptcha.com.evil.example/','https://site.example',true)).toBe(false);
 });

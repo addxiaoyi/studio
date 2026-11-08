@@ -147,6 +147,11 @@ test("uses a secure login form and never persists raw credentials in browser rec
 });
 
 test('plans from conversation, resumes human verification after refresh and remembers the session',async({page},info)=>{
+  if(process.env.HELT_TEST_CANDIDATE_PATH){
+    await desktop?.close();const userData=await mkdtemp(join(tmpdir(),'loomic-journey-desktop-'));
+    const env={...process.env,HELSTERA_ISOLATED_TEST:'1',HELSTERA_TEST_USER_DATA:userData,HELSTERA_DESKTOP_LOCAL_URL:'http://localhost:3228'};delete env.ELECTRON_RUN_AS_NODE;
+    desktop=await _electron.launch({executablePath:process.env.HELT_TEST_CANDIDATE_PATH,env:env as Record<string,string>,timeout:45000});page=await desktop.firstWindow();
+  }
   await page.goto(`http://localhost:3228/home/?session=${fixture.sessionId}`);
   await page.getByRole('button',{name:'展开 Agent 浏览器',exact:true}).click();
   const card=page.getByRole('region',{name:'网站介绍演示',exact:true});

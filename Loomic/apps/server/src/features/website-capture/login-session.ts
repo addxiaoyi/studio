@@ -8,8 +8,9 @@ export function redactLoginText(text: string, scope: Pick<LoginNetworkScope,"use
   return [scope.username,scope.password].filter(Boolean).reduce((value,secret)=>value.split(secret).join("••••"),text);
 }
 export function isLoginVerificationUrl(url:URL){
-  return /(^|\.)hcaptcha\.com$|(^|\.)recaptcha\.net$/.test(url.hostname)||url.hostname==='challenges.cloudflare.com'||(/(^|\.)google\.com$/.test(url.hostname)&&url.pathname.startsWith('/recaptcha/'));
+  return url.protocol==='https:'&&(/(^|\.)hcaptcha\.com$|(^|\.)recaptcha\.net$/.test(url.hostname)||url.hostname==='challenges.cloudflare.com'||(/(^|\.)google\.com$/.test(url.hostname)&&url.pathname.startsWith('/recaptcha/')));
 }
+export function isAllowedLoginNavigation(url:string,origin:string,subframe:boolean){return sameWebsiteOrigin(url,origin)||(subframe&&isLoginVerificationUrl(new URL(url)));}
 export function allowLoginRequest(request: Pick<Request, "url" | "method" | "postData">, scope: LoginNetworkScope) {
   const url = new URL(request.url());
   const sameOrigin = url.origin === scope.origin;
@@ -67,7 +68,7 @@ export async function signInWebsite(page: Page, credentials: WebsiteLoginCredent
       : (await form.count() === 1 ? form : page).getByRole("button", {name:/^(登录|登錄|登入|sign in|log in|login|登录账号)$/i}), "登录按钮");
     if (await form.count() === 1) {
       const action = await form.getAttribute("action");
-      if (action && !sameWebsiteOrigin(new URL(action,page.url()).href,credentials.loginUrl)) throw new Error("登录表单将账号发送到另一个站点，任务已停止。");
+    if (action && !sameWebsiteOrigin(new URL(action,page.url()).href,credentials.loginUrl)) throw new Error("登录表单将账号发送到另一个站点，任务已停止。");
     }
     await assertActive();
     phase="填写账号";

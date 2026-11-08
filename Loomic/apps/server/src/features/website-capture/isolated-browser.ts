@@ -14,7 +14,7 @@ import { websitePresentationSchema, type WebsitePresentation } from "@helstera/s
 import { capturePresentationScene, type PresentationScene } from "./presentation-snapshot.js";
 import { recordWebsitePresentation } from "./presentation.js";
 import { consumeWebsiteLogin, discardWebsiteLogin } from "./login-vault.js";
-import { allowLoginRequest, signInWebsite, newAuthenticatedContext, redactLoginText,isLoginVerificationUrl, type LoginNetworkScope } from "./login-session.js";
+import { allowLoginRequest, signInWebsite, newAuthenticatedContext, redactLoginText,isLoginVerificationUrl,isAllowedLoginNavigation, type LoginNetworkScope } from "./login-session.js";
 import { sameWebsiteOrigin, type WebsiteLoginRef } from "@helstera/shared";
 import { validateWebsiteJourney,type WebsiteJourney } from "@helstera/shared";
 import { waitForWebsiteLogin } from "./login-handoff.js";
@@ -156,7 +156,7 @@ export async function captureIsolatedWebsite(options: {
         await route.abort("blockedbyclient");
         return;
       }
-      if(loginScope&&route.request().isNavigationRequest()&&!sameWebsiteOrigin(route.request().url(),options.task.start_url)){
+      if(loginScope&&route.request().isNavigationRequest()&&!isAllowedLoginNavigation(route.request().url(),options.task.start_url,Boolean(route.request().frame().parentFrame()))){
         await route.abort("blockedbyclient");return;
       }
       await fulfillPublicReadOnlyRequest(route, budget,loginScope);
