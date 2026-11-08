@@ -20,6 +20,7 @@ import {
   type NodePreview,
 } from "./scene";
 import { useCanvasWorkflowScene } from "./use-canvas-scene";
+import { workflowStepState } from "./step-state";
 export type CanvasWorkflowProps = {
   token: string;
   canvasId: string;
@@ -121,8 +122,7 @@ export function useWorkflowController({
         flow.graph.nodes.map((node) => [
           node.id,
           currentRun
-            ? (run.goal?.executionSteps?.find((step) => step.stepId === node.id)
-                ?.state ?? (node.config.kind === "url" ? "succeeded" : "draft"))
+            ? node.config.kind === "url" ? "succeeded" : workflowStepState(run.goal?.executionSteps?.find(step=>step.stepId===node.id))
             : "draft",
         ]),
       ),

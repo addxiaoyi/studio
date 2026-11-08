@@ -6,6 +6,7 @@ import { goalStepFingerprint, stepEvent, type GoalStepRow } from "./goal-step-st
 export type ExecutingGoal = { id: string; created_by: string; workspace_id: string; canvas_id: string | null; chat_session_id: string | null; goal: string; plan: AgentGoalPlan; execution_mode: string; output_kind: string };
 export type StepExecution = { goal: ExecutingGoal; step: GoalStepRow; previous: GoalStepRow[]; signal: AbortSignal; assertActive(): Promise<void> };
 export type StepExecutor = (input: StepExecution) => Promise<Record<string, unknown>>;
+export class StepCanceled extends Error {}
 export class StepWaiting extends Error { constructor(readonly output: Record<string, unknown>, readonly waiting: "waiting_desktop" | "waiting_approval" = "waiting_desktop") { super("步骤正在等待执行器"); } }
 
 export class GoalStepWorker {
@@ -44,6 +45,11 @@ export class GoalStepWorker {
       if (!step || ["failed", "canceled", "review"].includes(step.state)) { await client.query("commit"); return null; }
       const depends = step.depends_on.every(id => previous.some(item => item.step_id === id && item.state === "succeeded"));
       if (!depends) throw new Error("步骤依赖未完成。");
+      if (step.executor === "media.generate" && step.state === "waiting_desktop" && step.output?.generationApproval) {
+        const approvalId = (step.output.generationApproval as { approvalId?: unknown }).approvalId;
+        const pending = typeof approvalId === "string" ? await client.query("select id from generation_approvals where id=$1 and workspace_id=$2 and user_id=$3 and status='pending' and expires_at>now()",[approvalId,goal.workspace_id,goal.created_by]) : null;
+        if (pending?.rows.length) { await client.query("commit"); return null; }
+      }
       if (step.state === "running") {
         const expired = await client.query("select id from agent_goal_steps where id=$1 and lease_until<now()", [step.id]);
         if (!expired.rows.length) { await client.query("commit"); return null; }
@@ -131,7 +137,11 @@ export class GoalStepWorker {
         await client.query("commit");
       } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
     } catch (error) {
-      if (error instanceof StepWaiting) {
+      if (error instanceof StepCanceled) {
+        await this.db.query("update agent_goal_steps set state='canceled',error=$2,lease_token=null,lease_until=null,updated_at=now() where goal_id=$1 and state<>'succeeded'",[goal.id,error.message]);
+        await this.db.query("update agent_goals set status='canceled',error_message=$2,completed_at=now(),updated_at=now() where id=$1 and status in ('running','waiting_approval','waiting_desktop')",[goal.id,error.message]);
+        await stepEvent(this.db,goal.id,"goal.canceled",error.message,{stepId:step.step_id});
+      } else if (error instanceof StepWaiting) {
         await this.db.query("update agent_goal_steps set state='waiting_desktop',output=$3::jsonb,lease_token=null,lease_until=null,updated_at=now() where id=$1 and lease_token=$2", [step.id, step.lease_token, JSON.stringify(error.output)]);
         await this.db.query("update agent_goals set status=$2,updated_at=now() where id=$1 and status='running'", [goal.id, error.waiting]);
       } else {

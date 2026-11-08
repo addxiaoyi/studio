@@ -10,6 +10,7 @@ import { createGenerationApprovalService } from "../generation/generation-approv
 import { assertConnectorEnabled } from "../agent-goals/connector-gate.js";
 import {
   StepWaiting,
+  StepCanceled,
   type StepExecution,
 } from "../agent-goals/goal-step-worker.js";
 import { createLocalCostGuard } from "../credits/tier-guard.js";
@@ -39,7 +40,7 @@ export async function executeWorkflowGeneration(
     )
   ).rows[0];
   if (prior?.status === "rejected")
-    throw new Error("你已拒绝此节点的生成费用，流程已停止。");
+    throw new StepCanceled("你已拒绝此节点的生成费用，流程已停止。");
   if (
     prior?.status === "pending" &&
     new Date(prior.expires_at).getTime() > Date.now() &&

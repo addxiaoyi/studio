@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { AuthenticatedRecording } from "@/components/chat/authenticated-recording";
 import { GenerationApprovalCard, type GenerationApprovalCardProps } from "@/components/chat/generation-approval-card";
+import { workflowStepState } from "./step-state";
 
 const statusLabels: Record<string, string> = {
   draft: "待确认",
@@ -158,7 +159,7 @@ export function WorkflowRunPanel({
                     failed: "失败",
                     canceled: "取消",
                   } as Record<string, string>
-                )[step.state] ?? step.state}
+                )[workflowStepState(step)] ?? step.state}
               </span>
             </div>
             {step.error && (
