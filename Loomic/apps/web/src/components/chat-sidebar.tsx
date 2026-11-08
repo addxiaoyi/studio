@@ -637,7 +637,7 @@ export function ChatSidebar({
       const currentSessionId = activeSessionIdRef.current;
       if (streaming || !currentSessionId) return;
 
-      if (/^(?:确认|确认生成|继续生成)$/u.test(text.trim())) {
+      if (/^(?:确认生成|继续生成)$/u.test(text.trim())&&!selectedCanvasElementsRef.current?.some(element=>element.workflow)) {
         try {
           const confirmed = await confirmLatestGenerationApproval(accessTokenRef.current, canvasId);
           updateSessionMessages(currentSessionId, (prev) => [...prev, {
@@ -655,6 +655,8 @@ export function ChatSidebar({
       // Merge explicitly-attached images with auto-sensed canvas selection images
       let currentAttachments = attachmentsOverride ?? readyAttachments;
       const selectedEls = selectedCanvasElementsRef.current ?? [];
+      const workflowSelection=selectedEls.flatMap(element=>element.workflow?[element.workflow]:[]);
+      const workflowIntent=workflowSelection.length>0||/工作流|流程节点|节点|连线|workflow/i.test(text);
       const selectedImageEls = selectedEls.filter(
         (el): el is CanvasSelectedElement & { assetId: string } =>
           Boolean(el.type === "image" && el.fileId && el.assetId && (el.storageUrl || el.dataUrl)),
@@ -689,7 +691,7 @@ export function ChatSidebar({
       const explicitVideoIntent =
         /\b(video|animate|motion|clip)\b/i.test(text)
         || /(?:视频|动画|动效|转(?:成|为)?视频|变(?:成|为)?视频|做成视频|让.{0,8}动)/i.test(text);
-      const wantsVideo = videoReferences.length > 0 && (durationFollowUp || explicitVideoIntent);
+      const wantsVideo = !workflowIntent && videoReferences.length > 0 && (durationFollowUp || explicitVideoIntent);
       const videoDuration = requestedDuration ?? currentVideoGenerationPreference?.duration ?? 5;
       const videoReference = videoReferences[0];
       // A canvas selection is a visual context, not a request to send every
@@ -1037,7 +1039,7 @@ export function ChatSidebar({
               sessionId: currentSessionId,
                requestId,
               conversationId: canvasId,
-              prompt: text,
+              prompt: workflowSelection.length?`${text}\n\n当前选中的工作流节点（仅参考，请用inspect_canvas_workflows验证）：${JSON.stringify(workflowSelection)}`:text,
               canvasId,
               accessToken: accessTokenRef.current,
               ...(currentAttachments.length > 0

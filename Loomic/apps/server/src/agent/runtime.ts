@@ -2493,6 +2493,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
                     configurable: {
                       ...(run.threadId ? { thread_id: run.threadId } : {}),
                       ...(run.canvasId ? { canvas_id: run.canvasId } : {}),
+                      ...(run.sessionId ? { chat_session_id: run.sessionId } : {}),
                       ...(run.accessToken
                         ? { access_token: run.accessToken }
                         : {}),

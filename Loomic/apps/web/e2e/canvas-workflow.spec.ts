@@ -141,9 +141,9 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
     .getByLabel("让 AI 帮你搭建")
     .fill("为 example.com 搭建读取网页与输出截图的工作流");
   await workspace
-    .getByRole("button", { name: "生成方案", exact: true })
+    .getByRole("button", { name: "发送给 AI", exact: true })
     .click();
-  await expect(page.getByRole("dialog")).toContainText("检查 AI 工作流方案");
+  await expect(workspace.getByRole("region",{name:"AI 工作流操作"}).last()).toContainText("等待确认");
   expect(
     (
       await fixture.db.query(
@@ -151,11 +151,11 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
       )
     ).rows[0].n,
   ).toBe(1);
-  await page.getByRole("button", { name: "应用到草稿" }).click();
-  await expect(page.getByRole("dialog")).toBeHidden();
+  await workspace.getByRole("button", { name: "应用到画布",exact:true }).click();
+  await expect(workspace.getByRole("region",{name:"AI 工作流操作"}).last()).toContainText("已应用");
   await expect(
-    workspace.getByRole("button", { name: "保存草稿", exact: true }),
-  ).toBeEnabled();
+    workspace.getByRole("button", { name: "已保存", exact: true }),
+  ).toBeDisabled();
   await page.setViewportSize({ width: 620, height: 900 });
   await workspace
     .getByRole("button", { name: "定位流程节点", exact: true })
@@ -172,9 +172,6 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
   await expect(workspace).toBeHidden();
   await expect(page.getByRole("article", { name: /目标网址/ })).toBeVisible();
   await page.getByRole("button", { name: "展开画布流程", exact: true }).click();
-  await workspace
-    .getByRole("button", { name: "保存草稿", exact: true })
-    .click();
   await expect(
     workspace.getByRole("button", { name: "已保存", exact: true }),
   ).toBeDisabled();
@@ -304,8 +301,8 @@ test("reuses completed results and private workflow and prompt recipes without r
   await workspace.getByRole("button",{name:/引用画布选区/}).click();
   await expect(workspace).toContainText("Inspire reference");
   await workspace.getByRole("textbox",{name:"让 AI 帮你搭建"}).fill("仅规划引用验收，不运行");
-  await workspace.getByRole("button",{name:"生成方案",exact:true}).click();
-  await expect(page.getByRole("dialog",{name:"检查 AI 工作流方案"})).toContainText("引用验收方案");
-  await page.getByRole("button",{name:"放弃方案",exact:true}).click();
+  await workspace.getByRole("button",{name:"发送给 AI",exact:true}).click();
+  await expect(workspace.getByRole("region",{name:"AI 工作流操作"}).last()).toContainText("引用验收方案");
+  await workspace.getByRole("button",{name:"暂不应用",exact:true}).last().click();
   expect(Number((await fixture.db.query("select count(*) as n from agent_goals")).rows[0].n)).toBe(count);
 });

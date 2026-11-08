@@ -5,6 +5,7 @@ import {
   workflowNodeSchema,
   type CreativeLibraryBody,
   type WorkflowGraph,
+  workflowProposalSchema,
 } from "@helstera/shared";
 import { getServerBaseUrl } from "./env";
 
@@ -128,3 +129,8 @@ export async function fetchWorkflowRuns(
     createdAt: string;
   }>;
 }
+export async function listWorkflowProposals(token:string,canvasId:string,workflowId?:string){return workflowProposalSchema.array().parse(await workflowRequest(token,canvasId,`/assistant${workflowId?`?workflowId=${encodeURIComponent(workflowId)}`:""}`));}
+export async function askWorkflowAssistant(token:string,canvasId:string,input:{prompt:string;requestKey:string;workflowId?:string;sessionId?:string;selectedNodeIds?:string[];referenceElementIds?:string[]}){return workflowProposalSchema.parse(await workflowRequest(token,canvasId,"/assistant","POST",input));}
+export async function getWorkflowProposal(token:string,canvasId:string,id:string){return workflowProposalSchema.parse(await workflowRequest(token,canvasId,`/assistant/${id}`));}
+export async function decideWorkflowProposal(token:string,canvasId:string,id:string,decision:"confirm"|"reject"){return workflowProposalSchema.parse(await workflowRequest(token,canvasId,`/assistant/${id}/${decision}`,"POST",{}));}
+export function notifyWorkflowChanged(id:string,goalId?:string){window.dispatchEvent(new CustomEvent("loomic:workflow-changed",{detail:{id,goalId}}));}

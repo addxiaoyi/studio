@@ -35,6 +35,7 @@ import { WorkflowMaterialDropCue } from "./material-drop-cue";
 import { WorkflowReferenceEditor } from "./reference-media";
 import { WorkflowCanvasLayer } from "./canvas-layer";
 import { WorkflowNodePicker } from "./node-picker";
+import {WorkflowAssistantChat} from "./assistant-chat";
 import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogFooter } from "@/components/ui/dialog";
 export function WorkflowWorkspace(props: CanvasWorkflowProps) {
   const { token, api, open, onOpen, onClose } = props;
@@ -71,6 +72,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
     materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
     pendingSwitch,setPendingSwitch,requestSwitch,confirmSwitch,editNode,deselectNode,disconnect,prepareRun,addingAfter,setAddingAfter,
+    prepareAssistant,
   } = useWorkflowController(props);
   const bodyRef=useRef<HTMLDivElement>(null),inspectorRef=useRef<HTMLDivElement>(null);
   const revealInspector=()=>{const body=bodyRef.current,editor=inspectorRef.current;if(body&&editor)body.scrollTop=editor.offsetTop;};
@@ -393,32 +395,9 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
             </>
           )}
           {tab === "ai" && (
-            <form
-              className="workflow-ai"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void askAi();
-              }}
-            >
-              <label htmlFor="workflow-ai-request">让 AI 帮你搭建</label>
+            <WorkflowAssistantChat token={token} canvasId={props.canvasId} workflowId={flow.selected?.id} sessionId={props.sessionId} selectedNodeIds={selection.nodes} referenceIds={references.map(item=>item.id)} prompt={flow.prompt} setPrompt={flow.setPrompt} prepare={prepareAssistant} onApplied={proposal=>{if(proposal.action!=="edit"&&proposal.action!=="inspect")setTab("runs");}}>
               <div className="workflow-ai-references"><Button type="button" size="sm" variant="outline" disabled={locked||!selection.references.length} onClick={attachReferences}>引用画布选区{selection.references.length?`（${selection.references.length}）`:""}</Button><Button type="button" size="sm" variant="ghost" onClick={()=>openLibrary(false,true)} disabled={locked}>提示词库</Button>{references.map((item,index)=><span key={item.id}>@{index+1} {item.title}<button type="button" aria-label={`移除引用${index+1}`} onClick={()=>setReferences(current=>current.filter(reference=>reference.id!==item.id))}>×</button></span>)}</div>
-              <textarea
-                id="workflow-ai-request"
-                rows={6}
-                value={flow.prompt}
-                onChange={(event) => flow.setPrompt(event.target.value)}
-                disabled={locked}
-                placeholder="例如：录制这个网站，截取前 5 秒，把成片放回画布。"
-              />
-              <p>
-                AI
-                读取当前节点与素材关系，先给你方案，确认后才应用到画布；运行另行确认。
-              </p>
-              <Button type="submit" disabled={locked || !flow.prompt.trim()}>
-                <Sparkles size={15} />
-                {flow.busy ? "生成中…" : "生成方案"}
-              </Button>
-            </form>
+            </WorkflowAssistantChat>
           )}
           {tab === "runs" && (
             <>

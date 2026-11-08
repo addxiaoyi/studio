@@ -1,0 +1,163 @@
+.workflow-assistant {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.workflow-assistant h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.workflow-assistant header p,
+.workflow-assistant-compose > p {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+  margin-top: 6px;
+}
+.workflow-assistant-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workflow-assistant-examples button {
+  text-align: left;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.workflow-assistant-examples button:hover {
+  background: var(--muted);
+}
+.workflow-assistant-history > div + div {
+  margin-top: 18px;
+}
+.workflow-user-request {
+  padding: 10px 12px;
+  background: var(--muted);
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+.workflow-assistant-compose label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 7px;
+}
+.workflow-assistant-compose textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--background);
+  padding: 10px;
+  font-size: 13px;
+  resize: vertical;
+  line-height: 1.7;
+}
+.workflow-assistant-compose > button {
+  margin-top: 10px;
+}
+.workflow-proposal {
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--background);
+  font-size: 12px;
+}
+.workflow-proposal > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.workflow-proposal > header strong {
+  font-size: 13px;
+}
+.workflow-proposal > header span {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.workflow-proposal .markdown-content {
+  font-size: 12px;
+  line-height: 1.7;
+}
+.workflow-proposal-version,
+.workflow-proposal-note {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.7;
+}
+.workflow-change-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  max-height: 260px;
+  overflow: auto;
+}
+.workflow-change-list li {
+  display: flex;
+  gap: 8px;
+  padding: 7px;
+  background: var(--muted);
+  border-radius: 7px;
+}
+.workflow-change-list li > span {
+  flex: none;
+  color: var(--primary);
+}
+.workflow-change-list li[data-kind="remove"] > span {
+  color: var(--destructive);
+}
+.workflow-change-list strong {
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.workflow-change-list small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  margin-top: 3px;
+}
+.workflow-proposal summary {
+  cursor: pointer;
+  font-size: 11px;
+}
+.workflow-proposal-node {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.workflow-proposal-node dl > div {
+  margin-top: 6px;
+}
+.workflow-proposal-node dt {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.workflow-proposal-node dd {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-height: 100px;
+  overflow: auto;
+}
+.workflow-proposal footer {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+@media (max-width: 760px) {
+  .workflow-assistant-compose textarea {
+    font-size: 16px;
+  }
+}

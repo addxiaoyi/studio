@@ -1,0 +1,25 @@
+create table if not exists canvas_workflow_proposals (
+  id uuid primary key default gen_random_uuid(),
+  canvas_id uuid not null references canvases(id) on delete cascade,
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  created_by uuid not null references app_users(id) on delete cascade,
+  workflow_id uuid references canvas_workflows(id) on delete cascade,
+  revision integer,
+  goal_id uuid references agent_goals(id) on delete cascade,
+  goal_updated_at timestamptz,
+  goal_status text,
+  session_id uuid references chat_sessions(id) on delete set null,
+  prompt text not null,
+  action text not null check(action in ('edit','run','pause','resume','cancel','retry','inspect')),
+  summary text not null,
+  before_graph jsonb,
+  graph jsonb,
+  status text not null default 'pending' check(status in ('pending','applied','rejected')),
+  result jsonb,
+  request_key uuid not null,
+  expires_at timestamptz not null default now()+interval '15 minutes',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(canvas_id,created_by,request_key)
+);
+create index if not exists canvas_workflow_proposals_owner on canvas_workflow_proposals(canvas_id,created_by,created_at desc);

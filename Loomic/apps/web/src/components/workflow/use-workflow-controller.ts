@@ -408,6 +408,9 @@ export function useWorkflowController({
   }
   async function prepareRun(){if(locked||!plan)return;if(flow.dirty&&!(await save()))return;setConfirmRun(true);}
   const saveRef=useRef(save);saveRef.current=save;
+  const assistantScope=useRef({flow,onOpen});assistantScope.current={flow,onOpen};
+  useEffect(()=>{const changed=(event:Event)=>{const detail=(event as CustomEvent<{id?:string}>).detail;if(!detail?.id)return;void assistantScope.current.flow.refresh(detail.id);assistantScope.current.onOpen();};window.addEventListener("loomic:workflow-changed",changed);return()=>window.removeEventListener("loomic:workflow-changed",changed);},[]);
+  const prepareAssistant=async()=>{try{await saveCanvas();if(flow.recovery)throw new Error("请先处理恢复草稿。");if(flow.dirty)return Boolean(await flow.save());return true;}catch(cause){flow.setError(cause instanceof Error?cause.message:"画布保存失败。");return false;}};
   useEffect(()=>{const key=(event:KeyboardEvent)=>{if(open&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="s"){event.preventDefault();if(!locked)void saveRef.current();}};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key);},[open,locked]);
   const proposal = flow.proposal;
   return {
@@ -442,5 +445,6 @@ export function useWorkflowController({
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
     materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
     pendingSwitch,setPendingSwitch,requestSwitch,confirmSwitch,editNode,deselectNode,disconnect,prepareRun,addingAfter,setAddingAfter,
+    prepareAssistant,
   };
 }

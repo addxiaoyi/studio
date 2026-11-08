@@ -29,6 +29,7 @@ export async function createWorkflowFixture(database: string, origin: string) {
         "20261106000003_goal_execution_steps",
         "20261108000004_canvas_workflows",
         "20261108000005_creative_library",
+        "20261108000006_workflow_assistant",
       ])
         await ctx.db.query(
           await readFile(
@@ -44,6 +45,18 @@ export async function createWorkflowFixture(database: string, origin: string) {
         env: {} as never,
         settingsService: {} as never,
         enabled: () => true,
+        assistantPlan:async(prompt,context)=>{
+          const input=context as {workflow?:{graph:import("@helstera/shared").WorkflowGraph};references?:Array<{text?:string}>};
+          if(prompt.includes("仅规划引用验收")&&!input.references?.some(item=>item.text?.includes("Inspire reference")))throw new Error("没有收到用户指定的真实选区引用");
+          if(prompt==="暂停当前流程")return {action:"pause",summary:"暂停当前运行"};
+          if(prompt==="继续当前流程")return {action:"resume",summary:"继续未完成步骤"};
+          if(prompt==="运行当前流程")return {action:"run",summary:"检查并运行已保存版本"};
+          const graph=input.workflow?.graph?structuredClone(input.workflow.graph):websiteWorkflow();
+          if(graph.nodes[0]!.config.kind==="url")graph.nodes[0]!.config={kind:"url",url:"https://example.com/"};
+          graph.title=prompt.includes("仅规划引用验收")?"引用验收方案":"AI 网站研究";
+          if(prompt.includes("录制")){const capture=graph.nodes.find(node=>node.config.kind==="capture");if(capture?.config.kind==="capture")capture.config.record=true;}
+          return {action:"edit",summary:"已准备节点方案，确认后应用。",graph};
+        },
         plan: async (_workspace, input, referenceContext) => {
           const graph = websiteWorkflow();
           if(input.goal.includes("仅规划引用验收")){

@@ -51,6 +51,7 @@ const cic: typeof cancelIdleCallback =
 const MemoizedCanvasToolMenu = memo(CanvasToolMenu);
 
 export type CanvasSelectedElement = {
+  workflow?:{workflowId:string;nodeId:string;title:string};
   id: string;
   type: string;
   x: number;
@@ -836,6 +837,7 @@ export function CanvasEditor({
                   base.text = el.text;
                 }
                 const workflowDocument=readWorkflowDocument(el);
+                const nodeBinding=workflowBinding(el);if(nodeBinding)base.workflow={workflowId:nodeBinding.workflowId,nodeId:nodeBinding.node.id,title:nodeBinding.node.title};
                 if(workflowDocument)base.text=workflowDocument.markdown;
                 if (el.type === "image" && el.fileId) {
                   base.fileId = el.fileId;

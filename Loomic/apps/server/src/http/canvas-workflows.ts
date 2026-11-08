@@ -22,6 +22,7 @@ import { listHealthyModels } from "./model-availability.js";
 import { registerCreativeLibraryRoutes } from "./creative-library.js";
 import { workflowReferences } from "../features/canvas-workflows/references.js";
 import type { StorageProvider } from "../storage/storage-provider.js";
+import {registerWorkflowAssistantRoutes,type WorkflowAssistantOptions} from "./workflow-assistant.js";
 
 const paramsSchema = z.object({
   canvasId: z.string().uuid(),
@@ -34,6 +35,7 @@ const createSchema = z
   .object({ graph: z.unknown(), requestKey: z.string().uuid() })
   .strict();
 type Options = {
+  assistantPlan?:WorkflowAssistantOptions["assistantPlan"];
   db: Pool;
   auth: RequestAuthenticator;
   env: ServerEnv;
@@ -69,6 +71,7 @@ export function registerCanvasWorkflowRoutes(
 ) {
   const service = new CanvasWorkflowService(options.db);
   registerCreativeLibraryRoutes(app,options);
+  registerWorkflowAssistantRoutes(app,options);
   const enabled =
     options.enabled ?? (() => process.env.HELSTERA_GOAL_STEPS === "1");
   for (const operation of [

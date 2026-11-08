@@ -84,6 +84,8 @@ function summarizeElement(el: CanvasElement) {
   }
 
   const groupIds = el.groupIds as unknown[] | undefined;
+  const workflow=(el.customData as {workflow?:{workflowId?:string;node?:{id?:string;title?:string}}}|undefined)?.workflow;
+  if(workflow?.workflowId&&workflow.node?.id){base.workflowId=workflow.workflowId;base.workflowNodeId=workflow.node.id;base.title=workflow.node.title;}
   if (Array.isArray(groupIds) && groupIds.length > 0) {
     base.grouped = true;
   }

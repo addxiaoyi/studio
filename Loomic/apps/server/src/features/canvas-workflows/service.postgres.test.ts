@@ -15,6 +15,7 @@ import { CreativeLibraryService } from "./library.js";
 import { workflowReferences } from "./references.js";
 import { workflowResults,reuseWorkflowResult } from "./results.js";
 import { assertWorkflowJobGenerationActive } from "./approval-access.js";
+import {WorkflowAssistantService} from "./assistant.js";
 
 const connectionString = process.env.HELT_TEST_DATABASE_URL;
 const schema = `canvas_flow_${randomUUID().replaceAll("-", "")}`;
@@ -60,6 +61,7 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
       "20261106000003_goal_execution_steps",
       "20261108000004_canvas_workflows",
       "20261108000005_creative_library",
+      "20261108000006_workflow_assistant",
       "20261029000000_canvas_content_version",
       "20261017000000_automation_lifecycle",
     ])
@@ -282,11 +284,10 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
         ),
       ),
     );
-    expect(reply.status).toBe("draft");
-    expect(reply.visualWorkflowId).toBeTruthy();
-    expect(
-      (await service.get(user, canvas, reply.visualWorkflowId)).activeGoalId,
-    ).toBeNull();
+    expect(reply.status).toBe("confirmation_required");
+    expect(reply.workflowProposalId).toBeTruthy();
+    const proposals=new WorkflowAssistantService(db);const pending=await proposals.get(user,canvas,reply.workflowProposalId);expect(pending.workflowId).toBeNull();
+    const applied=await proposals.decide(user,canvas,pending.id,"confirm",true);expect((await service.get(user,canvas,String(applied.result!.workflowId))).activeGoalId).toBeNull();
   });
   it("keeps a background result that arrives between reading and saving the canvas", async () => {
     const canvasService = createLocalCanvasService(db);
@@ -379,5 +380,23 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
     expect((await approvals.approve(request)).jobId).toBe(jobId);
     expect((await db.query("select count(*)::int as n from credit_transactions")).rows[0].n).toBe(before);
     await db.query("update agent_goals set status='canceled' where id=$1",[run.goalId]);
+  });
+  it("applies AI edits once, rejects stale versions and keeps execution behind a separate confirmation",async()=>{
+    const assistant=new WorkflowAssistantService(db),draft=await service.create(user,canvas,ready(),randomUUID());
+    const changed={...draft.graph,title:"AI 修改后的研究流程"};
+    const proposal=await assistant.propose(user,canvas,{workflowId:draft.id,revision:draft.revision,prompt:"改名字",requestKey:randomUUID(),plan:{action:"edit",summary:"修改名称，保留节点和素材。",graph:changed}});
+    expect((await service.get(user,canvas,draft.id)).graph.title).toBe(draft.graph.title);
+    await expect(assistant.get(randomUUID(),canvas,proposal.id)).rejects.toThrow("权限");
+    const applied=await assistant.decide(user,canvas,proposal.id,"confirm",true);const replay=await assistant.decide(user,canvas,proposal.id,"confirm",true);expect(replay.result).toEqual(applied.result);expect((await service.get(user,canvas,draft.id)).revision).toBe(2);
+    const stale=await assistant.propose(user,canvas,{workflowId:draft.id,revision:2,prompt:"再次改名",requestKey:randomUUID(),plan:{action:"edit",summary:"改名",graph:{...changed,title:"过时方案"}}});
+    await service.save(user,canvas,draft.id,2,{...changed,title:"用户先修改了"});await expect(assistant.decide(user,canvas,stale.id,"confirm",true)).rejects.toThrow("其他窗口");
+    const start=await assistant.propose(user,canvas,{workflowId:draft.id,revision:3,prompt:"运行",requestKey:randomUUID(),plan:{action:"run",summary:"运行第3版"}});expect((await service.get(user,canvas,draft.id)).activeGoalId).toBeNull();
+    await expect(assistant.decide(user,canvas,start.id,"confirm",false)).rejects.toThrow("尚未启用");
+    const executed=await assistant.decide(user,canvas,start.id,"confirm",true),again=await assistant.decide(user,canvas,start.id,"confirm",true);expect(again.result).toEqual(executed.result);expect((await service.runs(user,canvas,draft.id))).toHaveLength(1);
+    const pause=await assistant.propose(user,canvas,{workflowId:draft.id,prompt:"暂停",requestKey:randomUUID(),plan:{action:"pause",summary:"暂停当前运行"}});await assistant.decide(user,canvas,pause.id,"confirm",true);expect((await assistant.context(user,canvas,draft.id)).goal!.status).toBe("paused");
+    const resume=await assistant.propose(user,canvas,{workflowId:draft.id,prompt:"继续",requestKey:randomUUID(),plan:{action:"resume",summary:"继续未完成步骤"}});await db.query("update agent_goal_steps set state='review' where goal_id=$1 and step_id='capture'",[executed.result!.goalId]);await expect(assistant.decide(user,canvas,resume.id,"confirm",true)).rejects.toThrow("核验");
+    const cancel=await assistant.propose(user,canvas,{workflowId:draft.id,prompt:"取消",requestKey:randomUUID(),plan:{action:"cancel",summary:"取消"}});await assistant.decide(user,canvas,cancel.id,"confirm",true);
+    const expired=await assistant.propose(user,canvas,{prompt:"新建",requestKey:randomUUID(),plan:{action:"edit",summary:"新草稿",graph:ready()}});await db.query("update canvas_workflow_proposals set expires_at=now()-interval '1 second' where id=$1",[expired.id]);await expect(assistant.decide(user,canvas,expired.id,"confirm",true)).rejects.toThrow("过期");
+    expect((await assistant.decide(user,canvas,expired.id,"reject",true)).status).toBe("rejected");
   });
 });

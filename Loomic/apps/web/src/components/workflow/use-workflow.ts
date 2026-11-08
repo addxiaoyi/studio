@@ -281,7 +281,7 @@ export function useCanvasWorkflow(
     askAi,
     applyProposal,
     start,
-    refresh: () => run(() => {if(dirty)throw new Error("当前有未保存修改，请先保存或保留本机草稿后切换。");return load(selected?.id);}),
+    refresh: (preferred?:string) => run(() => {if(dirty)throw new Error("当前有未保存修改，请先保存或保留本机草稿后切换。");return load(preferred??selected?.id);}),
     clearRecovery: () => {
       if (selected) localStorage.removeItem(draftKey(selected.id));
       setRecovery(null);
