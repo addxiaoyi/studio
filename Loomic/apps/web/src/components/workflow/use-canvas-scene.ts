@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import type { WorkflowDocument, WorkflowGraph } from "@helstera/shared";
 import {focusCanvasContent,stopCanvasView} from "./viewport";
+import { refreshWorkflowCurves } from "./curves";
 import {
   nodeElementId,
   adoptWorkflowCopies,
@@ -115,7 +116,7 @@ export function useCanvasWorkflowScene(options: Options) {
   useEffect(() => {
     const api = options.api;
     if (!api) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined, frame = 0;
     let lastSelection = "";
     const sync = () => {
       const { document, graph, locked, edit, error } = current.current;
@@ -140,6 +141,15 @@ export function useCanvasWorkflowScene(options: Options) {
     };
     const unsubscribe = api.onChange((elements, state) => {
       if (projecting.current) return;
+      if (!frame) frame = requestAnimationFrame(() => {
+        frame = 0;
+        const before = api.getSceneElementsIncludingDeleted();
+        const curved = refreshWorkflowCurves(before);
+        if (curved === before) return;
+        projecting.current = true;
+        api.updateScene({ elements: curved, captureUpdate: "NEVER" });
+        projecting.current = false;
+      });
       const selection = Object.keys(state.selectedElementIds ?? {})
         .filter((id) => state.selectedElementIds[id])
         .sort()
@@ -158,6 +168,7 @@ export function useCanvasWorkflowScene(options: Options) {
     });
     return () => {
       clearTimeout(timer);
+      cancelAnimationFrame(frame);
       unsubscribe();
     };
   }, [options.api]);

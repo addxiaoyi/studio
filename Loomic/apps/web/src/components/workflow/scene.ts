@@ -6,6 +6,7 @@ import {
 } from "@helstera/shared";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { workflowInputReferences, type WorkflowReference } from "./material-references";
+import { workflowCurve, refreshWorkflowCurves } from "./curves";
 
 export type SceneElement = {
   id: string;
@@ -262,29 +263,11 @@ export function projectWorkflow(
     const id = edgeElementId(workflowId, edge.id),
       prior = byId.get(id),
       body = prior ?? baseElement(id, "arrow");
-    const x = from.x + from.width + 4,
-      y = from.y + from.height / 2;
-    const dx = to.x - 4 - x,
-      dy = to.y + to.height / 2 - y;
     next.set(
       id,
       revise(prior, {
         ...body,
-        x,
-        y,
-        width: Math.abs(dx),
-        height: Math.abs(dy),
-        points: [
-          [0, 0],
-          [dx, dy],
-        ],
-        startBinding: { elementId: from.id, focus: 0, gap: 4 },
-        endBinding: { elementId: to.id, focus: 0, gap: 4 },
-        startArrowhead: null,
-        endArrowhead: "arrow",
-        roundness: { type: 2 },
-        elbowed: false,
-        strokeWidth: 2,
+        ...workflowCurve(from, to),
         isDeleted: false,
         locked,
         customData: {
@@ -343,7 +326,7 @@ export function projectWorkflow(
       return el.isDeleted ? el : revise(el, { ...el, isDeleted: true });
     return el;
   });
-  return [...merged, ...next.values()];
+  return [...refreshWorkflowCurves([...merged, ...next.values()])];
 }
 export function readSceneWorkflow(
   scene: readonly SceneElement[],
@@ -460,25 +443,9 @@ export function linkWorkflowResults(
   )) {
     const id = `wr:${goalId}:${target.id}`;
     if (scene.some((el) => el.id === id)) continue;
-    const x = source.x + source.width + 4,
-      y = source.y + source.height / 2;
-    const dx = target.x - 4 - x,
-      dy = target.y + target.height / 2 - y;
     links.push({
       ...baseElement(id, "arrow"),
-      x,
-      y,
-      width: Math.abs(dx),
-      height: Math.abs(dy),
-      points: [
-        [0, 0],
-        [dx, dy],
-      ],
-      startBinding: { elementId: source.id, focus: 0, gap: 4 },
-      endBinding: { elementId: target.id, focus: 0, gap: 4 },
-      startArrowhead: null,
-      endArrowhead: "arrow",
-      elbowed: false,
+      ...workflowCurve(source, target),
       strokeStyle: "dashed",
       customData: { workflowResult: { workflowId, goalId } },
     });
