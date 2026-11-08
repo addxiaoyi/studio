@@ -57,8 +57,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: desktop-tools-${{ matrix.platform }}-${{ hashFiles('Loomic/pnpm-lock.yaml') }}
+          restore-keys: desktop-tools-${{ matrix.platform }}-
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            pnpm install --frozen-lockfile && break
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 5
+          done
       - name: Build shared contracts
         run: pnpm --filter @helstera/shared build
       - uses: actions/download-artifact@v4
@@ -91,10 +108,15 @@ jobs:
         if: runner.os == 'macOS'
         run: echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
       - name: Build candidate package
+        shell: bash
         run: |
           pnpm --filter @helstera/desktop exec tsc -p tsconfig.electron.json
           pnpm --filter @helstera/desktop exec vite build
-          pnpm --filter @helstera/desktop exec electron-builder ${{ matrix.args }} --publish never
+          for attempt in 1 2 3; do
+            pnpm --filter @helstera/desktop exec electron-builder ${{ matrix.args }} --publish never && break
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 5
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-candidate-${{ matrix.platform }}
