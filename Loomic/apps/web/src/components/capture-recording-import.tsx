@@ -57,9 +57,16 @@ export function CanvasVideoImport({ runtime, token, onImported }: { runtime: Stu
       const duration = await studioVideoDuration(file);
       const start = Math.min(source.start, duration - 1 / 30), end = Math.min(source.end ?? duration, duration);
       if (start < 0 || end - start < 1 / 30) throw new Error("画布裁剪范围超出视频时长，请重新选择。");
+      if (runtime.projectId() === "current-project") {
+        const selected = (await runtime.studioState()).compositions[0];
+        if (!selected) throw new Error("请选择要加入片段的合成。");
+        runtime.selectComposition(selected);
+      }
       const cut = runtime.readCut();
       const clipId = `canvas-${source.id}`;
       if (!cut?.clips.some(clip => clip.id === clipId)) await runtime.applyCut({ ...(cut ?? { format: "landscape", clips: [] }), clips: [...(cut?.clips ?? []), { id: clipId, name: file.name, duration, start, end }] });
+      const edited = await runtime.snapshot();
+      if (edited.duration + 1 / 30 < (cut?.clips.reduce((total,clip) => total+clip.end-clip.start,0) ?? 0) + end - start) throw new Error("合成尚未更新为完整视频时长，请等待编辑器加载后重试。");
       setInTimeline(true); onImported();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "添加时间线失败。"); }
     finally { setBusy(false); }

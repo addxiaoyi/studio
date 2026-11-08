@@ -61,6 +61,13 @@ export async function applyStudioCut(cut: StudioCut) {
     } } : null,
   });
   if (!installed.success) throw new Error(`无法加入快剪时间线：${"reason" in installed ? installed.reason : "工程发生变化，请重试。"}`);
+  if (destination.type === "current-composition") {
+    const metadata = await operations.updateCompositionMetadata({ idToUpdate: targetCompositionId,
+      newDurationInFrames: element.durationInFrames, newFps: STUDIO_FPS,
+      newWidth: element.dimensions.width, newHeight: element.dimensions.height,
+      symbolicatedStack: null, undoRedoNavigation: null });
+    if (!metadata.success) throw new Error("视频片段已添加，但合成时长更新失败，请检查时间线。");
+  }
   if (destination.type === "new-composition") {
     const url = new URL(location.href);
     url.search = `/${compositionId}`;

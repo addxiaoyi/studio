@@ -25,7 +25,7 @@ it("offers keyboard-addressable timeline and AI actions above the drawing surfac
 it("retains the canvas trim and adds one persistent clip only after the user confirms", async () => {
   window.history.replaceState(null, "", `/video/?assetId=${assetId}&start=2&end=8&edit=1`);
   let file: File | null = null, cut: any = null;
-  const runtime = { readAsset: vi.fn(async () => file), importAsset: vi.fn(async (next: File) => { file = next; }), readCut: () => cut, applyCut: vi.fn(async (next: unknown) => { cut = next; }) };
+  const runtime = { readAsset: vi.fn(async () => file), importAsset: vi.fn(async (next: File) => { file = next; }), projectId: () => "MyComp", snapshot: async () => ({ duration: 6 }), readCut: () => cut, applyCut: vi.fn(async (next: unknown) => { cut = next; }) };
   const props = { runtime: runtime as never, token: "token", onImported: vi.fn() };
   const view = render(<CanvasVideoImport {...props} />);
   const add = await screen.findByRole("button", { name: "加入剪辑时间线" });

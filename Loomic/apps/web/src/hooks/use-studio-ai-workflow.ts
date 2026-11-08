@@ -64,7 +64,7 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
         setContext(current => current?.compositionId === selected.compositionId ? current : null);
         setNotice(pendingReceipt.current ? "请先同步上一视频的修改记录，再继续编辑。" : "已切换视频，请为当前视频重新预览方案。");
       }
-      currentTarget.current = selected.compositionId;setTarget(selected);
+      currentTarget.current = selected.compositionId;setTarget(selected);setError("");
     } catch (cause) { if (mounted.current) { setTarget(null);setError(cause instanceof Error ? cause.message : "无法读取当前视频，请重新选择。"); } }
   }, [runtime, clearPreview]);
 

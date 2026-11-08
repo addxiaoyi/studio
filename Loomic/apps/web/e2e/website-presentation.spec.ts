@@ -139,6 +139,8 @@ test("rejects then approves a real presentation, plays the recording and restore
   const imported = page.getByRole("region", { name: "画布视频剪辑" });
   await imported.getByRole("button", { name: "加入剪辑时间线" }).click({ timeout: 90000 });
   await expect(imported).toContainText("画布视频已加入剪辑时间线", { timeout: 30000 });
+  await expect(page.getByLabel("修改对象", { exact: true })).toContainText("12.0s", { timeout: 30000 });
+  await expect(page.getByRole("complementary", { name: "视频 AI 对话" }).getByRole("alert")).toHaveCount(0);
   await imported.getByRole("button", { name: "让 AI 剪辑", exact: true }).click();
   await expect(page.getByRole("textbox", { name: /对话|编辑要求|输入/ }).filter({ visible: true }).last()).toHaveValue(/剪辑当前时间线/);
   await page.screenshot({ path: info.outputPath("capture-ai-edit-ready.png") });
@@ -221,10 +223,10 @@ test('plans from conversation, resumes human verification after refresh and reme
   expect((await fixture.db.query('select status from website_capture_tasks where id=$1',[task])).rows[0].status).toBe('succeeded');
   expect((await fixture.db.query('select count(*)::int as n from website_handoff_commands where task_id=$1 and ciphertext is not null',[task])).rows[0].n).toBe(0);
   expect((await fixture.db.query('select count(*)::int as n from website_browser_sessions where user_id=$1 and ciphertext is not null',[fixture.userId])).rows[0].n).toBe(1);
-  await expect(card.getByRole('button',{name:'导入视频工作区剪辑'})).toBeVisible();
+  await expect(card.getByRole('button',{name:'让 AI 剪辑录像'})).toBeVisible();
   await page.screenshot({path:info.outputPath('journey-complete.png')});
-  await card.getByRole('button',{name:'导入视频工作区剪辑'}).click();
-  await expect(page.getByLabel('网站录像导入')).toContainText('已导入',{timeout:45000});
+  await card.getByRole('button',{name:'让 AI 剪辑录像'}).click();
+  await expect(page.getByLabel('画布视频剪辑')).toContainText('已导入',{timeout:45000});
   await page.screenshot({path:info.outputPath('recording-in-video-workspace.png')});
   await page.getByRole('button',{name:'展开 Agent 浏览器',exact:true}).click();
   await page.getByRole('button',{name:'网站登录会话 · 管理',exact:true}).click();
