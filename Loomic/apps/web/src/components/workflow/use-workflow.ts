@@ -190,7 +190,7 @@ export function useCanvasWorkflow(
       setNotice("工作流已保存");
     });
   }
-  async function askAi() {
+  async function askAi(referenceElementIds?:string[]) {
     await run(async () => {
       const current = version.current;
       const suggestion = await planCanvasWorkflow(
@@ -198,6 +198,7 @@ export function useCanvasWorkflow(
         canvasId,
         prompt,
         selected ? graph : undefined,
+        referenceElementIds,
       );
       if (current !== version.current)
         throw new Error("生成期间流程已改变，请重新生成方案。");

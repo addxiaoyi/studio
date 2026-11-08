@@ -594,7 +594,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     viewerService,
     assistantHub: websiteAssistantHub,
   });
-  registerCanvasWorkflowRoutes(app, { db: localDb, auth, env, settingsService });
+  registerCanvasWorkflowRoutes(app, { db: localDb, auth, env, settingsService, storage: storageProvider });
   registerAgentMemoryRoutes(app, {
     auth,
     db: localDb,

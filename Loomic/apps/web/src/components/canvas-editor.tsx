@@ -1257,7 +1257,7 @@ export function CanvasEditor({
   // and render an inline player, falling back to default for everything else.
   const renderEmbeddable = useCallback((element: any, _appState: any) => {
     const binding = workflowBinding(element);
-    if (binding && binding.node.config.kind !== "asset") return <WorkflowCanvasNode element={element} accessToken={accessTokenRef.current} />;
+    if (binding && (binding.node.config.kind !== "asset" || !binding.node.config.elementId)) return <WorkflowCanvasNode element={element} accessToken={accessTokenRef.current} />;
     if (!binding && element.customData?.workflow && !element.customData?.isVideo && element.type === "embeddable") return <div className="canvas-workflow-node p-4 text-sm" role="status">正在同步复制的节点…</div>;
     const link = element?.link;
     const isCanvasVideo =

@@ -17,7 +17,7 @@ export const workflowNodeSchema = z
     }),
     config: z.discriminatedUnion("kind", [
       ...creativeNodeConfigs,
-      z.object({ kind: z.literal("asset"), elementId: z.string().min(1).max(200), assetId: z.string().uuid(), mediaType: z.enum(["image", "video"]) }).strict(),
+      z.object({ kind: z.literal("asset"), elementId: z.string().max(200), assetId: z.union([z.string().uuid(),z.literal("")]), mediaType: z.enum(["image", "video"]) }).strict(),
       z.object({ kind: z.literal("url"), url: z.string().max(2048) }).strict(),
       z
         .object({ kind: z.literal("search"), query: z.string().max(500) })
@@ -141,6 +141,7 @@ export function validateWorkflow(graph: WorkflowGraph): WorkflowIssue[] {
     issues.push({ message: "需要且只能有一个输出节点。" });
   for (const node of graph.nodes) {
     const input = graph.edges.filter((edge) => edge.target === node.id);
+    if(node.config.kind==="asset"&&(!node.config.assetId||!node.config.elementId))issues.push({nodeId:node.id,message:`${node.title}需要重新选择画布素材。`});
     if (
       ["capture", "trim", "deliver", "shot", "frame", "compose"].includes(node.config.kind) &&
       !input.length

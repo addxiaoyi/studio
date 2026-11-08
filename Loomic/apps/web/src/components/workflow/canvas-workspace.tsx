@@ -20,6 +20,8 @@ import { WorkflowDialogs } from "./dialogs";
 import { NodeInspector } from "./node-inspector";
 import { WorkflowRunPanel } from "./run-panel";
 import { workflowStateLabel } from "./canvas-node";
+import { WorkflowLibrary } from "./library-panel";
+import { WorkflowResultCompare } from "./compare-results";
 import {
   useWorkflowController,
   workflowConfigs as configs,
@@ -56,6 +58,8 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
     proposal,
     startRun,
     refreshRun,
+    selection,references,setReferences,attachReferences,askAi,openLibrary,libraryPrompt,applyPrompt,libraryMode,
+    compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
   } = useWorkflowController(props);
   return (
     <>
@@ -219,8 +223,10 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
           <button aria-pressed={tab === "runs"} onClick={() => setTab("runs")}>
             运行记录
           </button>
+          <button aria-pressed={tab === "library"} onClick={()=>openLibrary()}>资源库</button>
         </nav>
         <div className="workflow-dock-body">
+          {tab==="library"&&<WorkflowLibrary initialMode={libraryMode} token={token} canvasId={props.canvasId} graph={flow.selected?flow.graph:null} selectedIds={selection.nodes} prompt={libraryPrompt} disabled={locked} onInsert={graph=>{if(flow.dirty){flow.setError("先保存当前草稿，再插入模板。");return;}void flow.create(false,graph);setSelectedId(null);setTab("nodes");}} onPrompt={applyPrompt}/>}
           <div className="workflow-template-picker"><StyledSelect aria-label="创作流程模板" value="" disabled={locked||flow.dirty} options={[{value:"",label:"从创作模板开始…"},{value:"script",label:"故事 → 剧本"},{value:"storyboard",label:"剧本 → 分镜"},{value:"film",label:"故事 → 镜头生成 → 成片"}]} onChange={template=>void flow.create(false,creativeWorkflow(template as "script"|"storyboard"|"film"))} /></div>
           {tab === "nodes" && (
             <>
@@ -323,6 +329,9 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                     })
                   }
                   onConnect={connect}
+                  onPromptLibrary={()=>openLibrary(true)}
+                  materials={materials}
+                  onBindMaterial={bindSelectedMaterial}
                   onDisconnect={(id) =>
                     flow.edit({
                       ...flow.graph,
@@ -373,10 +382,11 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
               className="workflow-ai"
               onSubmit={(event) => {
                 event.preventDefault();
-                void flow.askAi();
+                void askAi();
               }}
             >
               <label htmlFor="workflow-ai-request">让 AI 帮你搭建</label>
+              <div className="workflow-ai-references"><Button type="button" size="sm" variant="outline" disabled={locked||!selection.references.length} onClick={attachReferences}>引用画布选区{selection.references.length?`（${selection.references.length}）`:""}</Button><Button type="button" size="sm" variant="ghost" onClick={()=>openLibrary(false,true)} disabled={locked}>提示词库</Button>{references.map((item,index)=><span key={item.id}>@{index+1} {item.title}<button type="button" aria-label={`移除引用${index+1}`} onClick={()=>setReferences(current=>current.filter(reference=>reference.id!==item.id))}>×</button></span>)}</div>
               <textarea
                 id="workflow-ai-request"
                 rows={6}
@@ -397,6 +407,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
           )}
           {tab === "runs" && (
             <>
+              {!!history.length&&flow.selected&&<div className="p-3"><Button variant="outline" size="sm" onClick={()=>setCompareOpen(true)}>对比 / 复用历史结果</Button></div>}
               {!!history.length && (
                 <div className="p-3">
                   <StyledSelect
@@ -476,6 +487,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
         setConfirmRun={setConfirmRun}
         run={() => void startRun()}
       />
+      {flow.selected&&<WorkflowResultCompare open={compareOpen} onClose={()=>setCompareOpen(false)} token={token} canvasId={props.canvasId} workflowId={flow.selected.id} history={history} disabled={locked} onReuse={reuseResult}/>}
     </>
   );
 }

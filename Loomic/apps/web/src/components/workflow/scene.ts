@@ -81,7 +81,7 @@ export function workflowBinding(element: SceneElement): NodeBinding | null {
   };
 }
 export function nodeElementId(workflowId: string, node: WorkflowNode) {
-  return node.config.kind === "asset"
+  return node.config.kind === "asset" && node.config.elementId
     ? node.config.elementId
     : `wf:${workflowId}:${node.id}`;
 }
@@ -218,9 +218,10 @@ export function projectWorkflow(
   for (const node of graph.nodes) {
     const id = nodeElementId(workflowId, node),
       prior = byId.get(id);
-    if (node.config.kind === "asset" && (!prior || prior.isDeleted)) continue;
+    const boundAsset = node.config.kind === "asset" && Boolean(node.config.elementId);
+    if (boundAsset && (!prior || prior.isDeleted)) continue;
     const body = prior ?? baseElement(id, "embeddable");
-    const snapshot = { workflowId, node, state: states[node.id] ?? "draft", ...(previews[node.id] ? {preview:previews[node.id]} : {}) };
+    const snapshot = { workflowId, node:{...node,position:{...node.position},config:{...node.config}}, state: states[node.id] ?? "draft", ...(previews[node.id] ? {preview:previews[node.id]} : {}) };
     next.set(
       id,
       revise(prior, {
@@ -228,7 +229,7 @@ export function projectWorkflow(
         x: node.position.x,
         y: node.position.y,
         isDeleted: false,
-        ...(node.config.kind !== "asset"
+        ...(!boundAsset
           ? {
               link: "https://studio.0st.top/#workflow-node",
               width: Math.max(240, body.width),
@@ -319,7 +320,8 @@ export function projectWorkflow(
       return replacement;
     }
     if (workflowBinding(el)?.workflowId === workflowId) {
-      if (workflowBinding(el)?.node.config.kind === "asset") {
+      const oldConfig = workflowBinding(el)?.node.config;
+      if (oldConfig?.kind === "asset" && oldConfig.elementId) {
         const { workflow: _removed, ...customData } = el.customData ?? {};
         return revise(el, { ...el, customData, locked: false });
       }
@@ -405,7 +407,7 @@ export function placeWorkflow(
   scene: readonly SceneElement[],
   state: CanvasState,
 ): WorkflowGraph {
-  if (graph.nodes.some((node) => node.config.kind === "asset")) return graph;
+  if (graph.nodes.some((node) => node.config.kind === "asset" && node.config.elementId)) return graph;
   const visible = scene.filter((el) => !el.isDeleted);
   const right = visible.length
     ? Math.max(...visible.map((el) => el.x + el.width)) + 160

@@ -17,6 +17,9 @@ type Props = {
   onDisconnect(id: string): void;
   onDelete(id: string): void;
   onReorder?: ((edgeId: string, direction: -1 | 1) => void) | undefined;
+  onPromptLibrary?: (()=>void)|undefined;
+  materials?: WorkflowNode[]|undefined;
+  onBindMaterial?: (()=>void)|undefined;
 };
 export function NodeInspector({
   node,
@@ -27,6 +30,7 @@ export function NodeInspector({
   onDisconnect,
   onDelete,
   onReorder,
+  onPromptLibrary,materials=[],onBindMaterial,
 }: Props) {
   const config = node.config;
   const field = "workflow-field";
@@ -72,6 +76,7 @@ export function NodeInspector({
         </label>
       )}
       <CreativeInspector node={node} disabled={disabled} onChange={onChange} />
+      {["text","write","generate"].includes(config.kind)&&onPromptLibrary&&<Button size="sm" variant="outline" disabled={disabled} onClick={onPromptLibrary}>提示词库 · 保存与套用</Button>}
       {config.kind === "search" && (
         <label>
           搜索主题
@@ -200,6 +205,7 @@ export function NodeInspector({
         </p>
       )}
       {config.kind === "asset" && <p className="text-sm text-muted-foreground">直接引用当前画布中的{config.mediaType === "video" ? "视频" : "图片"}。运行时重新验证素材权限和有效期；删除原素材后将停止执行。</p>}
+      {config.kind==="asset"&&onBindMaterial&&<Button className="mt-3" size="sm" variant="outline" disabled={disabled||!materials.some(node=>node.config.kind==="asset"&&node.config.mediaType===config.mediaType)} onClick={onBindMaterial}>{config.elementId?"替换为所选素材":"绑定所选素材"}</Button>}
       <div className="mt-5 border-t pt-4">
         <h4 className="text-xs font-semibold">输入连接</h4>
         <ul className="mt-2 space-y-2">

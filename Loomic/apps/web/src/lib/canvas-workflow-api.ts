@@ -1,6 +1,9 @@
 import {
   workflowDocumentSchema,
   workflowGraphSchema,
+  creativeLibraryEntrySchema,
+  workflowNodeSchema,
+  type CreativeLibraryBody,
   type WorkflowGraph,
 } from "@helstera/shared";
 import { getServerBaseUrl } from "./env";
@@ -74,16 +77,25 @@ export async function planCanvasWorkflow(
   canvasId: string,
   prompt: string,
   graph?: WorkflowGraph,
+  referenceElementIds?: string[],
 ) {
   const reply = (await workflowRequest(token, canvasId, "/plan", "POST", {
     prompt,
     ...(graph ? { graph } : {}),
+    ...(referenceElementIds?.length ? {referenceElementIds} : {}),
   })) as { graph: unknown; summary: string };
   return {
     graph: workflowGraphSchema.parse(reply.graph),
     summary: reply.summary,
   };
 }
+
+export async function listCreativeLibrary(token:string,canvasId:string){return creativeLibraryEntrySchema.array().parse(await workflowRequest(token,canvasId,"/library"));}
+export async function saveCreativeLibrary(token:string,canvasId:string,input:{name:string;description:string;body:CreativeLibraryBody;requestKey:string}){return creativeLibraryEntrySchema.parse(await workflowRequest(token,canvasId,"/library","POST",input));}
+export async function archiveCreativeLibrary(token:string,canvasId:string,id:string,restore=false){await workflowRequest(token,canvasId,`/library/${id}${restore?"/restore":""}`,restore?"POST":"DELETE");}
+export type WorkflowResultRun={goalId:string;revision:number;createdAt:string;status:string;results:Array<{nodeId:string;title:string;text:string;assets:Array<{id:string;mediaType:"image"|"video";available:boolean}>;config:Record<string,unknown>|null}>};
+export async function fetchWorkflowResults(token:string,canvasId:string,workflowId:string,goalId:string){return await workflowRequest(token,canvasId,`/${workflowId}/runs/${goalId}/results`) as WorkflowResultRun;}
+export async function reuseWorkflowOutput(token:string,canvasId:string,workflowId:string,input:{goalId:string;nodeId:string;assetId?:string}){return workflowNodeSchema.parse(await workflowRequest(token,canvasId,`/${workflowId}/reuse`,"POST",input));}
 export async function runCanvasWorkflow(
   token: string,
   canvasId: string,

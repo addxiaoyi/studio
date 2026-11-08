@@ -21,6 +21,7 @@ import {
 } from "./scene";
 import { useCanvasWorkflowScene } from "./use-canvas-scene";
 import { workflowStepState } from "./step-state";
+import { useSceneContext, type CanvasReference } from "./use-scene-context";
 export type CanvasWorkflowProps = {
   token: string;
   canvasId: string;
@@ -65,7 +66,10 @@ export function useWorkflowController({
     initialId,
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tab, setTab] = useState<"nodes" | "ai" | "runs">("nodes");
+  const [tab, setTab] = useState<"nodes" | "ai" | "runs" | "library">("nodes");
+  const [compareOpen,setCompareOpen]=useState(false),[references,setReferences]=useState<CanvasReference[]>([]);
+  const [libraryTarget,setLibraryTarget]=useState<string|null>(null);
+  const [libraryMode,setLibraryMode]=useState<"workflow"|"prompt">("workflow");
   const [confirmRun, setConfirmRun] = useState(false),
     [saving, setSaving] = useState(false);
   const [materials, setMaterials] = useState<WorkflowNode[]>([]);
@@ -130,6 +134,41 @@ export function useWorkflowController({
   );
   const issues = useMemo(() => validateWorkflow(flow.graph), [flow.graph]);
   const selected = flow.graph.nodes.find((node) => node.id === selectedId);
+  const selection=useSceneContext(api,flow.selected?.id);
+  const target=flow.graph.nodes.find(node=>node.id===libraryTarget);
+  const libraryPrompt=target?.config.kind==="generate"?target.config.prompt:target?.config.kind==="write"?target.config.instruction:target?.config.kind==="text"?target.config.text:flow.prompt;
+  const openLibrary=(forNode=false,prompts=false)=>{setLibraryTarget(forNode?selectedId:null);setLibraryMode(forNode||prompts?"prompt":"workflow");setTab("library");};
+  const applyPrompt=(prompt:string,append:boolean)=>{
+    const text=append?[libraryPrompt,prompt].filter(Boolean).join("\n\n"):prompt;
+    if(text.length>4000){flow.setError("合并后的提示词超过4000字，请缩短后再使用。");return;}
+    if(target){
+      const config=target.config;
+      if(config.kind==="write"&&text.length>2000){flow.setError("编剧要求最多2000字，请缩短后再使用。");return;}
+      const next=config.kind==="generate"?{...config,prompt:text}:config.kind==="write"?{...config,instruction:text}:config.kind==="text"?{...config,text}:null;
+      if(!next){flow.setError("请选择文字、编剧或生成节点。");return;}
+      flow.edit({...flow.graph,nodes:flow.graph.nodes.map(node=>node.id===target.id?{...node,config:next}:node)});setTab("nodes");
+    }else{flow.setPrompt(text);setTab("ai");}
+  };
+  const attachReferences=()=>{setReferences(current=>[...current,...selection.references.filter(item=>!current.some(reference=>reference.id===item.id))].slice(0,12));};
+  const askAi=async()=>{try{await saveCanvas();await flow.askAi(references.map(item=>item.id));}catch(cause){flow.setError(cause instanceof Error?cause.message:"画布保存失败，未发送引用。");}};
+  const reuseResult=async(node:WorkflowNode)=>{
+    if(!flow.selected||locked)throw new Error("先结束当前运行再复用结果。");
+    if(flow.graph.nodes.length>=24)throw new Error("当前流程已达24个节点上限。");
+    await onCanvasSync();
+    const anchor=selected??flow.graph.nodes.at(-1);
+    const next=node.config.kind==="asset"?node:{...node,position:{x:(anchor?.position.x??0)+390,y:anchor?.position.y??0}};
+    const elementId=next.config.kind==="asset"?next.config.elementId:null;
+    if(elementId&&flow.graph.nodes.some(item=>item.config.kind==="asset"&&item.config.elementId===elementId))throw new Error("该素材已经是当前流程输入。");
+    flow.edit({...flow.graph,nodes:[...flow.graph.nodes,next]});setSelectedId(next.id);setCompareOpen(false);setTab("nodes");
+  };
+  const bindSelectedMaterial=()=>{
+    if(!selected||selected.config.kind!=="asset"||locked)return;
+    const desiredType=selected.config.mediaType;
+    const source=materials.find(node=>node.config.kind==="asset"&&node.config.mediaType===desiredType);
+    if(!source){flow.setError(`在画布中选择一项已保存的${desiredType==="image"?"图片":"视频"}。`);return;}
+    if(flow.graph.nodes.some(node=>node.id!==selected.id&&node.config.kind==="asset"&&source.config.kind==="asset"&&node.config.elementId===source.config.elementId)){flow.setError("该素材已绑定到当前流程的另一个节点。");return;}
+    flow.edit({...flow.graph,nodes:flow.graph.nodes.map(node=>node.id===selected.id?{...node,position:source.position,config:source.config}:node)});
+  };
   const selectNode = (workflowId: string, nodeId: string) => {
     if (workflowId !== flow.selected?.id) {
       if (flow.dirty) {
@@ -360,5 +399,7 @@ export function useWorkflowController({
     proposal,
     startRun,
     refreshRun,
+    selection,references,setReferences,attachReferences,askAi,openLibrary,libraryPrompt,applyPrompt,libraryMode,
+    compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
   };
 }

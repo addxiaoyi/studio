@@ -19,6 +19,9 @@ import {
 } from "../features/canvas-workflows/service.js";
 import { createGoalPlanner } from "../features/agent-goals/goal-planner.js";
 import { listHealthyModels } from "./model-availability.js";
+import { registerCreativeLibraryRoutes } from "./creative-library.js";
+import { workflowReferences } from "../features/canvas-workflows/references.js";
+import type { StorageProvider } from "../storage/storage-provider.js";
 
 const paramsSchema = z.object({
   canvasId: z.string().uuid(),
@@ -35,10 +38,12 @@ type Options = {
   auth: RequestAuthenticator;
   env: ServerEnv;
   settingsService: SettingsService;
+  storage?: StorageProvider;
   enabled?: () => boolean;
   plan?: (
     workspaceId: string,
     input: AgentGoalCreateRequest,
+    referenceContext?: unknown,
   ) => Promise<AgentGoalPlan>;
 };
 function failed(error: unknown, reply: FastifyReply) {
@@ -63,6 +68,7 @@ export function registerCanvasWorkflowRoutes(
   options: Options,
 ) {
   const service = new CanvasWorkflowService(options.db);
+  registerCreativeLibraryRoutes(app,options);
   const enabled =
     options.enabled ?? (() => process.env.HELSTERA_GOAL_STEPS === "1");
   for (const operation of [
@@ -157,6 +163,7 @@ export function registerCanvasWorkflowRoutes(
               .object({
                 prompt: z.string().trim().min(1).max(3000),
                 graph: z.unknown().optional(),
+                referenceElementIds:z.array(z.string().min(1).max(200)).max(12).optional(),
               })
               .strict()
               .parse(request.body);
@@ -170,14 +177,15 @@ export function registerCanvasWorkflowRoutes(
             );
             const catalog = options.plan ? [] : (await Promise.all([listHealthyModels(options.db,"image",{allowUnverified:true}),listHealthyModels(options.db,"video",{allowUnverified:true})])).flatMap((models,index)=>models.slice(0,6).map(model=>({id:model.model_id,type:index?"video":"image",referenceImage: model.supports_input_image,maxDuration:model.max_duration_seconds})));
             const context = graph ? { ...graph,nodes:graph.nodes.map(node=>({...node,config:node.config.kind==="text"?{...node.config,text:node.config.text.slice(0,600)}:node.config})) } : null;
-            const goal = `${body.prompt}\n规划本站创作画布支持的资料、编剧、分镜、素材、图片视频生成、合成、抽帧、浏览录制与交付节点。不支持桌面动作。`;
+            const references=await workflowReferences(options.db,user.id,canvasId,body.referenceElementIds??[]);
+            const goal = `${body.prompt}\n规划本站创作画布支持的资料、编剧、分镜、素材、图片视频生成、合成、抽帧、浏览录制与交付节点。不支持桌面动作。${references.length?"用户指定的画布引用位于referenceContext.references；保留这些真实素材标识。":""}`;
             if (goal.length > 4000)
               throw new WorkflowError(
                 "当前流程上下文过长，请缩短要求或新建工作流。",
               );
             const plan = await (
               options.plan ??
-              createGoalPlanner(options.env, options.settingsService, user, { catalog, graph: context })
+              createGoalPlanner(options.env, options.settingsService, user, { catalog, graph: context, references })
             )(
               workspaceId,
               agentGoalCreateRequestSchema.parse({
@@ -186,6 +194,7 @@ export function registerCanvasWorkflowRoutes(
                 executionMode: "isolated_browser",
                 idempotencyKey: crypto.randomUUID(),
               }),
+              { references },
             );
             const checked = goalExecutionPlanSchema.parse({
               summary: plan.summary,

@@ -56,7 +56,7 @@ export function WorkflowCanvasNode({ element, accessToken }: { element: SceneEle
           : config.kind === "trim"
             ? `${config.start}–${config.end} 秒 · ${config.aspect === "portrait" ? "竖屏" : config.aspect === "landscape" ? "横屏" : "原画幅"}`
             : config.kind === "asset"
-              ? "引用当前画布素材"
+              ? config.elementId ? "引用当前画布素材" : "从当前画布选择素材后连接"
               : "截图、视频和介绍回到当前画布";
   return (
     <article

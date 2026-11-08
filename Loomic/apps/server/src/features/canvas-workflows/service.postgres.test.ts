@@ -11,6 +11,9 @@ import { createCanvasWorkflowTool } from "../../agent/tools/canvas-workflow.js";
 import { readWorkflowMaterial } from "./materials.js";
 import { createLocalCanvasService } from "../../local-db/canvas-service.js";
 import { insertLocalImageElement } from "../canvas/canvas-element-writer.js";
+import { CreativeLibraryService } from "./library.js";
+import { workflowReferences } from "./references.js";
+import { workflowResults,reuseWorkflowResult } from "./results.js";
 
 const connectionString = process.env.HELT_TEST_DATABASE_URL;
 const schema = `canvas_flow_${randomUUID().replaceAll("-", "")}`;
@@ -55,6 +58,7 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
       "20261031000000_agent_muse_workspace",
       "20261106000003_goal_execution_steps",
       "20261108000004_canvas_workflows",
+      "20261108000005_creative_library",
       "20261029000000_canvas_content_version",
       "20261017000000_automation_lifecycle",
     ])
@@ -120,6 +124,46 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
     await expect(
       service.run(user, canvas, draft.id, 1, randomUUID(), session),
     ).rejects.toThrow("网址");
+  });
+  it("stores private portable recipes idempotently and restores archived entries",async()=>{
+    const library=new CreativeLibraryService(db),requestKey=randomUUID();
+    const graph=ready();graph.nodes[0]!.config={kind:"asset",elementId:"secret-element",assetId:randomUUID(),mediaType:"video"};
+    const input={name:"我的镜头方法",description:"可跨画布使用",requestKey,body:{kind:"workflow" as const,graph}};
+    const [first,again]=await Promise.all([library.save(user,canvas,input),library.save(user,canvas,input)]);
+    expect(first.id).toBe(again.id);expect(JSON.stringify(first)).not.toContain("secret-element");
+    expect((await library.list(user,canvas)).filter(entry=>entry.id===first.id)).toHaveLength(1);
+    await library.archive(user,canvas,first.id);expect((await library.list(user,canvas)).some(entry=>entry.id===first.id)).toBe(false);
+    await library.archive(user,canvas,first.id,true);expect((await library.list(user,canvas)).some(entry=>entry.id===first.id)).toBe(true);
+    const outsider=randomUUID();await db.query("insert into app_users(id,email) values($1,$2)",[outsider,`${outsider}@test.invalid`]);await db.query("insert into workspace_members(workspace_id,user_id) values($1,$2)",[workspace,outsider]);
+    expect(await library.list(outsider,canvas)).toHaveLength(0);
+    await expect(library.archive(outsider,canvas,first.id)).rejects.toThrow("无权访问");
+    await db.query("delete from workspace_members where user_id=$1",[outsider]);
+    await expect(library.list(outsider,canvas)).rejects.toThrow("权限已撤销");
+  });
+  it("resolves AI references from the saved canvas instead of trusting client text",async()=>{
+    await db.query("update canvases set content=$2::jsonb where id=$1",[canvas,JSON.stringify({elements:[{id:"reference-text",type:"text",text:"已保存的产品说明"},{id:"deleted-text",type:"text",text:"已删除",isDeleted:true}]})]);
+    expect(await workflowReferences(db,user,canvas,["reference-text","reference-text"])).toEqual([{elementId:"reference-text",kind:"text",title:"已保存的产品说明",text:"已保存的产品说明"}]);
+    await expect(workflowReferences(db,user,canvas,["deleted-text"])).rejects.toThrow("已删除");
+    await expect(workflowReferences(db,randomUUID(),canvas,["reference-text"])).rejects.toThrow("权限已撤销");
+  });
+  it("reuses a completed output without rerunning or charging and rejects expired media",async()=>{
+    const draft=await service.create(user,canvas,ready(),randomUUID()),run=await service.run(user,canvas,draft.id,1,randomUUID(),session);
+    const asset=randomUUID(),generated=randomUUID(),path=`results/${asset}.webm`;
+    await db.query("insert into asset_objects(id,workspace_id,created_by,bucket,object_path,mime_type) values($1,$2,$3,'project-assets',$4,'video/webm')",[asset,workspace,user,path]);
+    await db.query("insert into generated_assets(id,workspace_id,created_by,media_type,object_path,mime_type,retention_until) values($1,$2,$3,'video',$4,'video/webm',now()+interval '1 day')",[generated,workspace,user,path]);
+    await db.query("update canvases set content=$2::jsonb where id=$1",[canvas,JSON.stringify({elements:[{id:"existing-result",type:"embeddable",x:100,y:200,customData:{assetId:asset,isVideo:true}}]})]);
+    await db.query("update agent_goals set status='completed' where id=$1",[run.goalId]);
+    await db.query("update agent_goal_steps set state='succeeded',output=$2::jsonb where goal_id=$1 and step_id='capture'",[run.goalId,JSON.stringify({text:"既有提示词",assets:[{id:asset,mediaType:"video"}]})]);
+    expect((await workflowResults(db,user,canvas,draft.id,run.goalId)).results[0]!.assets[0]!.available).toBe(true);
+    const before=(await db.query("select count(*)::int as n from agent_goals")).rows[0].n;
+    const input={goalId:run.goalId,nodeId:"capture",assetId:asset};
+    expect((await reuseWorkflowResult(db,undefined,user,canvas,draft.id,input)).config).toMatchObject({elementId:"existing-result",assetId:asset});
+    expect((await reuseWorkflowResult(db,undefined,user,canvas,draft.id,{goalId:run.goalId,nodeId:"capture"})).config).toMatchObject({kind:"text",text:"既有提示词"});
+    expect((await db.query("select count(*)::int as n from agent_goals")).rows[0].n).toBe(before);
+    await db.query("update generated_assets set retention_until=now()-interval '1 second' where id=$1",[generated]);
+    expect((await workflowResults(db,user,canvas,draft.id,run.goalId)).results[0]!.assets[0]!.available).toBe(false);
+    await expect(reuseWorkflowResult(db,undefined,user,canvas,draft.id,input)).rejects.toThrow("到期");
+    await expect(workflowResults(db,user,canvas,draft.id,randomUUID())).rejects.toThrow("不存在");
   });
   it("fences stale edits and scopes access to owner and current membership", async () => {
     const draft = await service.create(user, canvas, ready(), randomUUID());

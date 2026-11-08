@@ -20,6 +20,17 @@ const note: SceneElement = {
   text: "普通画布备注",
 };
 describe("workflows on the existing canvas", () => {
+  it("keeps a template media slot visible and removes its placeholder after binding",()=>{
+    const graph=websiteWorkflow();graph.nodes[0]!.config={kind:"asset",elementId:"",assetId:"",mediaType:"video"};graph.nodes[1]!.config={kind:"trim",start:0,end:3,aspect:"original"};
+    const original=projectWorkflow([note],"flow",graph,{},false),placeholder=nodeElementId("flow",graph.nodes[0]!);
+    expect(original.find(el=>el.id===placeholder)?.type).toBe("embeddable");
+    expect(readSceneWorkflow(original,"flow",graph).graph.nodes).toHaveLength(3);
+    const media:SceneElement={...note,id:"video",type:"embeddable",customData:{isVideo:true,assetId:"11111111-1111-4111-8111-111111111111"}};
+    graph.nodes[0]!.config={kind:"asset",elementId:media.id,assetId:"11111111-1111-4111-8111-111111111111",mediaType:"video"};
+    const bound=projectWorkflow([...original,media],"flow",graph,{},false);
+    expect(bound.find(el=>el.id===placeholder)?.isDeleted).toBe(true);
+    expect(bound.find(el=>el.id===media.id)?.isDeleted).toBe(false);
+  });
   it("preserves spacing beside a large existing canvas", () => {
     const graph=websiteWorkflow();
     const placed=placeWorkflow(graph,[{...note,x:20000}],{scrollX:0,scrollY:0,width:1000,height:800,zoom:{value:1},selectedElementIds:{}});

@@ -28,6 +28,7 @@ export async function createWorkflowFixture(database: string, origin: string) {
         "20261031000000_agent_muse_workspace",
         "20261106000003_goal_execution_steps",
         "20261108000004_canvas_workflows",
+        "20261108000005_creative_library",
       ])
         await ctx.db.query(
           await readFile(
@@ -43,8 +44,13 @@ export async function createWorkflowFixture(database: string, origin: string) {
         env: {} as never,
         settingsService: {} as never,
         enabled: () => true,
-        plan: async (_workspace, input) => {
+        plan: async (_workspace, input, referenceContext) => {
           const graph = websiteWorkflow();
+          if(input.goal.includes("仅规划引用验收")){
+            const references=(referenceContext as {references?:Array<{text?:string}>})?.references;
+            if(!references?.some(item=>item.text?.includes("Inspire reference")))throw new Error("没有收到用户指定的真实选区引用");
+            graph.title="引用验收方案";
+          }
           graph.nodes[0]!.config = { kind: "url", url: "https://example.com/" };
           return executableGoalPlan(compileWorkflow(graph), input);
         },

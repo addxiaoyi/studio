@@ -1,5 +1,17 @@
 # Third-party source notices
 
+## Inspire-Studio (functional design reference)
+
+`xc-2000/Inspire-Studio` was reviewed at commit
+`3ce81a3ee826a9ff70a115093411eee01077e35e` for its workflow library,
+prompt reuse, explicit canvas references and output comparison interactions.
+Source: https://github.com/xc-2000/Inspire-Studio
+
+The README says MIT while the pinned LICENSE contains AGPL-3.0. The license
+metadata is therefore inconsistent. This integration uses independently written
+Loomic components and services based on those product concepts; no upstream
+source, media, fonts or bundled application is copied into the release.
+
 ## AI Fusion Video (canvas interaction reference)
 
 The unified canvas workflow uses `Stonewuu/ai-fusion-video` at commit
