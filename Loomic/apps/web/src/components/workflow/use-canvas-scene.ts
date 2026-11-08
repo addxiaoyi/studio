@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef } from "react";
 import type { WorkflowDocument, WorkflowGraph } from "@helstera/shared";
+import {focusCanvasContent,stopCanvasView} from "./viewport";
 import {
   nodeElementId,
   adoptWorkflowCopies,
@@ -33,6 +34,7 @@ type Options = {
   error(message: string): void;
 };
 export function useCanvasWorkflowScene(options: Options) {
+  useEffect(()=>()=>{if(options.api)stopCanvasView(options.api);},[options.api]);
   const current = useRef(options);
   current.current = options;
   const initialized = useRef<string | null>(null),
@@ -49,36 +51,7 @@ export function useCanvasWorkflowScene(options: Options) {
     );
     const targets = api.getSceneElements().filter((el) => ids.has(el.id));
     if (!targets.length) return;
-    const state = api.getAppState(),
-      narrow = state.width <= 760;
-    const left = Math.min(...targets.map((el) => el.x)),
-      top = Math.min(...targets.map((el) => el.y));
-    const width = Math.max(...targets.map((el) => el.x + el.width)) - left;
-    const height = Math.max(...targets.map((el) => el.y + el.height)) - top;
-    const availableWidth = Math.max(
-      150,
-      state.width - 140 - (open && !narrow ? 360 : 0),
-    );
-    const availableHeight = Math.max(
-      150,
-      state.height * (open && narrow ? 0.42 : 0.8) - 80,
-    );
-    const zoom = Math.max(
-      0.1,
-      Math.min(
-        1,
-        availableWidth / Math.max(width, 1),
-        availableHeight / Math.max(height, 1),
-      ),
-    );
-    api.updateScene({
-      appState: {
-        zoom: { value: zoom },
-        scrollX: (85 + (availableWidth - width * zoom) / 2) / zoom - left,
-        scrollY: (100 + (availableHeight - height * zoom) / 2) / zoom - top,
-      },
-      captureUpdate: "NEVER",
-    });
+    focusCanvasContent(api,targets,open);
     if (nodeId)
       api.updateScene({
         appState: {
@@ -193,12 +166,7 @@ export function useCanvasWorkflowScene(options: Options) {
     const targets: readonly SceneElement[] = api
       .getSceneElements()
       .filter((el) => ids.includes(el.id));
-    if (targets.length)
-      api.scrollToContent(targets, {
-        fitToViewport: true,
-        animate: false,
-        maxZoom: 1,
-      });
+    focusCanvasContent(api,targets,current.current.open);
   }, []);
   return { focus, locateResults };
 }

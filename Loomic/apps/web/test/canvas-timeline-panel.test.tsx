@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/lib/server-api", () => ({
@@ -11,6 +11,18 @@ import { CanvasTimelinePanel } from "../src/components/canvas-timeline-panel";
 
 describe("CanvasTimelinePanel", () => {
   afterEach(cleanup);
+  it("dismisses only a blank canvas click, keeping item edits and drag gestures open",()=>{
+    vi.stubGlobal("PointerEvent",MouseEvent);
+    const close=vi.fn();
+    const api={getSceneElements:()=>[{id:"shape",type:"rectangle",x:10,y:10,width:100,height:100}],getAppState:()=>({scrollX:0,scrollY:0,zoom:{value:1}}),onChange:()=>()=>{}};
+    render(<><div data-canvas-surface><canvas data-testid="canvas"/></div><CanvasTimelinePanel excalidrawApi={api} open onClose={close} accessToken="test" projectId="project"/></>);
+    const canvas=screen.getByTestId("canvas");
+    fireEvent.pointerDown(screen.getByRole("textbox",{name:"字幕内容"}),{clientX:300,clientY:200});fireEvent.pointerUp(screen.getByRole("textbox",{name:"字幕内容"}),{clientX:300,clientY:200});expect(close).not.toHaveBeenCalled();
+    fireEvent.pointerDown(canvas,{clientX:40,clientY:40,button:0});fireEvent.pointerUp(canvas,{clientX:40,clientY:40,button:0});expect(close).not.toHaveBeenCalled();
+    fireEvent.pointerDown(canvas,{clientX:300,clientY:200,button:0});fireEvent.pointerUp(canvas,{clientX:340,clientY:200,button:0});expect(close).not.toHaveBeenCalled();
+    fireEvent.pointerDown(canvas,{clientX:300,clientY:200,button:0});fireEvent.pointerUp(canvas,{clientX:300,clientY:200,button:0});expect(close).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
 
   it("moves focus to the close control when opened", async () => {
     const api = {

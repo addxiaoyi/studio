@@ -35,3 +35,4 @@ export * from "./canvas-workflow.js";
 export * from "./creative-workflow.js";
 export * from "./workflow-templates.js";
 export * from "./creative-library.js";
+export * from "./canvas-document.js";

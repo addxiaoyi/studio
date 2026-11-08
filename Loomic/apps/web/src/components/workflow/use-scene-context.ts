@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { workflowBinding, type WorkflowCanvasApi } from "./scene";
+import {readWorkflowDocument} from "@helstera/shared";
 export type CanvasReference = {
   id: string;
   title: string;
@@ -26,6 +27,8 @@ export function useSceneContext(
         const binding = workflowBinding(element);
         if (binding && binding.workflowId === workflowId)
           nodes.push(binding.node.id);
+        const document=readWorkflowDocument(element);
+        if(document){references.push({id:element.id,title:document.title,kind:"text"});continue;}
         if (element.type === "text" && typeof element.text === "string")
           references.push({
             id: element.id,

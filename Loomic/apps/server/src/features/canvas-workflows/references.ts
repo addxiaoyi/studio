@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { assertWorkflowCanvas, WorkflowError } from "./service.js";
 import { readWorkflowMaterial } from "./materials.js";
+import {readWorkflowDocument} from "@helstera/shared";
 
 export async function workflowReferences(
   db: Pool,
@@ -24,6 +25,8 @@ export async function workflowReferences(
     const element = elements.find((item) => item.id === id && !item.isDeleted);
     if (!element)
       throw new WorkflowError("引用的画布内容已删除，请重新选择。", 409);
+    const document=readWorkflowDocument(element);
+    if(document){references.push({elementId:id,kind:"text",title:document.title,text:document.markdown.slice(0,2500)});continue;}
     if (element.type === "text" && typeof element.text === "string")
       references.push({
         elementId: id,

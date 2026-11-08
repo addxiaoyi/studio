@@ -72,7 +72,6 @@ function clearStashedInitialPrompt() {
 
 function CanvasPageContent() {
   const [workflowOpen,setWorkflowOpen]=useState(false),[workflowId,setWorkflowId]=useState<string|undefined>();
-  const previousChatOpen=useRef(true);
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const desktopMode = pathname.startsWith("/desktop-app/");
@@ -168,10 +167,9 @@ function CanvasPageContent() {
   const handleToggleChat = useCallback(() => setChatOpen((v) => !v), []);
   const handleToggleLayers = useCallback(() => { setLayersOpen((v) => !v); setFilesOpen(false); }, []);
   const handleToggleFiles = useCallback(() => { setFilesOpen((v) => !v); setLayersOpen(false); }, []);
-  const handleToggleTimeline = useCallback(() => setTimelineOpen((value) => !value), []);
+  const handleToggleTimeline = useCallback(() => {setWorkflowOpen(false);setTimelineOpen((value) => !value);}, []);
   const handleCloseTimeline = useCallback(() => {
     setTimelineOpen(false);
-    window.requestAnimationFrame(() => timelineToggleRef.current?.focus());
   }, []);
   const handleCloseLayers = useCallback(() => {
     setLayersOpen(false);
@@ -409,8 +407,9 @@ function CanvasPageContent() {
     }
   }, [canvasData]);
 
-  const openWorkflow = useCallback((id?:string) => { if (!workflowOpen) previousChatOpen.current=chatOpen;setChatOpen(false);if (id) setWorkflowId(id);setWorkflowOpen(true); },[chatOpen,workflowOpen]);
-  const closeWorkflow = useCallback(()=>{setWorkflowOpen(false);setChatOpen(window.innerWidth >= 1024 && previousChatOpen.current);},[]);
+  const openWorkflow = useCallback((id?:string) => {setTimelineOpen(false);setLayersOpen(false);setFilesOpen(false);if(window.innerWidth<1024)setChatOpen(false);if (id) setWorkflowId(id);setWorkflowOpen(true);},[]);
+  const closeWorkflow = useCallback(()=>setWorkflowOpen(false),[]);
+  useEffect(()=>{const media=window.matchMedia("(max-width:1023px)");const resize=()=>{if(media.matches&&workflowOpen)setChatOpen(false);};resize();media.addEventListener("change",resize);return()=>media.removeEventListener("change",resize);},[workflowOpen]);
   const saveWorkflowCanvas = useCallback(async () => { if (!saveBeforeVideo.current) throw new Error("画布尚未就绪，请稍后再试。"); await saveBeforeVideo.current(); },[]);
   useEffect(()=>{const open=(event:Event)=>openWorkflow((event as CustomEvent<{id?:string}>).detail?.id);window.addEventListener("loomic:workflow-open",open);return()=>window.removeEventListener("loomic:workflow-open",open);},[openWorkflow]);
 

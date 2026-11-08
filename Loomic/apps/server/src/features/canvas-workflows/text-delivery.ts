@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { createElementBase } from "../../agent/tools/canvas-element-helpers.js";
 import { calculateAutoPlacement } from "../canvas/canvas-element-writer.js";
+import { workflowDocumentElement } from "@helstera/shared";
 
 export async function writeWorkflowText(
   db: Pool,
@@ -41,7 +42,7 @@ export async function writeWorkflowText(
         height,
         Math.max(760, height),
       );
-    const element = {
+    const element = workflowDocumentElement({
       ...createElementBase(),
       type: "text",
       ...placement,
@@ -54,8 +55,8 @@ export async function writeWorkflowText(
       verticalAlign: "top",
       containerId: null,
       autoResize: false,
-      customData: { jobId, title, source: "workflow" },
-    };
+      customData: { jobId, title, source: "workflow",workflowDocument:{title,markdown:text} },
+    });
     await client.query(
       "update canvases set content=$2::jsonb,updated_at=now() where id=$1",
       [

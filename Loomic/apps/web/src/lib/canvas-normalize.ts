@@ -6,11 +6,12 @@
  * text measurement, matching Excalidraw's internal rendering.
  */
 
+import { workflowDocumentElement } from "@helstera/shared";
 type CanvasElement = Record<string, unknown>;
 
 /** Keep persisted agent-created elements compatible with Excalidraw's hit testing. */
 export function normalizeCanvasElement(element: CanvasElement): CanvasElement {
-  const normalized = { ...element };
+  const normalized = { ...workflowDocumentElement(element) };
   if (!Array.isArray(normalized.groupIds)) normalized.groupIds = [];
   if ((normalized.type === "line" || normalized.type === "arrow" || normalized.type === "freedraw") && !Array.isArray(normalized.points)) {
     normalized.points = [[0, 0], [Number(normalized.width) || 0, Number(normalized.height) || 0]];

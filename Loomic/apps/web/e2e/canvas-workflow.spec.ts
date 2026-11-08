@@ -26,6 +26,7 @@ test.afterAll(async () => {
 test("edits, confirms and executes a visual workflow with durable node receipts and canvas output", async ({
   page,
 }, info) => {
+  page.on("pageerror",error=>console.error("[workflow-page]",error.message));
   if (process.env.HELT_TEST_CANDIDATE_PATH) {
     const directory = await mkdtemp(join(tmpdir(), "workflow-desktop-"));
     const env = {
@@ -119,6 +120,7 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
     ),
   ).toBe(true);
   await page.screenshot({ path: info.outputPath("workflow-complete.png") });
+  await expect(workspace.getByRole("button",{name:"已保存",exact:true})).toBeDisabled();
   await page.reload();
   await page.getByRole("button", { name: "打开可视化工作流" }).click();
   await workspace
@@ -187,6 +189,7 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
 
 test("turns story references into structured shots and editable canvas text", async ({ page }, info) => {
   if (desktop) page=await desktop.firstWindow();
+  await page.setViewportSize({width:1440,height:960});
   await page.goto(`http://localhost:3228/${desktop?"desktop-app/":""}canvas/?id=${fixture.canvasId}&session=${fixture.sessionId}`);
   await page.getByRole("button", { name: "打开可视化工作流" }).click();
   const workspace=page.getByRole("region",{name:"可视化工作流",exact:true});
@@ -202,9 +205,43 @@ test("turns story references into structured shots and editable canvas text", as
   const goal=(await fixture.db.query("select * from agent_goals where goal='剧本到分镜' order by created_at desc limit 1")).rows[0];
   expect(goal.status).toBe("completed");
   const saved=(await fixture.db.query("select content from canvases where id=$1",[fixture.canvasId])).rows[0].content;
-  expect(saved.elements.some((element:{type:string;text?:string;isDeleted?:boolean})=>element.type==="text"&&!element.isDeleted&&element.text?.includes("机器人穿过城市"))).toBe(true);
+  expect(saved.elements.some((element:{type:string;customData?:{workflowDocument?:{markdown?:string}};isDeleted?:boolean})=>element.type==="embeddable"&&!element.isDeleted&&element.customData?.workflowDocument?.markdown?.includes("机器人穿过城市"))).toBe(true);
   await workspace.getByRole("button",{name:"定位画布结果"}).click();
+  await expect(page.getByRole("article",{name:"生成分镜文稿"}).getByRole("heading",{name:"机器人的花园",exact:true})).toBeVisible();
+  const document=page.getByRole("article",{name:"生成分镜文稿"});
+  await expect.poll(async()=>{const doc=await document.boundingBox(),dock=await workspace.boundingBox();return doc!.x>dock!.x+dock!.width;}).toBe(true);
+  await document.getByRole("button",{name:"编辑画布文稿"}).click();
+  await expect(page.getByRole("dialog",{name:"编辑画布文稿"})).toBeVisible();
+  await page.getByRole("dialog",{name:"编辑画布文稿"}).getByRole("button",{name:"取消",exact:true}).click();
   await page.screenshot({path:info.outputPath("creative-storyboard.png")});
+});
+
+test("keeps the workflow left of chat and dismisses timeline on blank canvas",async({page},info)=>{
+  if(desktop)page=await desktop.firstWindow();
+  await page.setViewportSize({width:1700,height:960});
+  await page.goto(`http://localhost:3228/${desktop?"desktop-app/":""}canvas/?id=${fixture.canvasId}&session=${fixture.sessionId}`);
+  const chat=page.getByRole("heading",{name:"Helstera Agent",exact:true});
+  await expect(chat).toBeVisible();
+  await page.getByRole("button",{name:"打开可视化工作流"}).click();
+  const dock=page.getByRole("region",{name:"可视化工作流",exact:true});
+  await expect(chat).toBeVisible();
+  const panelBounds=await dock.boundingBox(),chatBounds=await chat.boundingBox();
+  expect(panelBounds!.x).toBeLessThan(120);
+  expect(panelBounds!.x+panelBounds!.width).toBeLessThan(chatBounds!.x);
+  await page.screenshot({path:info.outputPath("canvas-left-workflow-chat.png")});
+  await dock.getByRole("button",{name:"收起流程面板"}).click();
+  await page.getByRole("button",{name:"媒体时间线",exact:true}).click();
+  const timeline=page.getByRole("complementary",{name:"媒体时间线"});await expect(timeline).toBeVisible();
+  await timeline.getByRole("textbox",{name:"字幕内容"}).fill("未提交字幕草稿");
+  await expect(timeline).toBeVisible();
+  await page.getByRole("button",{name:"拖拽画布 (H)",exact:true}).click();
+  const surface=page.locator('[data-canvas-surface] canvas').last();
+  await surface.hover({position:{x:500,y:150}});await page.mouse.down();await page.mouse.move(500,800,{steps:8});await page.mouse.up();
+  await expect(timeline).toBeVisible();
+  await surface.click({position:{x:500,y:160}});await expect(timeline).toBeHidden();
+  await page.getByRole("button",{name:"媒体时间线",exact:true}).click();
+  await expect(timeline.getByRole("textbox",{name:"字幕内容"})).toHaveValue("未提交字幕草稿");
+  await timeline.getByRole("button",{name:"关闭时间线"}).click();
 });
 
 test("reuses completed results and private workflow and prompt recipes without running again",async({page},info)=>{
@@ -262,7 +299,7 @@ test("reuses completed results and private workflow and prompt recipes without r
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.setViewportSize({width:1440,height:960});
   await page.getByRole("button",{name:"文字 (T)",exact:true}).click();
-  await page.mouse.click(180,180);await page.keyboard.type("Inspire reference: consistent white robot");await page.keyboard.press("Escape");
+  await page.mouse.click(700,180);await page.keyboard.type("Inspire reference: consistent white robot");await page.keyboard.press("Escape");
   await workspace.getByRole("button",{name:"AI 搭建",exact:true}).click();
   await workspace.getByRole("button",{name:/引用画布选区/}).click();
   await expect(workspace).toContainText("Inspire reference");

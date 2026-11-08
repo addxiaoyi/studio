@@ -26,6 +26,8 @@ import { ErrorBoundary } from "./error-boundary";
 import { Trash2 } from "lucide-react";
 import { WorkflowCanvasNode } from "./workflow/canvas-node";
 import { workflowBinding } from "./workflow/scene";
+import { CanvasWorkflowDocument } from "./canvas/workflow-document";
+import { readWorkflowDocument } from "@helstera/shared";
 
 const Excalidraw = dynamic(
   () => import("@excalidraw/excalidraw").then((mod) => mod.Excalidraw),
@@ -851,6 +853,8 @@ export function CanvasEditor({
                 if (el.type === "text" && el.text) {
                   base.text = el.text;
                 }
+                const workflowDocument=readWorkflowDocument(el);
+                if(workflowDocument)base.text=workflowDocument.markdown;
                 if (el.type === "image" && el.fileId) {
                   base.fileId = el.fileId;
                   const assetId =
@@ -1256,6 +1260,7 @@ export function CanvasEditor({
   // Excalidraw calls this for every embeddable element; we intercept video URLs
   // and render an inline player, falling back to default for everything else.
   const renderEmbeddable = useCallback((element: any, _appState: any) => {
+    if(readWorkflowDocument(element))return <CanvasWorkflowDocument element={element} api={excalidrawApi} />;
     const binding = workflowBinding(element);
     if (binding && (binding.node.config.kind !== "asset" || !binding.node.config.elementId)) return <WorkflowCanvasNode element={element} accessToken={accessTokenRef.current} />;
     if (!binding && element.customData?.workflow && !element.customData?.isVideo && element.type === "embeddable") return <div className="canvas-workflow-node p-4 text-sm" role="status">正在同步复制的节点…</div>;
@@ -1278,7 +1283,7 @@ export function CanvasEditor({
     }
     // Return null to let Excalidraw handle non-video embeddables with default behavior
     return null;
-  }, []);
+  }, [excalidrawApi]);
 
   // Allow any URL as a valid embeddable so our video links are accepted
   const validateEmbeddable = useCallback(() => true, []);
@@ -1360,6 +1365,7 @@ export function CanvasEditor({
     >
       <div
         ref={canvasRootRef}
+        data-canvas-surface
         className="h-full w-full relative isolate"
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}

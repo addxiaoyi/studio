@@ -22,6 +22,7 @@ import { WorkflowRunPanel } from "./run-panel";
 import { workflowStateLabel } from "./canvas-node";
 import { WorkflowLibrary } from "./library-panel";
 import { WorkflowResultCompare } from "./compare-results";
+import {useFloatingPanel} from "@/hooks/use-floating-panel";
 import {
   useWorkflowController,
   workflowConfigs as configs,
@@ -30,6 +31,7 @@ import {
 import "./workflow.css";
 export function WorkflowWorkspace(props: CanvasWorkflowProps) {
   const { token, api, open, onOpen, onClose } = props;
+  const floating=useFloatingPanel(open);
   const {
     flow,
     run,
@@ -77,7 +79,10 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
       <section
         className="workflow-dock"
         aria-label="可视化工作流"
-        hidden={!open}
+        hidden={!floating.present}
+        aria-hidden={!open}
+        inert={!open}
+        ref={floating.ref}
       >
         <header className="workflow-header">
           <div>

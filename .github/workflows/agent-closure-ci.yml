@@ -62,10 +62,10 @@ jobs:
           pnpm --filter @helstera/web exec vitest run test/capture-canvas-actions.test.tsx test/canvas-video-actions.test.tsx test/website-capture-recording.test.tsx test/canvas-timeline-panel.test.tsx test/capture-recording-import.test.tsx
       - name: Visual workflow contracts and execution journal
         run: |
-          pnpm --filter @helstera/shared exec vitest run src/canvas-workflow.test.ts src/creative-workflow.test.ts src/creative-library.test.ts
+          pnpm --filter @helstera/shared exec vitest run src/canvas-workflow.test.ts src/creative-workflow.test.ts src/creative-library.test.ts src/canvas-document.test.ts
           node scripts/test-local-postgres.mjs src/features/canvas-workflows/service.postgres.test.ts
           pnpm --filter @helstera/server exec vitest run src/features/canvas-workflows/execution-access.test.ts src/features/canvas-workflows/generation.test.ts src/features/agent-goals/agent-goal-background.test.ts src/agent/tools/index.test.ts
-          pnpm --filter @helstera/web exec vitest run test/workflow-node-inspector.test.tsx test/workflow-run.test.tsx test/workflow-scene.test.ts test/workflow-references.test.tsx test/agent-workflow-card.test.tsx test/canvas-save-conflict.test.tsx test/canvas-save-merge.test.ts test/canvas-recovery-copy.test.ts
+          pnpm --filter @helstera/web exec vitest run test/workflow-node-inspector.test.tsx test/workflow-run.test.tsx test/workflow-scene.test.ts test/workflow-references.test.tsx test/canvas-workflow-document.test.tsx test/canvas-timeline-panel.test.tsx test/agent-workflow-card.test.tsx test/canvas-save-conflict.test.tsx test/canvas-save-merge.test.ts test/canvas-recovery-copy.test.ts
       - name: Try-on billing and shared form regressions
         run: |
           pnpm --filter @helstera/server exec vitest run src/features/generation/fashion-billing.postgres.test.ts src/http/fashion-billing.test.ts src/http/image-models-route.test.ts src/http/generation-approvals.test.ts src/http/media-connector-gate.test.ts

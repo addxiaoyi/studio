@@ -12,6 +12,7 @@ import {
 import { WORKFLOW_LABELS } from "@helstera/shared";
 import { workflowBinding, type SceneElement } from "./scene";
 import { AuthenticatedRecording } from "@/components/chat/authenticated-recording";
+import {MarkdownRenderer} from "@/components/chat/markdown-renderer";
 import "./workflow.css";
 
 export const workflowStateLabel: Record<string, string> = {
@@ -73,7 +74,7 @@ export function WorkflowCanvasNode({ element, accessToken }: { element: SceneEle
           <strong>{node.title}</strong>
         </div>
       </header>
-      {binding.preview?.assetId && binding.preview.mediaType ? <div className="workflow-node-preview"><AuthenticatedRecording assetId={binding.preview.assetId} accessToken={accessToken} kind={binding.preview.mediaType} label={node.title} /></div> : <p>{binding.preview?.text || detail}</p>}
+      {binding.preview?.assetId && binding.preview.mediaType ? <div className="workflow-node-preview"><AuthenticatedRecording assetId={binding.preview.assetId} accessToken={accessToken} kind={binding.preview.mediaType} label={node.title} /></div> : binding.preview?.text ? <div className="workflow-node-text"><MarkdownRenderer text={binding.preview.text}/></div> : <p>{detail}</p>}
       <footer>
         <span className="workflow-state-dot" />
         <span>{workflowStateLabel[state] ?? state}</span>

@@ -18,6 +18,7 @@ export default defineConfig({
     timeout: 120000,
   },
   use: {
+    screenshot:"only-on-failure",
     baseURL: "http://localhost:3228",
     browserName: "chromium",
     viewport: { width: 1440, height: 960 },

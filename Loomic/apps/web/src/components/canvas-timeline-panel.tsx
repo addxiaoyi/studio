@@ -4,6 +4,8 @@ import { Download, Film, Image as ImageIcon, Music, Pause, Play, Plus, Type, Upl
 import { useCallback, useEffect, useRef, useState } from "react";
 import { uploadFile } from "../lib/server-api";
 import { OperationStatus, type OperationStatusKind } from "./operation-status";
+import {useCanvasBlankDismiss} from "../hooks/use-canvas-dismiss";
+import {useFloatingPanel} from "../hooks/use-floating-panel";
 
 type TimelinePanelProps = {
   excalidrawApi: any;
@@ -49,6 +51,8 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, 
   const [exportError, setExportError] = useState<string | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const wasOpenRef = useRef(false);
+  const closedOnCanvas=useRef(false),panel=useFloatingPanel(open,"bottom");
+  useCanvasBlankDismiss(open,excalidrawApi,()=>{closedOnCanvas.current=true;setPreviewing(false);onClose();});
 
   useEffect(() => {
     if (open) closeButtonRef.current?.focus();
@@ -59,11 +63,20 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, 
       wasOpenRef.current = true;
     } else if (wasOpenRef.current) {
       wasOpenRef.current = false;
-      triggerRef?.current?.focus();
+      if(!closedOnCanvas.current)triggerRef?.current?.focus();
+      closedOnCanvas.current=false;
     }
   }, [open, triggerRef]);
 
   const totalDuration = Math.max(5, ...items.map((item) => item.kind === "video" || item.kind === "audio" || item.kind === "subtitle" ? item.trimEnd : 0));
+  useEffect(()=>{
+    if(open)return;
+    setPreviewing(false);setActiveAudioId(null);
+    document.querySelectorAll<HTMLAudioElement>("audio[data-timeline-audio]").forEach(audio=>audio.pause());
+    const elements=excalidrawApi?.getSceneElements?.()??[];
+    const restored=elements.map((element:any)=>element.customData?.isSubtitle&&element.customData.previewOpacity!==undefined?{...element,opacity:Number(element.customData.previewOpacity)||100}:element);
+    if(restored.some((element:any,index:number)=>element.opacity!==elements[index].opacity))excalidrawApi.updateScene({elements:restored,captureUpdate:"NEVER"});
+  },[open,excalidrawApi]);
 
   const refresh = useCallback(() => setItems(readItems(excalidrawApi)), [excalidrawApi]);
 
@@ -258,10 +271,10 @@ export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, 
     void audio.play().then(() => setActiveAudioId(id)).catch(() => setActiveAudioId(null));
   }, [activeAudioId, items]);
 
-  if (!open) return null;
+  if (!panel.present) return null;
 
   return (
-    <aside onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }} className="absolute bottom-[calc(4.25rem+env(safe-area-inset-bottom))] left-4 right-4 z-30 max-h-[calc(100dvh-5.5rem)] max-w-3xl overflow-y-auto rounded-2xl border border-border/60 bg-background/95 p-3 shadow-2xl backdrop-blur-xl sm:bottom-16" aria-label="媒体时间线">
+    <aside ref={panel.ref} aria-hidden={!open} inert={!open} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }} className="canvas-timeline-panel absolute bottom-[calc(4.25rem+env(safe-area-inset-bottom))] left-4 right-4 z-30 max-h-[min(52dvh,480px)] max-w-3xl overflow-y-auto rounded-2xl border border-border/60 bg-background/95 p-3 shadow-2xl backdrop-blur-xl sm:bottom-16" aria-label="媒体时间线">
       <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border/60 bg-background/95 pb-2">
         <div>
           <h2 className="text-xs font-medium text-foreground">媒体时间线</h2>
