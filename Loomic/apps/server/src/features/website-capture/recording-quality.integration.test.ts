@@ -18,6 +18,8 @@ it('uses a value-independent mosaic and retains editability',async()=>{
   const {data}=await sharp(before).extract({left:80,top:60,width:96,height:24}).raw().toBuffer({resolveWithObject:true});
   const shades=new Set(Array.from({length:data.length/3},(_,i)=>Math.round(data[i*3]!/10)));expect(shades.size).toBeGreaterThan(3);
   expect(await page.locator('input').inputValue()).toBe('secret-two');await mkdir(evidence,{recursive:true});await copyFile(await writePreview(before),join(evidence,'mosaic.jpg'));
+  await page.route('https://privacy.example/',route=>route.fulfill({contentType:'text/html',body:'<input type="email" value="sensitive-invalid">'}));await page.goto('https://privacy.example/');
+  expect(await page.evaluate("(()=>{let prevented=false;document.addEventListener('invalid',event=>{prevented=event.defaultPrevented;},true);document.querySelector('input').reportValidity();return prevented;})()")).toBe(true);
  }finally{await browser.close();}
 });
 async function writePreview(bytes:Buffer){const {writeFile}=await import('node:fs/promises');const path=join(evidence,'mosaic-source.jpg');await writeFile(path,bytes);return path;}

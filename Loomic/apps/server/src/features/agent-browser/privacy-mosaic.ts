@@ -12,5 +12,5 @@ export async function mosaicScreenshot(page:Page,all=false,options:{quality?:num
   return page.screenshot({type:'jpeg',quality:options.quality??76,style:mosaicStyle(all),...options});
 }
 export async function installPrivacyMosaic(context:BrowserContext,all=true){
-  await context.addInitScript(`(()=>{const css=${JSON.stringify(mosaicStyle(all))};let sheet;const apply=()=>{if(!document.documentElement)return;if(!sheet?.isConnected){sheet=document.createElement('style');sheet.textContent=css;document.documentElement.append(sheet);}};new MutationObserver(apply).observe(document,{childList:true,subtree:true});apply();})()`);
+  await context.addInitScript(`(()=>{const css=${JSON.stringify(mosaicStyle(all))};document.addEventListener('invalid',event=>event.preventDefault(),true);let sheet;const apply=()=>{if(!document.documentElement)return;if(!sheet?.isConnected){sheet=document.createElement('style');sheet.textContent=css;document.documentElement.append(sheet);}};new MutationObserver(apply).observe(document,{childList:true,subtree:true});apply();})()`);
 }
