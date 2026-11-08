@@ -2,6 +2,9 @@ import type { Browser, BrowserContext, Locator, Page, Request } from "playwright
 import { sameWebsiteOrigin, type WebsiteLoginCredentials } from "@helstera/shared";
 
 export type LoginNetworkScope = { origin: string; submitting: boolean; username: string; password: string; submissions?: number };
+export function redactLoginText(text: string, scope: Pick<LoginNetworkScope,"username"|"password">) {
+  return [scope.username,scope.password].filter(Boolean).reduce((value,secret)=>value.split(secret).join("••••"),text);
+}
 export function allowLoginRequest(request: Pick<Request, "url" | "method" | "postData">, scope: LoginNetworkScope) {
   const url = new URL(request.url());
   const sameOrigin = url.origin === scope.origin;

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { allowLoginRequest } from "./login-session.js";
+import { allowLoginRequest, redactLoginText } from "./login-session.js";
 const scope={origin:"https://site.example",submitting:true,username:"viewer@example.test",password:"Secret+123!"};
 function request(url:string,method:string,body:string|null=null){return{url:()=>url,method:()=>method,postData:()=>body};}
 it("permits only the exact origin's login POST while submitting",()=>{
@@ -19,4 +19,8 @@ it("supports form encoding without forwarding a second login POST",()=>{
 it("does not mistake a short account name or admin path for leaked credentials",()=>{
   expect(allowLoginRequest(request("https://site.example/admin/login","GET"),{...scope,username:"admin",submitting:false})).toBe(true);
   expect(allowLoginRequest(request("https://site.example/login","GET"),{...scope,username:"l",submitting:false})).toBe(true);
+});
+it("redacts reflected credentials in page metadata before result writeback",()=>{
+  const description=`Welcome ${scope.username}. Secret: ${scope.password}`;
+  expect(redactLoginText(description,scope)).toBe("Welcome ••••. Secret: ••••");
 });

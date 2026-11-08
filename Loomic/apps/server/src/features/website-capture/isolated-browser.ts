@@ -14,7 +14,7 @@ import { websitePresentationSchema, type WebsitePresentation } from "@helstera/s
 import { capturePresentationScene, type PresentationScene } from "./presentation-snapshot.js";
 import { recordWebsitePresentation } from "./presentation.js";
 import { consumeWebsiteLogin, discardWebsiteLogin } from "./login-vault.js";
-import { allowLoginRequest, signInWebsite, newAuthenticatedContext, type LoginNetworkScope } from "./login-session.js";
+import { allowLoginRequest, signInWebsite, newAuthenticatedContext, redactLoginText, type LoginNetworkScope } from "./login-session.js";
 import { sameWebsiteOrigin, type WebsiteLoginRef } from "@helstera/shared";
 import { assertConnectorEnabled } from "../agent-goals/connector-gate.js";
 import type { Pool, PoolClient } from "pg";
@@ -211,6 +211,12 @@ export async function captureIsolatedWebsite(options: {
         const facts = pageFactsSchema.parse(
           await page.evaluate(`(${PAGE_FACTS_SCRIPT})(${MAX_HEADINGS})`),
         );
+        if(loginScope){
+          facts.title=redactLoginText(facts.title,loginScope);
+          facts.description=redactLoginText(facts.description,loginScope);
+          facts.headings=facts.headings.map(text=>redactLoginText(text,loginScope!));
+          facts.navigation=facts.navigation.map(text=>redactLoginText(text,loginScope!));
+        }
 
         const responseUrl = await validatePublicHttpUrl(facts.url);
         if(options.task.login&&!sameWebsiteOrigin(responseUrl.href,startUrl.href))throw new Error("体验页面已离开授权站点。");
