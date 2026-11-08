@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Pool } from "pg";
 import type { StorageProvider } from "../storage/storage-provider.js";
 import { deliverCaptureToCanvas } from "../features/website-capture/canvas-delivery.js";
+import { presentationProgress } from "../features/website-capture/recording-progress.js";
 import { z } from "zod";
 
 import { createWebsiteCaptureRequestSchema, desktopAgentTaskRequestSchema, type WebsiteCapturePromo, type WebsiteCaptureTask, type WebsitePresentation } from "@helstera/shared";
@@ -316,6 +317,10 @@ export function registerWebsiteCaptureRoutes(app: FastifyInstance, options: Webs
           const parsed = metrics.safeParse(JSON.parse(recordingEvent.detail));
           if (parsed.success) task.recordingProgress = parsed.data;
         } catch { /* Earlier workers wrote human-readable progress, which stays in the event list. */ }
+      }
+      if (!task.recordingProgress && task.presentation) {
+        const metrics = presentationProgress(task.presentation.durationSeconds, events.rows);
+        if (metrics) task.recordingProgress = metrics;
       }
       const approval = task.promoApprovalId
         ? (await options.db.query<{ id: string; job_type: "video_generation"; model: string; estimated_credits: number; expires_at: string; payload: { duration?: number; resolution?: string; input_asset_ids?: string[] } }>(
