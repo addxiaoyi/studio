@@ -7,13 +7,13 @@ it('observes an identity redirect and sends no account data until that exact ori
   const sent:string[]=[];
   await context.route('**/*',async route=>{
    const url=new URL(route.request().url());
-   if(route.request().isNavigationRequest()&&!isAllowedLoginNavigation(url.href,scope.origin,false,scope.allowedOrigins)){scope.proposedOrigins!.set(url.origin,url.href);await route.abort();return;}
+   if(route.request().isNavigationRequest()&&!isAllowedLoginNavigation(url.href,scope.origin,false,scope.allowedOrigins)){scope.proposedOrigins!.set(url.origin,url.href);await route.fulfill({status:403,contentType:'text/html',body:'<h1>Origin confirmation required</h1>'});return;}
    if(!allowLoginRequest(route.request(),scope)){await route.abort();return;}
    sent.push(url.origin);
    if(url.origin==='https://8.8.8.8')await route.fulfill({contentType:'text/html',body:'<a href="https://1.1.1.1/oauth">SSO login</a>'});
    else await route.fulfill({contentType:'text/html',body:'<h1>Identity login</h1>'});
   });
-  const page=await context.newPage();await page.goto('https://8.8.8.8/');await page.getByRole('link',{name:'SSO login'}).click({noWaitAfter:true});await page.waitForTimeout(100);
+  const page=await context.newPage();await page.goto('https://8.8.8.8/');await page.getByRole('link',{name:'SSO login'}).click();await page.getByRole('heading',{name:'Origin confirmation required'}).waitFor();
   expect(scope.proposedOrigins?.has('https://1.1.1.1')).toBe(true);expect(sent).not.toContain('https://1.1.1.1');
   scope.allowedOrigins!.push('https://1.1.1.1');await page.goto(scope.proposedOrigins!.get('https://1.1.1.1')!);expect(await page.locator('h1').innerText()).toBe('Identity login');
   expect(isAllowedLoginNavigation('https://evil.example/oauth',scope.origin,false,scope.allowedOrigins)).toBe(false);

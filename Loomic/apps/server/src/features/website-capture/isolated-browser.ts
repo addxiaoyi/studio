@@ -163,7 +163,10 @@ export async function captureIsolatedWebsite(options: {
       }
       if(loginScope&&route.request().isNavigationRequest()&&!isAllowedLoginNavigation(route.request().url(),options.task.start_url,Boolean(route.request().frame().parentFrame()),loginScope.human?loginScope.allowedOrigins:[])){
         const target=await validatePublicHttpUrl(route.request().url()).catch(()=>null);
-        if(target?.protocol==='https:'&&!route.request().frame().parentFrame()&&(loginScope.proposedOrigins?.size??0)<3)loginScope.proposedOrigins?.set(target.origin,target.href);
+        if(target?.protocol==='https:'&&!route.request().frame().parentFrame()&&(loginScope.proposedOrigins?.size??0)<3){
+          loginScope.proposedOrigins?.set(target.origin,target.href);
+          await route.fulfill({status:403,contentType:'text/html; charset=utf-8',body:'<!doctype html><title>等待登录来源确认</title><main style="font:20px system-ui;padding:48px"><h1>此登录来源需要你确认</h1><p>请在接管区域选择“允许此登录来源”，确认后继续登录。尚未向该站点发送账号信息。</p></main>'});return;
+        }
         await route.abort("blockedbyclient");return;
       }
       await fulfillPublicReadOnlyRequest(route, budget,loginScope);
