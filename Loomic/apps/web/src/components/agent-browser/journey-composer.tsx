@@ -21,7 +21,7 @@ export function WebsiteJourneyComposer({token,sourceUrl,busy,onStart}:{token:str
       setPlanning(true);
       const answer=await planWebsiteJourney(token,{url:target,goal,...(plan?{previous:{goal:plannedGoal,summary:plan.summary,steps:plan.steps}}:{})});
       setUrl(target);setCredentials(value=>({...value,loginUrl:value.loginUrl||target}));setPlan(answer.plan);setPlannedGoal(goal);
-      if(answer.plan.loginSuggested)setMethod(/接管|扫码|手动登录/.test(goal)?'interactive':sessions.some(session=>session.origin===new URL(target).origin)?'saved':'password');
+      if(answer.plan.loginSuggested||/登录|会话|账号|log.?in|session/i.test(goal))setMethod(/接管|扫码|手动登录/.test(goal)?'interactive':sessions.some(session=>session.origin===new URL(target).origin)?'saved':'password');
     }catch(cause){setError(cause instanceof Error?cause.message:'请填写有效的网站地址。');}
     finally{setPlanning(false);}
   }
