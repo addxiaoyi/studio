@@ -25,6 +25,7 @@ jobs:
         working-directory: Loomic
     env:
       HELT_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/loomic_test
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
