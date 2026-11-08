@@ -10,6 +10,7 @@ import {
   workflowBinding,
   type SceneElement,
   type WorkflowCanvasApi,
+  type NodePreview,
 } from "./scene";
 
 function signature(graph: WorkflowGraph) {
@@ -26,6 +27,7 @@ type Options = {
   states: Record<string, string>;
   locked: boolean;
   open: boolean;
+  previews?: Record<string,NodePreview>;
   edit(graph: WorkflowGraph, checkpoint?: boolean): void;
   select(workflowId: string, nodeId: string): void;
   error(message: string): void;
@@ -112,6 +114,7 @@ export function useCanvasWorkflowScene(options: Options) {
       graph,
       states,
       locked,
+      options.previews,
     );
     if (JSON.stringify(projected) !== JSON.stringify(scene)) {
       projecting.current = true;
@@ -128,6 +131,7 @@ export function useCanvasWorkflowScene(options: Options) {
     options.document?.id,
     options.graph,
     options.states,
+    options.previews,
     options.locked,
     focus,
   ]);

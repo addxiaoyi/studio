@@ -12,7 +12,12 @@ const graphInput = z.object({
       title: z.string(),
       position: z.object({ x: z.number(), y: z.number() }),
       config: z.object({
-        kind: z.enum(["url", "search", "capture", "trim", "deliver", "asset"]),
+        kind: z.enum(["url", "search", "capture", "trim", "deliver", "asset", "text", "write", "shot", "generate", "compose", "frame"]),
+        text: z.string().optional(), role: z.enum(["story", "script", "character", "prompt"]).optional(),
+        mode: z.enum(["rewrite", "script", "storyboard"]).optional(), instruction: z.string().optional(), shotCount: z.number().optional(),
+        index: z.number().optional(), at: z.number().optional(), model: z.string().optional(), prompt: z.string().optional(),
+        duration: z.number().optional(), resolution: z.enum(["480p", "720p", "768p", "1080p"]).optional(),
+        aspectRatio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4"]).optional(),
         elementId: z.string().optional(),
         assetId: z.string().uuid().optional(),
         mediaType: z.enum(["image", "video"]).optional(),
@@ -70,7 +75,7 @@ export function createCanvasWorkflowTool(db: Pool) {
     {
       name: "draft_canvas_workflow",
       description:
-        "Create or update editable workflow nodes on the same canvas as drawings and media. Saves a draft only; never runs nodes. config: url {url}; search {query}; capture {record,pageLimit}; trim {start,end,aspect}; asset {elementId,assetId,mediaType}; deliver {}. Asset IDs must come from inspected canvas media. Connect url/search -> capture -> trim(optional) -> deliver, or asset(video) -> trim -> deliver. Every node must reach one deliver. Preserve unrelated canvas elements and existing nodes unless requested. Node IDs use lowercase letters, digits and hyphens. Updates require workflowId and exact revision from inspect_canvas_workflows. Never include credentials or unsupported actions.",
+        "Create or update editable workflow nodes on the SAME canvas as drawings and media. Draft only, never execute. Configs: text {role:story|script|character|prompt,text}; write {mode:rewrite|script|storyboard,instruction,shotCount:1..6}; shot {index:1..6}; generate {mediaType:image|video,model,prompt,aspectRatio,duration:1..30,resolution}; compose {aspect:original|portrait|landscape}; frame {at}; url {url}; search {query}; capture {record,pageLimit}; trim {start,end,aspect}; asset {elementId,assetId,mediaType}; deliver {}. Use only actual available model IDs and inspected asset IDs. Story->write->shot->generate(video)->compose->deliver; character text or image assets may feed several generation nodes. Every processing node reaches one deliver, at most12 execution nodes. Sources of compose are ordered by edge order. Preserve unrelated work and positions. Updates require exact workflowId/revision. Generation runs show per-node costs for explicit user approval, even with auto-approve enabled.",
       schema: z.object({
         graph: graphInput,
         requestKey: z.string().uuid(),

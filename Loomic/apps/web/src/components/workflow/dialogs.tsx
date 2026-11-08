@@ -81,7 +81,7 @@ export function WorkflowDialogs({
           <DialogHeader>
             <DialogTitle>确认运行「{title}」</DialogTitle>
             <DialogDescription>
-              执行已保存的第 {revision} 版。录制和剪辑仍需逐项确认。
+              执行已保存的第 {revision} 版。录制、剪辑与生成费用仍需逐项确认。
             </DialogDescription>
           </DialogHeader>
           <ol className="max-h-64 overflow-auto list-decimal pl-5 text-sm space-y-2">
@@ -97,7 +97,7 @@ export function WorkflowDialogs({
             ))}
           </ol>
           <p className="text-xs text-muted-foreground">
-            素材会重新验证权限；这些节点不调用付费生成模型。
+            素材会重新验证权限。图片和视频生成会在执行到该节点时展示实际模型、参数和费用，确认后才扣费。
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmRun(false)}>

@@ -181,13 +181,69 @@ def probe() -> dict:
     return {"available": True, "burnSubtitles": " subtitles " in filters, "sourceCommit": "3a49104e2dfb9f2c7833e0ca7e1adfc4a07826d8"}
 
 
+def extract_frame(request: dict) -> dict:
+    source = str(Path(request["source"]).resolve(strict=True))
+    media = inspect_media(source)
+    at = float(request["at"])
+    if not media["video"] or not 0 <= at < media["duration"]:
+        raise ValueError("抽帧时间必须位于视频时长内。")
+    output = Path(request["output"]).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    encoders = run_tool([FFMPEG,"-hide_banner","-encoders"],timeout=15)
+    if " png " not in encoders:
+        raise RuntimeError("当前 FFmpeg 未包含 PNG 编码器，暂不能抽帧。请安装服务端完整 FFmpeg。")
+    run_tool([FFMPEG, "-hide_banner", "-loglevel", "error", "-nostdin", *LOCAL_MEDIA, "-ss", str(at), "-i", source, "-frames:v", "1", "-c:v", "png", "-update", "1", "-y", str(output)])
+    if output.stat().st_size < 100:
+        raise RuntimeError("抽帧没有生成有效图片。")
+    return {"width": media["width"], "height": media["height"], "bytes": output.stat().st_size}
+
+
+def compose(request: dict) -> dict:
+    sources = [str(Path(path).resolve(strict=True)) for path in request["sources"]]
+    if not 2 <= len(sources) <= 8:
+        raise ValueError("合成需要2到8个镜头。")
+    metadata = [inspect_media(path) for path in sources]
+    duration = sum(media["duration"] for media in metadata)
+    if duration > MAX_DURATION or any(not media["video"] for media in metadata):
+        raise ValueError("合成素材必须包含视频，且总时长不超过2小时。")
+    aspect = request["aspect"]
+    if aspect not in ("original", "portrait", "landscape"):
+        raise ValueError("不支持的合成画幅。")
+    width, height = (720, 1280) if aspect == "portrait" else (1280, 720) if aspect == "landscape" else (metadata[0]["width"] // 2 * 2, metadata[0]["height"] // 2 * 2)
+    if not 2 <= width <= 4096 or not 2 <= height <= 4096:
+        raise ValueError("合成尺寸超出支持范围。")
+    output = Path(request["output"]).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    filters, labels = [], []
+    args = [FFMPEG, "-hide_banner", "-loglevel", "error", "-nostdin"]
+    for index, (path, media) in enumerate(zip(sources, metadata)):
+        args.extend([*LOCAL_MEDIA, "-i", path])
+        filters.append(f"[{index}:v]setpts=PTS-STARTPTS,scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p[v{index}]")
+        if media["audio"]:
+            filters.append(f"[{index}:a]aresample=48000,aformat=channel_layouts=stereo,atrim=0:{media['duration']:.6f},asetpts=PTS-STARTPTS[a{index}]")
+        else:
+            filters.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{media['duration']:.6f},asetpts=PTS-STARTPTS[a{index}]")
+        labels.extend([f"[v{index}]", f"[a{index}]"])
+    filters.append("".join(labels) + f"concat=n={len(sources)}:v=1:a=1[out][sound]")
+    graph = output.parent / "compose-filters.txt"
+    graph.write_text(";\n".join(filters), encoding="utf-8")
+    help_text = run_tool([FFMPEG, "-hide_banner", "-h", "full"], timeout=15)
+    graph_option = "-filter_complex_script" if "-filter_complex_script " in help_text else "-/filter_complex"
+    args.extend([graph_option, str(graph), "-map", "[out]", "-map", "[sound]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-threads", "2", "-c:a", "aac", "-movflags", "+faststart", "-y", str(output)])
+    run_tool(args)
+    verified = inspect_media(str(output))
+    if output.stat().st_size < 1024 or abs(verified["duration"] - duration) > 0.35:
+        raise RuntimeError("合成结果时长与镜头不符。")
+    return {"duration": verified["duration"], "width": width, "height": height, "bytes": output.stat().st_size}
+
+
 if __name__ == "__main__":
     try:
         request = json.load(sys.stdin)
         mode = request.get("operation")
-        if mode not in ("probe", "transcribe", "export"):
+        if mode not in ("probe", "transcribe", "export", "compose", "frame"):
             raise ValueError("Unsupported OneTake operation.")
-        payload = probe() if mode == "probe" else transcribe(request) if mode == "transcribe" else export(request)
+        payload = probe() if mode == "probe" else transcribe(request) if mode == "transcribe" else compose(request) if mode == "compose" else extract_frame(request) if mode == "frame" else export(request)
         print(json.dumps(payload, ensure_ascii=False))
     except Exception as error:
         print(f"{type(error).__name__}: {error}", file=sys.stderr)

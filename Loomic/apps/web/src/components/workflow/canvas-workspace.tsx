@@ -13,7 +13,7 @@ import {
   ArrowUpRight,
   ImagePlus,
 } from "lucide-react";
-import { WORKFLOW_LABELS } from "@helstera/shared";
+import { WORKFLOW_LABELS, creativeWorkflow } from "@helstera/shared";
 import { Button } from "@/components/ui/button";
 import { StyledSelect } from "@/components/ui/styled-select";
 import { WorkflowDialogs } from "./dialogs";
@@ -221,6 +221,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
           </button>
         </nav>
         <div className="workflow-dock-body">
+          <div className="workflow-template-picker"><StyledSelect aria-label="创作流程模板" value="" disabled={locked||flow.dirty} options={[{value:"",label:"从创作模板开始…"},{value:"script",label:"故事 → 剧本"},{value:"storyboard",label:"剧本 → 分镜"},{value:"film",label:"故事 → 镜头生成 → 成片"}]} onChange={template=>void flow.create(false,creativeWorkflow(template as "script"|"storyboard"|"film"))} /></div>
           {tab === "nodes" && (
             <>
               {!flow.selected ? (
@@ -328,6 +329,13 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                       edges: flow.graph.edges.filter((edge) => edge.id !== id),
                     })
                   }
+                  onReorder={(id,direction)=>{
+                    const edges=[...flow.graph.edges],index=edges.findIndex(edge=>edge.id===id);
+                    const siblings=edges.map((edge,position)=>({edge,position})).filter(item=>item.edge.target===selected.id);
+                    const position=siblings.findIndex(item=>item.position===index),neighbor=siblings[position+direction]?.position;
+                    if(neighbor===undefined)return;
+                    [edges[index],edges[neighbor]]=[edges[neighbor]!,edges[index]!];flow.edit({...flow.graph,edges});
+                  }}
                   onDelete={(id) => {
                     flow.edit({
                       ...flow.graph,

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Pool } from "pg";
+import { assertWorkflowGenerationActive } from "../canvas-workflows/approval-access.js";
 
 export type GenerationApprovalState =
   | "confirmation_required"
@@ -24,6 +25,8 @@ export type GenerationApprovalRequest = {
     threadId?: string;
     projectId?: string;
     websiteCaptureTaskId?: string;
+    workflowGoalId?: string;
+    workflowStepId?: string;
   };
   jobId?: string;
 };
@@ -176,6 +179,7 @@ export function createGenerationApprovalService(db: Pool) {
       );
       const prior = existing.rows[0];
       if (prior?.job_id) return { ...toRequestFromRow(prior), jobId: prior.job_id };
+      if (prior) await assertWorkflowGenerationActive(db, toRequestFromRow(prior));
 
       const row = await db.query<ApprovalRow>(
         `update generation_approvals

@@ -12,12 +12,20 @@ import { runOneTake } from "../onetake/runner.js";
 import { savePrivateVideo } from "../assets/private-video.js";
 import { StepWaiting, type StepExecutor } from "./goal-step-worker.js";
 import { readWorkflowMaterial } from "../canvas-workflows/materials.js";
+import type { WorkflowAuthor } from "../canvas-workflows/author.js";
+import { executeCreativeNode } from "../canvas-workflows/creative-executor.js";
+import { writeWorkflowText } from "../canvas-workflows/text-delivery.js";
+import { executeWorkflowMedia } from "../canvas-workflows/media.js";
 
-type Options = { db: Pool; storage: StorageProvider; storageRoot: string; webOrigin: string; desktop: WebsiteAssistantHub };
+type Options = { db: Pool; storage: StorageProvider; storageRoot: string; webOrigin: string; desktop: WebsiteAssistantHub; author?: WorkflowAuthor };
 export function createGoalStepExecutor(options: Options): StepExecutor {
   return async input => {
     const { step, goal, previous, signal, assertActive } = input;
     const command = step.command;
+    const creative = await executeCreativeNode(options.db, input, options.author);
+    if (creative) return creative;
+    const rendered = await executeWorkflowMedia(options, input);
+    if (rendered) return rendered;
     if (command.executor === "canvas.asset") {
       const asset = await readWorkflowMaterial(options.db, { canvasId: goal.canvas_id, workspaceId: goal.workspace_id, userId: goal.created_by, ...command });
       await assertActive();
@@ -93,11 +101,16 @@ export function createGoalStepExecutor(options: Options): StepExecutor {
       if (["failed", "canceled"].includes(task.status)) throw new Error(task.error_message ?? "桌面步骤未完成。");
       throw new StepWaiting({ taskId }, task.status === "waiting_approval" ? "waiting_approval" : "waiting_desktop");
     }
-    const sources = previous.filter(item => command.sources.includes(item.step_id));
+    if (command.executor !== "result.deliver") throw new Error("当前创作节点没有执行器。");
+    const sources = command.sources.map(id => previous.find(item => item.step_id === id)).filter((item): item is typeof previous[number] => Boolean(item));
     const documents = [], assets: Array<{ id: string; url?: string | undefined; mediaType: string }> = [], canvasElementIds: string[] = [];
     for (const source of sources) {
       const output = source.output;
       if (!output) throw new Error("结果来源缺少完成回执。");
+      if (typeof output.text === "string") {
+        documents.push({ id: source.id, title: source.title, fileName: `${source.step_id}.md`, mimeType: "text/markdown", content: output.text, sourceUrls: [] });
+        if (goal.canvas_id) { await assertActive(); canvasElementIds.push(await writeWorkflowText(options.db, goal.canvas_id, source.id, source.title, output.text)); }
+      }
       if (source.executor === "web.capture") {
         const capture = output as unknown as Awaited<ReturnType<typeof captureIsolatedWebsite>>;
         documents.push(buildWebsiteDocument(`${goal.id}-${source.step_id}`, capture));
@@ -107,14 +120,23 @@ export function createGoalStepExecutor(options: Options): StepExecutor {
       } else if (Array.isArray(output.assets)) {
         assets.push(...output.assets as typeof assets);
         if (source.executor === "canvas.asset" && Array.isArray(output.canvasElementIds)) canvasElementIds.push(...output.canvasElementIds.filter((id): id is string => typeof id === "string"));
-        if (goal.canvas_id && source.executor === "media.trim" && typeof output.recordingAssetId === "string") {
+        if (source.executor === "media.generate" && Array.isArray(output.canvasElementIds)) canvasElementIds.push(...output.canvasElementIds.filter((id): id is string => typeof id === "string"));
+        if (goal.canvas_id && ["media.trim", "media.compose"].includes(source.executor) && typeof output.recordingAssetId === "string") {
           await assertActive();
           const inserted = await insertLocalVideoElement(options.db, { canvasId: goal.canvas_id, signedUrl: `/api/uploads/${output.recordingAssetId}/file`, width: source.command.executor === "media.trim" && source.command.aspect === "portrait" ? 720 : 1280, height: source.command.executor === "media.trim" && source.command.aspect === "portrait" ? 1280 : 720, mimeType: "video/mp4", title: "目标剪辑成片", assetId: output.recordingAssetId, jobId: `${source.id}:trim-output` });
           canvasElementIds.push(inserted.elementId);
         }
+        if (goal.canvas_id && source.executor === "media.frame") {
+          for (const asset of output.assets as Array<{ id: string }>) {
+            const row = (await options.db.query("select object_path from asset_objects where id=$1 and created_by=$2 and workspace_id=$3",[asset.id,goal.created_by,goal.workspace_id])).rows[0];
+            if (!row) throw new Error("抽帧结果已不可用。");
+            const inserted = await insertLocalImageElement(options.db,options.storage,{canvasId:goal.canvas_id,bucket:"private-try-on",objectPath:row.object_path,width:Number(output.width)||1280,height:Number(output.height)||720,mimeType:"image/png",assetId:asset.id,jobId:`${source.id}:frame-output`,title:source.title});
+            canvasElementIds.push(inserted.elementId);
+          }
+        }
       }
     }
     await assertActive();
-    return { summary: documents.map(document => document.content).join("\n\n") || "所有已确认步骤已完成，结果已保存。", documents, assets, canvasElementIds, saveState: assets.length ? "cloud" : "pending", localSaveVerified: false };
+    return { summary: documents.map(document => document.content).join("\n\n") || "所有已确认步骤已完成，结果已保存。", documents, assets, canvasElementIds, saveState: assets.length || canvasElementIds.length ? "cloud" : "pending", localSaveVerified: false };
   };
 }

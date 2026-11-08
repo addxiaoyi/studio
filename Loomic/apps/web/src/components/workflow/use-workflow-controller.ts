@@ -17,6 +17,7 @@ import {
   materialNode,
   linkWorkflowResults,
   type WorkflowCanvasApi,
+  type NodePreview,
 } from "./scene";
 import { useCanvasWorkflowScene } from "./use-canvas-scene";
 export type CanvasWorkflowProps = {
@@ -32,6 +33,12 @@ export type CanvasWorkflowProps = {
   saveCanvas(): Promise<void>;
 };
 export const workflowConfigs = {
+  text: {kind:"text",role:"story",text:""},
+  write: {kind:"write",mode:"storyboard",instruction:"",shotCount:3},
+  shot: {kind:"shot",index:1},
+  generate: {kind:"generate",mediaType:"image",model:"",prompt:"",aspectRatio:"16:9",duration:5,resolution:"720p"},
+  compose: {kind:"compose",aspect:"landscape"},
+  frame: {kind:"frame",at:0},
   url: { kind: "url", url: "" },
   search: { kind: "search", query: "" },
   capture: { kind: "capture", record: false, pageLimit: 1 },
@@ -137,11 +144,17 @@ export function useWorkflowController({
     setTab("nodes");
     if (!open) onOpen();
   };
+  const previews = useMemo<Record<string,NodePreview>>(()=>Object.fromEntries((currentRun ? run.goal?.executionSteps ?? [] : []).map(step=>{
+    const assets = step.output?.assets as Array<{id?:unknown;mediaType?:unknown}> | undefined;
+    const asset = assets?.find(item=>typeof item.id==="string" && ["image","video"].includes(String(item.mediaType)));
+    return [step.stepId,{...(typeof step.output?.text==="string"?{text:step.output.text.slice(0,300)}:{}),...(asset?{assetId:String(asset.id),mediaType:asset.mediaType as "image"|"video"}:{})}];
+  })),[run.goal,currentRun]);
   const scene = useCanvasWorkflowScene({
     api,
     document: flow.selected,
     graph: flow.graph,
     states,
+    previews,
     locked,
     open,
     edit: flow.edit,

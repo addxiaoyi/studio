@@ -32,3 +32,5 @@ export * from "./website-presentation.js";
 export * from "./website-login.js";
 export * from "./website-journey.js";
 export * from "./canvas-workflow.js";
+export * from "./creative-workflow.js";
+export * from "./workflow-templates.js";

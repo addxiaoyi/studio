@@ -4,7 +4,7 @@ import type { GoalCommand, AgentGoalPlan } from "@helstera/shared";
 
 export type GoalStepRow = { id: string; goal_id: string; step_id: string; title: string; executor: GoalCommand["executor"]; command: GoalCommand; depends_on: string[]; state: string; attempt: number; fingerprint: string; approval: string; approval_expires_at: Date | null; lease_token: string | null; output: Record<string, unknown> | null; error: string | null };
 export const goalStepFingerprint = (goalId: string, stepId: string, command: GoalCommand) => fingerprintPayload({ goalId, stepId, command, credits: 0 });
-export const requiresStepApproval = (command: GoalCommand) => command.executor === "web.capture" && command.record || command.executor === "media.trim";
+export const requiresStepApproval = (command: GoalCommand) => command.executor === "web.capture" && command.record || ["media.trim", "media.compose", "media.frame"].includes(command.executor);
 
 export async function initializeGoalSteps(db: Pick<Pool, "query">, goalId: string, plan: AgentGoalPlan) {
   for (const [ordinal, step] of plan.steps.entries()) {

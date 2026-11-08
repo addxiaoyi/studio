@@ -7,6 +7,7 @@ import {
 } from "@helstera/shared";
 import { Button } from "@/components/ui/button";
 import { StyledSelect } from "@/components/ui/styled-select";
+import { CreativeInspector } from "./creative-inspector";
 type Props = {
   node: WorkflowNode;
   graph: WorkflowGraph;
@@ -15,6 +16,7 @@ type Props = {
   onConnect(source: string, target: string): void;
   onDisconnect(id: string): void;
   onDelete(id: string): void;
+  onReorder?: ((edgeId: string, direction: -1 | 1) => void) | undefined;
 };
 export function NodeInspector({
   node,
@@ -24,6 +26,7 @@ export function NodeInspector({
   onConnect,
   onDisconnect,
   onDelete,
+  onReorder,
 }: Props) {
   const config = node.config;
   const field = "workflow-field";
@@ -68,6 +71,7 @@ export function NodeInspector({
           />
         </label>
       )}
+      <CreativeInspector node={node} disabled={disabled} onChange={onChange} />
       {config.kind === "search" && (
         <label>
           搜索主题
@@ -212,6 +216,7 @@ export function NodeInspector({
                       ?.title
                   }
                 </span>
+                {config.kind === "compose" && <span className="flex gap-1"><button disabled={disabled} onClick={()=>onReorder?.(edge.id,-1)} aria-label={`前移${edge.source}`}>↑</button><button disabled={disabled} onClick={()=>onReorder?.(edge.id,1)} aria-label={`后移${edge.source}`}>↓</button></span>}
                 <button
                   disabled={disabled}
                   onClick={() => onDisconnect(edge.id)}

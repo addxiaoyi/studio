@@ -6,6 +6,7 @@ import { getServerBaseUrl } from "@/lib/env";
 import { Button } from "@/components/ui/button";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { AuthenticatedRecording } from "@/components/chat/authenticated-recording";
+import { GenerationApprovalCard, type GenerationApprovalCardProps } from "@/components/chat/generation-approval-card";
 
 const statusLabels: Record<string, string> = {
   draft: "待确认",
@@ -118,7 +119,7 @@ export function WorkflowRunPanel({
             取消运行
           </Button>
         )}
-        {goal.status === "failed" && (
+        {goal.status === "failed" && !goal.executionSteps?.some(step=>step.executor === "media.generate" && step.state === "failed") && (
           <Button
             size="sm"
             variant="outline"
@@ -136,6 +137,7 @@ export function WorkflowRunPanel({
           {error || goal.error}
         </p>
       )}
+      {goal.status === "failed" && goal.executionSteps?.some(step=>step.executor === "media.generate" && step.state === "failed") && <p className="my-3 text-xs text-muted-foreground">已提交的生成任务保留在素材库中。核对任务结果后，可修改节点并重新运行；新生成仍需再次确认费用。</p>}
       <ol className="space-y-3">
         {goal.executionSteps?.map((step) => (
           <li
@@ -150,6 +152,7 @@ export function WorkflowRunPanel({
                     queued: "待执行",
                     running: "执行中",
                     waiting_approval: "待确认",
+                    waiting_desktop: "等待生成 / 执行器",
                     succeeded: "完成",
                     review: "待核验",
                     failed: "失败",
@@ -161,6 +164,10 @@ export function WorkflowRunPanel({
             {step.error && (
               <p className="mt-2 text-destructive">{step.error}</p>
             )}
+            {step.executor === "media.generate" && Boolean(step.output?.generationApproval) && <div className="mt-3"><GenerationApprovalCard {...step.output!.generationApproval as GenerationApprovalCardProps} onJobCreated={()=>void onRefresh()} /></div>}
+            {step.executor === "media.generate" && Boolean(step.output?.generationPreview) && <details className="mt-2"><summary>查看实际生成内容与参考素材</summary><p className="mt-2 whitespace-pre-wrap max-h-48 overflow-auto">{String((step.output!.generationPreview as {prompt?:string}).prompt ?? "")}</p><p className="mt-2 text-muted-foreground">参考图片 {(step.output!.generationPreview as {inputAssetIds?:string[]}).inputAssetIds?.length??0} 张 · 画幅 {String((step.output!.generationPreview as {aspectRatio?:string}).aspectRatio??"")}</p></details>}
+            {Boolean(step.output?.generationJob) && <p className="mt-2 text-muted-foreground">{String((step.output!.generationJob as {stage?:string}).stage || "生成任务处理中")} · {Number((step.output!.generationJob as {progress?:number}).progress)||0}%</p>}
+            {Array.isArray(step.output?.shots) && <ol className="mt-3 space-y-2">{(step.output.shots as Array<{title:string;description:string;duration:number}>).map((shot,index)=><li key={index}><strong>镜头 {index+1} · {shot.title}</strong><p className="mt-1 text-muted-foreground">{shot.description}</p><span>{shot.duration}秒</span></li>)}</ol>}
             {step.state === "waiting_approval" && (
               <div className="mt-2 space-y-2">
                 <p>

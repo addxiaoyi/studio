@@ -155,6 +155,7 @@ import { AgentGoalWorker } from "./features/agent-goals/agent-goal-worker.js";
 import { createBackgroundGoalExecutor } from "./features/agent-goals/agent-goal-background.js";
 import { GoalStepWorker } from "./features/agent-goals/goal-step-worker.js";
 import { createGoalStepExecutor } from "./features/agent-goals/goal-step-executors.js";
+import { createWorkflowAuthor } from "./features/canvas-workflows/author.js";
 import { CanvasEventBuffer } from "./ws/event-buffer.js";
 import { ConnectionManager } from "./ws/connection-manager.js";
 import { registerWsRoute } from "./ws/handler.js";
@@ -286,7 +287,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     }),
   );
   const agentGoalEvents = new AgentGoalEventPublisher(localDb, connectionManager, eventBuffer);
-  const goalSteps = new GoalStepWorker(localDb, guardWorkflowExecution(localDb, createGoalStepExecutor({ db: localDb, storage: storageProvider, storageRoot: env.storageRoot ?? "/www/helstera/uploads", webOrigin: env.webOrigin, desktop: websiteAssistantHub })));
+  const goalSteps = new GoalStepWorker(localDb, guardWorkflowExecution(localDb, createGoalStepExecutor({ db: localDb, storage: storageProvider, storageRoot: env.storageRoot ?? "/www/helstera/uploads", webOrigin: env.webOrigin, desktop: websiteAssistantHub, author: createWorkflowAuthor(env, settingsService) })));
   if (process.env.NODE_ENV !== "test") {
     agentGoalWorker.start();
     agentGoalEvents.start();

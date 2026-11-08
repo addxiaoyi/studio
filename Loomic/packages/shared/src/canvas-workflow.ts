@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { creativeNodeConfigs } from "./creative-workflow.js";
 import {
   goalExecutionPlanSchema,
   type GoalExecutionPlan,
@@ -15,6 +16,7 @@ export const workflowNodeSchema = z
       y: z.number().finite().min(-10000).max(10000),
     }),
     config: z.discriminatedUnion("kind", [
+      ...creativeNodeConfigs,
       z.object({ kind: z.literal("asset"), elementId: z.string().min(1).max(200), assetId: z.string().uuid(), mediaType: z.enum(["image", "video"]) }).strict(),
       z.object({ kind: z.literal("url"), url: z.string().max(2048) }).strict(),
       z
@@ -62,6 +64,7 @@ export const workflowDocumentSchema = z.object({
 export type WorkflowDocument = z.infer<typeof workflowDocumentSchema>;
 
 export const WORKFLOW_LABELS: Record<WorkflowNode["config"]["kind"], string> = {
+  text: "创作资料", write: "AI 编剧", shot: "分镜镜头", generate: "图片 / 视频生成", compose: "镜头合成", frame: "视频抽帧",
   asset: "画布素材",
   url: "网址输入",
   search: "网页搜索",
@@ -80,10 +83,16 @@ export function connectionIssue(
     return "不能连接自身或不存在的节点。";
   const a = source.config,
     b = target.config;
+  const text = ["text", "write", "shot"].includes(a.kind);
+  const image = a.kind === "asset" && a.mediaType === "image" || a.kind === "generate" && a.mediaType === "image" || a.kind === "frame";
+  const video = a.kind === "asset" && a.mediaType === "video" || a.kind === "capture" && a.record || a.kind === "generate" && a.mediaType === "video" || ["trim", "compose"].includes(a.kind);
   const compatible =
+    (b.kind === "write" && text) || (b.kind === "shot" && a.kind === "write" && a.mode === "storyboard") ||
+    (b.kind === "generate" && (text || image)) ||
+    (["compose", "frame"].includes(b.kind) && video) ||
     (b.kind === "capture" && ["url", "search"].includes(a.kind)) ||
-    (b.kind === "trim" && ((a.kind === "capture" && a.record) || (a.kind === "asset" && a.mediaType === "video") || a.kind === "trim")) ||
-    (b.kind === "deliver" && ["capture", "trim", "asset"].includes(a.kind));
+    (b.kind === "trim" && video) ||
+    (b.kind === "deliver" && !["url", "search", "deliver"].includes(a.kind));
   if (!compatible)
     return "连线类型不匹配：浏览需要网址，裁剪需要录像，输出需要素材。";
   if (
@@ -93,7 +102,7 @@ export function connectionIssue(
   )
     return "这两个节点已经连接。";
   if (
-    b.kind !== "deliver" &&
+    !["deliver", "write", "generate", "compose"].includes(b.kind) &&
     graph.edges.some((edge) => edge.target === targetId)
   )
     return "这个节点只能连接一个输入。";
@@ -133,7 +142,7 @@ export function validateWorkflow(graph: WorkflowGraph): WorkflowIssue[] {
   for (const node of graph.nodes) {
     const input = graph.edges.filter((edge) => edge.target === node.id);
     if (
-      ["capture", "trim", "deliver"].includes(node.config.kind) &&
+      ["capture", "trim", "deliver", "shot", "frame", "compose"].includes(node.config.kind) &&
       !input.length
     )
       issues.push({ nodeId: node.id, message: `${node.title}缺少输入连线。` });
@@ -150,6 +159,10 @@ export function validateWorkflow(graph: WorkflowGraph): WorkflowIssue[] {
     }
     if (node.config.kind === "search" && !node.config.query.trim())
       issues.push({ nodeId: node.id, message: "请输入搜索主题。" });
+    if (node.config.kind === "text" && !node.config.text.trim()) issues.push({ nodeId: node.id, message: "填写故事、剧本或角色资料。" });
+    if (node.config.kind === "generate" && (!node.config.model.trim() || (!node.config.prompt.trim() && !input.length))) issues.push({ nodeId: node.id, message: "选择生成模型，并填写提示词或连接创作资料。" });
+    if (node.config.kind === "write" && !node.config.instruction.trim() && !input.length) issues.push({ nodeId: node.id, message: "给 AI 编剧填写要求或连接故事资料。" });
+    if (node.config.kind === "compose" && input.length < 2) issues.push({ nodeId: node.id, message: "合成至少需要两个视频镜头，按输入顺序拼接。" });
     if (node.config.kind === "trim" && node.config.end <= node.config.start)
       issues.push({
         nodeId: node.id,
@@ -233,6 +246,12 @@ export function compileWorkflow(raw: WorkflowGraph): GoalExecutionPlan {
       });
     if (config.kind === "asset")
       steps.push({ ...base, command: { executor: "canvas.asset", elementId: config.elementId, assetId: config.assetId, mediaType: config.mediaType } });
+    if (config.kind === "text") steps.push({ ...base, command: { executor: "content.text", role: config.role, text: config.text } });
+    if (config.kind === "write") steps.push({ ...base, command: { executor: "ai.write", sources: inputs.map(input => input.id), mode: config.mode, instruction: config.instruction, shotCount: config.shotCount } });
+    if (config.kind === "shot") steps.push({ ...base, command: { executor: "content.shot", fromStep: inputs[0]!.id, index: config.index } });
+    if (config.kind === "generate") { const { kind: _kind, ...parameters } = config; steps.push({ ...base, command: { executor: "media.generate", sources: inputs.map(input => input.id), ...parameters } }); }
+    if (config.kind === "compose") steps.push({ ...base, command: { executor: "media.compose", sources: inputs.map(input => input.id), aspect: config.aspect } });
+    if (config.kind === "frame") steps.push({ ...base, command: { executor: "media.frame", fromStep: inputs[0]!.id, at: config.at } });
     if (config.kind === "capture") {
       const input = inputs[0]!;
       steps.push({
@@ -308,6 +327,12 @@ export function workflowFromPlan(plan: GoalExecutionPlan): WorkflowGraph {
       nodes.push({ ...base, config: { kind: "search", query: c.query } });
     if (c.executor === "canvas.asset")
       nodes.push({ ...base, config: { kind: "asset", elementId: c.elementId, assetId: c.assetId, mediaType: c.mediaType } });
+    if (c.executor === "content.text") nodes.push({ ...base, config: { kind: "text", role: c.role, text: c.text } });
+    if (c.executor === "ai.write") { nodes.push({ ...base, config: { kind: "write", mode: c.mode, instruction: c.instruction, shotCount: c.shotCount } }); c.sources.forEach(id => connect(id, step.id)); }
+    if (c.executor === "content.shot") { nodes.push({ ...base, config: { kind: "shot", index: c.index } }); connect(c.fromStep, step.id); }
+    if (c.executor === "media.generate") { const { executor: _executor, sources, ...parameters } = c; nodes.push({ ...base, config: { kind: "generate", ...parameters } }); sources.forEach(id => connect(id, step.id)); }
+    if (c.executor === "media.compose") { nodes.push({ ...base, config: { kind: "compose", aspect: c.aspect } }); c.sources.forEach(id => connect(id, step.id)); }
+    if (c.executor === "media.frame") { nodes.push({ ...base, config: { kind: "frame", at: c.at } }); connect(c.fromStep, step.id); }
     if (c.executor === "web.capture") {
       if (c.url) {
         let inputId = `url-${nodes.length}`;

@@ -56,6 +56,10 @@ export async function createWorkflowFixture(database: string, origin: string) {
         storageRoot: ctx.root,
         webOrigin: origin,
         desktop: {} as never,
+        author: async ({command,context}) => {
+          if (!context.includes("机器人寻找花园")) throw new Error("创作输入未通过连线到达编剧节点");
+          return {title:"机器人的花园",text:"# 机器人的花园\n\n机器人穿过城市，找到屋顶花园。",shots:Array.from({length:command.shotCount},(_,index)=>({title:`场景 ${index+1}`,description:`机器人寻找花园，镜头 ${index+1}`,dialogue:"出发吧。",duration:5}))};
+        },
       });
       worker = new GoalStepWorker(
         ctx.db,

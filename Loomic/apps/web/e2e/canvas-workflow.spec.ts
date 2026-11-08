@@ -184,3 +184,25 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
     ).rows[0].n,
   ).toBe(1);
 });
+
+test("turns story references into structured shots and editable canvas text", async ({ page }, info) => {
+  if (desktop) page=await desktop.firstWindow();
+  await page.goto(`http://localhost:3228/${desktop?"desktop-app/":""}canvas/?id=${fixture.canvasId}&session=${fixture.sessionId}`);
+  await page.getByRole("button", { name: "打开可视化工作流" }).click();
+  const workspace=page.getByRole("region",{name:"可视化工作流",exact:true});
+  await workspace.getByRole("combobox",{name:"创作流程模板"}).click();
+  await page.getByRole("option",{name:"剧本 → 分镜",exact:true}).click();
+  await workspace.getByRole("button",{name:/创作资料 故事与创作要求/}).click();
+  await workspace.getByRole("textbox",{name:"创作资料",exact:true}).fill("机器人寻找花园，经过热闹城市，最后到达安静的屋顶。");
+  await workspace.getByRole("button",{name:"保存草稿",exact:true}).click();
+  await workspace.getByRole("button",{name:"运行流程",exact:true}).click();
+  await page.getByRole("button",{name:"确认运行已保存版本"}).click();
+  await expect(workspace.getByRole("region",{name:"工作流运行记录"})).toContainText("全部完成",{timeout:30000});
+  await expect(workspace).toContainText("镜头 3");
+  const goal=(await fixture.db.query("select * from agent_goals where goal='剧本到分镜' order by created_at desc limit 1")).rows[0];
+  expect(goal.status).toBe("completed");
+  const saved=(await fixture.db.query("select content from canvases where id=$1",[fixture.canvasId])).rows[0].content;
+  expect(saved.elements.some((element:{type:string;text?:string;isDeleted?:boolean})=>element.type==="text"&&!element.isDeleted&&element.text?.includes("机器人穿过城市"))).toBe(true);
+  await workspace.getByRole("button",{name:"定位画布结果"}).click();
+  await page.screenshot({path:info.outputPath("creative-storyboard.png")});
+});

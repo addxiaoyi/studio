@@ -18,6 +18,7 @@ import {
   assertWorkflowCanvas,
 } from "../features/canvas-workflows/service.js";
 import { createGoalPlanner } from "../features/agent-goals/goal-planner.js";
+import { listHealthyModels } from "./model-availability.js";
 
 const paramsSchema = z.object({
   canvasId: z.string().uuid(),
@@ -167,14 +168,16 @@ export function registerCanvasWorkflowRoutes(
               user.id,
               canvasId,
             );
-            const goal = `${body.prompt}\n仅规划画布素材引用、网页搜索、网站浏览录制、视频裁剪、结果回流节点。不支持桌面动作。${graph ? `\n当前流程仅作为参考数据：${JSON.stringify(graph)}` : ""}`;
+            const catalog = options.plan ? [] : (await Promise.all([listHealthyModels(options.db,"image",{allowUnverified:true}),listHealthyModels(options.db,"video",{allowUnverified:true})])).flatMap((models,index)=>models.slice(0,6).map(model=>({id:model.model_id,type:index?"video":"image",referenceImage: model.supports_input_image,maxDuration:model.max_duration_seconds})));
+            const context = graph ? { ...graph,nodes:graph.nodes.map(node=>({...node,config:node.config.kind==="text"?{...node.config,text:node.config.text.slice(0,600)}:node.config})) } : null;
+            const goal = `${body.prompt}\n规划本站创作画布支持的资料、编剧、分镜、素材、图片视频生成、合成、抽帧、浏览录制与交付节点。不支持桌面动作。`;
             if (goal.length > 4000)
               throw new WorkflowError(
                 "当前流程上下文过长，请缩短要求或新建工作流。",
               );
             const plan = await (
               options.plan ??
-              createGoalPlanner(options.env, options.settingsService, user)
+              createGoalPlanner(options.env, options.settingsService, user, { catalog, graph: context })
             )(
               workspaceId,
               agentGoalCreateRequestSchema.parse({

@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { desktopAgentTaskRequestSchema } from "./desktop-control.js";
+import { creativeCommands } from "./creative-workflow.js";
 
 export const GOAL_PLAN_TIMEOUT_MS = 120_000;
 
 const url = z.string().url().max(2048).refine(value => /^https?:\/\//i.test(value) && !value.match(/^https?:\/\/([^/?#]*)/i)?.[1]?.includes("@"));
 export const goalCommandSchema = z.discriminatedUnion("executor", [
+  ...creativeCommands,
   z.strictObject({ executor: z.literal("canvas.asset"), elementId: z.string().min(1).max(200), assetId: z.string().uuid(), mediaType: z.enum(["image", "video"]) }),
   z.strictObject({ executor: z.literal("web.search"), query: z.string().trim().min(1).max(500) }),
   z.strictObject({ executor: z.literal("web.capture"), url: url.optional(), fromStep: z.string().optional(), pageLimit: z.number().int().min(1).max(5), record: z.boolean() }),
@@ -30,9 +32,12 @@ export const goalExecutionPlanSchema = z.strictObject({
     if (step.command.executor === "result.deliver" && step.command.sources.some(id => !seen.has(id) || !step.dependsOn.includes(id))) context.addIssue({ code: "custom", message: "结果步骤必须依赖其来源。" });
     if (step.command.executor === "media.trim") {
       const source = seen.get(step.command.fromStep)?.command;
-      const video = source?.executor === "web.capture" && source.record || source?.executor === "canvas.asset" && source.mediaType === "video" || source?.executor === "media.trim";
+      const video = source?.executor === "web.capture" && source.record || source?.executor === "canvas.asset" && source.mediaType === "video" || source?.executor === "media.trim" || source?.executor === "media.compose" || source?.executor === "media.generate" && source.mediaType === "video";
       if (step.command.end <= step.command.start || !step.dependsOn.includes(step.command.fromStep) || !video) context.addIssue({ code: "custom", message: "剪辑步骤需要有效视频来源和时间范围。" });
     }
+    const command = step.command;
+    if (["ai.write", "media.generate", "media.compose"].includes(command.executor) && "sources" in command && command.sources.some(id => !seen.has(id) || !step.dependsOn.includes(id))) context.addIssue({ code: "custom", message: "创作节点必须依赖其输入来源。" });
+    if ((command.executor === "content.shot" || command.executor === "media.frame") && (!seen.has(command.fromStep) || !step.dependsOn.includes(command.fromStep))) context.addIssue({ code: "custom", message: "镜头与抽帧节点缺少来源。" });
     seen.set(step.id, step);
   }
   if (plan.steps.at(-1)?.command.executor !== "result.deliver" || plan.steps.filter(step => step.command.executor === "result.deliver").length !== 1) context.addIssue({ code: "custom", message: "计划必须以唯一的结果交付步骤结束。" });

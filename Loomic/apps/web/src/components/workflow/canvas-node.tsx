@@ -7,9 +7,11 @@ import {
   PackageCheck,
   Scissors,
   Search,
+  FileText, Sparkles, Clapperboard, Wand2, Layers, Camera,
 } from "lucide-react";
 import { WORKFLOW_LABELS } from "@helstera/shared";
 import { workflowBinding, type SceneElement } from "./scene";
+import { AuthenticatedRecording } from "@/components/chat/authenticated-recording";
 import "./workflow.css";
 
 export const workflowStateLabel: Record<string, string> = {
@@ -24,6 +26,7 @@ export const workflowStateLabel: Record<string, string> = {
   waiting_desktop: "等待执行器",
 };
 const icons = {
+  text:FileText,write:Sparkles,shot:Clapperboard,generate:Wand2,compose:Layers,frame:Camera,
   url: Globe,
   search: Search,
   capture: Film,
@@ -31,14 +34,20 @@ const icons = {
   deliver: PackageCheck,
   asset: ImageIcon,
 };
-export function WorkflowCanvasNode({ element }: { element: SceneElement }) {
+export function WorkflowCanvasNode({ element, accessToken }: { element: SceneElement; accessToken: string }) {
   const binding = workflowBinding(element);
   if (!binding) return null;
   const { node, state } = binding,
     config = node.config,
     Icon = icons[config.kind];
   const detail =
-    config.kind === "url"
+    config.kind === "text" ? config.text || "填写故事、剧本或角色设定"
+    : config.kind === "write" ? `${config.mode === "storyboard" ? `拆分${config.shotCount}个镜头` : config.mode === "script" ? "创作剧本" : "改写内容"} · 本站 Agent`
+    : config.kind === "shot" ? `提取上游第 ${config.index} 个镜头`
+    : config.kind === "generate" ? `${config.mediaType === "image" ? "图片" : "视频"} · ${config.model || "待选择模型"} · 逐次费用确认`
+    : config.kind === "compose" ? "按输入顺序拼接镜头与音轨"
+    : config.kind === "frame" ? `提取第 ${config.at} 秒画面`
+    : config.kind === "url"
       ? config.url || "设置目标网址"
       : config.kind === "search"
         ? config.query || "设置搜索主题"
@@ -64,7 +73,7 @@ export function WorkflowCanvasNode({ element }: { element: SceneElement }) {
           <strong>{node.title}</strong>
         </div>
       </header>
-      <p>{detail}</p>
+      {binding.preview?.assetId && binding.preview.mediaType ? <div className="workflow-node-preview"><AuthenticatedRecording assetId={binding.preview.assetId} accessToken={accessToken} kind={binding.preview.mediaType} label={node.title} /></div> : <p>{binding.preview?.text || detail}</p>}
       <footer>
         <span className="workflow-state-dot" />
         <span>{workflowStateLabel[state] ?? state}</span>

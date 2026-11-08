@@ -11,6 +11,7 @@ import { createGenerationApprovalService } from "../features/generation/generati
 import type { JobService } from "../features/jobs/job-service.js";
 import { CreditServiceError, type CreditService } from "../features/credits/credit-service.js";
 import { assertConnectorEnabled, ConnectorDisabledError } from "../features/agent-goals/connector-gate.js";
+import { assertWorkflowGenerationActive, WorkflowApprovalBlocked } from "../features/canvas-workflows/approval-access.js";
 
 export function registerGenerationApprovalRoutes(
   app: FastifyInstance,
@@ -38,6 +39,7 @@ export function registerGenerationApprovalRoutes(
       }
       await assertConnectorEnabled(options.db, viewer.workspace.id, user.id, "media-generation");
       const approval = await approvals.approve({ approvalId, workspaceId: viewer.workspace.id, userId: user.id });
+      await assertWorkflowGenerationActive(options.db, approval);
       if (!options.jobService) return reply.send({ ok: true, data: { state: "approved", approval } });
       const job = await options.jobService.createJob(user, {
         workspaceId: viewer.workspace.id,
@@ -212,6 +214,7 @@ export function registerGenerationApprovalRoutes(
       const { approvalId } = request.params as { approvalId: string };
       await assertConnectorEnabled(options.db, viewer.workspace.id, user.id, "media-generation");
       const approval = await approvals.approve({ approvalId, workspaceId: viewer.workspace.id, userId: user.id });
+      await assertWorkflowGenerationActive(options.db, approval);
       if (approval.jobId) return reply.code(200).send({ ok: true, data: { state: "approved", approval, jobId: approval.jobId } });
       if (!options.jobService) return reply.code(200).send({ ok: true, data: { state: "approved", approval } });
       const job = await options.jobService.createJob(user, {
@@ -278,6 +281,7 @@ function unauthorized(reply: FastifyReply) {
 }
 
 function approvalError(error: unknown, reply: FastifyReply) {
+  if (error instanceof WorkflowApprovalBlocked) return reply.code(409).send({ok:false,error:{code:"workflow_stopped",message:error.message}});
   if (error instanceof ConnectorDisabledError) {
     return reply.code(403).send({ ok: false, error: { code: "connector_disabled", message: error.message } });
   }

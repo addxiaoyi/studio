@@ -55,7 +55,9 @@ type NodeBinding = {
   node: WorkflowNode;
   state: string;
   issue?: string;
+  preview?: NodePreview;
 };
+export type NodePreview = { text?: string; assetId?: string; mediaType?: "image" | "video" };
 export const NODE_WIDTH = 300,
   NODE_HEIGHT = 184;
 const uuid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
@@ -75,6 +77,7 @@ export function workflowBinding(element: SceneElement): NodeBinding | null {
     node: node.data,
     state: typeof value.state === "string" ? value.state : "draft",
     ...(typeof value.issue === "string" ? { issue: value.issue } : {}),
+    ...(value.preview ? {preview:value.preview} : {}),
   };
 }
 export function nodeElementId(workflowId: string, node: WorkflowNode) {
@@ -208,6 +211,7 @@ export function projectWorkflow(
   graph: WorkflowGraph,
   states: Record<string, string>,
   locked: boolean,
+  previews: Record<string, NodePreview> = {},
 ): SceneElement[] {
   const byId = new Map(scene.map((el) => [el.id, el]));
   const next = new Map<string, SceneElement>();
@@ -216,7 +220,7 @@ export function projectWorkflow(
       prior = byId.get(id);
     if (node.config.kind === "asset" && (!prior || prior.isDeleted)) continue;
     const body = prior ?? baseElement(id, "embeddable");
-    const snapshot = { workflowId, node, state: states[node.id] ?? "draft" };
+    const snapshot = { workflowId, node, state: states[node.id] ?? "draft", ...(previews[node.id] ? {preview:previews[node.id]} : {}) };
     next.set(
       id,
       revise(prior, {
@@ -391,6 +395,8 @@ export function readSceneWorkflow(
     graph.edges.push({ id: edgeId, source, target });
     if (el.id !== edgeElementId(workflowId, edgeId)) consumedArrows.push(el.id);
   }
+  const order = new Map(previous.edges.map((edge,index)=>[edge.id,index]));
+  graph.edges.sort((a,b)=>(order.get(a.id)??Number.MAX_SAFE_INTEGER)-(order.get(b.id)??Number.MAX_SAFE_INTEGER));
   return { graph, issues: [...new Set(issues)], consumedArrows };
 }
 
