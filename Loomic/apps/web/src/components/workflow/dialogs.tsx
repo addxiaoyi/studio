@@ -25,6 +25,7 @@ type Props = {
   apply(): void;
   setConfirmRun(open: boolean): void;
   run(): void;
+  targetTitle?:string|undefined;
 };
 export function WorkflowDialogs({
   proposal,
@@ -37,6 +38,7 @@ export function WorkflowDialogs({
   apply,
   setConfirmRun,
   run,
+  targetTitle,
 }: Props) {
   return (
     <>
@@ -79,11 +81,12 @@ export function WorkflowDialogs({
       <Dialog open={confirmRun} onOpenChange={setConfirmRun}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>确认运行「{title}」</DialogTitle>
+            <DialogTitle>{targetTitle?`执行到「${targetTitle}」`:`确认运行「${title}」`}</DialogTitle>
             <DialogDescription>
               执行已保存的第 {revision} 版。录制、剪辑与生成费用仍需逐项确认。
             </DialogDescription>
           </DialogHeader>
+          {targetTitle&&<p className="text-sm">仅执行目标节点及所需上游，并保存本次结果。上游会重新执行，不复用旧回执；未列出的分支不会运行。</p>}
           <ol className="max-h-64 overflow-auto list-decimal pl-5 text-sm space-y-2">
             {plan?.steps.map((step) => (
               <li key={step.id}>

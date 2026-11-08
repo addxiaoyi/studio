@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Search } from "lucide-react";
-import { WORKFLOW_LABELS } from "@helstera/shared";
+import { WORKFLOW_LABELS, insertWorkflowNode, type WorkflowGraph } from "@helstera/shared";
 import {
   Dialog,
   DialogContent,
@@ -34,14 +34,22 @@ export function WorkflowNodePicker({
   onAdd,
   disabled,
   anchor,
+  insertion,
 }: {
   open: boolean;
   onClose(): void;
   onAdd(kind: string): void;
   disabled: boolean;
   anchor?: string | undefined;
+  insertion?: { graph:WorkflowGraph;edgeId:string } | undefined;
 }) {
   const [query, setQuery] = useState("");
+  const [candidateIds]=useState(()=>({node:`candidate-${crypto.randomUUID()}`,edge:`candidate-${crypto.randomUUID()}`}));
+  const compatibility=(kind: keyof typeof workflowConfigs)=>{
+    if(!insertion)return null;
+    try{insertWorkflowNode(insertion.graph,insertion.edgeId,{id:candidateIds.node,title:"候选节点",position:{x:0,y:0},config:workflowConfigs[kind]},candidateIds.edge);return null;}
+    catch(cause){return cause instanceof Error?cause.message:"当前连线不兼容";}
+  };
   const matched = (kind: string) =>
     `${WORKFLOW_LABELS[kind as keyof typeof workflowConfigs]} ${descriptions[kind]}`.includes(
       query.trim(),
@@ -60,7 +68,7 @@ export function WorkflowNodePicker({
         <DialogHeader>
           <DialogTitle>添加处理节点</DialogTitle>
           <DialogDescription>
-            {anchor
+            {insertion ? "插入后会自动接好前后两条线，不兼容的节点不可选择。" : anchor
               ? `接在「${anchor}」之后，兼容的输入会自动连接。`
               : "选择要添加到当前画布的步骤。"}
           </DialogDescription>
@@ -85,7 +93,8 @@ export function WorkflowNodePicker({
                   <button
                     type="button"
                     key={kind}
-                    disabled={disabled}
+                    disabled={disabled || Boolean(compatibility(kind))}
+                    title={compatibility(kind)??descriptions[kind]}
                     onClick={() => onAdd(kind)}
                   >
                     <strong>{WORKFLOW_LABELS[kind]}</strong>

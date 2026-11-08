@@ -92,3 +92,13 @@ it("collapses applied changes without hiding the receipt or workflow entry", asy
   expect(requests.openCanvasWorkflow).toHaveBeenCalledWith("workflow");
   expect(requests.decideWorkflowProposal).not.toHaveBeenCalled();
 });
+it("shows the exact partial run scope before a user confirms",async()=>{
+  const graph=websiteWorkflow(true);graph.nodes[0]!.config={kind:"url",url:"https://example.com"};
+  const partial:WorkflowProposal={...proposal,action:"run",before:graph,graph:null,targetNodeId:"capture"};
+  requests.getWorkflowProposal.mockResolvedValue(partial);
+  await act(async()=>{render(<WorkflowProposalCard canvasId={partial.canvasId} id={partial.id} initial={partial}/>);});
+  expect(screen.getByText("执行到：录制网站")).toBeVisible();
+  expect(screen.getByText("保存本次节点结果")).toBeVisible();
+  expect(screen.getByRole("button",{name:"确认运行流程"})).toBeEnabled();
+  expect(requests.decideWorkflowProposal).not.toHaveBeenCalled();
+});

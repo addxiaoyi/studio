@@ -14,6 +14,7 @@ export const workflowAssistantPlanSchema = z
     action: workflowAssistantActionSchema,
     summary: z.string().trim().min(1).max(2000),
     graph: workflowGraphSchema.optional(),
+    targetNodeId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
   })
   .strict();
 export type WorkflowAssistantPlan = z.infer<typeof workflowAssistantPlanSchema>;
@@ -25,6 +26,7 @@ export const workflowProposalSchema = z.object({
   goalId: z.string().uuid().nullable(),
   prompt: z.string(),
   action: workflowAssistantActionSchema,
+  targetNodeId: z.string().optional(),
   summary: z.string(),
   before: z.nullable(workflowGraphSchema),
   graph: z.nullable(workflowGraphSchema),

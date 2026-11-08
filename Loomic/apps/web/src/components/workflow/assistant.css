@@ -156,6 +156,7 @@
   gap: 7px;
   flex-wrap: wrap;
 }
+.workflow-partial-scope{padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--muted);font-size:12px;line-height:1.7}.workflow-partial-scope p{font-size:11px;color:var(--muted-foreground);margin-top:5px}.workflow-partial-scope ol{padding-left:18px;list-style:decimal;margin-top:8px}
 .workflow-assistant { padding: 16px; gap: 20px; }
 .workflow-assistant > header h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; letter-spacing: -.015em; }
 .workflow-assistant > header h3 svg { color: var(--primary); }

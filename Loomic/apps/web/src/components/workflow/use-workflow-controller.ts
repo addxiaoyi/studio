@@ -5,6 +5,8 @@ import {
   compileWorkflow,
   connectionIssue,
   layoutWorkflow,
+  workflowRunGraph,
+  insertWorkflowNode,
   validateWorkflow,
   type WorkflowNode,
   type AgentGoal,
@@ -80,6 +82,8 @@ export function useWorkflowController({
     [saving, setSaving] = useState(false);
   const [pendingSwitch,setPendingSwitch]=useState<WorkflowDocument|null>(null);
   const [addingAfter,setAddingAfter]=useState<string|null>(null);
+  const [insertingEdge,setInsertingEdge]=useState<string|null>(null);
+  const [runTarget,setRunTarget]=useState<string|null>(null);
   const [materials, setMaterials] = useState<WorkflowNode[]>([]);
   const [history, setHistory] = useState<
     Awaited<ReturnType<typeof fetchWorkflowRuns>>
@@ -89,12 +93,14 @@ export function useWorkflowController({
     graph: flow.graph,
     workflowId: flow.selected?.id,
     onCanvasSync,
+    runs:history,
   });
   completedScope.current = {
     api,
     graph: flow.graph,
     workflowId: flow.selected?.id,
     onCanvasSync,
+    runs:history,
   };
   const completed = useCallback(async (goal: AgentGoal) => {
     const scope = completedScope.current;
@@ -114,6 +120,7 @@ export function useWorkflowController({
           scope.graph,
           goal.id,
           ids,
+          scope.runs.find(item=>item.goalId===goal.id)?.targetNodeId??undefined,
         ),
         captureUpdate: "NEVER",
       });
@@ -124,21 +131,22 @@ export function useWorkflowController({
     run.goal && !["completed", "failed", "canceled"].includes(run.goal.status),
   );
   const locked = flow.busy || active || saving || Boolean(flow.recovery);
+  const viewedRun=history.find((item)=>item.goalId===flow.goalId);
   const currentRun =
     !flow.dirty &&
-    history.find((item) => item.goalId === flow.goalId)?.revision ===
+    viewedRun?.revision ===
       flow.selected?.revision;
   const states = useMemo(
     () =>
       Object.fromEntries(
         flow.graph.nodes.map((node) => [
           node.id,
-          currentRun
+          currentRun && viewedRun?.graph.nodes.some(item=>item.id===node.id)
             ? node.config.kind === "url" ? "succeeded" : workflowStepState(run.goal?.executionSteps?.find(step=>step.stepId===node.id))
             : "draft",
         ]),
       ),
-    [flow.graph, run.goal, currentRun],
+    [flow.graph, run.goal, currentRun, viewedRun],
   );
   const issues = useMemo(() => validateWorkflow(flow.graph), [flow.graph]);
   const selected = flow.graph.nodes.find((node) => node.id === selectedId);
@@ -311,7 +319,8 @@ export function useWorkflowController({
   const addNode = (kind: string) => {
     if (!flow.selected || locked || !(kind in workflowConfigs)) return;
     const config = workflowConfigs[kind as keyof typeof workflowConfigs];
-    const anchor = flow.graph.nodes.find(node=>node.id===addingAfter) ?? selected ?? flow.graph.nodes.at(-1);
+    const wire=flow.graph.edges.find(edge=>edge.id===insertingEdge);
+    const anchor = flow.graph.nodes.find(node=>node.id===(wire?.source??addingAfter)) ?? selected ?? flow.graph.nodes.at(-1);
     const occupied=api?.getSceneElements().filter(el=>!el.isDeleted)??flow.graph.nodes.map(node=>({...node.position,width:300,height:node.config.kind==="generate"?280:184}));
     const node: WorkflowNode = {
       id: `node-${crypto.randomUUID()}`,
@@ -319,6 +328,11 @@ export function useWorkflowController({
       config: structuredClone(config),
       position: nextNodePosition(anchor?.position??{x:0,y:0},occupied,config.kind==="generate"?280:184),
     };
+    if(insertingEdge){
+      try{flow.edit(insertWorkflowNode(flow.graph,insertingEdge,node,`edge-${crypto.randomUUID()}`));setSelectedId(node.id);setTab("nodes");setInsertingEdge(null);onOpen();requestAnimationFrame(()=>scene.focus(node.id));}
+      catch(cause){flow.setError(cause instanceof Error?cause.message:"插入节点失败。");}
+      return;
+    }
     const graph = { ...flow.graph, nodes: [...flow.graph.nodes, node] };
     if (anchor && !connectionIssue(graph, anchor.id, node.id))
       graph.edges = [
@@ -408,12 +422,19 @@ export function useWorkflowController({
     setConfirmRun(false);
     try {
       await saveCanvas();
-      if(await flow.start(sessionId))setTab("runs");
+      if(await flow.start(sessionId,runTarget??undefined))setTab("runs");
     } catch (cause) {
       flow.setError(cause instanceof Error ? cause.message : "画布保存失败。");
     }
   }
-  async function prepareRun(){if(locked||!plan)return;if(flow.dirty&&!(await save()))return;setConfirmRun(true);}
+  async function prepareRun(targetId?:string){
+    if(locked)return;
+    try {compileWorkflow(workflowRunGraph(flow.graph,targetId));}catch(cause){flow.setError(cause instanceof Error?cause.message:"节点参数未完善。");return;}
+    if(flow.dirty&&!(await save()))return;
+    setRunTarget(targetId??null);setConfirmRun(true);
+  }
+  let confirmationPlan:ReturnType<typeof compileWorkflow>|null=null;
+  try{confirmationPlan=compileWorkflow(workflowRunGraph(flow.graph,runTarget??undefined));}catch{/* Keep the draft editable until required inputs are present. */}
   const saveRef=useRef(save);saveRef.current=save;
   const assistantScope=useRef({flow,onOpen});assistantScope.current={flow,onOpen};
   useEffect(()=>{const changed=(event:Event)=>{const detail=(event as CustomEvent<{id?:string}>).detail;if(!detail?.id)return;void assistantScope.current.flow.refresh(detail.id);assistantScope.current.onOpen();};window.addEventListener("loomic:workflow-changed",changed);return()=>window.removeEventListener("loomic:workflow-changed",changed);},[]);
@@ -452,6 +473,6 @@ export function useWorkflowController({
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
     materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
     pendingSwitch,setPendingSwitch,requestSwitch,confirmSwitch,editNode,deselectNode,disconnect,prepareRun,addingAfter,setAddingAfter,
-    prepareAssistant,askNode,
+    prepareAssistant,askNode,insertingEdge,setInsertingEdge,runTarget,confirmationPlan,viewedRun,
   };
 }

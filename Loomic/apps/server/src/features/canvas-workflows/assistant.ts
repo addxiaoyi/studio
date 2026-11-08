@@ -4,6 +4,7 @@ import {
   workflowProposalSchema,
   workflowGraphSchema,
   compileWorkflow,
+  workflowRunGraph,
   type WorkflowAssistantPlan,
   type WorkflowProposal,
 } from "@helstera/shared";
@@ -35,6 +36,7 @@ type ProposalRow = {
   result: Record<string, unknown> | null;
   request_key: string;
   workspace_id: string;
+  target_node_id: string|null;
 };
 const view = (row: ProposalRow) =>
   workflowProposalSchema.parse({
@@ -45,6 +47,7 @@ const view = (row: ProposalRow) =>
     goalId: row.goal_id,
     prompt: row.prompt,
     action: row.action,
+    ...(row.target_node_id ? {targetNodeId:row.target_node_id} : {}),
     summary: row.summary,
     before: row.before_graph,
     graph: row.graph,
@@ -153,7 +156,8 @@ export class WorkflowAssistantService {
         workspaceId,
         userId,
       });
-    if (plan.action === "run") compileWorkflow(workflow!.graph);
+    if(plan.targetNodeId&&plan.action!=="run")throw new WorkflowError("仅局部运行可指定目标节点。");
+    if (plan.action === "run") compileWorkflow(workflowRunGraph(workflow!.graph,plan.targetNodeId));
     if (!["edit", "inspect", "run"].includes(plan.action) && !goal)
       throw new WorkflowError("当前流程还没有运行记录。");
     if (
@@ -168,8 +172,8 @@ export class WorkflowAssistantService {
       throw new WorkflowError("对话不属于当前画布。", 403);
     const row = (
       await this.db.query<ProposalRow>(
-        `insert into canvas_workflow_proposals(canvas_id,workspace_id,created_by,workflow_id,revision,goal_id,goal_updated_at,goal_status,session_id,prompt,action,summary,before_graph,graph,request_key,status,result)
-      values($1,$2,$3,$4,$5,$6,(select updated_at from agent_goals where id=$6),(select status from agent_goals where id=$6),$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,$15::jsonb)
+        `insert into canvas_workflow_proposals(canvas_id,workspace_id,created_by,workflow_id,revision,goal_id,goal_updated_at,goal_status,session_id,prompt,action,summary,before_graph,graph,request_key,status,result,target_node_id)
+      values($1,$2,$3,$4,$5,$6,(select updated_at from agent_goals where id=$6),(select status from agent_goals where id=$6),$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,$15::jsonb,$16)
       on conflict(canvas_id,created_by,request_key) do update set request_key=excluded.request_key returning *`,
         [
           canvasId,
@@ -195,6 +199,7 @@ export class WorkflowAssistantService {
                   ).length ?? 0,
               })
             : null,
+          plan.targetNodeId ?? null,
         ],
       )
     ).rows[0]!;
@@ -281,6 +286,7 @@ export class WorkflowAssistantService {
           row.revision!,
           row.id,
           row.session_id ?? undefined,
+          row.target_node_id ?? undefined,
         );
         receipt = { workflowId: row.workflow_id, ...run };
       } else {

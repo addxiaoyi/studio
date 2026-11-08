@@ -30,6 +30,7 @@ export async function createWorkflowFixture(database: string, origin: string) {
         "20261108000004_canvas_workflows",
         "20261108000005_creative_library",
         "20261108000006_workflow_assistant",
+        "20261109000000_workflow_partial_runs",
       ])
         await ctx.db.query(
           await readFile(

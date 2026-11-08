@@ -23,6 +23,7 @@ type Props = {
   onAsk(workflowId: string, nodeId: string): void;
   onConnect(source: string, target: string): void;
   onDisconnect(edgeId: string): void;
+  onInsert(edgeId:string):void;
   onAdd(nodeId: string): void;
   onError(message: string): void;
 };
@@ -88,6 +89,7 @@ export function WorkflowCanvasLayer(props: Props) {
           .filter(
             (el) =>
               !el.isDeleted &&
+              Boolean(props.workflowId) &&
               el.type === "arrow" &&
               (
                 el.customData?.workflowEdge as
@@ -109,6 +111,7 @@ export function WorkflowCanvasLayer(props: Props) {
                 key={el.id}
                 d={path}
                 className="workflow-wire-hit"
+                data-workflow-edge={(el.customData?.workflowEdge as {edgeId:string}).edgeId}
                 data-active={Boolean(state.selectedElementIds[el.id] || state.selectedElementIds[el.startBinding?.elementId ?? ""] || state.selectedElementIds[el.endBinding?.elementId ?? ""])}
                 style={{
                   pointerEvents:
@@ -299,6 +302,11 @@ export function WorkflowCanvasLayer(props: Props) {
             {props.graph.nodes.find((node) => node.id === wire.source)?.title} →{" "}
             {props.graph.nodes.find((node) => node.id === wire.target)?.title}
           </span>
+          <button
+            type="button"
+            disabled={props.disabled}
+            onClick={()=>props.onInsert(wire.id)}
+          ><Plus size={14}/>插入节点</button>
           <button
             type="button"
             disabled={props.disabled}

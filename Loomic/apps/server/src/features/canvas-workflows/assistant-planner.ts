@@ -55,7 +55,8 @@ export async function planWorkflowConversation(input: {
     [
       new SystemMessage(
         [
-          "你是本站可视化工作流助手。根据用户对话和真实上下文返回严格JSON，禁止Markdown或可执行代码：{action,summary,graph?}。不要实际执行。",
+          "你是本站可视化工作流助手。根据用户对话和真实上下文返回严格JSON，禁止Markdown或可执行代码：{action,summary,graph?,targetNodeId?}。不要实际执行。",
+          "用户要求测试某个节点、执行到选中节点时，action=run并设置真实targetNodeId；仅运行其必要上游和该节点，结果回到画布。上游会重新执行、费用再次确认，不能声称复用了旧结果。完整运行省略targetNodeId；其他action禁止targetNodeId。url/search本身不是局部运行目标，应选择下游处理节点。",
           "action为edit/run/pause/resume/cancel/retry/inspect。用户要求搭建、增删节点、修改参数、连线、布局用edit；仅控制运行时用其余操作，不能附加graph。问题、缺必要信息或解释失败用inspect，在summary给出中文答案或具体问题。没有流程时不能操控运行。",
           "edit.graph是完整工作流{title,nodes:[{id,title,position:{x,y},config}],edges:[{id,source,target}]}。保留未要求改变的节点ID、参数、位置和连线；只改用户指定部分。节点id为小写英文字母开头，后续只允许字母数字连字符，最长64。最多24节点、40连线、12执行节点。",
           "config完整格式：text {kind:'text',role:'story'|'script'|'character'|'prompt',text}；write {kind:'write',mode:'rewrite'|'script'|'storyboard',instruction,shotCount:1..6}；shot {kind:'shot',index:1..6}；generate {kind:'generate',mediaType:'image'|'video',model,prompt,aspectRatio:'16:9'|'9:16'|'1:1'|'4:3'|'3:4',duration:1..30,resolution:'480p'|'720p'|'768p'|'1080p'}；compose {kind:'compose',aspect:'original'|'portrait'|'landscape'}；frame {kind:'frame',at:秒}；asset {kind:'asset',elementId,assetId,mediaType:'image'|'video'}；url {kind:'url',url}；search {kind:'search',query}；capture {kind:'capture',record:boolean,pageLimit:1..5}；trim {kind:'trim',start,end,aspect}；deliver {kind:'deliver'}。每个config只含对应字段。",

@@ -62,6 +62,7 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
       "20261108000004_canvas_workflows",
       "20261108000005_creative_library",
       "20261108000006_workflow_assistant",
+      "20261109000000_workflow_partial_runs",
       "20261029000000_canvas_content_version",
       "20261017000000_automation_lifecycle",
     ])
@@ -398,5 +399,32 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
     const cancel=await assistant.propose(user,canvas,{workflowId:draft.id,prompt:"取消",requestKey:randomUUID(),plan:{action:"cancel",summary:"取消"}});await assistant.decide(user,canvas,cancel.id,"confirm",true);
     const expired=await assistant.propose(user,canvas,{prompt:"新建",requestKey:randomUUID(),plan:{action:"edit",summary:"新草稿",graph:ready()}});await db.query("update canvas_workflow_proposals set expires_at=now()-interval '1 second' where id=$1",[expired.id]);await expect(assistant.decide(user,canvas,expired.id,"confirm",true)).rejects.toThrow("过期");
     expect((await assistant.decide(user,canvas,expired.id,"reject",true)).status).toBe("rejected");
+  });
+  it("binds a partial run to its target, excludes unrelated branches and keeps recording approval",async()=>{
+    const graph=ready(true);
+    graph.nodes.push({id:"unused",title:"未配置生成",position:{x:0,y:600},config:{kind:"generate",mediaType:"image",model:"",prompt:"",aspectRatio:"16:9",duration:5,resolution:"720p"}});
+    const draft=await service.create(user,canvas,graph,randomUUID()),key=randomUUID();
+    await expect(service.run(randomUUID(),canvas,draft.id,1,key,session,"capture")).rejects.toThrow("权限");
+    const first=await service.run(user,canvas,draft.id,1,key,session,"capture");
+    const replay=await service.run(user,canvas,draft.id,1,key,session,"capture");
+    expect(replay).toEqual({goalId:first.goalId,reused:true});
+    await expect(service.run(user,canvas,draft.id,1,key,session)).rejects.toThrow("不一致");
+    const execute=vi.fn(async()=>({}));
+    await new GoalStepWorker(db,execute).tick();
+    const steps=(await db.query("select step_id,state,command from agent_goal_steps where goal_id=$1 order by ordinal",[first.goalId])).rows;
+    expect(steps.map(step=>step.step_id)).toEqual(["capture","preview-output"]);
+    expect(steps[0]).toMatchObject({state:"waiting_approval",command:{record:true,pageLimit:1,url:"https://example.com"}});
+    expect(execute).not.toHaveBeenCalled();
+    expect((await service.get(user,canvas,draft.id)).graph).toEqual(graph);
+    expect((await service.runs(user,canvas,draft.id))[0]).toMatchObject({targetNodeId:"capture",revision:1});
+    await db.query("update agent_goals set status='canceled' where id=$1",[first.goalId]);
+    const assistant=new WorkflowAssistantService(db);
+    const proposed=await assistant.propose(user,canvas,{workflowId:draft.id,revision:1,requestKey:randomUUID(),prompt:"仅执行录制节点",plan:{action:"run",targetNodeId:"capture",summary:"执行录制及其必要上游"}});
+    expect(proposed).toMatchObject({targetNodeId:"capture",status:"pending"});
+    expect(await service.runs(user,canvas,draft.id)).toHaveLength(1);
+    const approved=await assistant.decide(user,canvas,proposed.id,"confirm",true);
+    expect((await assistant.decide(user,canvas,proposed.id,"confirm",true)).result).toEqual(approved.result);
+    expect((await service.runs(user,canvas,draft.id))[0]).toMatchObject({targetNodeId:"capture"});
+    await db.query("update agent_goals set status='canceled' where id=$1",[approved.result!.goalId]);
   });
 });

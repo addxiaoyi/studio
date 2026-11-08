@@ -5,6 +5,8 @@ import {
   workflowChanges,
   WORKFLOW_ACTION_LABELS,
   validateWorkflow,
+  compileWorkflow,
+  workflowRunGraph,
   type WorkflowProposal,
 } from "@helstera/shared";
 import { useAuth } from "@/lib/auth-context";
@@ -109,6 +111,12 @@ export function WorkflowProposalCard({
   const expired = Date.parse(proposal.expiresAt) <= now,
     changes = workflowChanges(proposal.before, proposal.graph),
     issues = proposal.graph ? validateWorkflow(proposal.graph) : [];
+  let scopeSteps:string[]=[];
+  let scopeError="";
+  if(proposal.targetNodeId){
+    try{if(!proposal.before)throw new Error("缺少流程快照，请重新生成方案。");scopeSteps=compileWorkflow(workflowRunGraph(proposal.before,proposal.targetNodeId)).steps.map(step=>step.title);}
+    catch(cause){scopeError=cause instanceof Error?cause.message:"无法核对执行范围。";}
+  }
   return (
     <section className="workflow-proposal" data-status={proposal.status === "pending" && expired ? "expired" : proposal.status} aria-label="AI 工作流操作">
       <header>
@@ -126,6 +134,7 @@ export function WorkflowProposalCard({
                 : "等待确认"}
         </span>
       </header>
+      {proposal.targetNodeId&&<div className="workflow-partial-scope"><strong>执行到：{proposal.before?.nodes.find(node=>node.id===proposal.targetNodeId)?.title??proposal.targetNodeId}</strong><p>仅运行以下步骤，上游会重新执行；生成费用仍逐次确认。</p><ol>{scopeSteps.map((title,index)=><li key={index}>{title}</li>)}</ol>{scopeError&&<p role="alert">{scopeError}</p>}</div>}
       {proposal.graph && (
         <strong className="text-xs">{proposal.graph.title}</strong>
       )}
@@ -238,7 +247,7 @@ export function WorkflowProposalCard({
         <footer>
           <Button
             size="sm"
-            disabled={busy || expired}
+            disabled={busy || expired || Boolean(scopeError)}
             onClick={() => void decide("confirm")}
           >
             {busy

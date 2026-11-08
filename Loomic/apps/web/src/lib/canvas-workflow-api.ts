@@ -104,11 +104,13 @@ export async function runCanvasWorkflow(
   revision: number,
   requestKey: string,
   sessionId?: string,
+  targetNodeId?: string,
 ) {
   return (await workflowRequest(token, canvasId, `/${id}/run`, "POST", {
     revision,
     requestKey,
     ...(sessionId ? { sessionId } : {}),
+    ...(targetNodeId ? { targetNodeId } : {}),
   })) as { goalId: string; reused: boolean };
 }
 export function openCanvasWorkflow(id?: string) {
@@ -127,6 +129,8 @@ export async function fetchWorkflowRuns(
     revision: number;
     status: string;
     createdAt: string;
+    graph: WorkflowGraph;
+    targetNodeId: string | null;
   }>;
 }
 export async function listWorkflowProposals(token:string,canvasId:string,workflowId?:string){return workflowProposalSchema.array().parse(await workflowRequest(token,canvasId,`/assistant${workflowId?`?workflowId=${encodeURIComponent(workflowId)}`:""}`));}

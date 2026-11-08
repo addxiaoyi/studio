@@ -3,6 +3,7 @@ import {
   agentGoalCreateRequestSchema,
   compileWorkflow,
   workflowGraphSchema,
+  workflowRunGraph,
   type WorkflowGraph,
   type WorkflowDocument,
 } from "@helstera/shared";
@@ -162,6 +163,7 @@ export class CanvasWorkflowService {
     revision: number,
     requestKey: string,
     sessionId?: string,
+    targetNodeId?: string,
   ) {
     const client = await this.db.connect();
     try {
@@ -173,13 +175,13 @@ export class CanvasWorkflowService {
         id,
       );
       const prior = (
-        await client.query<{ goal_id: string; revision: number }>(
-          "select goal_id,revision from canvas_workflow_runs where workflow_id=$1 and request_key=$2",
+        await client.query<{ goal_id: string; revision: number; target_node_id: string | null }>(
+          "select goal_id,revision,target_node_id from canvas_workflow_runs where workflow_id=$1 and request_key=$2",
           [id, requestKey],
         )
       ).rows[0];
       if (prior) {
-        if (prior.revision !== revision)
+        if (prior.revision !== revision || prior.target_node_id !== (targetNodeId ?? null))
           throw new WorkflowError("这次运行请求与已确认版本不一致。", 409);
         await client.query("commit");
         return { goalId: prior.goal_id, reused: true };
@@ -197,8 +199,9 @@ export class CanvasWorkflowService {
         ).rows.length
       )
         throw new WorkflowError("聊天会话不属于当前画布。", 403);
-      const compiled = compileWorkflow(row.graph);
-      await assertWorkflowMaterials(client, row.graph, { canvasId, workspaceId, userId });
+      const executionGraph = workflowRunGraph(row.graph,targetNodeId);
+      const compiled = compileWorkflow(executionGraph);
+      await assertWorkflowMaterials(client, executionGraph, { canvasId, workspaceId, userId });
       const input = agentGoalCreateRequestSchema.parse({
         goal: row.graph.title,
         canvasId,
@@ -213,8 +216,8 @@ export class CanvasWorkflowService {
       const goal = await service.create(userId, workspaceId, input);
       await service.confirm(userId, workspaceId, goal.id);
       await client.query(
-        "insert into canvas_workflow_runs(workflow_id,goal_id,revision,graph,request_key) values($1,$2,$3,$4::jsonb,$5)",
-        [id, goal.id, revision, JSON.stringify(row.graph), requestKey],
+        "insert into canvas_workflow_runs(workflow_id,goal_id,revision,graph,request_key,target_node_id) values($1,$2,$3,$4::jsonb,$5,$6)",
+        [id, goal.id, revision, JSON.stringify(executionGraph), requestKey, targetNodeId ?? null],
       );
       await client.query(
         "update canvas_workflows set active_goal_id=$2,updated_at=now() where id=$1",
@@ -233,7 +236,7 @@ export class CanvasWorkflowService {
     await this.get(userId, canvasId, id);
     return (
       await this.db.query(
-        `select r.id,r.goal_id as "goalId",r.revision,r.graph,r.created_at as "createdAt",g.status
+        `select r.id,r.goal_id as "goalId",r.revision,r.graph,r.target_node_id as "targetNodeId",r.created_at as "createdAt",g.status
       from canvas_workflow_runs r join agent_goals g on g.id=r.goal_id where r.workflow_id=$1 order by r.created_at desc limit 20`,
         [id],
       )

@@ -453,8 +453,9 @@ export function linkWorkflowResults(
   graph: WorkflowGraph,
   goalId: string,
   elementIds: string[],
+  sourceNodeId?:string,
 ) {
-  const output = graph.nodes.find((node) => node.config.kind === "deliver");
+  const output = graph.nodes.find((node) => sourceNodeId ? node.id===sourceNodeId : node.config.kind === "deliver");
   const source =
     output && scene.find((el) => el.id === nodeElementId(workflowId, output));
   if (!source) return [...scene];

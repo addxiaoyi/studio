@@ -24,9 +24,14 @@ export function WorkflowRunPanel({
   token,
   goal,
   onRefresh,
-}: { token: string; goal: AgentGoal; onRefresh(): Promise<void> }) {
+  onSelectNode,
+  nodeIds,targetTitle,
+}: { token: string; goal: AgentGoal; onRefresh(): Promise<void>; onSelectNode?:((id:string)=>void)|undefined; nodeIds?:string[]|undefined; targetTitle?:string|undefined }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [filter,setFilter]=useState<"all"|"attention"|"completed">("all");
+  const steps=goal.executionSteps??[];
+  const visible=steps.filter(step=>filter==="all"||filter==="completed"&&step.state==="succeeded"||filter==="attention"&&["failed","review","waiting_approval","waiting_desktop"].includes(workflowStepState(step)));
   async function operate(action: () => Promise<unknown>) {
     setBusy(true);
     setError("");
@@ -70,6 +75,7 @@ export function WorkflowRunPanel({
   }
   return (
     <section className="workflow-run" aria-label="工作流运行记录">
+      {targetTitle&&<p className="node-data-caption">局部运行 · 执行到「{targetTitle}」</p>}
       <header className="flex items-center justify-between gap-2">
         <h3 className="font-semibold">
           {statusLabels[goal.status] ?? goal.status}
@@ -140,14 +146,16 @@ export function WorkflowRunPanel({
         </p>
       )}
       {goal.status === "failed" && goal.executionSteps?.some(step=>step.executor === "media.generate" && step.state === "failed") && <p className="my-3 text-xs text-muted-foreground">已提交的生成任务保留在素材库中。核对任务结果后，可修改节点并重新运行；新生成仍需再次确认费用。</p>}
+      <div className="workflow-run-filter" role="group" aria-label="筛选执行步骤">{([["all","全部"],["attention","需处理"],["completed","已完成"]] as const).map(([value,label])=><button key={value} type="button" aria-pressed={filter===value} onClick={()=>setFilter(value)}>{label}</button>)}</div>
+      {!visible.length&&<p role="status" className="node-data-empty">{steps.length?"没有符合条件的步骤。":"正在等待执行步骤。"}</p>}
       <ol className="space-y-3">
-        {goal.executionSteps?.map((step) => (
+        {visible.map((step) => (
           <li
             key={step.id}
             className="rounded-lg border border-border p-3 text-xs"
           >
             <div className="flex justify-between gap-2">
-              <strong>{step.title}</strong>
+              {onSelectNode&&(!nodeIds||nodeIds.includes(step.stepId))?<button type="button" className="workflow-run-node-link" onClick={()=>onSelectNode(step.stepId)} aria-label={`定位节点：${step.title}`}>{step.title}</button>:<strong>{step.title}</strong>}
               <span>
                 {(
                   {

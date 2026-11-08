@@ -38,6 +38,7 @@ import { WorkflowCanvasLayer } from "./canvas-layer";
 import { WorkflowNodePicker } from "./node-picker";
 import {WorkflowAssistantChat} from "./assistant-chat";
 import { WorkflowRenameDialog } from "./rename-dialog";
+import { NodeWorkbench } from "./node-workbench";
 import "./surface.css";
 import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogFooter } from "@/components/ui/dialog";
 export function WorkflowWorkspace(props: CanvasWorkflowProps) {
@@ -76,15 +77,15 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
     materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
     pendingSwitch,setPendingSwitch,requestSwitch,confirmSwitch,editNode,deselectNode,disconnect,prepareRun,addingAfter,setAddingAfter,
-    prepareAssistant,askNode,
+    prepareAssistant,askNode,insertingEdge,setInsertingEdge,runTarget,confirmationPlan,viewedRun,
   } = useWorkflowController(props);
   const bodyRef=useRef<HTMLDivElement>(null),inspectorRef=useRef<HTMLDivElement>(null);
   const revealInspector=()=>{const body=bodyRef.current,editor=inspectorRef.current;if(body&&editor)body.scrollTop=editor.offsetTop;};
   useEffect(()=>{if(!selected||tab!=="nodes"||!open)return;revealInspector();const body=bodyRef.current;if(!body)return;const resize=new ResizeObserver(revealInspector);resize.observe(body);return()=>resize.disconnect();},[selectedId,tab,open]);
   return (
     <>
-      <WorkflowCanvasLayer api={api} token={token} workflowId={flow.selected?.id} graph={flow.graph} disabled={locked} onEdit={editNode} onAsk={askNode} onConnect={connect} onDisconnect={disconnect} onAdd={setAddingAfter} onError={flow.setError}/>
-      <WorkflowNodePicker open={addingAfter!==null} onClose={()=>setAddingAfter(null)} onAdd={addNode} disabled={locked} anchor={flow.graph.nodes.find(node=>node.id===addingAfter)?.title}/>
+      <WorkflowCanvasLayer api={api} token={token} workflowId={flow.selected?.id} graph={flow.graph} disabled={locked} onEdit={editNode} onAsk={askNode} onConnect={connect} onDisconnect={disconnect} onInsert={setInsertingEdge} onAdd={setAddingAfter} onError={flow.setError}/>
+      <WorkflowNodePicker open={addingAfter!==null||insertingEdge!==null} onClose={()=>{setAddingAfter(null);setInsertingEdge(null);}} onAdd={addNode} disabled={locked} anchor={flow.graph.nodes.find(node=>node.id===addingAfter)?.title} insertion={insertingEdge?{graph:flow.graph,edgeId:insertingEdge}:undefined}/>
       <WorkflowMaterialDropCue cue={materialDrop.cue} onComplete={materialDrop.clearCue} />
       {renaming && <WorkflowRenameDialog title={flow.graph.title} close={()=>setRenaming(false)} rename={title=>flow.edit({...flow.graph,title})} />}
       {!open && flow.selected && (
@@ -333,6 +334,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                 <div ref={inspectorRef} className="workflow-selected-editor">
                 <div className="workflow-selection-header"><button type="button" onClick={deselectNode}><ChevronLeft size={16}/>全部节点</button><Button size="sm" variant="ghost" onClick={()=>scene.focus(selected.id)}><LocateFixed size={14}/>定位</Button></div>
                 {locked&&<p role="status" className="workflow-edit-lock">{flow.recovery?"先处理上方的本机草稿，再继续编辑。":active?"当前版本正在执行，参数已锁定。可在运行记录中暂停或取消。":"正在保存，请稍候。"}</p>}
+                <NodeWorkbench key={`${flow.selected!.id}:${selected.id}`} node={selected} graph={flow.graph} token={token} canvasId={props.canvasId} workflowId={flow.selected!.id} run={viewedRun} goal={run.goal} dirty={flow.dirty} disabled={locked||!flow.enabled} onSelect={id=>editNode(flow.selected!.id,id)} onRun={()=>void prepareRun(selected.id)} onAsk={()=>askNode(flow.selected!.id,selected.id)} onRecords={()=>setTab("runs")}>
                 <NodeInspector
                   node={selected}
                   graph={flow.graph}
@@ -368,7 +370,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                     });
                     setSelectedId(null);
                   }}
-                /></div>
+                /></NodeWorkbench></div>
               )}
               {!!issues.length && flow.selected && (
                 <div className="workflow-validation">
@@ -406,7 +408,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                     value={flow.goalId ?? ""}
                     options={history.map((item) => ({
                       value: item.goalId,
-                      label: `第${item.revision}版 · ${new Date(item.createdAt).toLocaleString()}`,
+                      label: `第${item.revision}版 · ${item.targetNodeId?`执行到 ${item.graph.nodes.find(node=>node.id===item.targetNodeId)?.title??item.targetNodeId}`:"完整流程"} · ${new Date(item.createdAt).toLocaleString()}`,
                     }))}
                     onChange={flow.setGoalId}
                   />
@@ -418,6 +420,9 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                     token={token}
                     goal={run.goal}
                     onRefresh={refreshRun}
+                    nodeIds={flow.graph.nodes.map(node=>node.id)}
+                    targetTitle={viewedRun?.targetNodeId?viewedRun.graph.nodes.find(node=>node.id===viewedRun.targetNodeId)?.title:undefined}
+                    onSelectNode={id=>{if(flow.graph.nodes.some(node=>node.id===id)){editNode(flow.selected!.id,id);scene.focus(id);}}}
                   />
                   {run.goal.status === "completed" && (
                     <Button
@@ -466,7 +471,8 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
         proposal={proposal}
         title={flow.graph.title}
         revision={flow.selected?.revision}
-        plan={plan}
+        plan={confirmationPlan}
+        targetTitle={runTarget?flow.graph.nodes.find(node=>node.id===runTarget)?.title:undefined}
         confirmRun={confirmRun}
         busy={locked}
         discard={() => flow.setProposal(null)}
