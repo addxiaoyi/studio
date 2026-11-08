@@ -186,6 +186,7 @@ test("embeds real canvas image and video by dragging, restores drafts and remove
       name: "可视化工作流",
       exact: true,
     });
+    await workspace.getByRole("button",{name:"定位流程节点",exact:true}).click();
     await expect(
       workspace.getByRole("button", { name: /图片 \/ 视频生成 参考图创作/ }),
     ).toBeVisible();

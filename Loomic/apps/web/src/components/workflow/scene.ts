@@ -31,6 +31,10 @@ export type CanvasState = {
   selectedElementIds: Record<string, boolean>;
   offsetLeft?: number;
   offsetTop?: number;
+  cursorButton?: "up" | "down";
+  selectedElementsAreBeingDragged?: boolean;
+  resizingElement?: unknown;
+  activeTool?: {type:string};
 };
 export type WorkflowCanvasApi = {
   onPointerDown?: ExcalidrawImperativeAPI["onPointerDown"];
@@ -93,6 +97,16 @@ export function nodeElementId(workflowId: string, node: WorkflowNode) {
   return node.config.kind === "asset" && node.config.elementId
     ? node.config.elementId
     : `wf:${workflowId}:${node.id}`;
+}
+export function upgradeWorkflowCards(scene: readonly SceneElement[]): readonly SceneElement[] {
+  let changed=false;
+  const upgraded=scene.map(element=>{
+    const binding=workflowBinding(element);
+    if(element.isDeleted||!binding||binding.node.config.kind==="asset"&&binding.node.config.elementId||element.type==="rectangle"&&element.link===null)return element;
+    changed=true;
+    return {...element,type:"rectangle",link:null,backgroundColor:"#ffffff",strokeColor:"transparent",roundness:null,version:(element.version??1)+1,versionNonce:Math.floor(Math.random()*2e9),updated:Date.now()};
+  });
+  return changed?upgraded:scene;
 }
 const edgeElementId = (workflowId: string, id: string) =>
   `we:${workflowId}:${id}`;
@@ -241,7 +255,9 @@ export function projectWorkflow(
         isDeleted: false,
         ...(!boundAsset
           ? {
-              link: "https://studio.0st.top/#workflow-node",
+              type: "rectangle",
+              link: null,
+              backgroundColor: "#ffffff",
               width: Math.max(240, body.width),
               height: Math.max(node.config.kind === "generate" ? 280 : 164, body.height),
               strokeColor: "transparent",
@@ -326,7 +342,7 @@ export function projectWorkflow(
       return el.isDeleted ? el : revise(el, { ...el, isDeleted: true });
     return el;
   });
-  return [...refreshWorkflowCurves([...merged, ...next.values()])];
+  return [...refreshWorkflowCurves(upgradeWorkflowCards([...merged, ...next.values()]))];
 }
 export function readSceneWorkflow(
   scene: readonly SceneElement[],

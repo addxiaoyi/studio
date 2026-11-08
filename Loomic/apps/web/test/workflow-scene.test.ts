@@ -7,6 +7,7 @@ import {
   adoptWorkflowCopies,
   retainWorkflowLayout,
   placeWorkflow,
+  upgradeWorkflowCards,
   type SceneElement,
 } from "@/components/workflow/scene";
 
@@ -20,10 +21,19 @@ const note: SceneElement = {
   text: "普通画布备注",
 };
 describe("workflows on the existing canvas", () => {
+  it("upgrades old workflow embeds without changing identities, saved node parameters or ordinary links",()=>{
+    const graph=websiteWorkflow(),scene=projectWorkflow([note],"flow",graph,{},false);
+    const old=scene.map(el=>el.customData?.workflow?{...el,type:"embeddable",link:"https://studio.0st.top/#workflow-node"}:el);
+    const upgraded=upgradeWorkflowCards(old);
+    expect(upgraded.map(el=>el.id)).toEqual(old.map(el=>el.id));
+    expect(readSceneWorkflow(upgraded,"flow",graph).graph).toEqual(graph);
+    expect(upgraded.filter(el=>el.customData?.workflow).every(el=>el.type==="rectangle"&&el.link===null)).toBe(true);
+    expect(upgradeWorkflowCards(upgraded)).toBe(upgraded);
+  });
   it("keeps a template media slot visible and removes its placeholder after binding",()=>{
     const graph=websiteWorkflow();graph.nodes[0]!.config={kind:"asset",elementId:"",assetId:"",mediaType:"video"};graph.nodes[1]!.config={kind:"trim",start:0,end:3,aspect:"original"};
     const original=projectWorkflow([note],"flow",graph,{},false),placeholder=nodeElementId("flow",graph.nodes[0]!);
-    expect(original.find(el=>el.id===placeholder)?.type).toBe("embeddable");
+    expect(original.find(el=>el.id===placeholder)?.type).toBe("rectangle");
     expect(readSceneWorkflow(original,"flow",graph).graph.nodes).toHaveLength(3);
     const media:SceneElement={...note,id:"video",type:"embeddable",customData:{isVideo:true,assetId:"11111111-1111-4111-8111-111111111111"}};
     graph.nodes[0]!.config={kind:"asset",elementId:media.id,assetId:"11111111-1111-4111-8111-111111111111",mediaType:"video"};
@@ -76,7 +86,8 @@ describe("workflows on the existing canvas", () => {
     const graph = websiteWorkflow();
     const first = projectWorkflow([note], "flow", graph, {}, false);
     expect(first[0]).toBe(note);
-    expect(first.filter((el) => el.type === "embeddable")).toHaveLength(3);
+    expect(first.filter((el) => el.type === "rectangle")).toHaveLength(3);
+    expect(first.filter(el=>el.customData?.workflow).every(el=>el.link===null)).toBe(true);
     expect(first.filter((el) => el.type === "arrow")).toHaveLength(2);
     expect(projectWorkflow(first, "flow", graph, {}, false)).toEqual(first);
   });

@@ -98,8 +98,8 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
   ).rows;
   expect(
     rows[0].content.elements.filter(
-      (element: { type: string; isDeleted?: boolean }) =>
-        element.type === "rectangle" && !element.isDeleted,
+      (element: { type: string; isDeleted?: boolean;customData?:{workflow?:unknown} }) =>
+        element.type === "rectangle" && !element.isDeleted && !element.customData?.workflow,
     ),
   ).toHaveLength(1);
   expect(

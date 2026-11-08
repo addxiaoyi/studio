@@ -8,6 +8,7 @@ import {
   validateWorkflow,
   type WorkflowNode,
   type AgentGoal,
+  type WorkflowDocument,
 } from "@helstera/shared";
 import { useAuth } from "@/lib/auth-context";
 import { fetchWorkflowRuns } from "@/lib/canvas-workflow-api";
@@ -15,6 +16,7 @@ import { useCanvasWorkflow } from "./use-workflow";
 import { useWorkflowRun } from "./run-panel";
 import {
   materialNode,
+  nodeElementId,
   linkWorkflowResults,
   type WorkflowCanvasApi,
   type NodePreview,
@@ -24,6 +26,7 @@ import { workflowStepState } from "./step-state";
 import { useSceneContext, type CanvasReference } from "./use-scene-context";
 import { useWorkflowMaterialDrop } from "./use-material-drop";
 import { embedWorkflowMaterials, removeWorkflowReference } from "./material-inputs";
+import { nextNodePosition } from "./graph-state";
 export type CanvasWorkflowProps = {
   token: string;
   canvasId: string;
@@ -74,6 +77,8 @@ export function useWorkflowController({
   const [libraryMode,setLibraryMode]=useState<"workflow"|"prompt">("workflow");
   const [confirmRun, setConfirmRun] = useState(false),
     [saving, setSaving] = useState(false);
+  const [pendingSwitch,setPendingSwitch]=useState<WorkflowDocument|null>(null);
+  const [addingAfter,setAddingAfter]=useState<string|null>(null);
   const [materials, setMaterials] = useState<WorkflowNode[]>([]);
   const [history, setHistory] = useState<
     Awaited<ReturnType<typeof fetchWorkflowRuns>>
@@ -117,7 +122,7 @@ export function useWorkflowController({
   const active = Boolean(
     run.goal && !["completed", "failed", "canceled"].includes(run.goal.status),
   );
-  const locked = flow.busy || active || saving;
+  const locked = flow.busy || active || saving || Boolean(flow.recovery);
   const currentRun =
     !flow.dirty &&
     history.find((item) => item.goalId === flow.goalId)?.revision ===
@@ -171,10 +176,11 @@ export function useWorkflowController({
     if(flow.graph.nodes.some(node=>node.id!==selected.id&&node.config.kind==="asset"&&source.config.kind==="asset"&&node.config.elementId===source.config.elementId)){flow.setError("该素材已绑定到当前流程的另一个节点。");return;}
     flow.edit({...flow.graph,nodes:flow.graph.nodes.map(node=>node.id===selected.id?{...node,position:source.position,config:source.config}:node)});
   };
-  const selectNode = (workflowId: string, nodeId: string) => {
+  const selectNode = (workflowId: string, nodeId: string, openEditor=false) => {
     if (workflowId !== flow.selected?.id) {
+      if(!openEditor)return;
       if (flow.dirty) {
-        flow.setError("先保存当前流程，再编辑另一组节点。");
+        setPendingSwitch(flow.documents.find(item=>item.id===workflowId)??null);
         return;
       }
       const document = flow.documents.find((item) => item.id === workflowId);
@@ -182,8 +188,7 @@ export function useWorkflowController({
       flow.select(document);
     }
     setSelectedId(nodeId);
-    setTab("nodes");
-    if (!open) onOpen();
+    if(openEditor){setTab("nodes");if(!open)onOpen();}
   };
   const previews = useMemo<Record<string,NodePreview>>(()=>Object.fromEntries((currentRun ? run.goal?.executionSteps ?? [] : []).map(step=>{
     const assets = step.output?.assets as Array<{id?:unknown;mediaType?:unknown}> | undefined;
@@ -214,6 +219,8 @@ export function useWorkflowController({
     select: selectNode,
     error: flow.setError,
     suspendSync: materialDrop.dragging,
+    recoveryPending:Boolean(flow.recovery),
+    deselect:()=>setSelectedId(null),
   });
   const materialSignature = useRef("");
   useEffect(() => {
@@ -253,20 +260,22 @@ export function useWorkflowController({
   }, [token, canvasId, flow.selected?.id, flow.goalId, run.goal?.status]);
   const refreshRun = useCallback(() => run.refresh(), [run.refresh]);
   const save = async () => {
-    if (saving) return;
+    if (saving) return null;
     setSaving(true);
     try {
       await saveCanvas();
-      await flow.save();
+      return await flow.save();
     } catch (cause) {
       flow.setError(
         cause instanceof Error ? cause.message : "画布保存失败，请重试。",
       );
+      return null;
     } finally {
       setSaving(false);
     }
   };
   const connect = (source: string, target: string) => {
+    if(locked)return;
     const issue = connectionIssue(flow.graph, source, target);
     if (issue) {
       flow.setError(issue);
@@ -279,19 +288,27 @@ export function useWorkflowController({
         { id: `edge-${crypto.randomUUID()}`, source, target },
       ],
     });
+    flow.setError("");
   };
+  const requestSwitch=(doc:WorkflowDocument)=>{if(flow.dirty){setPendingSwitch(doc);return;}flow.select(doc);setSelectedId(null);};
+  const confirmSwitch=async(persist:boolean)=>{if(!pendingSwitch)return;if(persist&&!(await save()))return;flow.select(pendingSwitch);setSelectedId(null);setPendingSwitch(null);};
+  const editNode=(workflowId:string,nodeId:string)=>{
+    selectNode(workflowId,nodeId,true);
+    const doc=flow.documents.find(item=>item.id===workflowId),node=doc?.id===flow.selected?.id?flow.graph.nodes.find(item=>item.id===nodeId):doc?.graph.nodes.find(item=>item.id===nodeId);
+    if(node)api?.updateScene({appState:{selectedElementIds:{[nodeElementId(workflowId,node)]:true}},captureUpdate:"NEVER"});
+  };
+  const deselectNode=()=>{setSelectedId(null);api?.updateScene({appState:{selectedElementIds:{}},captureUpdate:"NEVER"});};
+  const disconnect=(edgeId:string)=>{if(locked)return;flow.edit({...flow.graph,edges:flow.graph.edges.filter(edge=>edge.id!==edgeId)});const picked=api?.getSceneElements().some(el=>api.getAppState().selectedElementIds[el.id]&&(el.customData?.workflowEdge as {edgeId?:string}|undefined)?.edgeId===edgeId);if(picked)api?.updateScene({appState:{selectedElementIds:{}},captureUpdate:"NEVER"});flow.setError("");};
   const addNode = (kind: string) => {
     if (!flow.selected || locked || !(kind in workflowConfigs)) return;
     const config = workflowConfigs[kind as keyof typeof workflowConfigs];
-    const anchor = selected ?? flow.graph.nodes.at(-1);
+    const anchor = flow.graph.nodes.find(node=>node.id===addingAfter) ?? selected ?? flow.graph.nodes.at(-1);
+    const occupied=api?.getSceneElements().filter(el=>!el.isDeleted)??flow.graph.nodes.map(node=>({...node.position,width:300,height:node.config.kind==="generate"?280:184}));
     const node: WorkflowNode = {
       id: `node-${crypto.randomUUID()}`,
       title: WORKFLOW_LABELS[config.kind],
       config: structuredClone(config),
-      position: {
-        x: Math.min(990600, (anchor?.position.x ?? 0) + 390),
-        y: anchor?.position.y ?? 0,
-      },
+      position: nextNodePosition(anchor?.position??{x:0,y:0},occupied,config.kind==="generate"?280:184),
     };
     const graph = { ...flow.graph, nodes: [...flow.graph.nodes, node] };
     if (anchor && !connectionIssue(graph, anchor.id, node.id))
@@ -306,6 +323,9 @@ export function useWorkflowController({
     flow.edit(graph);
     setSelectedId(node.id);
     setTab("nodes");
+    setAddingAfter(null);
+    if(!open)onOpen();
+    requestAnimationFrame(()=>scene.focus(node.id));
   };
   const importMaterials = () => {
     if (!materials.length || locked) return;
@@ -379,12 +399,14 @@ export function useWorkflowController({
     setConfirmRun(false);
     try {
       await saveCanvas();
-      await flow.start(sessionId);
-      setTab("runs");
+      if(await flow.start(sessionId))setTab("runs");
     } catch (cause) {
       flow.setError(cause instanceof Error ? cause.message : "画布保存失败。");
     }
   }
+  async function prepareRun(){if(locked||!plan)return;if(flow.dirty&&!(await save()))return;setConfirmRun(true);}
+  const saveRef=useRef(save);saveRef.current=save;
+  useEffect(()=>{const key=(event:KeyboardEvent)=>{if(open&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="s"){event.preventDefault();if(!locked)void saveRef.current();}};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key);},[open,locked]);
   const proposal = flow.proposal;
   return {
     flow,
@@ -417,5 +439,6 @@ export function useWorkflowController({
     selection,references,setReferences,attachReferences,askAi,openLibrary,libraryPrompt,applyPrompt,libraryMode,
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
     materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
+    pendingSwitch,setPendingSwitch,requestSwitch,confirmSwitch,editNode,deselectNode,disconnect,prepareRun,addingAfter,setAddingAfter,
   };
 }

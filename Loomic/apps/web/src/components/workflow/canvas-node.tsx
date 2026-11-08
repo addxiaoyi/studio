@@ -36,7 +36,7 @@ const icons = {
   deliver: PackageCheck,
   asset: ImageIcon,
 };
-export function WorkflowCanvasNode({ element, accessToken }: { element: SceneElement; accessToken: string }) {
+export function WorkflowCanvasNode({ element, accessToken, selected = false, connecting = false, issue }: { element: SceneElement; accessToken: string; selected?:boolean; connecting?:boolean; issue?:string|undefined }) {
   const binding = workflowBinding(element);
   if (!binding) return null;
   const { node, state } = binding,
@@ -64,6 +64,8 @@ export function WorkflowCanvasNode({ element, accessToken }: { element: SceneEle
     <article
       className="canvas-workflow-node"
       data-state={state}
+      data-selected={selected}
+      data-connectable={connecting}
       data-workflow-node={node.id}
       aria-label={`${node.title}，${workflowStateLabel[state] ?? state}`}
     >
@@ -82,12 +84,13 @@ export function WorkflowCanvasNode({ element, accessToken }: { element: SceneEle
       </div>}
       <footer>
         <span className="workflow-state-dot" />
-        <span>{workflowStateLabel[state] ?? state}</span>
+        <span title={issue}>{issue?"需要完善":workflowStateLabel[state] ?? state}</span>
         <span className="ml-auto flex items-center gap-1">
           {config.kind === "deliver" ? "交付" : "连接下一步"}
           <ArrowRight size={13} />
         </span>
       </footer>
+      {issue&&<span className="workflow-node-issue" title={issue} aria-label={issue}>!</span>}
       <span className="canvas-workflow-port is-input" />
       <span className="canvas-workflow-port is-output" />
     </article>

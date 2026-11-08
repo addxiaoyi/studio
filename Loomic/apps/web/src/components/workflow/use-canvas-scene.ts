@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, type RefObject } from "react";
 import type { WorkflowDocument, WorkflowGraph } from "@helstera/shared";
 import {focusCanvasContent,stopCanvasView} from "./viewport";
 import { refreshWorkflowCurves } from "./curves";
+import { workflowGraphKey } from "./graph-state";
 import {
   nodeElementId,
   adoptWorkflowCopies,
@@ -10,18 +11,12 @@ import {
   projectWorkflow,
   readSceneWorkflow,
   workflowBinding,
+  upgradeWorkflowCards,
   type SceneElement,
   type WorkflowCanvasApi,
   type NodePreview,
 } from "./scene";
 
-function signature(graph: WorkflowGraph) {
-  return JSON.stringify({
-    ...graph,
-    nodes: [...graph.nodes].sort((a, b) => a.id.localeCompare(b.id)),
-    edges: [...graph.edges].sort((a, b) => a.id.localeCompare(b.id)),
-  });
-}
 type Options = {
   api: WorkflowCanvasApi | null;
   document: WorkflowDocument | null;
@@ -31,8 +26,10 @@ type Options = {
   open: boolean;
   previews?: Record<string,NodePreview>;
   suspendSync?: RefObject<boolean>;
+  recoveryPending?: boolean;
   edit(graph: WorkflowGraph, checkpoint?: boolean): void;
-  select(workflowId: string, nodeId: string): void;
+  select(workflowId: string, nodeId: string, openEditor?:boolean): void;
+  deselect?():void;
   error(message: string): void;
 };
 export function useCanvasWorkflowScene(options: Options) {
@@ -45,7 +42,7 @@ export function useCanvasWorkflowScene(options: Options) {
   const needsFocus = useRef(false);
   const focus = useCallback((nodeId?: string) => {
     const { api, document, graph, open } = current.current;
-    if (!api || !document) return;
+    if (!api || !document || current.current.recoveryPending) return;
     const ids = new Set(
       graph.nodes
         .filter((node) => !nodeId || node.id === nodeId)
@@ -66,7 +63,7 @@ export function useCanvasWorkflowScene(options: Options) {
   }, []);
   useEffect(() => {
     const { api, document, graph, states, locked } = options;
-    if (!api || !document) return;
+    if (!api || !document || options.recoveryPending) return;
     const first = initialized.current !== document.id;
     if (first) needsFocus.current = true;
     initialized.current = document.id;
@@ -108,11 +105,15 @@ export function useCanvasWorkflowScene(options: Options) {
     options.states,
     options.previews,
     options.locked,
+    options.recoveryPending,
     focus,
   ]);
-  useEffect(() => {
-    if (options.open) focus();
-  }, [options.open, focus]);
+  useEffect(()=>{
+    const {api,document,graph}=current.current;if(!options.open||!api||!document||options.recoveryPending)return;
+    const state=api.getAppState(),ids=new Set(graph.nodes.map(node=>nodeElementId(document.id,node)));
+    const visible=api.getSceneElements().some(el=>ids.has(el.id)&&(el.x+state.scrollX+el.width)*state.zoom.value>80&&(el.x+state.scrollX)*state.zoom.value<state.width&&(el.y+state.scrollY+el.height)*state.zoom.value>80&&(el.y+state.scrollY)*state.zoom.value<state.height);
+    if(!visible)focus();
+  },[options.open,options.recoveryPending,focus]);
   useEffect(() => {
     const api = options.api;
     if (!api) return;
@@ -120,7 +121,7 @@ export function useCanvasWorkflowScene(options: Options) {
     let lastSelection = "";
     const sync = () => {
       const { document, graph, locked, edit, error } = current.current;
-      if (!document || locked || projecting.current || current.current.suspendSync?.current) return;
+      if (!document || locked || projecting.current || current.current.suspendSync?.current || current.current.recoveryPending) return;
       const before = api.getSceneElementsIncludingDeleted();
       const scene = adoptWorkflowCopies(before, document.id);
       if (JSON.stringify(before) !== JSON.stringify(scene)) {
@@ -134,7 +135,7 @@ export function useCanvasWorkflowScene(options: Options) {
       }
       const next = readSceneWorkflow(scene, document.id, graph);
       if (next.issues.length) error(next.issues.join("\n"));
-      if (signature(next.graph) !== signature(graph)) {
+      if (workflowGraphKey(next.graph) !== workflowGraphKey(graph)) {
         next.consumedArrows.forEach((id) => consumed.current.add(id));
         edit(next.graph);
       }
@@ -144,7 +145,7 @@ export function useCanvasWorkflowScene(options: Options) {
       if (!frame) frame = requestAnimationFrame(() => {
         frame = 0;
         const before = api.getSceneElementsIncludingDeleted();
-        const curved = refreshWorkflowCurves(before);
+        const curved = refreshWorkflowCurves(upgradeWorkflowCards(before));
         if (curved === before) return;
         projecting.current = true;
         api.updateScene({ elements: curved, captureUpdate: "NEVER" });
@@ -156,20 +157,27 @@ export function useCanvasWorkflowScene(options: Options) {
         .join(",");
       if (selection !== lastSelection) {
         lastSelection = selection;
-        const chosen = elements.find(
-          (el) => state.selectedElementIds[el.id] && workflowBinding(el),
-        );
+        const selected=elements.filter(el=>state.selectedElementIds[el.id]);
+        const chosen=selected.length===1?selected[0]:undefined;
         const binding = chosen && workflowBinding(chosen);
         if (binding)
-          current.current.select(binding.workflowId, binding.node.id);
+          current.current.select(binding.workflowId, binding.node.id, false);
+        else current.current.deselect?.();
       }
       clearTimeout(timer);
       timer = setTimeout(sync, 120);
+    });
+    const pointerUp = api.onPointerUp?.((_tool, press) => {
+      if(press.drag.hasOccurred||press.resize.isResizing||press.boxSelection.hasOccurred)return;
+      const selected=api.getSceneElements().filter(el=>api.getAppState().selectedElementIds[el.id]);
+      const binding=selected.length===1?workflowBinding(selected[0]!):null;
+      if(binding)current.current.select(binding.workflowId,binding.node.id,true);
     });
     return () => {
       clearTimeout(timer);
       cancelAnimationFrame(frame);
       unsubscribe();
+      pointerUp?.();
     };
   }, [options.api]);
   const locateResults = useCallback((ids: string[]) => {

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { retainWorkflowLayout } from "./scene";
+import { workflowGraphKey } from "./graph-state";
 import {
   websiteWorkflow,
   workflowGraphSchema,
@@ -42,10 +43,11 @@ export function useCanvasWorkflow(
     version = useRef(0),
     key = useRef(crypto.randomUUID());
   const dirty = selected
-    ? JSON.stringify(graph) !== JSON.stringify(selected.graph)
+    ? workflowGraphKey(graph) !== workflowGraphKey(selected.graph)
     : false;
   const draftKey = (id: string) => `loomic:workflow:${userId}:${id}`;
   function select(document: WorkflowDocument) {
+    setError("");
     setSelected(document);
     setGraph(document.graph);
     setGoalId(document.activeGoalId);
@@ -60,7 +62,7 @@ export function useCanvasWorkflow(
       const raw = localStorage.getItem(draftKey(document.id));
       if (raw) {
         const saved = workflowGraphSchema.parse(JSON.parse(raw));
-        if (JSON.stringify(saved) !== JSON.stringify(document.graph))
+        if (workflowGraphKey(saved) !== workflowGraphKey(document.graph))
           setRecovery(saved);
       }
     } catch {
@@ -117,6 +119,7 @@ export function useCanvasWorkflow(
     return () => window.removeEventListener("beforeunload", guard);
   }, [dirty]);
   function edit(next: WorkflowGraph, checkpoint = true) {
+    if(workflowGraphKey(next)===workflowGraphKey(graph))return;
     if (checkpoint) setUndo((history) => [...history.slice(-29), graph]);
     setRedo([]);
     setGraph(next);
@@ -145,15 +148,16 @@ export function useCanvasWorkflow(
       version.current++;
     }
   }
-  async function run(work: () => Promise<void>) {
-    if (lock.current) return;
+  async function run<T>(work: () => Promise<T>): Promise<T | null> {
+    if (lock.current) return null;
     lock.current = true;
     setBusy(true);
     setError("");
     try {
-      await work();
+      return await work();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "工作流操作失败。");
+      return null;
     } finally {
       lock.current = false;
       setBusy(false);
@@ -172,8 +176,10 @@ export function useCanvasWorkflow(
     });
   }
   async function save() {
-    await run(async () => {
-      if (!selected) return;
+    return run(async () => {
+      if (!selected) return null;
+      if (recovery) throw new Error("先选择恢复本机草稿或使用服务器版本，再保存。");
+      const savingVersion = version.current;
       const doc = await saveCanvasWorkflow(
         token,
         canvasId,
@@ -186,8 +192,9 @@ export function useCanvasWorkflow(
       setDocuments((current) =>
         current.map((item) => (item.id === doc.id ? doc : item)),
       );
-      localStorage.removeItem(draftKey(doc.id));
+      if (version.current === savingVersion) localStorage.removeItem(draftKey(doc.id));
       setNotice("工作流已保存");
+      return doc;
     });
   }
   async function askAi(referenceElementIds?:string[]) {
@@ -226,7 +233,7 @@ export function useCanvasWorkflow(
     });
   }
   async function start(sessionId?: string) {
-    await run(async () => {
+    return run(async () => {
       if (!selected || dirty) throw new Error("请先保存当前流程。");
       const receipt = await runCanvasWorkflow(
         token,
@@ -242,6 +249,7 @@ export function useCanvasWorkflow(
       );
       key.current = crypto.randomUUID();
       setNotice("流程已开始，按节点依赖依次执行。");
+      return receipt;
     });
   }
   return {
@@ -272,7 +280,7 @@ export function useCanvasWorkflow(
     askAi,
     applyProposal,
     start,
-    refresh: () => run(() => load(selected?.id)),
+    refresh: () => run(() => {if(dirty)throw new Error("当前有未保存修改，请先保存或保留本机草稿后切换。");return load(selected?.id);}),
     clearRecovery: () => {
       if (selected) localStorage.removeItem(draftKey(selected.id));
       setRecovery(null);

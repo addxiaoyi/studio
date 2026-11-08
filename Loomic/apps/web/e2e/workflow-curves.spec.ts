@@ -77,6 +77,7 @@ test("curved wires follow node drags, survive reload and preserve native undo an
     await expect(
       dock.getByRole("button", { name: /浏览与录制 读取网页与截图/ }),
     ).toBeVisible();
+    await dock.getByRole("button",{name:"定位流程节点",exact:true}).click();
     await page.keyboard.press("Escape");
     await page.keyboard.press("v");
     const capture = page.locator('[data-workflow-node="capture"]');
@@ -133,6 +134,7 @@ test("curved wires follow node drags, survive reload and preserve native undo an
     await page.reload();
     await page.getByRole("button", { name: "打开可视化工作流" }).click();
     await expect(dock.getByRole("button",{name:/浏览与录制 读取网页与截图/})).toBeVisible();
+    await dock.getByRole("button",{name:"定位流程节点",exact:true}).click();
     await expect.poll(async()=>{
       const output=await page.locator('[data-workflow-node="deliver"]').boundingBox();
       const canvas=await page.locator('[data-canvas-surface]').boundingBox();
@@ -152,12 +154,12 @@ test("curved wires follow node drags, survive reload and preserve native undo an
     const sourceBox = (await page
       .locator('[data-workflow-node="site"]')
       .boundingBox())!;
-    const zoom = sourceBox.width / (from.width - 2);
+    const zoom = sourceBox.width / from.width;
     const nativeWire = elements.find((el) => el.id === wire.id)!;
     const middle = (nativeWire.points as number[][])[4]!;
     await page.mouse.click(
-      sourceBox.x + (nativeWire.x + middle[0]! - from.x - 1) * zoom,
-      sourceBox.y + (nativeWire.y + middle[1]! - from.y - 1) * zoom,
+      sourceBox.x + (nativeWire.x + middle[0]! - from.x) * zoom,
+      sourceBox.y + (nativeWire.y + middle[1]! - from.y) * zoom,
     );
     await page.screenshot({path:info.outputPath("curve-selected.png")});
     await expect(page.getByText("已选 1 项",{exact:false})).toBeVisible();

@@ -12,7 +12,9 @@ import {
   X,
   ArrowUpRight,
   ImagePlus,
+  ChevronLeft,
 } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { WORKFLOW_LABELS, creativeWorkflow } from "@helstera/shared";
 import { Button } from "@/components/ui/button";
 import { StyledSelect } from "@/components/ui/styled-select";
@@ -31,6 +33,9 @@ import {
 import "./workflow.css";
 import { WorkflowMaterialDropCue } from "./material-drop-cue";
 import { WorkflowReferenceEditor } from "./reference-media";
+import { WorkflowCanvasLayer } from "./canvas-layer";
+import { WorkflowNodePicker } from "./node-picker";
+import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogFooter } from "@/components/ui/dialog";
 export function WorkflowWorkspace(props: CanvasWorkflowProps) {
   const { token, api, open, onOpen, onClose } = props;
   const floating=useFloatingPanel(open);
@@ -65,9 +70,15 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
     selection,references,setReferences,attachReferences,askAi,openLibrary,libraryPrompt,applyPrompt,libraryMode,
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
     materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
+    pendingSwitch,setPendingSwitch,requestSwitch,confirmSwitch,editNode,deselectNode,disconnect,prepareRun,addingAfter,setAddingAfter,
   } = useWorkflowController(props);
+  const bodyRef=useRef<HTMLDivElement>(null),inspectorRef=useRef<HTMLDivElement>(null);
+  const revealInspector=()=>{const body=bodyRef.current,editor=inspectorRef.current;if(body&&editor)body.scrollTop=editor.offsetTop;};
+  useEffect(()=>{if(!selected||tab!=="nodes"||!open)return;revealInspector();const body=bodyRef.current;if(!body)return;const resize=new ResizeObserver(revealInspector);resize.observe(body);return()=>resize.disconnect();},[selectedId,tab,open]);
   return (
     <>
+      <WorkflowCanvasLayer api={api} token={token} workflowId={flow.selected?.id} graph={flow.graph} disabled={locked} onEdit={editNode} onConnect={connect} onDisconnect={disconnect} onAdd={setAddingAfter} onError={flow.setError}/>
+      <WorkflowNodePicker open={addingAfter!==null} onClose={()=>setAddingAfter(null)} onAdd={addNode} disabled={locked} anchor={flow.graph.nodes.find(node=>node.id===addingAfter)?.title}/>
       <WorkflowMaterialDropCue cue={materialDrop.cue} onComplete={materialDrop.clearCue} />
       {!open && flow.selected && (
         <button
@@ -110,7 +121,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
             <StyledSelect
               aria-label="选择工作流"
               value={flow.selected?.id ?? ""}
-              disabled={flow.busy || flow.dirty}
+              disabled={flow.busy}
               options={[
                 { value: "", label: "选择流程" },
                 ...flow.documents.map((doc) => ({
@@ -120,7 +131,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
               ]}
               onChange={(id) => {
                 const doc = flow.documents.find((item) => item.id === id);
-                if (doc) flow.select(doc);
+                if (doc) requestSwitch(doc);
               }}
             />
           </div>
@@ -146,18 +157,16 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
         {(flow.error || run.error) && (
           <div role="alert" className="workflow-banner is-error">
             {flow.error || run.error}
-            <button onClick={() => void flow.refresh()} disabled={locked}>
-              重新加载
-            </button>
+            <button onClick={()=>flow.setError("")} aria-label="关闭提示">知道了</button>
           </div>
         )}
         {flow.recovery && (
           <div className="workflow-banner">
             本机有尚未保存的草稿。
-            <button onClick={flow.restoreRecovery} disabled={locked}>
+            <button onClick={flow.restoreRecovery} disabled={flow.busy||active}>
               恢复草稿
             </button>
-            <button onClick={flow.clearRecovery}>使用服务器版本</button>
+            <button onClick={flow.clearRecovery} disabled={flow.busy}>使用服务器版本</button>
           </div>
         )}
         {flow.loading && (
@@ -234,9 +243,9 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
           </button>
           <button aria-pressed={tab === "library"} onClick={()=>openLibrary()}>资源库</button>
         </nav>
-        <div className="workflow-dock-body">
+        <div className="workflow-dock-body" ref={bodyRef}>
           {tab==="library"&&<WorkflowLibrary initialMode={libraryMode} token={token} canvasId={props.canvasId} graph={flow.selected?flow.graph:null} selectedIds={selection.nodes} prompt={libraryPrompt} disabled={locked} onInsert={graph=>{if(flow.dirty){flow.setError("先保存当前草稿，再插入模板。");return;}void flow.create(false,graph);setSelectedId(null);setTab("nodes");}} onPrompt={applyPrompt}/>}
-          <div className="workflow-template-picker"><StyledSelect aria-label="创作流程模板" value="" disabled={locked||flow.dirty} options={[{value:"",label:"从创作模板开始…"},{value:"script",label:"故事 → 剧本"},{value:"storyboard",label:"剧本 → 分镜"},{value:"film",label:"故事 → 镜头生成 → 成片"}]} onChange={template=>void flow.create(false,creativeWorkflow(template as "script"|"storyboard"|"film"))} /></div>
+          {tab==="nodes"&&!selected&&<div className="workflow-template-picker"><StyledSelect aria-label="创作流程模板" value="" disabled={locked||flow.dirty} options={[{value:"",label:"从创作模板开始…"},{value:"script",label:"故事 → 剧本"},{value:"storyboard",label:"剧本 → 分镜"},{value:"film",label:"故事 → 镜头生成 → 成片"}]} onChange={template=>void flow.create(false,creativeWorkflow(template as "script"|"storyboard"|"film"))} /></div>}
           {tab === "nodes" && (
             <>
               {!flow.selected ? (
@@ -291,8 +300,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                         <button
                           aria-pressed={selectedId === node.id}
                           onClick={() => {
-                            setSelectedId(node.id);
-                            scene.focus(node.id);
+                            if(flow.selected){editNode(flow.selected.id,node.id);requestAnimationFrame(revealInspector);}
                           }}
                         >
                           <span>
@@ -301,7 +309,6 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                           </span>
                           <span className="workflow-list-state">
                             {workflowStateLabel[states[node.id] ?? "draft"]}
-                            <ArrowUpRight size={13} />
                           </span>
                         </button>
                       </li>
@@ -309,7 +316,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                   </ol>
                 </>
               )}
-              <div className="workflow-materials">
+              {(!selected||materials.length>0)&&<div className="workflow-materials">
                 <Button
                   size="sm"
                   variant="outline"
@@ -323,8 +330,11 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                 <p>
                   图片、视频可直接拖入生成节点作为参考。也可选中素材后接入，或画箭头连接处理节点。
                 </p>
-              </div>
+              </div>}
               {selected && (
+                <div ref={inspectorRef} className="workflow-selected-editor">
+                <div className="workflow-selection-header"><button type="button" onClick={deselectNode}><ChevronLeft size={16}/>全部节点</button><Button size="sm" variant="ghost" onClick={()=>scene.focus(selected.id)}><LocateFixed size={14}/>定位</Button></div>
+                {locked&&<p role="status" className="workflow-edit-lock">{flow.recovery?"先处理上方的本机草稿，再继续编辑。":active?"当前版本正在执行，参数已锁定。可在运行记录中暂停或取消。":"正在保存，请稍候。"}</p>}
                 <NodeInspector
                   node={selected}
                   graph={flow.graph}
@@ -342,12 +352,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                   materials={materials}
                   onBindMaterial={bindSelectedMaterial}
                   referenceEditor={<WorkflowReferenceEditor graph={flow.graph} node={selected} api={api} token={token} disabled={locked} previews={previews} onEmbed={embedMaterials} onRemove={removeReference} onFrame={setReferenceFrame} />}
-                  onDisconnect={(id) =>
-                    flow.edit({
-                      ...flow.graph,
-                      edges: flow.graph.edges.filter((edge) => edge.id !== id),
-                    })
-                  }
+                  onDisconnect={disconnect}
                   onReorder={(id,direction)=>{
                     const edges=[...flow.graph.edges],index=edges.findIndex(edge=>edge.id===id);
                     const siblings=edges.map((edge,position)=>({edge,position})).filter(item=>item.edge.target===selected.id);
@@ -365,7 +370,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                     });
                     setSelectedId(null);
                   }}
-                />
+                /></div>
               )}
               {!!issues.length && flow.selected && (
                 <div className="workflow-validation">
@@ -472,16 +477,15 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
           </span>
           <Button
             size="sm"
-            disabled={
-              locked || flow.dirty || !plan || !flow.selected || !flow.enabled
-            }
-            onClick={() => setConfirmRun(true)}
+            disabled={locked || !plan || !flow.selected || !flow.enabled}
+            onClick={() => void prepareRun()}
           >
             <Play size={14} />
-            运行流程
+            {saving?"正在保存…":flow.dirty&&plan?"保存并运行":"运行流程"}
           </Button>
         </footer>
       </section>
+      <Dialog open={Boolean(pendingSwitch)} onOpenChange={value=>{if(!value)setPendingSwitch(null);}}><DialogContent><DialogHeader><DialogTitle>切换前保留当前修改</DialogTitle><DialogDescription>当前流程有未保存修改。可以保存到工作区，也可以保留为本机草稿后切换；不会运行任何节点。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={()=>setPendingSwitch(null)}>继续编辑</Button><Button variant="outline" disabled={saving||flow.busy} onClick={()=>void confirmSwitch(false)}>保留本机草稿并切换</Button><Button disabled={saving||flow.busy} onClick={()=>void confirmSwitch(true)}>保存并切换</Button></DialogFooter></DialogContent></Dialog>
       <WorkflowDialogs
         proposal={proposal}
         title={flow.graph.title}
