@@ -45,6 +45,12 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
   await page.goto(
     `http://localhost:3228/canvas/?id=${fixture.canvasId}&session=${fixture.sessionId}`,
   );
+  await page.getByRole("button", { name: "矩形 (R)", exact: true }).click();
+  await page.mouse.move(110, 180);
+  await page.mouse.down();
+  await page.mouse.move(250, 250, { steps: 8 });
+  await page.mouse.up();
+  await page.keyboard.press("v");
   await page.getByRole("button", { name: "打开可视化工作流" }).click();
   const workspace = page.getByRole("region", {
     name: "可视化工作流",
@@ -53,15 +59,19 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
   await workspace
     .getByRole("button", { name: "网站研究与截图", exact: true })
     .click();
-  await workspace.getByRole("article", { name: /目标网址/ }).click();
+  await workspace.getByRole("button", { name: /网址输入 目标网址/ }).click();
   await workspace
     .getByRole("textbox", { name: "目标网址", exact: true })
     .fill("https://example.com/");
-	await workspace.getByRole("article", { name: /读取网页与截图/ }).click();
-	await workspace.getByRole("button", { name: "断开site到capture" }).click();
-	await expect(workspace.getByRole("button", { name: "运行流程", exact: true })).toBeDisabled();
-	await workspace.getByRole("combobox", { name: "连接上游节点" }).click();
-	await page.getByRole("option", { name: "目标网址", exact: true }).click();
+  await workspace
+    .getByRole("button", { name: /浏览与录制 读取网页与截图/ })
+    .click();
+  await workspace.getByRole("button", { name: "断开site到capture" }).click();
+  await expect(
+    workspace.getByRole("button", { name: "运行流程", exact: true }),
+  ).toBeDisabled();
+  await workspace.getByRole("combobox", { name: "连接上游节点" }).click();
+  await page.getByRole("option", { name: "目标网址", exact: true }).click();
   await workspace
     .getByRole("button", { name: "保存草稿", exact: true })
     .click();
@@ -85,7 +95,24 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
       fixture.canvasId,
     ])
   ).rows;
-  expect(rows[0].content.elements).toHaveLength(1);
+  expect(
+    rows[0].content.elements.filter(
+      (element: { type: string; isDeleted?: boolean }) =>
+        element.type === "rectangle" && !element.isDeleted,
+    ),
+  ).toHaveLength(1);
+  expect(
+    rows[0].content.elements.filter(
+      (element: { type: string; isDeleted?: boolean }) =>
+        element.type === "image" && !element.isDeleted,
+    ),
+  ).toHaveLength(1);
+  expect(
+    rows[0].content.elements.filter(
+      (element: { customData?: { workflow?: unknown }; isDeleted?: boolean }) =>
+        element.customData?.workflow && !element.isDeleted,
+    ),
+  ).toHaveLength(3);
   expect(
     (await fixture.db.query("select state from agent_goal_steps")).rows.every(
       (row) => row.state === "succeeded",
@@ -94,6 +121,9 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
   await page.screenshot({ path: info.outputPath("workflow-complete.png") });
   await page.reload();
   await page.getByRole("button", { name: "打开可视化工作流" }).click();
+  await workspace
+    .getByRole("button", { name: "运行记录", exact: true })
+    .click();
   await expect(
     workspace.getByRole("region", { name: "工作流运行记录" }),
   ).toContainText("全部完成");
@@ -104,6 +134,7 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
       )
     ).rows[0].n,
   ).toBe(1);
+  await workspace.getByRole("button", { name: "AI 搭建", exact: true }).click();
   await workspace
     .getByLabel("让 AI 帮你搭建")
     .fill("为 example.com 搭建读取网页与输出截图的工作流");
@@ -119,14 +150,26 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
     ).rows[0].n,
   ).toBe(1);
   await page.getByRole("button", { name: "应用到草稿" }).click();
-  await expect(workspace).toContainText("AI 方案已应用到草稿");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(
+    workspace.getByRole("button", { name: "保存草稿", exact: true }),
+  ).toBeEnabled();
   await page.setViewportSize({ width: 620, height: 900 });
+  await workspace
+    .getByRole("button", { name: "定位流程节点", exact: true })
+    .click();
   await page.screenshot({ path: info.outputPath("workflow-narrow.png") });
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+  await workspace
+    .getByRole("button", { name: "收起流程面板", exact: true })
+    .click();
+  await expect(workspace).toBeHidden();
+  await expect(page.getByRole("article", { name: /目标网址/ })).toBeVisible();
+  await page.getByRole("button", { name: "展开画布流程", exact: true }).click();
   await workspace
     .getByRole("button", { name: "保存草稿", exact: true })
     .click();

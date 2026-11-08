@@ -158,12 +158,12 @@ export function useCanvasWorkflow(
       setBusy(false);
     }
   }
-  async function create(record = false) {
+  async function create(record = false, initial?: WorkflowGraph) {
     await run(async () => {
       const doc = await createCanvasWorkflow(
         token,
         canvasId,
-        websiteWorkflow(record),
+        initial ?? websiteWorkflow(record),
         crypto.randomUUID(),
       );
       setDocuments((current) => [doc, ...current]);

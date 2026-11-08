@@ -270,7 +270,7 @@ export function WorkflowRunPanel({
 export function useWorkflowRun(
   token: string,
   goalId: string | null,
-  onComplete?: () => void,
+  onComplete?: (goal: AgentGoal) => void | Promise<void>,
 ) {
   const [goal, setGoal] = useState<AgentGoal | null>(null),
     [error, setError] = useState("");
@@ -295,8 +295,9 @@ export function useWorkflowRun(
         setGoal(next);
         setError("");
         if (next.status === "completed" && !done) {
+          await onComplete?.(next);
+          if (stopped) return;
           done = true;
-          onComplete?.();
           if (next.chatSessionId) {
             window.dispatchEvent(new CustomEvent("helstera:desktop-agent-result", {
               detail: { sessionId: next.chatSessionId },

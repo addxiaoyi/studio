@@ -57,7 +57,7 @@ function createFakeDb(input: { version?: number; content?: unknown } = {}) {
         ? { rows: [{ ...state.row }], rowCount: 1 }
         : { rows: [], rowCount: 0 };
     }
-    if (sql.includes("set content = $1, version = c.version + 1")) {
+    if (sql.startsWith("update canvases c") && sql.includes("version = c.version + 1")) {
       const [json, , , expectedVersion] = params;
       // 模拟「读版本」与「写回」之间被另一个窗口抢先落库。
       beforeUpdate?.();

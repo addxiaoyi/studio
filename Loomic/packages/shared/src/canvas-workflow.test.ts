@@ -53,3 +53,18 @@ describe("visual workflow contracts", () => {
     expect(compileWorkflow(workflowFromPlan(plan))).toEqual(plan);
   });
 });
+it("uses an existing canvas video as an approved trim source", () => {
+  const graph = {
+    title: "素材剪辑", nodes: [
+      { id: "asset", title: "录像", position: { x: 0, y: 0 }, config: { kind: "asset", elementId: "canvas-video", assetId: "ea5aa1ab-10b3-4f12-b89a-963b26b47b86", mediaType: "video" } },
+      { id: "trim", title: "剪辑", position: { x: 400, y: 0 }, config: { kind: "trim", start: 0, end: 3, aspect: "original" } },
+      { id: "output", title: "输出", position: { x: 800, y: 0 }, config: { kind: "deliver" } },
+    ], edges: [{ id: "a", source: "asset", target: "trim" }, { id: "b", source: "trim", target: "output" }],
+  };
+  const plan = compileWorkflow(graph as never);
+  expect(plan.steps[0]!.command).toMatchObject({ executor: "canvas.asset", elementId: "canvas-video", mediaType: "video" });
+  expect(plan.steps[1]!.dependsOn).toEqual(["asset"]);
+  expect(workflowFromPlan(plan).nodes[0]!.config).toEqual(graph.nodes[0]!.config);
+  graph.nodes[0]!.config.mediaType = "image";
+  expect(() => compileWorkflow(graph as never)).toThrow(/类型不匹配/);
+});

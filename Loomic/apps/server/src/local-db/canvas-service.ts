@@ -44,8 +44,17 @@ const SELECT_CANVAS_VERSION_SQL = `select c.version from canvases c
   join workspace_members wm on wm.workspace_id = p.workspace_id
   where c.id = $1 and wm.user_id = $2`;
 
+// Keep background deliveries that arrived after the client's read. An explicit tombstone still wins.
 const SAVE_CANVAS_SQL = `update canvases c
-  set content = $1, version = c.version + 1, updated_at = now()
+  set content = $1::jsonb || (
+    select jsonb_build_object(
+      'elements',coalesce($1::jsonb->'elements','[]') || coalesce(jsonb_agg(el),'[]'),
+      'files',coalesce($1::jsonb->'files','{}') || coalesce(jsonb_object_agg(el->>'fileId',c.content->'files'->(el->>'fileId'))
+        filter(where el->>'fileId' is not null and c.content->'files' ? (el->>'fileId')),'{}'))
+    from jsonb_array_elements(coalesce(c.content->'elements','[]')) el
+    where el->'customData'->>'jobId' is not null and coalesce((el->>'isDeleted')::boolean,false)=false
+      and not exists(select 1 from jsonb_array_elements(coalesce($1::jsonb->'elements','[]')) incoming where incoming->>'id'=el->>'id')
+  ), version = c.version + 1, updated_at = now()
   from projects p
   join workspace_members wm on wm.workspace_id = p.workspace_id
   where c.id = $2 and p.id = c.project_id and wm.user_id = $3 and c.version = $4

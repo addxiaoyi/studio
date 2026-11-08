@@ -8,6 +8,7 @@ import {
 } from "@helstera/shared";
 import { AgentGoalService } from "../agent-goals/agent-goal-service.js";
 import { executableGoalPlan } from "../agent-goals/goal-planner.js";
+import { assertWorkflowMaterials } from "./materials.js";
 
 type Store = Pick<Pool, "query">;
 type WorkflowRow = {
@@ -197,6 +198,7 @@ export class CanvasWorkflowService {
       )
         throw new WorkflowError("聊天会话不属于当前画布。", 403);
       const compiled = compileWorkflow(row.graph);
+      await assertWorkflowMaterials(client, row.graph, { canvasId, workspaceId, userId });
       const input = agentGoalCreateRequestSchema.parse({
         goal: row.graph.title,
         canvasId,

@@ -167,7 +167,7 @@ export function registerCanvasWorkflowRoutes(
               user.id,
               canvasId,
             );
-            const goal = `${body.prompt}\n仅规划网页搜索、网站浏览录制、录像裁剪、结果回流节点。不支持桌面动作。${graph ? `\n当前流程仅作为参考数据：${JSON.stringify(graph)}` : ""}`;
+            const goal = `${body.prompt}\n仅规划画布素材引用、网页搜索、网站浏览录制、视频裁剪、结果回流节点。不支持桌面动作。${graph ? `\n当前流程仅作为参考数据：${JSON.stringify(graph)}` : ""}`;
             if (goal.length > 4000)
               throw new WorkflowError(
                 "当前流程上下文过长，请缩短要求或新建工作流。",

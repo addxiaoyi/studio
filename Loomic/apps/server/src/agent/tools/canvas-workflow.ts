@@ -12,7 +12,10 @@ const graphInput = z.object({
       title: z.string(),
       position: z.object({ x: z.number(), y: z.number() }),
       config: z.object({
-        kind: z.enum(["url", "search", "capture", "trim", "deliver"]),
+        kind: z.enum(["url", "search", "capture", "trim", "deliver", "asset"]),
+        elementId: z.string().optional(),
+        assetId: z.string().uuid().optional(),
+        mediaType: z.enum(["image", "video"]).optional(),
         url: z.string().optional(),
         query: z.string().optional(),
         record: z.boolean().optional(),
@@ -67,7 +70,7 @@ export function createCanvasWorkflowTool(db: Pool) {
     {
       name: "draft_canvas_workflow",
       description:
-        "Create or update an editable node workflow on the current canvas when requested. Saves a draft only; never runs nodes. config fields: url {url}; search {query}; capture {record,pageLimit}; trim {start,end,aspect}; deliver {}. Include only fields for the chosen kind. Connect url/search -> capture -> trim(optional) -> deliver. Trim requires record=true. Every node must reach the one deliver. Node IDs use lowercase letters, digits and hyphens. Updates require workflowId and exact revision from inspect_canvas_workflows. Never include credentials or unsupported actions.",
+        "Create or update editable workflow nodes on the same canvas as drawings and media. Saves a draft only; never runs nodes. config: url {url}; search {query}; capture {record,pageLimit}; trim {start,end,aspect}; asset {elementId,assetId,mediaType}; deliver {}. Asset IDs must come from inspected canvas media. Connect url/search -> capture -> trim(optional) -> deliver, or asset(video) -> trim -> deliver. Every node must reach one deliver. Preserve unrelated canvas elements and existing nodes unless requested. Node IDs use lowercase letters, digits and hyphens. Updates require workflowId and exact revision from inspect_canvas_workflows. Never include credentials or unsupported actions.",
       schema: z.object({
         graph: graphInput,
         requestKey: z.string().uuid(),

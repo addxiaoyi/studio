@@ -11,12 +11,18 @@ import { assertConnectorEnabled } from "./connector-gate.js";
 import { runOneTake } from "../onetake/runner.js";
 import { savePrivateVideo } from "../assets/private-video.js";
 import { StepWaiting, type StepExecutor } from "./goal-step-worker.js";
+import { readWorkflowMaterial } from "../canvas-workflows/materials.js";
 
 type Options = { db: Pool; storage: StorageProvider; storageRoot: string; webOrigin: string; desktop: WebsiteAssistantHub };
 export function createGoalStepExecutor(options: Options): StepExecutor {
   return async input => {
     const { step, goal, previous, signal, assertActive } = input;
     const command = step.command;
+    if (command.executor === "canvas.asset") {
+      const asset = await readWorkflowMaterial(options.db, { canvasId: goal.canvas_id, workspaceId: goal.workspace_id, userId: goal.created_by, ...command });
+      await assertActive();
+      return { assets: [{ id: asset.id, mediaType: command.mediaType, url: `/api/uploads/${asset.id}/file` }], canvasElementIds: [command.elementId], ...(command.mediaType === "video" ? { recordingAssetId: asset.id } : {}) };
+    }
     if (command.executor.startsWith("web.")) await assertConnectorEnabled(options.db, goal.workspace_id, goal.created_by, "isolated-browser");
     if (command.executor === "web.search") {
       const response = await fetch("https://html.duckduckgo.com/html/?" + new URLSearchParams({ q: command.query }), { signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]), redirect: "error" });
@@ -100,6 +106,7 @@ export function createGoalStepExecutor(options: Options): StepExecutor {
         if (goal.canvas_id) canvasElementIds.push(...await writeCaptureToCanvas({ db: options.db, storage: options.storage, writer: { insertImage: insertLocalImageElement, insertVideo: insertLocalVideoElement }, canvasId: goal.canvas_id, taskId: source.id, workspaceId: goal.workspace_id, pages: capture.pages, recordingAssetId: capture.recordingAssetId, recordingUrl: capture.recordingUrl, beforeWrite: assertActive }));
       } else if (Array.isArray(output.assets)) {
         assets.push(...output.assets as typeof assets);
+        if (source.executor === "canvas.asset" && Array.isArray(output.canvasElementIds)) canvasElementIds.push(...output.canvasElementIds.filter((id): id is string => typeof id === "string"));
         if (goal.canvas_id && source.executor === "media.trim" && typeof output.recordingAssetId === "string") {
           await assertActive();
           const inserted = await insertLocalVideoElement(options.db, { canvasId: goal.canvas_id, signedUrl: `/api/uploads/${output.recordingAssetId}/file`, width: source.command.executor === "media.trim" && source.command.aspect === "portrait" ? 720 : 1280, height: source.command.executor === "media.trim" && source.command.aspect === "portrait" ? 1280 : 720, mimeType: "video/mp4", title: "目标剪辑成片", assetId: output.recordingAssetId, jobId: `${source.id}:trim-output` });

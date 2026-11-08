@@ -1,5 +1,19 @@
 # Third-party source notices
 
+## AI Fusion Video (canvas interaction reference)
+
+The unified canvas workflow uses `Stonewuu/ai-fusion-video` at commit
+`308cd8f5484162a990111f37696940e02afb648e` as an interaction reference:
+media and operation nodes on one canvas, contextual node inspection, connected
+inputs, in-place results, and an assistant that produces reviewable drafts.
+The project is MIT licensed, Copyright (c) 2026 Stone Wu.
+
+Source: https://github.com/Stonewuu/ai-fusion-video
+
+Loomic's Excalidraw scene bridge and execution adapters are implemented against
+Loomic's own canvas, permissions and approval APIs. No upstream Java service,
+provider configuration, media asset or frontend bundle is included.
+
 ## Novanova Studio
 
 The migration work references and may incorporate source code from

@@ -24,6 +24,8 @@ import { CanvasToolMenu } from "./canvas-tool-menu";
 import { normalizeCanvasElement, normalizeCanvasElements } from "../lib/canvas-normalize";
 import { ErrorBoundary } from "./error-boundary";
 import { Trash2 } from "lucide-react";
+import { WorkflowCanvasNode } from "./workflow/canvas-node";
+import { workflowBinding } from "./workflow/scene";
 
 const Excalidraw = dynamic(
   () => import("@excalidraw/excalidraw").then((mod) => mod.Excalidraw),
@@ -661,7 +663,7 @@ export function CanvasEditor({
             accessTokenRef.current,
             canvasIdRef.current,
             {
-              elements: mutableElements.filter((el: any) => !el.isDeleted),
+              elements: mutableElements,
               appState: {
                 viewBackgroundColor: appState.viewBackgroundColor,
                 gridModeEnabled: appState.gridModeEnabled,
@@ -726,7 +728,7 @@ export function CanvasEditor({
           }
         }
         const content = {
-          elements: elements.filter((el: any) => !el.isDeleted) as Record<
+          elements: (excalidrawApi?.getSceneElementsIncludingDeleted() ?? elements) as Record<
             string,
             unknown
           >[],
@@ -999,7 +1001,7 @@ export function CanvasEditor({
         };
       }
       return {
-        elements: sceneElements.filter((el: any) => !el.isDeleted),
+        elements: excalidrawApi.getSceneElementsIncludingDeleted(),
         appState: {
           viewBackgroundColor: appState.viewBackgroundColor,
           gridModeEnabled: appState.gridModeEnabled,
@@ -1254,6 +1256,9 @@ export function CanvasEditor({
   // Excalidraw calls this for every embeddable element; we intercept video URLs
   // and render an inline player, falling back to default for everything else.
   const renderEmbeddable = useCallback((element: any, _appState: any) => {
+    const binding = workflowBinding(element);
+    if (binding && binding.node.config.kind !== "asset") return <WorkflowCanvasNode element={element} />;
+    if (!binding && element.customData?.workflow && !element.customData?.isVideo && element.type === "embeddable") return <div className="canvas-workflow-node p-4 text-sm" role="status">正在同步复制的节点…</div>;
     const link = element?.link;
     const isCanvasVideo =
       element?.customData?.isVideo === true ||

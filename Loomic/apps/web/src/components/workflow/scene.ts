@@ -1,0 +1,479 @@
+import {
+  connectionIssue,
+  workflowNodeSchema,
+  type WorkflowGraph,
+  type WorkflowNode,
+} from "@helstera/shared";
+
+export type SceneElement = {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  isDeleted?: boolean;
+  version?: number;
+  customData?: Record<string, unknown>;
+  startBinding?: { elementId: string; focus?: number; gap?: number } | null;
+  endBinding?: { elementId: string; focus?: number; gap?: number } | null;
+  [key: string]: unknown;
+};
+export type CanvasState = {
+  scrollX: number;
+  scrollY: number;
+  width: number;
+  height: number;
+  zoom: { value: number };
+  selectedElementIds: Record<string, boolean>;
+};
+export type WorkflowCanvasApi = {
+  getSceneElements(): readonly SceneElement[];
+  getSceneElementsIncludingDeleted(): readonly SceneElement[];
+  getAppState(): CanvasState;
+  updateScene(scene: {
+    elements?: readonly SceneElement[];
+    appState?: Partial<CanvasState>;
+    captureUpdate: "NEVER" | "IMMEDIATELY";
+  }): void;
+  onChange(
+    listener: (elements: readonly SceneElement[], state: CanvasState) => void,
+  ): () => void;
+  scrollToContent(
+    elements: readonly SceneElement[],
+    options: {
+      fitToViewport: boolean;
+      animate: boolean;
+      viewportZoomFactor?: number;
+      maxZoom?: number;
+    },
+  ): void;
+  setActiveTool(tool: { type: "arrow" | "selection" }): void;
+};
+type NodeBinding = {
+  workflowId: string;
+  node: WorkflowNode;
+  state: string;
+  issue?: string;
+};
+export const NODE_WIDTH = 300,
+  NODE_HEIGHT = 184;
+const uuid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
+export function workflowBinding(element: SceneElement): NodeBinding | null {
+  const value = element.customData?.workflow as
+    | Partial<NodeBinding>
+    | undefined;
+  if (!value || typeof value.workflowId !== "string") return null;
+  const node = workflowNodeSchema.safeParse(value.node);
+  if (
+    !node.success ||
+    element.id !== nodeElementId(value.workflowId, node.data)
+  )
+    return null;
+  return {
+    workflowId: value.workflowId,
+    node: node.data,
+    state: typeof value.state === "string" ? value.state : "draft",
+    ...(typeof value.issue === "string" ? { issue: value.issue } : {}),
+  };
+}
+export function nodeElementId(workflowId: string, node: WorkflowNode) {
+  return node.config.kind === "asset"
+    ? node.config.elementId
+    : `wf:${workflowId}:${node.id}`;
+}
+const edgeElementId = (workflowId: string, id: string) =>
+  `we:${workflowId}:${id}`;
+export function adoptWorkflowCopies(
+  scene: readonly SceneElement[],
+  workflowId: string,
+): SceneElement[] {
+  const renamed = new Map<string, string>();
+  const adopted = scene.map((el) => {
+    const binding = el.customData?.workflow as Partial<NodeBinding> | undefined;
+    if (
+      el.isDeleted ||
+      binding?.workflowId !== workflowId ||
+      workflowBinding(el)
+    )
+      return el;
+    const parsed = workflowNodeSchema.safeParse(binding.node);
+    if (!parsed.success) return el;
+    const seed = el.id
+      .replace(/[^a-z0-9]/gi, "")
+      .toLowerCase()
+      .slice(0, 40);
+    const node: WorkflowNode = {
+      ...parsed.data,
+      id: `copy-${seed}`,
+      position: { x: el.x, y: el.y },
+      ...(parsed.data.config.kind === "asset"
+        ? { config: { ...parsed.data.config, elementId: el.id } }
+        : {}),
+    };
+    const id = nodeElementId(workflowId, node);
+    renamed.set(el.id, id);
+    return revise(el, {
+      ...el,
+      id,
+      customData: {
+        ...el.customData,
+        workflow: { workflowId, node, state: "draft" },
+      },
+    });
+  });
+  if (!renamed.size) return [...scene];
+  return adopted.map((el) => {
+    const start = el.startBinding && renamed.get(el.startBinding.elementId),
+      end = el.endBinding && renamed.get(el.endBinding.elementId);
+    if (!start && !end) return el;
+    return revise(el, {
+      ...el,
+      ...(start
+        ? { startBinding: { ...el.startBinding!, elementId: start } }
+        : {}),
+      ...(end ? { endBinding: { ...el.endBinding!, elementId: end } } : {}),
+      customData: { ...el.customData, workflowEdge: undefined },
+    });
+  });
+}
+export function materialNode(element: SceneElement): WorkflowNode | null {
+  const assetId = element.customData?.assetId;
+  if (typeof assetId !== "string" || !uuid.test(assetId) || element.isDeleted)
+    return null;
+  const mediaType =
+    element.type === "image"
+      ? "image"
+      : element.customData?.isVideo === true
+        ? "video"
+        : null;
+  if (!mediaType) return null;
+  // A stable id lets drawing the same connection after undo reuse the same material input.
+  let hash = 2166136261;
+  for (const character of element.id)
+    hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  return {
+    id: `asset-${(hash >>> 0).toString(36)}`,
+    title: String(
+      element.customData?.title ??
+        (mediaType === "video" ? "画布视频" : "画布图片"),
+    ).slice(0, 100),
+    position: { x: element.x, y: element.y },
+    config: { kind: "asset", elementId: element.id, assetId, mediaType },
+  };
+}
+function baseElement(id: string, type: string): SceneElement {
+  return {
+    id,
+    type,
+    x: 0,
+    y: 0,
+    width: NODE_WIDTH,
+    height: NODE_HEIGHT,
+    angle: 0,
+    strokeColor: "#64748b",
+    backgroundColor: "transparent",
+    fillStyle: "solid",
+    strokeWidth: 1,
+    strokeStyle: "solid",
+    roughness: 0,
+    opacity: 100,
+    groupIds: [],
+    frameId: null,
+    roundness: { type: 3 },
+    boundElements: null,
+    index: null,
+    seed: 1,
+    version: 1,
+    versionNonce: 1,
+    isDeleted: false,
+    updated: Date.now(),
+    link: null,
+    locked: false,
+  };
+}
+function revise(prior: SceneElement | undefined, next: SceneElement) {
+  if (!prior) return next;
+  if (JSON.stringify(prior) === JSON.stringify(next)) return prior;
+  return {
+    ...next,
+    version: (prior.version ?? 1) + 1,
+    versionNonce: Math.floor(Math.random() * 2_000_000_000),
+    updated: Date.now(),
+  };
+}
+export function projectWorkflow(
+  scene: readonly SceneElement[],
+  workflowId: string,
+  graph: WorkflowGraph,
+  states: Record<string, string>,
+  locked: boolean,
+): SceneElement[] {
+  const byId = new Map(scene.map((el) => [el.id, el]));
+  const next = new Map<string, SceneElement>();
+  for (const node of graph.nodes) {
+    const id = nodeElementId(workflowId, node),
+      prior = byId.get(id);
+    if (node.config.kind === "asset" && (!prior || prior.isDeleted)) continue;
+    const body = prior ?? baseElement(id, "embeddable");
+    const snapshot = { workflowId, node, state: states[node.id] ?? "draft" };
+    next.set(
+      id,
+      revise(prior, {
+        ...body,
+        x: node.position.x,
+        y: node.position.y,
+        isDeleted: false,
+        ...(node.config.kind !== "asset"
+          ? {
+              link: "https://studio.0st.top/#workflow-node",
+              width: Math.max(240, body.width),
+              height: Math.max(164, body.height),
+              strokeColor: "transparent",
+              roundness: null,
+            }
+          : {}),
+        locked,
+        customData: { ...body.customData, workflow: snapshot },
+      }),
+    );
+  }
+  for (const edge of graph.edges) {
+    const sourceNode = graph.nodes.find((node) => node.id === edge.source),
+      targetNode = graph.nodes.find((node) => node.id === edge.target);
+    if (!sourceNode || !targetNode) continue;
+    const from = next.get(nodeElementId(workflowId, sourceNode)),
+      to = next.get(nodeElementId(workflowId, targetNode));
+    if (!from || !to) continue;
+    const id = edgeElementId(workflowId, edge.id),
+      prior = byId.get(id),
+      body = prior ?? baseElement(id, "arrow");
+    const x = from.x + from.width + 4,
+      y = from.y + from.height / 2;
+    const dx = to.x - 4 - x,
+      dy = to.y + to.height / 2 - y;
+    next.set(
+      id,
+      revise(prior, {
+        ...body,
+        x,
+        y,
+        width: Math.abs(dx),
+        height: Math.abs(dy),
+        points: [
+          [0, 0],
+          [dx, dy],
+        ],
+        startBinding: { elementId: from.id, focus: 0, gap: 4 },
+        endBinding: { elementId: to.id, focus: 0, gap: 4 },
+        startArrowhead: null,
+        endArrowhead: "arrow",
+        roundness: { type: 2 },
+        elbowed: false,
+        strokeWidth: 2,
+        isDeleted: false,
+        locked,
+        customData: {
+          ...body.customData,
+          workflowEdge: { workflowId, edgeId: edge.id },
+        },
+      }),
+    );
+  }
+  // Excalidraw uses reverse bindings to keep arrows attached during ordinary canvas drags.
+  for (const node of graph.nodes) {
+    const id = nodeElementId(workflowId, node),
+      el = next.get(id);
+    if (!el) continue;
+    const connected = [...next.values()].filter(
+      (edge) =>
+        edge.type === "arrow" &&
+        (edge.startBinding?.elementId === id ||
+          edge.endBinding?.elementId === id),
+    );
+    const existing = Array.isArray(el.boundElements)
+      ? (el.boundElements as Array<{ id: string; type: string }>)
+      : [];
+    const foreign = existing.filter(
+      (binding) => !binding.id.startsWith(`we:${workflowId}:`),
+    );
+    next.set(
+      id,
+      revise(byId.get(id), {
+        ...el,
+        boundElements: [
+          ...foreign,
+          ...connected.map((edge) => ({ id: edge.id, type: "arrow" })),
+        ],
+      }),
+    );
+  }
+  const merged = scene.map((el) => {
+    const replacement = next.get(el.id);
+    if (replacement) {
+      next.delete(el.id);
+      return replacement;
+    }
+    if (workflowBinding(el)?.workflowId === workflowId) {
+      if (workflowBinding(el)?.node.config.kind === "asset") {
+        const { workflow: _removed, ...customData } = el.customData ?? {};
+        return revise(el, { ...el, customData, locked: false });
+      }
+      return el.isDeleted ? el : revise(el, { ...el, isDeleted: true });
+    }
+    const binding = el.customData?.workflowEdge as
+      | { workflowId?: string }
+      | undefined;
+    if (binding?.workflowId === workflowId)
+      return el.isDeleted ? el : revise(el, { ...el, isDeleted: true });
+    return el;
+  });
+  return [...merged, ...next.values()];
+}
+export function readSceneWorkflow(
+  scene: readonly SceneElement[],
+  workflowId: string,
+  previous: WorkflowGraph,
+) {
+  const nodes: WorkflowNode[] = [],
+    ids = new Map<string, string>(),
+    issues: string[] = [],
+    consumedArrows: string[] = [];
+  for (const el of scene) {
+    if (el.isDeleted) continue;
+    const binding = workflowBinding(el);
+    if (binding?.workflowId !== workflowId) continue;
+    const position = {
+      x: Math.max(-10000, Math.min(10000, el.x)),
+      y: Math.max(-10000, Math.min(10000, el.y)),
+    };
+    nodes.push({ ...binding.node, position });
+    ids.set(el.id, binding.node.id);
+  }
+  const graph: WorkflowGraph = { title: previous.title, nodes, edges: [] };
+  for (const el of scene) {
+    if (el.isDeleted || el.type !== "arrow" || el.customData?.workflowResult)
+      continue;
+    const target = ids.get(el.endBinding?.elementId ?? "");
+    if (!target) continue;
+    let source = ids.get(el.startBinding?.elementId ?? "");
+    if (!source) {
+      const media = scene.find(
+        (item) => item.id === el.startBinding?.elementId && !item.isDeleted,
+      );
+      const node =
+        media && !workflowBinding(media) ? materialNode(media) : null;
+      if (
+        node &&
+        !connectionIssue({ ...graph, nodes: [...nodes, node] }, node.id, target)
+      ) {
+        nodes.push(node);
+        ids.set(media!.id, node.id);
+        source = node.id;
+      }
+    }
+    if (!source) continue;
+    const issue = connectionIssue(graph, source, target);
+    if (issue) {
+      issues.push(issue);
+      continue;
+    }
+    const binding = el.customData?.workflowEdge as
+      | { workflowId?: string; edgeId?: string }
+      | undefined;
+    const edgeId =
+      binding?.workflowId === workflowId && binding.edgeId
+        ? binding.edgeId
+        : `link-${el.id
+            .replace(/[^a-z0-9-]/gi, "")
+            .toLowerCase()
+            .slice(0, 50)}`;
+    graph.edges.push({ id: edgeId, source, target });
+    if (el.id !== edgeElementId(workflowId, edgeId)) consumedArrows.push(el.id);
+  }
+  return { graph, issues: [...new Set(issues)], consumedArrows };
+}
+
+export function placeWorkflow(
+  graph: WorkflowGraph,
+  scene: readonly SceneElement[],
+  state: CanvasState,
+): WorkflowGraph {
+  if (graph.nodes.some((node) => node.config.kind === "asset")) return graph;
+  const visible = scene.filter((el) => !el.isDeleted);
+  const right = visible.length
+    ? Math.max(...visible.map((el) => el.x + el.width)) + 160
+    : -state.scrollX + 100;
+  const top = -state.scrollY + 150 / state.zoom.value;
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => ({
+      ...node,
+      position: {
+        x: Math.min(9000, right + node.position.x),
+        y: Math.min(9000, top + node.position.y),
+      },
+    })),
+  };
+}
+
+export function linkWorkflowResults(
+  scene: readonly SceneElement[],
+  workflowId: string,
+  graph: WorkflowGraph,
+  goalId: string,
+  elementIds: string[],
+) {
+  const output = graph.nodes.find((node) => node.config.kind === "deliver");
+  const source =
+    output && scene.find((el) => el.id === nodeElementId(workflowId, output));
+  if (!source) return [...scene];
+  const links: SceneElement[] = [];
+  for (const target of scene.filter(
+    (el) => elementIds.includes(el.id) && !el.isDeleted && !workflowBinding(el),
+  )) {
+    const id = `wr:${goalId}:${target.id}`;
+    if (scene.some((el) => el.id === id)) continue;
+    const x = source.x + source.width + 4,
+      y = source.y + source.height / 2;
+    const dx = target.x - 4 - x,
+      dy = target.y + target.height / 2 - y;
+    links.push({
+      ...baseElement(id, "arrow"),
+      x,
+      y,
+      width: Math.abs(dx),
+      height: Math.abs(dy),
+      points: [
+        [0, 0],
+        [dx, dy],
+      ],
+      startBinding: { elementId: source.id, focus: 0, gap: 4 },
+      endBinding: { elementId: target.id, focus: 0, gap: 4 },
+      startArrowhead: null,
+      endArrowhead: "arrow",
+      elbowed: false,
+      strokeStyle: "dashed",
+      customData: { workflowResult: { workflowId, goalId } },
+    });
+  }
+  if (!links.length) return [...scene];
+  return [
+    ...scene.map((el) => {
+      const attached = links.filter(
+        (link) =>
+          link.startBinding?.elementId === el.id ||
+          link.endBinding?.elementId === el.id,
+      );
+      if (!attached.length) return el;
+      return revise(el, {
+        ...el,
+        boundElements: [
+          ...(Array.isArray(el.boundElements) ? el.boundElements : []),
+          ...attached.map((link) => ({ id: link.id, type: "arrow" })),
+        ],
+      });
+    }),
+    ...links,
+  ];
+}

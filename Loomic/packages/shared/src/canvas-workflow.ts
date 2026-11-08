@@ -15,6 +15,7 @@ export const workflowNodeSchema = z
       y: z.number().finite().min(-10000).max(10000),
     }),
     config: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("asset"), elementId: z.string().min(1).max(200), assetId: z.string().uuid(), mediaType: z.enum(["image", "video"]) }).strict(),
       z.object({ kind: z.literal("url"), url: z.string().max(2048) }).strict(),
       z
         .object({ kind: z.literal("search"), query: z.string().max(500) })
@@ -61,6 +62,7 @@ export const workflowDocumentSchema = z.object({
 export type WorkflowDocument = z.infer<typeof workflowDocumentSchema>;
 
 export const WORKFLOW_LABELS: Record<WorkflowNode["config"]["kind"], string> = {
+  asset: "画布素材",
   url: "网址输入",
   search: "网页搜索",
   capture: "浏览与录制",
@@ -80,8 +82,8 @@ export function connectionIssue(
     b = target.config;
   const compatible =
     (b.kind === "capture" && ["url", "search"].includes(a.kind)) ||
-    (b.kind === "trim" && a.kind === "capture" && a.record) ||
-    (b.kind === "deliver" && ["capture", "trim"].includes(a.kind));
+    (b.kind === "trim" && ((a.kind === "capture" && a.record) || (a.kind === "asset" && a.mediaType === "video") || a.kind === "trim")) ||
+    (b.kind === "deliver" && ["capture", "trim", "asset"].includes(a.kind));
   if (!compatible)
     return "连线类型不匹配：浏览需要网址，裁剪需要录像，输出需要素材。";
   if (
@@ -229,6 +231,8 @@ export function compileWorkflow(raw: WorkflowGraph): GoalExecutionPlan {
         ...base,
         command: { executor: "web.search", query: config.query.trim() },
       });
+    if (config.kind === "asset")
+      steps.push({ ...base, command: { executor: "canvas.asset", elementId: config.elementId, assetId: config.assetId, mediaType: config.mediaType } });
     if (config.kind === "capture") {
       const input = inputs[0]!;
       steps.push({
@@ -279,7 +283,7 @@ export function layoutWorkflow(graph: WorkflowGraph): WorkflowGraph {
     const row = rows.get(level) ?? 0;
     rows.set(level, row + 1);
     depth.set(node.id, level);
-    return { ...node, position: { x: level * 290, y: row * 190 } };
+    return { ...node, position: { x: level * 390, y: row * 260 } };
   });
   return { ...graph, nodes };
 }
@@ -302,6 +306,8 @@ export function workflowFromPlan(plan: GoalExecutionPlan): WorkflowGraph {
       );
     if (c.executor === "web.search")
       nodes.push({ ...base, config: { kind: "search", query: c.query } });
+    if (c.executor === "canvas.asset")
+      nodes.push({ ...base, config: { kind: "asset", elementId: c.elementId, assetId: c.assetId, mediaType: c.mediaType } });
     if (c.executor === "web.capture") {
       if (c.url) {
         let inputId = `url-${nodes.length}`;
@@ -353,13 +359,13 @@ export function websiteWorkflow(record = false): WorkflowGraph {
       {
         id: "capture",
         title: record ? "录制网站" : "读取网页与截图",
-        position: { x: 290, y: 0 },
+        position: { x: 390, y: 0 },
         config: { kind: "capture", record, pageLimit: 1 },
       },
       {
         id: "deliver",
         title: "保存到画布与聊天",
-        position: { x: 580, y: 0 },
+        position: { x: 780, y: 0 },
         config: { kind: "deliver" },
       },
     ],

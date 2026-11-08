@@ -7,6 +7,9 @@ import { CanvasWorkflowService } from "./service.js";
 import { GoalStepWorker } from "../agent-goals/goal-step-worker.js";
 import { decideGoalStep } from "../agent-goals/goal-step-store.js";
 import { createCanvasWorkflowTool } from "../../agent/tools/canvas-workflow.js";
+import { readWorkflowMaterial } from "./materials.js";
+import { createLocalCanvasService } from "../../local-db/canvas-service.js";
+import { insertLocalImageElement } from "../canvas/canvas-element-writer.js";
 
 const connectionString = process.env.HELT_TEST_DATABASE_URL;
 const schema = `canvas_flow_${randomUUID().replaceAll("-", "")}`;
@@ -51,6 +54,8 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
       "20261031000000_agent_muse_workspace",
       "20261106000003_goal_execution_steps",
       "20261108000004_canvas_workflows",
+      "20261029000000_canvas_content_version",
+      "20261017000000_automation_lifecycle",
     ])
       await db.query(
         await readFile(
@@ -236,5 +241,31 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
     expect(
       (await service.get(user, canvas, reply.visualWorkflowId)).activeGoalId,
     ).toBeNull();
+  });
+  it("keeps a background result that arrives between reading and saving the canvas", async () => {
+    const canvasService = createLocalCanvasService(db);
+    const account = { id: user } as Parameters<typeof canvasService.getCanvasWithVersion>[0];
+    const before = await canvasService.getCanvasWithVersion(account, canvas);
+    const receipt = await insertLocalImageElement(db, { download: async () => ({ data: Buffer.from("image"), error: null }) }, { canvasId: canvas, objectPath: "race.jpg", width: 100, height: 80, mimeType: "image/jpeg", jobId: "workflow-save-race" });
+    await canvasService.saveCanvasContentWithVersion(account, canvas, before.canvas.content, before.version);
+    const saved = await canvasService.getCanvasWithVersion(account, canvas);
+    expect((saved.canvas.content.elements ?? []).some(el => el.id === receipt.elementId)).toBe(true);
+    const deleted = { ...saved.canvas.content, elements: saved.canvas.content.elements.map(el => el.id === receipt.elementId ? { ...el, isDeleted: true } : el) };
+    await canvasService.saveCanvasContentWithVersion(account, canvas, deleted, saved.version);
+    expect((await canvasService.getCanvasWithVersion(account, canvas)).canvas.content.elements.find(el => el.id === receipt.elementId)?.isDeleted).toBe(true);
+  });
+  it("rechecks private canvas media ownership, deletion and retention", async () => {
+    const assetId = randomUUID(), generated = randomUUID(), path = `workflow/${assetId}.mp4`;
+    await db.query("insert into asset_objects(id,workspace_id,created_by,bucket,object_path,mime_type) values($1,$2,$3,'project-assets',$4,'video/mp4')", [assetId,workspace,user,path]);
+    await db.query("insert into generated_assets(id,workspace_id,created_by,media_type,object_path,mime_type,retention_until) values($1,$2,$3,'video',$4,'video/mp4',now()+interval '1 day')", [generated,workspace,user,path]);
+    await db.query("update canvases set content=$2 where id=$1", [canvas,JSON.stringify({ elements: [{ id: "private-video", type: "embeddable", customData: { isVideo: true, assetId } }], appState: {}, files: {} })]);
+    const source = { canvasId:canvas,workspaceId:workspace,userId:user,elementId:"private-video",assetId,mediaType:"video" as const };
+    expect((await readWorkflowMaterial(db,source)).id).toBe(assetId);
+    await expect(readWorkflowMaterial(db,{...source,userId:randomUUID()})).rejects.toThrow("无访问权限");
+    await expect(readWorkflowMaterial(db,{...source,elementId:"unknown"})).rejects.toThrow("已删除");
+    await db.query("update generated_assets set retention_until=now()-interval '1 second' where id=$1", [generated]);
+    await expect(readWorkflowMaterial(db,source)).rejects.toThrow("到期");
+    await db.query("update generated_assets set retention_until=now()+interval '1 day',deleted_at=now() where id=$1", [generated]);
+    await expect(readWorkflowMaterial(db,source)).rejects.toThrow("已删除");
   });
 });

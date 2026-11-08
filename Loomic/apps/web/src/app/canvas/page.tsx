@@ -29,7 +29,7 @@ import { CanvasTimelinePanel } from "../../components/canvas-timeline-panel";
 import { CreditHeaderButton } from "../../components/credits/credit-header-button";
 import type { DesktopExecutionContext } from "@helstera/shared";
 import { AgentWorkspacePanel } from "../../components/agent-workspace-panel";
-const WorkflowWorkspace = dynamic(() => import("../../components/workflow/workspace").then(module => module.WorkflowWorkspace), { ssr: false, loading: () => <div role="status" className="absolute inset-0 z-40 grid place-items-center bg-background">正在加载工作流…</div> });
+const WorkflowWorkspace = dynamic(() => import("../../components/workflow/canvas-workspace").then(module => module.WorkflowWorkspace), { ssr: false });
 
 function isBlankCanvasContent(content: {
   elements: Record<string, unknown>[];
@@ -409,8 +409,9 @@ function CanvasPageContent() {
     }
   }, [canvasData]);
 
-  const openWorkflow = useCallback((id?:string) => { previousChatOpen.current=chatOpen;excalidrawApiRef.current?.updateScene({appState:{selectedElementIds:{}}});setChatOpen(false);setWorkflowId(id);setWorkflowOpen(true); },[chatOpen]);
-  const closeWorkflow = useCallback(()=>{setWorkflowOpen(false);setChatOpen(previousChatOpen.current);},[]);
+  const openWorkflow = useCallback((id?:string) => { if (!workflowOpen) previousChatOpen.current=chatOpen;setChatOpen(false);if (id) setWorkflowId(id);setWorkflowOpen(true); },[chatOpen,workflowOpen]);
+  const closeWorkflow = useCallback(()=>{setWorkflowOpen(false);setChatOpen(window.innerWidth >= 1024 && previousChatOpen.current);},[]);
+  const saveWorkflowCanvas = useCallback(async () => { if (!saveBeforeVideo.current) throw new Error("画布尚未就绪，请稍后再试。"); await saveBeforeVideo.current(); },[]);
   useEffect(()=>{const open=(event:Event)=>openWorkflow((event as CustomEvent<{id?:string}>).detail?.id);window.addEventListener("loomic:workflow-open",open);return()=>window.removeEventListener("loomic:workflow-open",open);},[openWorkflow]);
 
   // Fallback polling for timed-out generation jobs.
@@ -662,7 +663,7 @@ function CanvasPageContent() {
           onClose={handleCloseFiles}
           triggerRef={filesToggleRef}
         />
-        {workflowOpen && <WorkflowWorkspace token={accessToken} canvasId={canvasData.id} sessionId={initialSessionId} initialId={workflowId} onClose={closeWorkflow} onCanvasSync={handleCanvasSync} />}
+        {canvasReady && <WorkflowWorkspace token={accessToken} canvasId={canvasData.id} sessionId={initialSessionId} initialId={workflowId} api={excalidrawApi} open={workflowOpen} onOpen={()=>openWorkflow()} onClose={closeWorkflow} onCanvasSync={handleCanvasSync} saveCanvas={saveWorkflowCanvas} />}
       </div>
       <ChatSidebar
         accessToken={accessToken}

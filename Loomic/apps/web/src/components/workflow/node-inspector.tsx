@@ -195,6 +195,7 @@ export function NodeInspector({
           把输入节点的截图、录像或成片保存到当前画布。关联对话时同时回写结果。
         </p>
       )}
+      {config.kind === "asset" && <p className="text-sm text-muted-foreground">直接引用当前画布中的{config.mediaType === "video" ? "视频" : "图片"}。运行时重新验证素材权限和有效期；删除原素材后将停止执行。</p>}
       <div className="mt-5 border-t pt-4">
         <h4 className="text-xs font-semibold">输入连接</h4>
         <ul className="mt-2 space-y-2">
@@ -241,7 +242,7 @@ export function NodeInspector({
             />
           )}
         <p className="mt-2 text-xs text-muted-foreground">
-          也可以从节点右侧端口拖到目标节点左侧。
+          也可使用画布箭头工具（A），从源节点边缘连到目标节点边缘。
         </p>
       </div>
       <Button
