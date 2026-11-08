@@ -7,6 +7,7 @@ import { launchAgentBrowser } from "../agent-browser/engine.js";
 import { allowLoginRequest, newAuthenticatedContext, signInWebsite } from "./login-session.js";
 import { capturePresentationScene } from "./presentation-snapshot.js";
 import { recordWebsitePresentation } from "./presentation.js";
+import { discoverLoginPage } from "./login-detection.js";
 
 it("logs in once, transfers the session, masks credentials and records authenticated content",async()=>{
   const {browser}=await launchAgentBrowser();
@@ -62,5 +63,11 @@ it("does not expose fill values in login errors",async()=>{
     const page=await browser.newPage();await page.route("**/*",route=>route.fulfill({contentType:"text/html; charset=utf-8",body:'<input type="password"><input type="password">'}));
     const credentials={loginUrl:"https://login.example/login",successText:"工作台",username:"private-account",password:"private-password"};
     await expect(signInWebsite(page,credentials,{origin:"https://login.example",submitting:false,...credentials},async()=>{})).rejects.toThrow("登录未完成");
+  }finally{await browser.close();}
+});
+it('waits for an asynchronously mounted password login mode',async()=>{
+  const {browser}=await launchAgentBrowser();try{
+    const page=await browser.newPage();await page.setContent('<body><script>setTimeout(()=>{document.body.innerHTML=\'<button id="mode">使用密码登录</button>\';document.querySelector("button").onclick=()=>{document.body.innerHTML=\'<input type="password">\';}},500)</script></body>');
+    await discoverLoginPage(page,'https://example.com/',true);expect(await page.locator('input[type="password"]').isVisible()).toBe(true);
   }finally{await browser.close();}
 });

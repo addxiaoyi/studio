@@ -1,16 +1,31 @@
 import type { Page } from "playwright";
 import { sameWebsiteOrigin } from "@helstera/shared";
+import { setTimeout as delay } from "node:timers/promises";
 
 export async function discoverLoginPage(page:Page,originUrl:string,passwordMode=false){
-  if(passwordMode){
-    const mode=page.getByRole('button',{name:/使用密码登录|密码登录|账号密码登录|sign in with password|use password/i}).filter({visible:true});
-    if(await mode.count()===1)await mode.click({timeout:5000,noWaitAfter:true});
+  const until=Date.now()+5000;
+  while(Date.now()<until){
+    if(await page.locator('input').filter({visible:true}).count()||await page.getByRole('link',{name:/登录|sign in|log in/i}).filter({visible:true}).count()||await page.getByRole('button',{name:/登录|password/i}).filter({visible:true}).count())break;
+    await delay(200);
   }
+  async function selectPassword(){
+    if(!passwordMode)return false;
+    const mode=page.getByRole('button',{name:/使用密码登录|密码登录|账号密码登录|sign in with password|use password/i}).filter({visible:true});
+    if(await mode.count()!==1)return false;
+    const deadline=Date.now()+5000;
+    while(Date.now()<deadline){
+      if(await page.locator('input[type="password"]').filter({visible:true}).count())return true;
+      if(await mode.count()===1)await mode.click({timeout:1500,noWaitAfter:true});
+      await delay(300);
+    }
+    return false;
+  }
+  if(await selectPassword())return;
   if(await page.locator('input[type="password"]').filter({visible:true}).count())return;
   const links=await page.getByRole('link',{name:/^(登录|登錄|登入|登录账号|sign in|log in|login)$/i}).filter({visible:true}).all();
   if(links.length===1){
     const href=await links[0]!.getAttribute('href');
-    if(href){const target=new URL(href,page.url()).href;if(sameWebsiteOrigin(target,originUrl))await page.goto(target,{waitUntil:'domcontentloaded',timeout:15000});}
+    if(href){const target=new URL(href,page.url()).href;if(sameWebsiteOrigin(target,originUrl)){await page.goto(target,{waitUntil:'load',timeout:15000});await selectPassword();}}
     return;
   }
   const button=page.getByRole('button',{name:/^(登录|登錄|登入|sign in|log in|login)$/i}).filter({visible:true});

@@ -17,6 +17,7 @@ export async function observeAgentBrowser(options: {
   signal?: AbortSignal;
   name?: string;
   sourceUrl?: string;
+  maskAllInputs?:boolean;
 }) {
   const { page, store } = options;
   const id = await store.create({ ...options, name: options.name??"浏览 Agent" });
@@ -32,17 +33,18 @@ export async function observeAgentBrowser(options: {
       const bytes = await page.screenshot({
         type: "jpeg",
         quality: 62,
+        maskColor: "#d8dee8",
         timeout: 3000,
         mask: [
           page.locator(
-            'input[type="password"],input[autocomplete="one-time-code"],input[autocomplete="cc-number"],input[autocomplete="cc-csc"]',
+            options.maskAllInputs?'input,textarea,select,[contenteditable="true"]':'input[type="password"],input[autocomplete="one-time-code"],input[autocomplete="cc-number"],input[autocomplete="cc-csc"]',
           ),
         ],
       });
       const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
       await store.writeFrame(id, bytes, {
         url: options.sourceUrl??page.url(),
-        title: await page.title(),
+        title: options.maskAllInputs?'登录验证':await page.title(),
         ...viewport,
       });
       frameFailures = 0;

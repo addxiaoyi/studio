@@ -127,7 +127,7 @@ jobs:
           pnpm --filter @helstera/web exec playwright test --config playwright.agent-browser.config.ts
       - name: Website presentation recording and playback
         run: |
-          pnpm --filter @helstera/server exec vitest run src/features/website-capture/presentation.integration.test.ts src/features/website-capture/login-session.test.ts src/features/website-capture/login-session.integration.test.ts src/features/website-capture/journey-planner.test.ts src/features/website-capture/journey-navigation.integration.test.ts
+          pnpm --filter @helstera/server exec vitest run src/features/website-capture/presentation.integration.test.ts src/features/website-capture/login-session.test.ts src/features/website-capture/login-session.integration.test.ts src/features/website-capture/login-handoff.integration.test.ts src/features/website-capture/journey-planner.test.ts src/features/website-capture/journey-navigation.integration.test.ts
           pnpm --filter @helstera/web exec playwright test --config playwright.presentation.config.ts
       - uses: actions/upload-artifact@v4
         if: always()
