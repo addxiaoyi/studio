@@ -37,3 +37,11 @@
 线上复查同时修复了旧悬浮播放器直接读取私有URL的问题，现在复用带鉴权、大小限制和对象URL回收的媒体读取组件。测试覆盖私有播放器及下载路径，2项通过，Web类型检查通过。
 
 `1ce9d2a` 的 Agent Closure CI `42455692000`、Desktop Candidate CI `42455691988` 全部成功。`9bd0a44` 的 Website Capture CI `42456401811` 成功；更后提交状态须以对应运行确认，不与前一提交混用。
+
+## 线上最终结果
+
+- 新任务 `73bc582e-4561-42eb-9875-42a9697ed0a7`：`succeeded`，回执为 `canvasDelivery.status=succeeded`，新增元素恰好2个，聊天完成消息恰好1条。录像素材 `f7172f41-a538-470a-ac72-6123d7a90cdd`，12秒。任务用时4分19秒，仍是后台逐帧渲染，不能称为实时生成。
+- 原画布刷新后截图、录像与时间线项目保留；两个录像均显示实际12秒。新版悬浮播放器在生产页面完整播放至 `currentTime=12,duration=12,ended=true`，没有再直接把未鉴权URL交给播放器。
+- 最终截图：`M:/loomic-builds/capture-online-evidence/canvas-timeline-markdown.png`。原有另一个视频工作区的编辑锁得到保留，线上没有替换用户已打开的合成；完整合成导入与AI上下文在Windows隔离验收中通过。
+- 私有播放器最终增量包899,067字节，3248文件哈希验证后原子上线；`canvas/`、`video/`、`fashion-gallery/`、`desktop-app/`均200，Server健康 `ok=true`。日志：`publish-capture-preview.log`、`deploy-capture-progress.log`。
+- 代码已推送至 `codex/agent-workspace-ci`，运行代码为 `cb0527d` 加生产基线保留差异。最终文档提交不改变代码。`cb0527d` 对应 Agent Closure CI `42456615525` 与 Desktop Candidate CI `42456615663` 仍在运行，未将其宣称为成功；本机Web与Windows完整链路、私有预览回归和各包类型检查已有真实通过证据。
