@@ -624,6 +624,7 @@ export function CanvasToolMenu({
           elementId={activeVideoPlayerId}
           elementBounds={videoPlayerBounds}
           videoUrl={videoPlayerData.videoUrl}
+          accessToken={accessToken}
           mimeType={videoPlayerData.mimeType}
           {...(videoPlayerData.durationSeconds != null
             ? { durationSeconds: videoPlayerData.durationSeconds }

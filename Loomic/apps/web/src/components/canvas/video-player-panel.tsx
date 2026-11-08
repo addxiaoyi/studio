@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { t, useLocale } from "../../lib/i18n";
+import { AuthenticatedRecording } from "../chat/authenticated-recording";
 
 type VideoPlayerPanelProps = {
   elementId: string;
@@ -13,6 +14,7 @@ type VideoPlayerPanelProps = {
   title?: string;
   canvasScrollZoom: { scrollX: number; scrollY: number; zoom: number };
   onClose: () => void;
+  accessToken?: string | undefined;
 };
 
 export function VideoPlayerPanel({
@@ -24,7 +26,9 @@ export function VideoPlayerPanel({
   title,
   canvasScrollZoom,
   onClose,
+  accessToken,
 }: VideoPlayerPanelProps) {
+  const assetId = videoUrl.match(/\/api\/uploads\/([a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})\/file(?:[?#]|$)/i)?.[1];
   const copy = t(useLocale()).generation;
   const panelRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -134,6 +138,7 @@ export function VideoPlayerPanel({
 
       {/* Video Player */}
       <div className="bg-black">
+        {assetId ? accessToken ? <AuthenticatedRecording assetId={assetId} accessToken={accessToken} maxBytes={250*1024*1024} label={`${title || "视频"}播放器`} downloadName={`${title || "video"}.${mimeType === "video/webm" ? "webm" : "mp4"}`} /> : <p role="alert" className="p-3 text-sm text-white">登录后可播放此私有视频。</p> :
         <video
           src={videoUrl}
           controls
@@ -144,12 +149,12 @@ export function VideoPlayerPanel({
           style={{ display: "block" }}
         >
           <source src={videoUrl} type={mimeType} />
-        </video>
+        </video>}
       </div>
 
       {/* Footer with download */}
       <p id="video-player-panel-description" className="sr-only">使用键盘或播放器控件播放、暂停和调整视频进度。</p>
-      <div className="flex items-center justify-end px-3 py-2 border-t border-border/50">
+      {!assetId && <div className="flex items-center justify-end px-3 py-2 border-t border-border/50">
         <a
           href={videoUrl}
           download={`${title || "video"}.mp4`}
@@ -171,7 +176,7 @@ export function VideoPlayerPanel({
           </svg>
           {copy.download}
         </a>
-      </div>
+      </div>}
     </div>,
     document.body,
   );
