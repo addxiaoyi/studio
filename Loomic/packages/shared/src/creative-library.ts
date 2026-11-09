@@ -38,8 +38,9 @@ export function portableWorkflow(
     y = Math.min(...nodes.map((node) => node.position.y));
   return {
     ...graph,
+    ...(graph.groups?{groups:graph.groups.map(group=>({...group,nodeIds:group.nodeIds.filter(id=>selected.has(id))})).filter(group=>group.nodeIds.length)}:{}),
     nodes: nodes.map((node) => ({
-      ...node,
+      ...Object.fromEntries(Object.entries(node).filter(([key])=>key!=="pin")) as typeof node,
       position: { x: node.position.x - x, y: node.position.y - y },
       config:
         node.config.kind === "asset"
@@ -55,7 +56,7 @@ export function instantiateWorkflow(
   input: WorkflowGraph,
   instanceId: string,
 ): WorkflowGraph {
-  const graph = workflowGraphSchema.parse(input),
+  const graph = portableWorkflow(input),
     prefix = instanceId
       .replace(/[^a-z0-9]/gi, "")
       .toLowerCase()
@@ -66,6 +67,7 @@ export function instantiateWorkflow(
   );
   return {
     ...graph,
+    ...(graph.groups?{groups:graph.groups.map((group,index)=>({...group,id:`g-${prefix}-${index}`,nodeIds:group.nodeIds.map(id=>ids.get(id)!)}))}:{}),
     nodes: graph.nodes.map((node) => ({
       ...node,
       id: ids.get(node.id)!,

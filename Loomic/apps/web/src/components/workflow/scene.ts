@@ -7,6 +7,7 @@ import {
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { workflowInputReferences, type WorkflowReference } from "./material-references";
 import { workflowCurve, refreshWorkflowCurves } from "./curves";
+import { collapsedGroup,groupMovement,workflowGroupBounds,workflowGroupId } from "./groups-scene";
 
 export type SceneElement = {
   id: string;
@@ -134,8 +135,9 @@ export function adoptWorkflowCopies(
       .replace(/[^a-z0-9]/gi, "")
       .toLowerCase()
       .slice(0, 40);
+    const {pin:_pin,...copy}=parsed.data;
     const node: WorkflowNode = {
-      ...parsed.data,
+      ...copy,
       id: `copy-${seed}`,
       position: { x: el.x, y: el.y },
       ...(parsed.data.config.kind === "asset"
@@ -243,11 +245,16 @@ export function projectWorkflow(
 ): SceneElement[] {
   const byId = new Map(scene.map((el) => [el.id, el]));
   const next = new Map<string, SceneElement>();
+  for(const group of graph.groups??[]){
+    if(!group.nodeIds.some(id=>graph.nodes.some(node=>node.id===id)))continue;
+    const id=workflowGroupId(workflowId,group.id),prior=byId.get(id),bounds=workflowGroupBounds(graph,group.nodeIds,scene);
+    next.set(id,revise(prior,{...(prior??baseElement(id,"rectangle")),...bounds,...(group.collapsed?{width:280,height:100}:{}),isDeleted:false,locked,backgroundColor:group.collapsed?"#ffffff":"transparent",strokeColor:"#b3bbc8",roughness:0,strokeWidth:1,roundness:{type:3},customData:{workflowGroup:{...group,workflowId,anchor:{x:bounds.x,y:bounds.y}}}}));
+  }
   for (const node of graph.nodes) {
     const id = nodeElementId(workflowId, node),
       prior = byId.get(id);
     const boundAsset = node.config.kind === "asset" && Boolean(node.config.elementId);
-    if (boundAsset && (!prior || prior.isDeleted)) continue;
+    if (boundAsset && (!prior || prior.isDeleted&&!prior.customData?.workflowCollapsed)) continue;
     const body = prior ?? baseElement(id, "embeddable");
     const references = workflowInputReferences(graph, node.id, previews);
     const snapshot = { workflowId, node:{...node,position:{...node.position},config:{...node.config}}, state: states[node.id] ?? "draft", references, ...(previews[node.id] ? {preview:previews[node.id]} : {}) };
@@ -257,7 +264,7 @@ export function projectWorkflow(
         ...body,
         x: node.position.x,
         y: node.position.y,
-        isDeleted: false,
+        isDeleted: !boundAsset&&Boolean(collapsedGroup(graph,node.id)),
         ...(!boundAsset
           ? {
               type: "rectangle",
@@ -270,7 +277,7 @@ export function projectWorkflow(
             }
           : {}),
         locked,
-        customData: { ...body.customData, workflow: snapshot },
+        customData: { ...body.customData, workflow: snapshot,workflowCollapsed:!boundAsset&&Boolean(collapsedGroup(graph,node.id)) },
       }),
     );
   }
@@ -278,8 +285,9 @@ export function projectWorkflow(
     const sourceNode = graph.nodes.find((node) => node.id === edge.source),
       targetNode = graph.nodes.find((node) => node.id === edge.target);
     if (!sourceNode || !targetNode) continue;
-    const from = next.get(nodeElementId(workflowId, sourceNode)),
-      to = next.get(nodeElementId(workflowId, targetNode));
+    const sourceGroup=collapsedGroup(graph,sourceNode.id),targetGroup=collapsedGroup(graph,targetNode.id);
+    const from = next.get(sourceGroup?workflowGroupId(workflowId,sourceGroup.id):nodeElementId(workflowId, sourceNode)),
+      to = next.get(targetGroup?workflowGroupId(workflowId,targetGroup.id):nodeElementId(workflowId, targetNode));
     if (!from || !to) continue;
     const id = edgeElementId(workflowId, edge.id),
       prior = byId.get(id),
@@ -289,11 +297,12 @@ export function projectWorkflow(
       revise(prior, {
         ...body,
         ...workflowCurve(from, to),
-        isDeleted: false,
-        locked,
+        isDeleted: Boolean(sourceGroup&&sourceGroup.id===targetGroup?.id),
+        locked:locked||Boolean(sourceGroup||targetGroup),
         customData: {
           ...body.customData,
-          workflowEdge: { workflowId, edgeId: edge.id },
+          workflowEdge: { workflowId, edgeId: edge.id,source:edge.source,target:edge.target,...(edge.branch?{branch:edge.branch}:{}) },
+          workflowCollapsed:Boolean(sourceGroup&&sourceGroup.id===targetGroup?.id),
         },
       }),
     );
@@ -338,16 +347,19 @@ export function projectWorkflow(
         const { workflow: _removed, ...customData } = el.customData ?? {};
         return revise(el, { ...el, customData, locked: false });
       }
-      return el.isDeleted ? el : revise(el, { ...el, isDeleted: true });
+      return revise(el, { ...el, isDeleted: true,customData:{...el.customData,workflowCollapsed:false} });
     }
     const binding = el.customData?.workflowEdge as
       | { workflowId?: string }
       | undefined;
     if (binding?.workflowId === workflowId)
-      return el.isDeleted ? el : revise(el, { ...el, isDeleted: true });
+      return revise(el, { ...el, isDeleted: true,customData:{...el.customData,workflowCollapsed:false} });
+    if((el.customData?.workflowGroup as {workflowId?:string}|undefined)?.workflowId===workflowId)return el.isDeleted?el:revise(el,{...el,isDeleted:true});
     return el;
   });
-  return [...refreshWorkflowCurves(upgradeWorkflowCards([...merged, ...next.values()]))];
+  const projected=[...merged,...next.values()];
+  projected.sort((a,b)=>Number(Boolean(b.customData?.workflowGroup))-Number(Boolean(a.customData?.workflowGroup)));
+  return [...refreshWorkflowCurves(upgradeWorkflowCards(projected))];
 }
 export function readSceneWorkflow(
   scene: readonly SceneElement[],
@@ -358,24 +370,26 @@ export function readSceneWorkflow(
     ids = new Map<string, string>(),
     issues: string[] = [],
     consumedArrows: string[] = [];
+  const grouping=groupMovement(scene,workflowId,previous);
   for (const el of scene) {
-    if (el.isDeleted) continue;
+    if (el.isDeleted&&!el.customData?.workflowCollapsed) continue;
     const binding = workflowBinding(el);
     if (binding?.workflowId !== workflowId) continue;
     const position = {
-      x: Math.max(-1000000, Math.min(1000000, el.x)),
-      y: Math.max(-1000000, Math.min(1000000, el.y)),
+      x: Math.max(-1000000, Math.min(1000000, el.x+(grouping.moved.get(binding.node.id)?.x??0))),
+      y: Math.max(-1000000, Math.min(1000000, el.y+(grouping.moved.get(binding.node.id)?.y??0))),
     };
     nodes.push({ ...binding.node, position });
     ids.set(el.id, binding.node.id);
   }
-  const graph: WorkflowGraph = { title: previous.title, nodes, edges: [] };
+  const graph: WorkflowGraph = { title: previous.title, nodes, edges: [],...(grouping.groups?{groups:grouping.groups.map(group=>({...group,nodeIds:group.nodeIds.filter(id=>nodes.some(node=>node.id===id))})).filter(group=>group.nodeIds.length)}:{}) };
   for (const el of scene) {
-    if (el.isDeleted || el.type !== "arrow" || el.customData?.workflowResult)
+    if (el.isDeleted&&!el.customData?.workflowCollapsed || el.type !== "arrow" || el.customData?.workflowResult)
       continue;
-    const target = ids.get(el.endBinding?.elementId ?? "");
+    const known=el.customData?.workflowEdge as {workflowId?:string;edgeId?:string;source?:string;target?:string;branch?:"true"|"false"}|undefined;
+    const target = ids.get(el.endBinding?.elementId ?? "")??(el.endBinding?.elementId.startsWith(`wfg:${workflowId}:`)?known?.target:undefined);
     if (!target) continue;
-    let source = ids.get(el.startBinding?.elementId ?? "");
+    let source = ids.get(el.startBinding?.elementId ?? "")??(el.startBinding?.elementId.startsWith(`wfg:${workflowId}:`)?known?.source:undefined);
     if (!source) {
       const media = scene.find(
         (item) => item.id === el.startBinding?.elementId && !item.isDeleted,
@@ -392,7 +406,8 @@ export function readSceneWorkflow(
       }
     }
     if (!source) continue;
-    const issue = connectionIssue(graph, source, target);
+    const branch=graph.nodes.find(node=>node.id===source)?.config.kind==="condition"?(known?.branch??previous.edges.find(edge=>edge.id===known?.edgeId)?.branch??"true"):undefined;
+    const issue = connectionIssue(graph, source, target,branch,{...previous,nodes});
     if (issue) {
       issues.push(issue);
       continue;
@@ -407,7 +422,7 @@ export function readSceneWorkflow(
             .replace(/[^a-z0-9-]/gi, "")
             .toLowerCase()
             .slice(0, 50)}`;
-    graph.edges.push({ id: edgeId, source, target });
+    graph.edges.push({ id: edgeId, source, target,...(branch?{branch}:{}) });
     if (el.id !== edgeElementId(workflowId, edgeId)) consumedArrows.push(el.id);
   }
   const order = new Map(previous.edges.map((edge,index)=>[edge.id,index]));

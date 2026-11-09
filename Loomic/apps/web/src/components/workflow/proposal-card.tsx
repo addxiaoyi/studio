@@ -134,7 +134,7 @@ export function WorkflowProposalCard({
                 : "等待确认"}
         </span>
       </header>
-      {proposal.targetNodeId&&<div className="workflow-partial-scope"><strong>执行到：{proposal.before?.nodes.find(node=>node.id===proposal.targetNodeId)?.title??proposal.targetNodeId}</strong><p>仅运行以下步骤，上游会重新执行；生成费用仍逐次确认。</p><ol>{scopeSteps.map((title,index)=><li key={index}>{title}</li>)}</ol>{scopeError&&<p role="alert">{scopeError}</p>}</div>}
+      {proposal.targetNodeId&&<div className="workflow-partial-scope"><strong>执行到：{proposal.before?.nodes.find(node=>node.id===proposal.targetNodeId)?.title??proposal.targetNodeId}</strong><p>仅运行以下步骤，未固定上游会重新执行；固定结果复用，生成费用仍逐次确认。</p><ol>{scopeSteps.map((title,index)=><li key={index}>{title}</li>)}</ol>{scopeError&&<p role="alert">{scopeError}</p>}</div>}
       {proposal.graph && (
         <strong className="text-xs">{proposal.graph.title}</strong>
       )}

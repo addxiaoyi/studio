@@ -5,10 +5,12 @@ export function workflowGraphKey(graph: WorkflowGraph) {
     title: graph.title,
     nodes: [...graph.nodes].sort((a,b)=>a.id.localeCompare(b.id)).map(node=>({
       id:node.id,title:node.title,x:node.position.x,y:node.position.y,
+      note:node.note,pin:node.pin,
       config:Object.fromEntries(Object.entries(node.config).sort(([a],[b])=>a.localeCompare(b))),
     })),
     // Input order determines the order of composed clips.
-    edges:graph.edges.map(edge=>({id:edge.id,source:edge.source,target:edge.target})),
+    edges:graph.edges.map(edge=>({id:edge.id,source:edge.source,target:edge.target,branch:edge.branch})),
+    groups:graph.groups?.map(group=>({...group,nodeIds:[...group.nodeIds].sort()})).sort((a,b)=>a.id.localeCompare(b.id)),
   });
 }
 

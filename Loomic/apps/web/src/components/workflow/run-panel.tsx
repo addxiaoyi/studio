@@ -159,6 +159,7 @@ export function WorkflowRunPanel({
               <span>
                 {(
                   {
+                    skipped:"已跳过",pinned:"复用固定结果",waiting:"等待中",
                     queued: "待执行",
                     running: "执行中",
                     waiting_approval: "待确认",

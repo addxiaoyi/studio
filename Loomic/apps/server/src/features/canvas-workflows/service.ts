@@ -4,12 +4,14 @@ import {
   compileWorkflow,
   workflowGraphSchema,
   workflowRunGraph,
+  prunePinnedAncestors,
   type WorkflowGraph,
   type WorkflowDocument,
 } from "@helstera/shared";
 import { AgentGoalService } from "../agent-goals/agent-goal-service.js";
 import { executableGoalPlan } from "../agent-goals/goal-planner.js";
 import { assertWorkflowMaterials } from "./materials.js";
+import { assertWorkflowPins } from "./pins.js";
 
 type Store = Pick<Pool, "query">;
 type WorkflowRow = {
@@ -73,6 +75,7 @@ export class CanvasWorkflowService {
   ) {
     const workspace = await assertWorkflowCanvas(this.db, userId, canvasId);
     const parsed = workflowGraphSchema.parse(graph);
+    if(parsed.nodes.some(node=>node.pin))throw new WorkflowError("新建流程不能沿用旧流程的固定结果，请在本流程完成一次执行后固定。");
     const row = (
       await this.db.query<WorkflowRow>(
         `insert into canvas_workflows(canvas_id,workspace_id,created_by,graph,request_key)
@@ -134,13 +137,14 @@ export class CanvasWorkflowService {
       client = await this.db.connect();
     try {
       await client.query("begin");
-      const { row } = await this.lock(client, userId, canvasId, id);
+      const { row,workspaceId } = await this.lock(client, userId, canvasId, id);
       if (row.revision !== revision)
         throw new WorkflowError(
           "工作流已在其他窗口修改，请重新加载；本地草稿已保留。",
           409,
         );
       await this.assertEditable(client, row);
+      await assertWorkflowPins(client,parsed,{workflowId:id,userId,workspaceId});
       const saved = (
         await client.query<WorkflowRow>(
           "update canvas_workflows set graph=$2::jsonb,revision=revision+1,active_goal_id=null,updated_at=now() where id=$1 returning *",
@@ -199,9 +203,10 @@ export class CanvasWorkflowService {
         ).rows.length
       )
         throw new WorkflowError("聊天会话不属于当前画布。", 403);
-      const executionGraph = workflowRunGraph(row.graph,targetNodeId);
+      const executionGraph = prunePinnedAncestors(workflowRunGraph(row.graph,targetNodeId));
       const compiled = compileWorkflow(executionGraph);
       await assertWorkflowMaterials(client, executionGraph, { canvasId, workspaceId, userId });
+      await assertWorkflowPins(client,executionGraph,{workflowId:id,userId,workspaceId});
       const input = agentGoalCreateRequestSchema.parse({
         goal: row.graph.title,
         canvasId,

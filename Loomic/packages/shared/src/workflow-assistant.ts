@@ -71,11 +71,12 @@ export function workflowChanges(
     const moved =
       prior.position.x !== node.position.x ||
       prior.position.y !== node.position.y;
+    const noteChanged=prior.note!==node.note,pinChanged=JSON.stringify(prior.pin)!==JSON.stringify(node.pin);
     if (
       keys.length ||
       prior.title !== node.title ||
       prior.config.kind !== node.config.kind ||
-      moved
+      moved || noteChanged || pinChanged
     )
       changes.push({
         kind: "change",
@@ -101,10 +102,12 @@ export function workflowChanges(
                     end: "结束时间",
                     shotCount: "镜头数量",
                     resolution: "分辨率",
+                    conditions:"判断条件",match:"条件组合",json:"JSON 数据",path:"字段路径",operation:"文字处理方式",template:"文字模板",separator:"合并分隔符",seconds:"等待时间",search:"查找文字",replacement:"替换文字",
                   }) as Record<string, string>
                 )[key] ?? key,
             ),
             ...(moved ? ["节点位置"] : []),
+            ...(noteChanged?["节点备注"]:[]),...(pinChanged?[node.pin?"固定成功结果，跳过上游生成":"取消固定，下次重新执行"]:[]),
           ].join("、") || "名称或节点类型",
       });
   }
@@ -130,6 +133,8 @@ export function workflowChanges(
         title: `${label(edge.source)} → ${label(edge.target)}`,
         detail: "新增连接",
       });
+  for(const edge of after.edges){const prior=before?.edges.find(item=>item.id===edge.id);if(prior&&prior.branch!==edge.branch)changes.push({kind:"change",title:`${label(edge.source)} → ${label(edge.target)}`,detail:`IF 分支改为${edge.branch==="true"?"是":edge.branch==="false"?"否":"普通连接"}`});}
+  if(JSON.stringify(before?.groups??[])!==JSON.stringify(after.groups??[]))changes.push({kind:"change",title:"节点分组",detail:"更新分组、备注或折叠状态"});
   for (const edge of before?.edges ?? [])
     if (
       !after.edges.some(

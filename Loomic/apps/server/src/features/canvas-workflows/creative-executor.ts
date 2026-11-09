@@ -3,6 +3,9 @@ import { storyboardOutputSchema } from "@helstera/shared";
 import type { StepExecution } from "../agent-goals/goal-step-worker.js";
 import type { WorkflowAuthor } from "./author.js";
 import { executeWorkflowGeneration } from "./generation.js";
+import { executeLogicNode } from "./logic-executor.js";
+import { readPinnedOutput } from "./pins.js";
+import type { WorkflowGraph } from "@helstera/shared";
 
 export async function executeCreativeNode(
   db: Pool,
@@ -10,6 +13,13 @@ export async function executeCreativeNode(
   author?: WorkflowAuthor,
 ) {
   const command = input.step.command;
+  if(command.executor==="result.pinned"){
+    const run=(await db.query<{workflow_id:string;graph:WorkflowGraph}>("select workflow_id,graph from canvas_workflow_runs where goal_id=$1",[input.goal.id])).rows[0];
+    const node=run?.graph.nodes.find(node=>node.id===input.step.step_id);
+    if(!run||!node?.pin||node.pin.goalId!==command.sourceGoalId||node.pin.nodeId!==command.sourceNodeId)throw new Error("固定结果与当前运行不匹配。");
+    return readPinnedOutput(db,node,{workflowId:run.workflow_id,workspaceId:input.goal.workspace_id,userId:input.goal.created_by});
+  }
+  const logic=await executeLogicNode(input);if(logic)return logic;
   if (command.executor === "content.text")
     return { text: command.text, role: command.role };
   if (command.executor === "ai.write") {

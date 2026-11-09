@@ -39,6 +39,7 @@ import { WorkflowNodePicker } from "./node-picker";
 import {WorkflowAssistantChat} from "./assistant-chat";
 import { WorkflowRenameDialog } from "./rename-dialog";
 import { NodeWorkbench } from "./node-workbench";
+import { WorkflowGroupManager } from "./group-manager";
 import "./surface.css";
 import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogFooter } from "@/components/ui/dialog";
 export function WorkflowWorkspace(props: CanvasWorkflowProps) {
@@ -84,7 +85,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
   useEffect(()=>{if(!selected||tab!=="nodes"||!open)return;revealInspector();const body=bodyRef.current;if(!body)return;const resize=new ResizeObserver(revealInspector);resize.observe(body);return()=>resize.disconnect();},[selectedId,tab,open]);
   return (
     <>
-      <WorkflowCanvasLayer api={api} token={token} workflowId={flow.selected?.id} graph={flow.graph} disabled={locked} onEdit={editNode} onAsk={askNode} onConnect={connect} onDisconnect={disconnect} onInsert={setInsertingEdge} onAdd={setAddingAfter} onError={flow.setError}/>
+      <WorkflowCanvasLayer api={api} token={token} workflowId={flow.selected?.id} graph={flow.graph} disabled={locked} onEdit={editNode} onAsk={askNode} onConnect={connect} onDisconnect={disconnect} onInsert={setInsertingEdge} onAdd={setAddingAfter} onError={flow.setError} onToggleGroup={id=>{if(!locked)flow.edit({...flow.graph,groups:flow.graph.groups?.map(group=>group.id===id?{...group,collapsed:!group.collapsed}:group)});}}/>
       <WorkflowNodePicker open={addingAfter!==null||insertingEdge!==null} onClose={()=>{setAddingAfter(null);setInsertingEdge(null);}} onAdd={addNode} disabled={locked} anchor={flow.graph.nodes.find(node=>node.id===addingAfter)?.title} insertion={insertingEdge?{graph:flow.graph,edgeId:insertingEdge}:undefined}/>
       <WorkflowMaterialDropCue cue={materialDrop.cue} onComplete={materialDrop.clearCue} />
       {renaming && <WorkflowRenameDialog title={flow.graph.title} close={()=>setRenaming(false)} rename={title=>flow.edit({...flow.graph,title})} />}
@@ -313,6 +314,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                       </li>
                     ))}
                   </ol>
+                  {!selected&&<WorkflowGroupManager graph={flow.graph} selectedIds={selection.nodes} disabled={locked} onChange={flow.edit} onLocate={ids=>scene.locateResults([...ids.map(id=>`wf:${flow.selected!.id}:${id}`),...(flow.graph.groups??[]).filter(group=>group.nodeIds.some(id=>ids.includes(id))).map(group=>`wfg:${flow.selected!.id}:${group.id}`)])}/>}
                 </>
               )}
               {(!selected||materials.length>0)&&<div className="workflow-materials">
@@ -334,7 +336,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                 <div ref={inspectorRef} className="workflow-selected-editor">
                 <div className="workflow-selection-header"><button type="button" onClick={deselectNode}><ChevronLeft size={16}/>全部节点</button><Button size="sm" variant="ghost" onClick={()=>scene.focus(selected.id)}><LocateFixed size={14}/>定位</Button></div>
                 {locked&&<p role="status" className="workflow-edit-lock">{flow.recovery?"先处理上方的本机草稿，再继续编辑。":active?"当前版本正在执行，参数已锁定。可在运行记录中暂停或取消。":"正在保存，请稍候。"}</p>}
-                <NodeWorkbench key={`${flow.selected!.id}:${selected.id}`} node={selected} graph={flow.graph} token={token} canvasId={props.canvasId} workflowId={flow.selected!.id} run={viewedRun} goal={run.goal} dirty={flow.dirty} disabled={locked||!flow.enabled} onSelect={id=>editNode(flow.selected!.id,id)} onRun={()=>void prepareRun(selected.id)} onAsk={()=>askNode(flow.selected!.id,selected.id)} onRecords={()=>setTab("runs")}>
+                <NodeWorkbench key={`${flow.selected!.id}:${selected.id}`} node={selected} graph={flow.graph} token={token} canvasId={props.canvasId} workflowId={flow.selected!.id} run={viewedRun} goal={run.goal} dirty={flow.dirty} disabled={locked||!flow.enabled} onSelect={id=>editNode(flow.selected!.id,id)} onRun={()=>void prepareRun(selected.id)} onAsk={()=>askNode(flow.selected!.id,selected.id)} onRecords={()=>setTab("runs")} onPin={pin=>{if(!locked){const {pin:oldPin,...rest}=selected;flow.edit({...flow.graph,nodes:flow.graph.nodes.map(node=>node.id===selected.id?{...rest,...(pin?{pin}:{})}:node)});}}}>
                 <NodeInspector
                   node={selected}
                   graph={flow.graph}
@@ -353,6 +355,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                   onBindMaterial={bindSelectedMaterial}
                   referenceEditor={<WorkflowReferenceEditor graph={flow.graph} node={selected} api={api} token={token} disabled={locked} previews={previews} onEmbed={embedMaterials} onRemove={removeReference} onFrame={setReferenceFrame} />}
                   onDisconnect={disconnect}
+                  onBranch={(id,branch)=>{if(!locked)flow.edit({...flow.graph,edges:flow.graph.edges.map(edge=>edge.id===id?{...edge,branch}:edge)});}}
                   onReorder={(id,direction)=>{
                     const edges=[...flow.graph.edges],index=edges.findIndex(edge=>edge.id===id);
                     const siblings=edges.map((edge,position)=>({edge,position})).filter(item=>item.edge.target===selected.id);
@@ -367,6 +370,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                       edges: flow.graph.edges.filter(
                         (edge) => edge.source !== id && edge.target !== id,
                       ),
+                      ...(flow.graph.groups?{groups:flow.graph.groups.map(group=>({...group,nodeIds:group.nodeIds.filter(nodeId=>nodeId!==id)})).filter(group=>group.nodeIds.length)}:{}),
                     });
                     setSelectedId(null);
                   }}

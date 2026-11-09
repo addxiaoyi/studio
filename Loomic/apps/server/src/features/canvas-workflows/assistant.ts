@@ -15,6 +15,7 @@ import {
 } from "./service.js";
 import { AgentGoalService } from "../agent-goals/agent-goal-service.js";
 import { assertWorkflowMaterials } from "./materials.js";
+import { assertWorkflowPins } from "./pins.js";
 
 type ProposalRow = {
   id: string;
@@ -156,6 +157,7 @@ export class WorkflowAssistantService {
         workspaceId,
         userId,
       });
+    if(plan.graph?.nodes.some(node=>node.pin)){if(!workflow)throw new WorkflowError("先在当前工作流完成运行，再固定成功结果。");await assertWorkflowPins(this.db,plan.graph,{workflowId:workflow.id,userId,workspaceId});}
     if(plan.targetNodeId&&plan.action!=="run")throw new WorkflowError("仅局部运行可指定目标节点。");
     if (plan.action === "run") compileWorkflow(workflowRunGraph(workflow!.graph,plan.targetNodeId));
     if (!["edit", "inspect", "run"].includes(plan.action) && !goal)

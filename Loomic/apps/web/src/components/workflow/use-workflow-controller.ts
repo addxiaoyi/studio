@@ -49,6 +49,10 @@ export const workflowConfigs = {
   generate: {kind:"generate",mediaType:"image",model:"",prompt:"",aspectRatio:"16:9",duration:5,resolution:"720p"},
   compose: {kind:"compose",aspect:"landscape"},
   frame: {kind:"frame",at:0},
+  condition:{kind:"condition",conditions:[{field:"text",operator:"not_empty",value:""}],match:"all"},
+  transform:{kind:"transform",operation:"trim",search:"",replacement:""},
+  template:{kind:"template",template:"{{text}}"},merge:{kind:"merge",separator:"\n\n"},
+  json:{kind:"json",json:'{"message":"你好"}'},extract:{kind:"extract",path:"message"},delay:{kind:"delay",seconds:3},
   url: { kind: "url", url: "" },
   search: { kind: "search", query: "" },
   capture: { kind: "capture", record: false, pageLimit: 1 },
@@ -186,6 +190,7 @@ export function useWorkflowController({
     flow.edit({...flow.graph,nodes:flow.graph.nodes.map(node=>node.id===selected.id?{...node,position:source.position,config:source.config}:node)});
   };
   const selectNode = (workflowId: string, nodeId: string, openEditor=false) => {
+    if(!openEditor){if(workflowId!==flow.selected?.id||nodeId!==selectedId)setSelectedId(null);return false;}
     if (workflowId !== flow.selected?.id) {
       if(!openEditor)return false;
       if (flow.dirty) {
@@ -285,9 +290,10 @@ export function useWorkflowController({
       setSaving(false);
     }
   };
-  const connect = (source: string, target: string) => {
+  const connect = (source: string, target: string, branch?:"true"|"false") => {
     if(locked)return;
-    const issue = connectionIssue(flow.graph, source, target);
+    const outputBranch=branch??(flow.graph.nodes.find(node=>node.id===source)?.config.kind==="condition"?"true":undefined);
+    const issue = connectionIssue(flow.graph, source, target,outputBranch);
     if (issue) {
       flow.setError(issue);
       return;
@@ -296,7 +302,7 @@ export function useWorkflowController({
       ...flow.graph,
       edges: [
         ...flow.graph.edges,
-        { id: `edge-${crypto.randomUUID()}`, source, target },
+        { id: `edge-${crypto.randomUUID()}`, source, target,...(outputBranch?{branch:outputBranch}:{}) },
       ],
     });
     flow.setError("");
@@ -305,8 +311,10 @@ export function useWorkflowController({
   const confirmSwitch=async(persist:boolean)=>{if(!pendingSwitch)return;if(persist&&!(await save()))return;flow.select(pendingSwitch,api?workflowWithScenePositions(pendingSwitch.graph,pendingSwitch.id,api.getSceneElements()):undefined);setSelectedId(null);setPendingSwitch(null);};
   const editNode=(workflowId:string,nodeId:string)=>{
     if(!selectNode(workflowId,nodeId,true))return false;
+    if(!locked&&workflowId===flow.selected?.id&&flow.graph.groups?.some(group=>group.collapsed&&group.nodeIds.includes(nodeId)))flow.edit({...flow.graph,groups:flow.graph.groups.map(group=>group.nodeIds.includes(nodeId)?{...group,collapsed:false}:group)});
     const doc=flow.documents.find(item=>item.id===workflowId),node=doc?.id===flow.selected?.id?flow.graph.nodes.find(item=>item.id===nodeId):doc?.graph.nodes.find(item=>item.id===nodeId);
     if(node)api?.updateScene({appState:{selectedElementIds:{[nodeElementId(workflowId,node)]:true}},captureUpdate:"NEVER"});
+    setSelectedId(nodeId);
     return true;
   };
   const askNode=(workflowId:string,nodeId:string)=>{
@@ -334,13 +342,15 @@ export function useWorkflowController({
       return;
     }
     const graph = { ...flow.graph, nodes: [...flow.graph.nodes, node] };
-    if (anchor && !connectionIssue(graph, anchor.id, node.id))
+    const branch=anchor?.config.kind==="condition"?"true" as const:undefined;
+    if (anchor && !connectionIssue(graph, anchor.id, node.id,branch))
       graph.edges = [
         ...graph.edges,
         {
           id: `edge-${crypto.randomUUID()}`,
           source: anchor.id,
           target: node.id,
+          ...(branch?{branch}:{}),
         },
       ];
     flow.edit(graph);

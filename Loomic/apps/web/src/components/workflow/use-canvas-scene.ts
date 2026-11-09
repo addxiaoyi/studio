@@ -169,18 +169,10 @@ export function useCanvasWorkflowScene(options: Options) {
       clearTimeout(timer);
       timer = setTimeout(sync, 120);
     });
-    const pointerUp = api.onPointerUp?.((_tool, press) => {
-      if(press.resize.isResizing||press.boxSelection.hasOccurred)return;
-      const selected=api.getSceneElements().filter(el=>api.getAppState().selectedElementIds[el.id]);
-      const binding=selected.length===1?workflowBinding(selected[0]!):null;
-      if(press.drag.hasOccurred){if(binding&&binding.workflowId!==current.current.document?.id)current.current.select(binding.workflowId,binding.node.id,true);return;}
-      if(binding)current.current.select(binding.workflowId,binding.node.id,true);
-    });
     return () => {
       clearTimeout(timer);
       cancelAnimationFrame(frame);
       unsubscribe();
-      pointerUp?.();
     };
   }, [options.api]);
   const locateResults = useCallback((ids: string[]) => {

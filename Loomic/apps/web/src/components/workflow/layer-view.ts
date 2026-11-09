@@ -38,7 +38,7 @@ export function hitWorkflowCard(
 function viewSignature(elements: readonly SceneElement[], state: CanvasState) {
   return JSON.stringify([
     elements
-      .filter((el) => el.customData?.workflow || el.customData?.workflowEdge)
+      .filter((el) => el.customData?.workflow || el.customData?.workflowEdge || el.customData?.workflowGroup)
       .map((el) => [el.id, el.version]),
     state.scrollX,
     state.scrollY,

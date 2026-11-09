@@ -38,3 +38,5 @@ export * from "./creative-library.js";
 export * from "./canvas-document.js";
 export * from "./workflow-assistant.js";
 export * from "./workflow-editor.js";
+export * from "./workflow-logic.js";
+export * from "./workflow-types.js";

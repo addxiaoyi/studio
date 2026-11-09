@@ -86,11 +86,12 @@ export function WorkflowDialogs({
               执行已保存的第 {revision} 版。录制、剪辑与生成费用仍需逐项确认。
             </DialogDescription>
           </DialogHeader>
-          {targetTitle&&<p className="text-sm">仅执行目标节点及所需上游，并保存本次结果。上游会重新执行，不复用旧回执；未列出的分支不会运行。</p>}
+          {targetTitle&&<p className="text-sm">仅执行目标节点及所需上游，并保存本次结果。未固定的上游会重新执行；固定节点使用已验证结果，未命中的分支不会执行。</p>}
           <ol className="max-h-64 overflow-auto list-decimal pl-5 text-sm space-y-2">
             {plan?.steps.map((step) => (
               <li key={step.id}>
                 {step.title}
+                {step.command.executor==="result.pinned"?" · 复用固定结果，不调用生成":step.command.executor==="flow.if"?" · 条件判断":step.when?.length?` · ${step.when.map(rule=>`${rule.source}=${rule.branch==="true"?"是":"否"}`).join("，")}`:""}
                 {step.command.executor === "web.capture"
                   ? ` · ${step.command.url ?? "搜索结果"} · ${step.command.record ? "录制" : "截图"}`
                   : step.command.executor === "media.trim"

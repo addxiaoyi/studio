@@ -16,6 +16,17 @@ import { workflowReferences } from "./references.js";
 import { workflowResults,reuseWorkflowResult } from "./results.js";
 import { assertWorkflowJobGenerationActive } from "./approval-access.js";
 import {WorkflowAssistantService} from "./assistant.js";
+import {executeLogicNode} from "./logic-executor.js";
+import {executeCreativeNode} from "./creative-executor.js";
+import {readPinnedOutput} from "./pins.js";
+const logicGraph=():WorkflowGraph=>({title:"分支验收",nodes:[
+  {id:"source",title:"资料",position:{x:0,y:0},config:{kind:"text",role:"story",text:"Hello"}},
+  {id:"check",title:"条件",position:{x:400,y:0},config:{kind:"condition",conditions:[{field:"text",operator:"contains",value:"Hello"}],match:"all"}},
+  {id:"yes",title:"命中",position:{x:800,y:0},config:{kind:"transform",operation:"uppercase",search:"",replacement:""}},
+  {id:"no",title:"未命中",position:{x:800,y:300},config:{kind:"template",template:"{{text}}"}},
+  {id:"merge",title:"合并",position:{x:1200,y:0},config:{kind:"merge",separator:"\n"}},
+  {id:"output",title:"输出",position:{x:1600,y:0},config:{kind:"deliver"}},
+],edges:[{id:"a",source:"source",target:"check"},{id:"b",source:"check",target:"yes",branch:"true"},{id:"c",source:"check",target:"no",branch:"false"},{id:"d",source:"yes",target:"merge"},{id:"e",source:"no",target:"merge"},{id:"f",source:"merge",target:"output"}]});
 
 const connectionString = process.env.HELT_TEST_DATABASE_URL;
 const schema = `canvas_flow_${randomUUID().replaceAll("-", "")}`;
@@ -426,5 +437,25 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
     expect((await assistant.decide(user,canvas,proposed.id,"confirm",true)).result).toEqual(approved.result);
     expect((await service.runs(user,canvas,draft.id))[0]).toMatchObject({targetNodeId:"capture"});
     await db.query("update agent_goals set status='canceled' where id=$1",[approved.result!.goalId]);
+  });
+  it("skips the false generation branch before executor approval and never charges it",async()=>{
+    const graph=logicGraph();graph.nodes.find(node=>node.id==="no")!.config={kind:"generate",mediaType:"image",model:"test",prompt:"never generate",aspectRatio:"16:9",duration:5,resolution:"720p"};
+    graph.edges=graph.edges.filter(edge=>edge.id!=="e");graph.edges.push({id:"no-output",source:"no",target:"output"});
+    const draft=await service.create(user,canvas,graph,randomUUID()),receipt=await service.run(user,canvas,draft.id,1,randomUUID(),session);
+    const effects=vi.fn();const worker=new GoalStepWorker(db,async input=>{if(input.step.executor==="media.generate"){effects();throw Error("False branch executed");}return await executeLogicNode(input)??(input.step.executor==="content.text"?{text:"  Hello  "}:{summary:"branch done"});});
+    for(let i=0;i<8;i++)await worker.tick();
+    expect(effects).not.toHaveBeenCalled();expect((await db.query("select status from agent_goals where id=$1",[receipt.goalId])).rows[0].status).toBe("completed");
+    const skipped=(await db.query("select state,approval,attempt,output from agent_goal_steps where goal_id=$1 and step_id='no'",[receipt.goalId])).rows[0];expect(skipped).toMatchObject({state:"succeeded",attempt:0,output:{skipped:true}});
+  });
+  it("reuses a successful pinned generation receipt and rejects edits and unavailable assets",async()=>{
+    const graph:WorkflowGraph={title:"固定结果",nodes:[{id:"source",title:"资料",position:{x:0,y:0},config:{kind:"text",role:"prompt",text:"one"}},{id:"generated",title:"已生成图片",position:{x:400,y:0},config:{kind:"generate",mediaType:"image",model:"fixture",prompt:"one",aspectRatio:"16:9",duration:5,resolution:"720p"}},{id:"output",title:"输出",position:{x:800,y:0},config:{kind:"deliver"}}],edges:[{id:"a",source:"source",target:"generated"},{id:"b",source:"generated",target:"output"}]};
+    const draft=await service.create(user,canvas,graph,randomUUID()),first=await service.run(user,canvas,draft.id,1,randomUUID(),session);const generate=vi.fn();
+    const worker=new GoalStepWorker(db,async input=>{if(input.step.executor==="media.generate"){generate();return {text:"verified output"};}return {summary:"ok"};});for(let i=0;i<4;i++)await worker.tick();expect(generate).toHaveBeenCalledOnce();
+    graph.nodes[1]!.pin={goalId:first.goalId,nodeId:"generated"};const saved=await service.save(user,canvas,draft.id,1,graph);const second=await service.run(user,canvas,draft.id,saved.revision,randomUUID(),session);
+    const executor=new GoalStepWorker(db,async input=>await executeCreativeNode(db,input)??{summary:"reused"});for(let i=0;i<3;i++)await executor.tick();
+    const steps=(await db.query("select executor,output from agent_goal_steps where goal_id=$1 order by ordinal",[second.goalId])).rows;expect(steps.map(step=>step.executor)).toEqual(["result.pinned","result.deliver"]);expect(steps[0].output).toMatchObject({text:"verified output",pinned:true});expect(generate).toHaveBeenCalledOnce();
+    await expect(readPinnedOutput(db,{...graph.nodes[1]!,config:{...graph.nodes[1]!.config,prompt:"changed"} as never},{workflowId:draft.id,workspaceId:workspace,userId:user})).rejects.toThrow("参数已改变");
+    await db.query("update agent_goal_steps set output=$2::jsonb where goal_id=$1 and step_id='generated'",[first.goalId,JSON.stringify({assets:[{id:randomUUID(),mediaType:"image"}]})]);
+    await expect(service.run(user,canvas,draft.id,saved.revision,randomUUID(),session)).rejects.toThrow("固定素材已到期");
   });
 });

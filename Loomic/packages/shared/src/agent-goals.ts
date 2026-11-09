@@ -48,6 +48,7 @@ export const agentGoalPlanStepSchema = z.object({
   command: goalCommandSchema.optional(),
   dependsOn: z.array(z.string()).optional(),
   completion: z.string().optional(),
+  when: z.array(z.object({source:z.string(),branch:z.enum(["true","false"])})).max(8).optional(),
 });
 
 export const agentGoalPlanSchema = z.object({

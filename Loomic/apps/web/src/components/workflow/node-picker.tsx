@@ -11,11 +11,13 @@ import {
 } from "@/components/ui/dialog";
 import { workflowConfigs } from "./use-workflow-controller";
 const groups = [
+  {title:"逻辑与数据",kinds:["condition","json","extract","transform","template","merge","delay"]},
   { title: "创作与生成", kinds: ["text", "write", "shot", "generate"] },
   { title: "视频处理", kinds: ["frame", "trim", "compose"] },
   { title: "网站与交付", kinds: ["url", "search", "capture", "deliver"] },
 ] as const;
 const descriptions: Record<string, string> = {
+  condition:"按条件选择“是”或“否”分支",json:"创建结构化 JSON 输入",extract:"读取 JSON 中的指定字段",transform:"去空白、大小写或替换文字",template:"使用 {{text}} 组织文字内容",merge:"按输入顺序合并命中的文字分支",delay:"等待指定秒数，刷新后可继续",
   text: "故事、角色与提示词",
   write: "使用本站 Agent 改写、编剧、分镜",
   shot: "从分镜中提取一个镜头",

@@ -7,7 +7,7 @@ import {
   PackageCheck,
   Scissors,
   Search,
-  FileText, Sparkles, Clapperboard, Wand2, Layers, Camera,
+  FileText, Sparkles, Clapperboard, Wand2, Layers, Camera,GitFork,Braces,Filter,CaseSensitive,Clock,Pin,
 } from "lucide-react";
 import { WORKFLOW_LABELS } from "@helstera/shared";
 import { workflowBinding, type SceneElement } from "./scene";
@@ -17,6 +17,7 @@ import "./workflow.css";
 import { WorkflowReferenceThumb } from "./reference-media";
 
 export const workflowStateLabel: Record<string, string> = {
+  skipped:"已跳过",pinned:"复用固定结果",waiting:"等待中",
   draft: "草稿",
   queued: "待执行",
   running: "执行中",
@@ -28,6 +29,7 @@ export const workflowStateLabel: Record<string, string> = {
   waiting_desktop: "等待执行器",
 };
 const icons = {
+  condition:GitFork,json:Braces,extract:Filter,transform:CaseSensitive,template:FileText,merge:Layers,delay:Clock,
   text:FileText,write:Sparkles,shot:Clapperboard,generate:Wand2,compose:Layers,frame:Camera,
   url: Globe,
   search: Search,
@@ -43,6 +45,14 @@ export function WorkflowCanvasNode({ element, accessToken, selected = false, con
     config = node.config,
     Icon = icons[config.kind];
   const detail =
+    config.kind==="condition"?`${config.conditions.length} 项条件 · ${config.match==="all"?"全部满足":"任一满足"}`
+    :config.kind==="json"?config.json
+    :config.kind==="extract"?`提取 ${config.path}`
+    :config.kind==="template"?config.template
+    :config.kind==="transform"?({trim:"移除首尾空白",uppercase:"转换为大写",lowercase:"转换为小写",replace:"替换指定文字"}[config.operation])
+    :config.kind==="merge"?"合并已命中的文字分支"
+    :config.kind==="delay"?`等待 ${config.seconds} 秒`
+    :
     config.kind === "text" ? config.text || "填写故事、剧本或角色设定"
     : config.kind === "write" ? `${config.mode === "storyboard" ? `拆分${config.shotCount}个镜头` : config.mode === "script" ? "创作剧本" : "改写内容"} · 本站 Agent`
     : config.kind === "shot" ? `提取上游第 ${config.index} 个镜头`
@@ -80,6 +90,8 @@ export function WorkflowCanvasNode({ element, accessToken, selected = false, con
           <strong>{node.title}</strong>
         </div>
       </header>
+      {node.pin&&<div className="workflow-pin-badge"><Pin size={11}/>已固定 · 不重复生成</div>}
+      {node.note&&<p className="workflow-node-note" title={node.note}>{node.note}</p>}
       {binding.preview?.assetId && binding.preview.mediaType ? <div className="workflow-node-preview"><AuthenticatedRecording assetId={binding.preview.assetId} accessToken={accessToken} kind={binding.preview.mediaType} label={node.title} /></div> : binding.preview?.text ? <div className="workflow-node-text"><MarkdownRenderer text={binding.preview.text}/></div> : <p>{detail}</p>}
       {config.kind === "generate" && <div className="workflow-reference-strip" aria-label="嵌入的参考素材">
         {binding.references?.length ? <><small>参考素材 · {binding.references.length}</small><div>{binding.references.map(reference => <figure key={reference.sourceId}><WorkflowReferenceThumb reference={reference} token={accessToken} /><figcaption>{reference.frameAt !== undefined ? `${reference.frameAt}s 参考帧` : reference.title}</figcaption></figure>)}</div></> : <span><ImageIcon size={16} /> 拖入图片 / 视频作为参考</span>}

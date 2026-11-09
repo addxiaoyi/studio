@@ -7,6 +7,7 @@ import {
   Play,
   Settings2,
   Sparkles,
+  Pin,
 } from "lucide-react";
 import {
   WORKFLOW_LABELS,
@@ -48,6 +49,7 @@ type Props = {
   onRun(): void;
   onAsk(): void;
   onRecords(): void;
+  onPin(pin:WorkflowNode["pin"]):void;
 };
 export function NodeWorkbench(props: Props) {
   const [tab, setTab] = useState<"input" | "parameters" | "output">(
@@ -62,7 +64,7 @@ export function NodeWorkbench(props: Props) {
   const signature = goal?.executionSteps
     ?.map((step) => `${step.id}:${step.state}:${step.attempt}`)
     .join("|");
-  const goalId = props.run?.goalId;
+  const goalId = props.node.pin?.goalId??props.run?.goalId;
   useEffect(() => {
     let active = true;
     setResults(null);
@@ -98,7 +100,7 @@ export function NodeWorkbench(props: Props) {
     .filter((edge) => edge.target === props.node.id)
     .map((edge) => props.graph.nodes.find((node) => node.id === edge.source))
     .filter((node): node is WorkflowNode => Boolean(node));
-  const canRun = !["url", "search"].includes(props.node.config.kind);
+  const canRun = !["url", "search","condition"].includes(props.node.config.kind);
   const record = results?.results.find((item) => item.nodeId === props.node.id);
   const current =
     props.run &&
@@ -187,10 +189,11 @@ export function NodeWorkbench(props: Props) {
   );
   const outputView = (
     <section className="node-data-pane" aria-label="节点输出">
+      {props.node.pin?<div className="workflow-pin-notice"><strong><Pin size={13}/>已固定成功结果</strong><p>后续运行复用这份回执，上游不会重复生成。参数锁定，素材失效时会停止。</p><Button size="sm" variant="outline" disabled={props.disabled} onClick={()=>props.onPin(undefined)}>取消固定</Button></div>:record&&props.run&&!props.dirty&&canRun&&!["deliver","delay"].includes(props.node.config.kind)&&<Button size="sm" variant="outline" disabled={props.disabled} onClick={()=>props.onPin({goalId:props.run!.goalId,nodeId:props.node.id})}><Pin size={13}/>固定此结果</Button>}
       <h3>
         输出结果{" "}
         <span>
-          {step ? workflowStateLabel[workflowStepState(step)] : "尚未执行"}
+              {props.node.pin?"已固定":step ? workflowStateLabel[workflowStepState(step)] : "尚未执行"}
         </span>
       </h3>
       {props.run && (

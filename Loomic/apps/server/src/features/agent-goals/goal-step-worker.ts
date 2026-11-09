@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { AgentGoalPlan, GoalCommand } from "@helstera/shared";
 import { goalStepFingerprint, stepEvent, type GoalStepRow } from "./goal-step-store.js";
+import { shouldSkipStep } from "./step-routing.js";
 
 export type ExecutingGoal = { id: string; created_by: string; workspace_id: string; canvas_id: string | null; chat_session_id: string | null; goal: string; plan: AgentGoalPlan; execution_mode: string; output_kind: string };
 export type StepExecution = { goal: ExecutingGoal; step: GoalStepRow; previous: GoalStepRow[]; signal: AbortSignal; assertActive(): Promise<void> };
@@ -45,6 +46,13 @@ export class GoalStepWorker {
       if (!step || ["failed", "canceled", "review"].includes(step.state)) { await client.query("commit"); return null; }
       const depends = step.depends_on.every(id => previous.some(item => item.step_id === id && item.state === "succeeded"));
       if (!depends) throw new Error("步骤依赖未完成。");
+      if(shouldSkipStep(goal.plan,step,previous)){
+        await client.query("update agent_goal_steps set state='succeeded',output=$2::jsonb,error=null,updated_at=now() where id=$1",[step.id,JSON.stringify({skipped:true,reason:"IF 分支未命中或上游已跳过"})]);
+        await this.planState(client,goal,step.step_id,"skipped");
+        await stepEvent(client,goal.id,"goal.step_skipped",step.title,{stepId:step.step_id});
+        await client.query("commit");return null;
+      }
+      if(step.executor==="flow.delay"&&step.state==="waiting_desktop"&&typeof step.output?.resumeAt==="string"&&Date.parse(step.output.resumeAt)>Date.now()){await client.query("commit");return null;}
       if (step.executor === "media.generate" && step.state === "waiting_desktop" && step.output?.generationApproval) {
         const approvalId = (step.output.generationApproval as { approvalId?: unknown }).approvalId;
         const pending = typeof approvalId === "string" ? await client.query("select id from generation_approvals where id=$1 and workspace_id=$2 and user_id=$3 and status='pending' and expires_at>now()",[approvalId,goal.workspace_id,goal.created_by]) : null;
@@ -153,7 +161,7 @@ export class GoalStepWorker {
       }
     } finally { clearInterval(heartbeat); }
   }
-  private async planState(db: Pick<PoolClient, "query">, goal: ExecutingGoal, stepId: string, status: "running" | "succeeded") {
+  private async planState(db: Pick<PoolClient, "query">, goal: ExecutingGoal, stepId: string, status: "running" | "succeeded" | "skipped") {
     await db.query(`update agent_goals set plan=jsonb_set(plan,'{steps}',(select jsonb_agg(case when item->>'id'=$2 then jsonb_set(item,'{status}',to_jsonb($3::text)) else item end order by n) from jsonb_array_elements(plan->'steps') with ordinality as steps(item,n))),updated_at=now() where id=$1`, [goal.id, stepId, status]);
   }
   private async complete(db: PoolClient, goal: ExecutingGoal, output: Record<string, unknown>) {

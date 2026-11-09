@@ -1,6 +1,6 @@
 "use client";
 import { createPortal } from "react-dom";
-import { Pencil, Plus, X, Unplug } from "lucide-react";
+import { Pencil, Plus, X, Unplug,ChevronDown,ChevronRight,Layers } from "lucide-react";
 import {
   connectionIssue,
   validateWorkflow,
@@ -21,11 +21,12 @@ type Props = {
   disabled: boolean;
   onEdit(workflowId: string, nodeId: string): void;
   onAsk(workflowId: string, nodeId: string): void;
-  onConnect(source: string, target: string): void;
+  onConnect(source: string, target: string,branch?:"true"|"false"): void;
   onDisconnect(edgeId: string): void;
   onInsert(edgeId:string):void;
   onAdd(nodeId: string): void;
   onError(message: string): void;
+  onToggleGroup(id:string):void;
 };
 export function WorkflowCanvasLayer(props: Props) {
   const { view, hover } = useWorkflowLayerView(props.api);
@@ -81,6 +82,7 @@ export function WorkflowCanvasLayer(props: Props) {
       : null;
   return createPortal(
     <div className="workflow-canvas-layer" data-workflow-layer>
+      {elements.filter(el=>Boolean(props.workflowId)&&!el.isDeleted&&(el.customData?.workflowGroup as {workflowId?:string}|undefined)?.workflowId===props.workflowId).map(el=>{const group=el.customData!.workflowGroup as {id:string;title:string;note?:string;nodeIds:string[];collapsed:boolean};const at=point(el.x,el.y);return <div key={el.id} className={`workflow-group-overlay ${group.collapsed?"is-collapsed":""}`} style={{transform:`translate(${at.x}px,${at.y}px) scale(${zoom})`,width:el.width,height:group.collapsed?el.height:44}} data-workflow-group={group.id}><header><Layers size={15}/><strong>{group.title}</strong><small>{group.nodeIds.length} 节点</small><button type="button" disabled={props.disabled} aria-label={`${group.collapsed?"展开":"折叠"}画布分组${group.title}`} onPointerDown={event=>event.stopPropagation()} onClick={()=>props.onToggleGroup(group.id)}>{group.collapsed?<ChevronRight size={16}/>:<ChevronDown size={16}/>}</button></header>{group.collapsed&&<p>{group.note||"展开查看组内节点"}</p>}</div>;})}
       {context.menu && <WorkflowNodeContextMenu menu={context.menu} close={context.close}
         current={workflowBinding(context.menu.element)?.workflowId === props.workflowId} disabled={props.disabled}
         onEdit={props.onEdit} onAsk={props.onAsk} onConnect={connect.start} onAdd={props.onAdd} />}
@@ -167,6 +169,7 @@ export function WorkflowCanvasLayer(props: Props) {
               props.graph,
               connect.connection.source,
               binding.node.id,
+              connect.connection.branch,
             )
           : null;
         const valid = connect.connection && !issue;
@@ -220,7 +223,8 @@ export function WorkflowCanvasLayer(props: Props) {
                   >
                     <span />
                   </button>
-                  {binding.node.config.kind !== "deliver" && (
+                  {binding.node.config.kind === "condition" && (["true","false"] as const).map(branch=><button key={branch} type="button" className={`workflow-output-port is-branch is-${branch}`} disabled={props.disabled} aria-label={`从${binding.node.title}${branch==="true"?"是":"否"}分支连接`} onPointerDown={event=>connect.start(binding.node.id,event,branch)} onClick={event=>{if(event.detail===0)connect.start(binding.node.id,undefined,branch);}}><small>{branch==="true"?"是":"否"}</small><span/></button>)}
+                  {!["deliver","condition"].includes(binding.node.config.kind) && (
                     <button
                       type="button"
                       className="workflow-output-port"

@@ -16,6 +16,7 @@ import type { WorkflowAuthor } from "../canvas-workflows/author.js";
 import { executeCreativeNode } from "../canvas-workflows/creative-executor.js";
 import { writeWorkflowText } from "../canvas-workflows/text-delivery.js";
 import { executeWorkflowMedia } from "../canvas-workflows/media.js";
+import { activeStepInputs } from "./step-routing.js";
 
 type Options = { db: Pool; storage: StorageProvider; storageRoot: string; webOrigin: string; desktop: WebsiteAssistantHub; author?: WorkflowAuthor };
 export function createGoalStepExecutor(options: Options): StepExecutor {
@@ -102,7 +103,7 @@ export function createGoalStepExecutor(options: Options): StepExecutor {
       throw new StepWaiting({ taskId }, task.status === "waiting_approval" ? "waiting_approval" : "waiting_desktop");
     }
     if (command.executor !== "result.deliver") throw new Error("当前创作节点没有执行器。");
-    const sources = command.sources.map(id => previous.find(item => item.step_id === id)).filter((item): item is typeof previous[number] => Boolean(item));
+      const sources = activeStepInputs(goal.plan,step.step_id,previous,command.sources);
     const documents = [], assets: Array<{ id: string; url?: string | undefined; mediaType: string }> = [], canvasElementIds: string[] = [];
     for (const source of sources) {
       const output = source.output;
@@ -111,7 +112,7 @@ export function createGoalStepExecutor(options: Options): StepExecutor {
         documents.push({ id: source.id, title: source.title, fileName: `${source.step_id}.md`, mimeType: "text/markdown", content: output.text, sourceUrls: [] });
         if (goal.canvas_id) { await assertActive(); canvasElementIds.push(await writeWorkflowText(options.db, goal.canvas_id, source.id, source.title, output.text)); }
       }
-      if (source.executor === "web.capture") {
+      if (source.executor === "web.capture" || Array.isArray(output.pages)&&typeof output.startUrl==="string") {
         const capture = output as unknown as Awaited<ReturnType<typeof captureIsolatedWebsite>>;
         documents.push(buildWebsiteDocument(`${goal.id}-${source.step_id}`, capture));
         assets.push(...capture.pages.map(page => ({ id: page.assetId, url: page.screenshotUrl, mediaType: "image" })));
@@ -119,6 +120,7 @@ export function createGoalStepExecutor(options: Options): StepExecutor {
         if (goal.canvas_id) canvasElementIds.push(...await writeCaptureToCanvas({ db: options.db, storage: options.storage, writer: { insertImage: insertLocalImageElement, insertVideo: insertLocalVideoElement }, canvasId: goal.canvas_id, taskId: source.id, workspaceId: goal.workspace_id, pages: capture.pages, recordingAssetId: capture.recordingAssetId, recordingUrl: capture.recordingUrl, beforeWrite: assertActive }));
       } else if (Array.isArray(output.assets)) {
         assets.push(...output.assets as typeof assets);
+        if(["result.pinned","flow.if","flow.delay"].includes(source.executor)&&Array.isArray(output.canvasElementIds))canvasElementIds.push(...output.canvasElementIds.filter((id):id is string=>typeof id==="string"));
         if (source.executor === "canvas.asset" && Array.isArray(output.canvasElementIds)) canvasElementIds.push(...output.canvasElementIds.filter((id): id is string => typeof id === "string"));
         if (source.executor === "media.generate" && Array.isArray(output.canvasElementIds)) canvasElementIds.push(...output.canvasElementIds.filter((id): id is string => typeof id === "string"));
         if (goal.canvas_id && ["media.trim", "media.compose"].includes(source.executor) && typeof output.recordingAssetId === "string") {

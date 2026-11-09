@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { StyledSelect } from "@/components/ui/styled-select";
 import { CreativeInspector } from "./creative-inspector";
 import { workflowInputReferences } from "./material-references";
+import { LogicInspector } from "./logic-inspector";
 type Props = {
   node: WorkflowNode;
   graph: WorkflowGraph;
@@ -23,19 +24,22 @@ type Props = {
   materials?: WorkflowNode[]|undefined;
   onBindMaterial?: (()=>void)|undefined;
   referenceEditor?: ReactNode;
+  onBranch?:((id:string,branch:"true"|"false")=>void)|undefined;
 };
 export function NodeInspector({
   node,
   graph,
-  disabled,
+  disabled:busy,
   onChange,
   onConnect,
   onDisconnect,
   onDelete,
   onReorder,
   onPromptLibrary,materials=[],onBindMaterial,referenceEditor,
+  onBranch,
 }: Props) {
   const config = node.config;
+  const disabled=busy||Boolean(node.pin);
   const field = "workflow-field";
   return (
     <section className="workflow-inspector" aria-label="节点设置">
@@ -79,6 +83,8 @@ export function NodeInspector({
         </label>
       )}
       <CreativeInspector node={node} disabled={disabled} onChange={onChange} referenceCount={workflowInputReferences(graph,node.id).length} />
+      <LogicInspector node={node} disabled={disabled} onChange={onChange}/>
+      <details className="workflow-node-notes"><summary>节点备注{node.note?" · 已填写":""}</summary><label>备注<textarea className={field} rows={3} maxLength={2000} value={node.note??""} disabled={busy} onChange={event=>onChange({...node,note:event.target.value})}/></label></details>
       {referenceEditor}
       {["text","write","generate"].includes(config.kind)&&onPromptLibrary&&<Button size="sm" variant="outline" disabled={disabled} onClick={onPromptLibrary}>提示词库 · 保存与套用</Button>}
       {config.kind === "search" && (
@@ -227,6 +233,7 @@ export function NodeInspector({
                   }
                 </span>
                 {config.kind === "compose" && <span className="flex gap-1"><button disabled={disabled} onClick={()=>onReorder?.(edge.id,-1)} aria-label={`前移${edge.source}`}>↑</button><button disabled={disabled} onClick={()=>onReorder?.(edge.id,1)} aria-label={`后移${edge.source}`}>↓</button></span>}
+                {graph.nodes.find(node=>node.id===edge.source)?.config.kind==="condition"&&<StyledSelect aria-label={`分支${edge.id}`} value={edge.branch??"true"} disabled={busy} options={[{value:"true",label:"是分支"},{value:"false",label:"否分支"}]} onChange={value=>onBranch?.(edge.id,value as "true"|"false")}/>}
                 <button
                   disabled={disabled}
                   onClick={() => onDisconnect(edge.id)}
@@ -240,7 +247,7 @@ export function NodeInspector({
         </ul>
         {!disabled &&
           graph.nodes.some(
-            (source) => !connectionIssue(graph, source.id, node.id),
+            (source) => !connectionIssue(graph, source.id, node.id,source.config.kind==="condition"?"true":undefined),
           ) && (
             <StyledSelect
               aria-label="连接上游节点"
@@ -250,7 +257,7 @@ export function NodeInspector({
                 { value: "", label: "选择上游节点…" },
                 ...graph.nodes
                   .filter(
-                    (source) => !connectionIssue(graph, source.id, node.id),
+                    (source) => !connectionIssue(graph, source.id, node.id,source.config.kind==="condition"?"true":undefined),
                   )
                   .map((source) => ({ value: source.id, label: source.title })),
               ]}

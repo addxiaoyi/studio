@@ -102,6 +102,8 @@ test("nodes support direct ports, stable dragging, visible settings and save-bef
     expect((await source.boundingBox())!.width).toBeCloseTo(start.width, 1);
     const dragged = (await source.boundingBox())!;
     await page.mouse.click(dragged.x + dragged.width / 2, dragged.y + 24);
+    await expect(dock).toBeHidden();
+    await page.mouse.dblclick(dragged.x + dragged.width / 2, dragged.y + 24);
     await expect(dock).toBeVisible();
     await expect(
       dock.getByRole("textbox", { name: "目标网址", exact: true }),

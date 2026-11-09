@@ -8,13 +8,14 @@ type Connection = {
   target: string | null;
   pointer: { x: number; y: number } | null;
   issue: string | null;
+  branch?:"true"|"false"|undefined;
 };
 export function useNodeConnect(options: {
   api: WorkflowCanvasApi | null;
   workflowId?: string | undefined;
   graph: WorkflowGraph;
   disabled: boolean;
-  connect(source: string, target: string): void;
+  connect(source: string, target: string,branch?:"true"|"false"): void;
   error(message: string): void;
 }) {
   const current = useRef(options);
@@ -31,13 +32,13 @@ export function useNodeConnect(options: {
     const source = latest.current?.source,
       scope = current.current;
     if (!source || scope.disabled) return;
-    const issue = connectionIssue(scope.graph, source, target);
+    const issue = connectionIssue(scope.graph, source, target,latest.current?.branch);
     if (issue) {
       scope.error(issue);
       setConnection((value) => (value ? { ...value, target, issue } : null));
       return;
     }
-    scope.connect(source, target);
+    scope.connect(source, target,latest.current?.branch);
     cancel();
   };
   useEffect(() => {
@@ -79,7 +80,7 @@ export function useNodeConnect(options: {
               ...value,
               target: id,
               pointer: point,
-              issue: id ? connectionIssue(scope.graph, value.source, id) : null,
+              issue: id ? connectionIssue(scope.graph, value.source, id,value.branch) : null,
             }
           : null,
       );
@@ -119,12 +120,13 @@ export function useNodeConnect(options: {
     connection,
     cancel,
     finish,
-    start: (source: string, event?: React.PointerEvent) => {
+    start: (source: string, event?: React.PointerEvent,branch?:"true"|"false") => {
       if (options.disabled) return;
       event?.preventDefault();
       event?.stopPropagation();
       press.current = event ? { x: event.clientX, y: event.clientY } : null;
-      const next = { source, target: null, pointer: null, issue: null };
+      const output=branch??(options.graph.nodes.find(node=>node.id===source)?.config.kind==="condition"?"true":undefined);
+      const next = { source, target: null, pointer: null, issue: null,branch:output };
       latest.current = next;
       setConnection(next);
       options.error("");
