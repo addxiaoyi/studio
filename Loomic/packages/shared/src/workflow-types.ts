@@ -1,5 +1,5 @@
 import type { WorkflowGraph } from "./canvas-workflow.js";
-export type WorkflowValueKind = "text" | "image" | "video" | "json" | "url";
+export type WorkflowValueKind = "text" | "image" | "video" | "json" | "url" | "list";
 export function workflowValueKinds(
   graph: WorkflowGraph,
   id: string,
@@ -9,7 +9,7 @@ export function workflowValueKinds(
   seen.add(id);
   const c = graph.nodes.find((node) => node.id === id)?.config;
   if (!c) return new Set();
-  if (c.kind === "condition" || c.kind === "delay")
+  if (c.kind === "condition" || c.kind === "switch" || c.kind === "delay")
     return new Set(
       graph.edges
         .filter((edge) => edge.target === id)
@@ -30,6 +30,7 @@ export function workflowValueKinds(
   )
     return new Set(["text"]);
   if (c.kind === "json") return new Set(["json"]);
+  if (c.kind === "split" || c.kind === "batch") return new Set(["list", "json", "text"]);
   if (c.kind === "url" || c.kind === "search") return new Set(["url"]);
   if (c.kind === "asset" || c.kind === "generate")
     return new Set([c.mediaType]);
@@ -51,7 +52,7 @@ export function prunePinnedAncestors(graph: WorkflowGraph): WorkflowGraph {
       if (seen.has(id)) continue;
       seen.add(id);
       if (
-        graph.nodes.find((item) => item.id === id)?.config.kind === "condition"
+        ["condition", "switch"].includes(graph.nodes.find((item) => item.id === id)?.config.kind ?? "")
       )
         throw new Error(
           "条件分支内的节点不能固定，请固定分支之前的来源，保留分支判断。",

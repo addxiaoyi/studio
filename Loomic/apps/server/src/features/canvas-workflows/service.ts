@@ -247,4 +247,32 @@ export class CanvasWorkflowService {
       )
     ).rows;
   }
+  async versions(userId: string, canvasId: string, id: string, before?: number) {
+    await this.get(userId, canvasId, id);
+    return (await this.db.query<{revision:number;graph:WorkflowGraph;restored_from:number|null;created_at:Date}>(
+      "select revision,graph,restored_from,created_at from canvas_workflow_versions where workflow_id=$1 and ($2::integer is null or revision<$2) order by revision desc limit 20",
+      [id, before ?? null],
+    )).rows.map(row => ({ revision: row.revision, graph: workflowGraphSchema.parse(row.graph), restoredFrom: row.restored_from, createdAt: row.created_at.toISOString() }));
+  }
+  async restore(userId: string, canvasId: string, id: string, revision: number, targetRevision: number) {
+    const client = await this.db.connect();
+    try {
+      await client.query("begin");
+      const {row, workspaceId} = await this.lock(client,userId,canvasId,id);
+      if (row.revision !== revision) throw new WorkflowError("版本已变化，请重新查看差异后恢复。",409);
+      await this.assertEditable(client,row);
+      if (revision === targetRevision) throw new WorkflowError("当前已经是这个版本，无需恢复。");
+      const snapshot = (await client.query<{graph:WorkflowGraph}>("select graph from canvas_workflow_versions where workflow_id=$1 and revision=$2",[id,targetRevision])).rows[0];
+      if (!snapshot) throw new WorkflowError("历史版本不存在或已不可用。",404);
+      const graph = workflowGraphSchema.parse(snapshot.graph);
+      // Restoring layout never resurrects permission to use an expired private asset.
+      await assertWorkflowMaterials(client,graph,{canvasId,workspaceId,userId});
+      await assertWorkflowPins(client,graph,{workflowId:id,workspaceId,userId});
+      const saved = (await client.query<WorkflowRow>("update canvas_workflows set graph=$2::jsonb,revision=revision+1,active_goal_id=null,updated_at=now() where id=$1 returning *",[id,JSON.stringify(graph)])).rows[0]!;
+      await client.query("update canvas_workflow_versions set restored_from=$3 where workflow_id=$1 and revision=$2",[id,saved.revision,targetRevision]);
+      await client.query("commit");
+      return view(saved);
+    } catch(error) { await client.query("rollback"); throw error; }
+    finally { client.release(); }
+  }
 }

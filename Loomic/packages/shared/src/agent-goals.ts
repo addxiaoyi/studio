@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { goalCommandSchema, goalStepReceiptSchema } from "./goal-execution.js";
+import { workflowWhenSchema } from "./workflow-logic.js";
 
 import {
   desktopAgentActionSchema,
@@ -48,13 +49,13 @@ export const agentGoalPlanStepSchema = z.object({
   command: goalCommandSchema.optional(),
   dependsOn: z.array(z.string()).optional(),
   completion: z.string().optional(),
-  when: z.array(z.object({source:z.string(),branch:z.enum(["true","false"])})).max(8).optional(),
+  when: workflowWhenSchema.optional(),
 });
 
 export const agentGoalPlanSchema = z.object({
   version: z.literal(2).optional(),
   summary: z.string().optional(),
-  steps: z.array(agentGoalPlanStepSchema).max(32),
+  steps: z.array(agentGoalPlanStepSchema).max(64),
   generatedAt: z.string().datetime({ offset: true }),
 });
 

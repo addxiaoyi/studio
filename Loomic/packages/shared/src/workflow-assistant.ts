@@ -102,7 +102,7 @@ export function workflowChanges(
                     end: "结束时间",
                     shotCount: "镜头数量",
                     resolution: "分辨率",
-                    conditions:"判断条件",match:"条件组合",json:"JSON 数据",path:"字段路径",operation:"文字处理方式",template:"文字模板",separator:"合并分隔符",seconds:"等待时间",search:"查找文字",replacement:"替换文字",
+                    cases:"分支规则",mode:"匹配方式",source:"列表来源",maxItems:"项数上限",batchSize:"批次大小",operations:"逐项动作",conditions:"判断条件",match:"条件组合",json:"JSON 数据",path:"字段路径",operation:"文字处理方式",template:"文字模板",separator:"合并分隔符",seconds:"等待时间",search:"查找文字",replacement:"替换文字",
                   }) as Record<string, string>
                 )[key] ?? key,
             ),
@@ -133,7 +133,7 @@ export function workflowChanges(
         title: `${label(edge.source)} → ${label(edge.target)}`,
         detail: "新增连接",
       });
-  for(const edge of after.edges){const prior=before?.edges.find(item=>item.id===edge.id);if(prior&&prior.branch!==edge.branch)changes.push({kind:"change",title:`${label(edge.source)} → ${label(edge.target)}`,detail:`IF 分支改为${edge.branch==="true"?"是":edge.branch==="false"?"否":"普通连接"}`});}
+  for(const edge of after.edges){const prior=before?.edges.find(item=>item.id===edge.id);if(prior&&prior.branch!==edge.branch)changes.push({kind:"change",title:`${label(edge.source)} → ${label(edge.target)}`,detail:`分支改为${edge.branch==="true"?"是":edge.branch==="false"?"否":edge.branch==="default"?"默认":edge.branch??"普通连接"}`});}
   if(JSON.stringify(before?.groups??[])!==JSON.stringify(after.groups??[]))changes.push({kind:"change",title:"节点分组",detail:"更新分组、备注或折叠状态"});
   for (const edge of before?.edges ?? [])
     if (

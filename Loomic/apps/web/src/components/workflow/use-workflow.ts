@@ -14,6 +14,7 @@ import {
   planCanvasWorkflow,
   runCanvasWorkflow,
   saveCanvasWorkflow,
+  restoreWorkflowVersion,
 } from "@/lib/canvas-workflow-api";
 
 export function useCanvasWorkflow(
@@ -279,6 +280,16 @@ export function useCanvasWorkflow(
     redoEdit,
     create,
     save,
+    restoreVersion: (revision:number) => run(async()=>{
+      if(!selected)throw new Error("先选择工作流。");
+      if(dirty||recovery)throw new Error("先保存当前草稿，再恢复版本。");
+      const restored=await restoreWorkflowVersion(token,canvasId,selected.id,selected.revision,revision);
+      localStorage.removeItem(draftKey(restored.id));
+      setDocuments(current=>current.map(doc=>doc.id===restored.id?restored:doc));
+      select(restored);
+      setNotice(`已恢复第 ${revision} 版，另存为第 ${restored.revision} 版。`);
+      return restored;
+    }),
     askAi,
     applyProposal,
     start,

@@ -29,6 +29,7 @@ export const workflowStateLabel: Record<string, string> = {
   waiting_desktop: "等待执行器",
 };
 const icons = {
+  switch:GitFork,split:Filter,batch:Layers,
   condition:GitFork,json:Braces,extract:Filter,transform:CaseSensitive,template:FileText,merge:Layers,delay:Clock,
   text:FileText,write:Sparkles,shot:Clapperboard,generate:Wand2,compose:Layers,frame:Camera,
   url: Globe,
@@ -45,6 +46,10 @@ export function WorkflowCanvasNode({ element, accessToken, selected = false, con
     config = node.config,
     Icon = icons[config.kind];
   const detail =
+    config.kind==="switch"?`${config.cases.length} 个出口 + 默认 · ${config.mode==="first"?"首次命中":"所有命中"}`
+    :config.kind==="split"?`${config.source==="json"?"JSON 列表":"拆分文字"} · 最多 ${config.maxItems} 项`
+    :config.kind==="batch"?`${config.operations.length} 个逐项动作 · 每批 ${config.batchSize} 项 / 上限 ${config.maxItems}`
+    :
     config.kind==="condition"?`${config.conditions.length} 项条件 · ${config.match==="all"?"全部满足":"任一满足"}`
     :config.kind==="json"?config.json
     :config.kind==="extract"?`提取 ${config.path}`

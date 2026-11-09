@@ -40,3 +40,6 @@ export * from "./workflow-assistant.js";
 export * from "./workflow-editor.js";
 export * from "./workflow-logic.js";
 export * from "./workflow-types.js";
+export * from "./workflow-branches.js";
+export * from "./workflow-batch.js";
+export * from "./workflow-versions.js";

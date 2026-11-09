@@ -100,7 +100,7 @@ export function NodeWorkbench(props: Props) {
     .filter((edge) => edge.target === props.node.id)
     .map((edge) => props.graph.nodes.find((node) => node.id === edge.source))
     .filter((node): node is WorkflowNode => Boolean(node));
-  const canRun = !["url", "search","condition"].includes(props.node.config.kind);
+  const canRun = !["url", "search","condition","switch"].includes(props.node.config.kind);
   const record = results?.results.find((item) => item.nodeId === props.node.id);
   const current =
     props.run &&

@@ -1,4 +1,5 @@
 "use client";
+import { workflowOutlets } from "@helstera/shared";
 import { createPortal } from "react-dom";
 import { Pencil, Plus, X, Unplug,ChevronDown,ChevronRight,Layers } from "lucide-react";
 import {
@@ -21,7 +22,7 @@ type Props = {
   disabled: boolean;
   onEdit(workflowId: string, nodeId: string): void;
   onAsk(workflowId: string, nodeId: string): void;
-  onConnect(source: string, target: string,branch?:"true"|"false"): void;
+  onConnect(source: string, target: string,branch?:string): void;
   onDisconnect(edgeId: string): void;
   onInsert(edgeId:string):void;
   onAdd(nodeId: string): void;
@@ -223,8 +224,8 @@ export function WorkflowCanvasLayer(props: Props) {
                   >
                     <span />
                   </button>
-                  {binding.node.config.kind === "condition" && (["true","false"] as const).map(branch=><button key={branch} type="button" className={`workflow-output-port is-branch is-${branch}`} disabled={props.disabled} aria-label={`从${binding.node.title}${branch==="true"?"是":"否"}分支连接`} onPointerDown={event=>connect.start(binding.node.id,event,branch)} onClick={event=>{if(event.detail===0)connect.start(binding.node.id,undefined,branch);}}><small>{branch==="true"?"是":"否"}</small><span/></button>)}
-                  {!["deliver","condition"].includes(binding.node.config.kind) && (
+                  {!!workflowOutlets(binding.node).length && <div className="workflow-branch-ports">{workflowOutlets(binding.node).map(outlet=><button key={outlet.value} type="button" className="workflow-branch-port" disabled={props.disabled} title={outlet.label} aria-label={`从${binding.node.title}${outlet.label}分支连接`} onPointerDown={event=>connect.start(binding.node.id,event,outlet.value)} onClick={event=>{if(event.detail===0)connect.start(binding.node.id,undefined,outlet.value);}}><small>{outlet.label}</small><span/></button>)}</div>}
+                  {!["deliver","condition","switch"].includes(binding.node.config.kind) && (
                     <button
                       type="button"
                       className="workflow-output-port"

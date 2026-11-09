@@ -1,4 +1,5 @@
 "use client";
+import { workflowOutlets } from "@helstera/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   WORKFLOW_LABELS,
@@ -50,6 +51,9 @@ export const workflowConfigs = {
   compose: {kind:"compose",aspect:"landscape"},
   frame: {kind:"frame",at:0},
   condition:{kind:"condition",conditions:[{field:"text",operator:"not_empty",value:""}],match:"all"},
+  switch:{kind:"switch",mode:"first",cases:[{id:"route-1",title:"分支 1",conditions:[{field:"text",operator:"contains",value:""}],match:"all"}]},
+  split:{kind:"split",source:"json",path:"",separator:"\n",maxItems:50},
+  batch:{kind:"batch",maxItems:50,batchSize:5,operations:[{kind:"template",template:"{{index}}. {{text}}"}]},
   transform:{kind:"transform",operation:"trim",search:"",replacement:""},
   template:{kind:"template",template:"{{text}}"},merge:{kind:"merge",separator:"\n\n"},
   json:{kind:"json",json:'{"message":"你好"}'},extract:{kind:"extract",path:"message"},delay:{kind:"delay",seconds:3},
@@ -173,7 +177,7 @@ export function useWorkflowController({
   const askAi=async()=>{try{await saveCanvas();await flow.askAi(references.map(item=>item.id));}catch(cause){flow.setError(cause instanceof Error?cause.message:"画布保存失败，未发送引用。");}};
   const reuseResult=async(node:WorkflowNode)=>{
     if(!flow.selected||locked)throw new Error("先结束当前运行再复用结果。");
-    if(flow.graph.nodes.length>=24)throw new Error("当前流程已达24个节点上限。");
+    if(flow.graph.nodes.length>=64)throw new Error("当前流程已达64个节点上限。");
     await onCanvasSync();
     const anchor=selected??flow.graph.nodes.at(-1);
     const next=node.config.kind==="asset"?node:{...node,position:{x:(anchor?.position.x??0)+390,y:anchor?.position.y??0}};
@@ -290,9 +294,9 @@ export function useWorkflowController({
       setSaving(false);
     }
   };
-  const connect = (source: string, target: string, branch?:"true"|"false") => {
+  const connect = (source: string, target: string, branch?:string) => {
     if(locked)return;
-    const outputBranch=branch??(flow.graph.nodes.find(node=>node.id===source)?.config.kind==="condition"?"true":undefined);
+    const outputBranch=branch??(workflowOutlets(flow.graph.nodes.find(node=>node.id===source))[0]?.value);
     const issue = connectionIssue(flow.graph, source, target,outputBranch);
     if (issue) {
       flow.setError(issue);
@@ -342,7 +346,7 @@ export function useWorkflowController({
       return;
     }
     const graph = { ...flow.graph, nodes: [...flow.graph.nodes, node] };
-    const branch=anchor?.config.kind==="condition"?"true" as const:undefined;
+    const branch=workflowOutlets(anchor)[0]?.value;
     if (anchor && !connectionIssue(graph, anchor.id, node.id,branch))
       graph.edges = [
         ...graph.edges,
@@ -388,8 +392,8 @@ export function useWorkflowController({
       flow.setError("所选素材已经在当前流程中。");
       return;
     }
-    if (flow.graph.nodes.length + fresh.length > 24) {
-      flow.setError("单个流程最多24个节点，请减少所选素材。");
+    if (flow.graph.nodes.length + fresh.length > 64) {
+      flow.setError("单个流程最多64个节点，请减少所选素材。");
       return;
     }
     flow.edit({ ...flow.graph, nodes: [...flow.graph.nodes, ...fresh] });

@@ -2,17 +2,21 @@
 import type { WorkflowNode } from "@helstera/shared";
 import { StyledSelect } from "@/components/ui/styled-select";
 import { Button } from "@/components/ui/button";
+import { CollectionInspector } from "./collection-inspector";
 export function LogicInspector({
   node,
   disabled,
   onChange,
+  branchHint = true,
 }: {
   node: WorkflowNode;
   disabled: boolean;
   onChange(node: WorkflowNode): void;
+  branchHint?: boolean;
 }) {
   const c = node.config,
     field = "workflow-field";
+  if (["switch","split","batch"].includes(c.kind)) return <CollectionInspector config={c} disabled={disabled} onChange={config=>onChange({...node,config})} renderFields={(config,change)=><LogicInspector node={{...node,config}} disabled={disabled} branchHint={false} onChange={next=>change(next.config)}/>}/>;
   if (c.kind === "condition")
     return (
       <div className="workflow-conditions">
@@ -126,9 +130,9 @@ export function LogicInspector({
         >
           添加条件
         </Button>
-        <p className="node-data-caption">
+        {branchHint&&<p className="node-data-caption">
           从“是 / 否”出口连接后续节点，未命中的分支不会执行。
-        </p>
+        </p>}
       </div>
     );
   if (c.kind === "transform")

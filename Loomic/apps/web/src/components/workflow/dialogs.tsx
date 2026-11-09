@@ -91,7 +91,7 @@ export function WorkflowDialogs({
             {plan?.steps.map((step) => (
               <li key={step.id}>
                 {step.title}
-                {step.command.executor==="result.pinned"?" · 复用固定结果，不调用生成":step.command.executor==="flow.if"?" · 条件判断":step.when?.length?` · ${step.when.map(rule=>`${rule.source}=${rule.branch==="true"?"是":"否"}`).join("，")}`:""}
+                {step.command.executor==="result.pinned"?" · 复用固定结果，不调用生成":step.command.executor==="flow.if"||step.command.executor==="flow.switch"?" · 条件分支":step.command.executor==="flow.batch"?` · 最多 ${step.command.maxItems} 项，每批 ${step.command.batchSize} 项`:step.when?.length?` · ${step.when.map(rule=>`${rule.source}=${rule.branch==="true"?"是":rule.branch==="false"?"否":rule.branch==="default"?"默认":rule.branch}`).join("，")}`:""}
                 {step.command.executor === "web.capture"
                   ? ` · ${step.command.url ?? "搜索结果"} · ${step.command.record ? "录制" : "截图"}`
                   : step.command.executor === "media.trim"

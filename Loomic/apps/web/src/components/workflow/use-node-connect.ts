@@ -1,4 +1,5 @@
 "use client";
+import { workflowOutlets } from "@helstera/shared";
 import { useEffect, useRef, useState } from "react";
 import { connectionIssue, type WorkflowGraph } from "@helstera/shared";
 import { workflowBinding, type WorkflowCanvasApi } from "./scene";
@@ -8,14 +9,14 @@ type Connection = {
   target: string | null;
   pointer: { x: number; y: number } | null;
   issue: string | null;
-  branch?:"true"|"false"|undefined;
+  branch?:string|undefined;
 };
 export function useNodeConnect(options: {
   api: WorkflowCanvasApi | null;
   workflowId?: string | undefined;
   graph: WorkflowGraph;
   disabled: boolean;
-  connect(source: string, target: string,branch?:"true"|"false"): void;
+  connect(source: string, target: string,branch?:string): void;
   error(message: string): void;
 }) {
   const current = useRef(options);
@@ -120,12 +121,12 @@ export function useNodeConnect(options: {
     connection,
     cancel,
     finish,
-    start: (source: string, event?: React.PointerEvent,branch?:"true"|"false") => {
+    start: (source: string, event?: React.PointerEvent,branch?:string) => {
       if (options.disabled) return;
       event?.preventDefault();
       event?.stopPropagation();
       press.current = event ? { x: event.clientX, y: event.clientY } : null;
-      const output=branch??(options.graph.nodes.find(node=>node.id===source)?.config.kind==="condition"?"true":undefined);
+      const output=branch??(workflowOutlets(options.graph.nodes.find(node=>node.id===source))[0]?.value);
       const next = { source, target: null, pointer: null, issue: null,branch:output };
       latest.current = next;
       setConnection(next);

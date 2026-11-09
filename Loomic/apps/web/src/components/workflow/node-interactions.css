@@ -352,3 +352,6 @@ body:has(.context-menu, .workflow-context-menu) [data-canvas-floating-panel] { v
     padding-block: 6px;
   }
 }
+.workflow-branch-ports{position:absolute;right:-20px;top:20px;bottom:20px;display:flex;flex-direction:column;justify-content:space-evenly;pointer-events:auto;gap:4px}
+.workflow-branch-port{display:flex;align-items:center;justify-content:flex-end;gap:4px;min-height:24px;max-width:115px;color:var(--muted-foreground);background:var(--background);border:1px solid var(--border);border-radius:6px;padding:2px 4px;cursor:crosshair}
+.workflow-branch-port small{max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}.workflow-branch-port span{width:8px;height:8px;border:1px solid currentColor;border-radius:50%;background:var(--background)}.workflow-branch-port:hover,.workflow-branch-port:focus-visible{color:var(--primary);outline:2px solid var(--ring);outline-offset:2px}

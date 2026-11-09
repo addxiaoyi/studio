@@ -14,6 +14,7 @@ import {
   ImagePlus,
   ChevronLeft,
   Pencil,
+  History,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { WORKFLOW_LABELS, creativeWorkflow } from "@helstera/shared";
@@ -40,12 +41,15 @@ import {WorkflowAssistantChat} from "./assistant-chat";
 import { WorkflowRenameDialog } from "./rename-dialog";
 import { NodeWorkbench } from "./node-workbench";
 import { WorkflowGroupManager } from "./group-manager";
+import { WorkflowNavigation } from "./navigation-map";
+import { WorkflowVersionHistory } from "./version-history";
 import "./surface.css";
 import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogFooter } from "@/components/ui/dialog";
 export function WorkflowWorkspace(props: CanvasWorkflowProps) {
   const { token, api, open, onOpen, onClose } = props;
   const floating=useFloatingPanel(open);
   const [renaming, setRenaming] = useState(false);
+  const [versionsOpen,setVersionsOpen]=useState(false);
   const {
     flow,
     run,
@@ -188,6 +192,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
           <div className="workflow-project-bar">
             <Button size="sm" variant="ghost" disabled={locked} onClick={()=>setRenaming(true)} aria-label="重命名流程"><Pencil size={13}/>重命名</Button>
             <div className="flex gap-1">
+              <Button size="icon" variant="ghost" aria-label="版本历史" onClick={()=>setVersionsOpen(true)}><History size={14}/></Button>
               <Button
                 size="icon"
                 variant="ghost"
@@ -270,11 +275,12 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                 </div>
               ) : (
                 <>
+                  {!selected&&<WorkflowNavigation graph={flow.graph} onLocate={ids=>scene.locateResults([...ids.map(id=>`wf:${flow.selected!.id}:${id}`),...(flow.graph.groups??[]).filter(group=>group.nodeIds.some(id=>ids.includes(id))).map(group=>`wfg:${flow.selected!.id}:${group.id}`)])}/>}
                   <div className="workflow-palette">
                     <StyledSelect
                       aria-label="添加节点"
                       value=""
-                      disabled={locked || flow.graph.nodes.length >= 24}
+                      disabled={locked || flow.graph.nodes.length >= 64}
                       options={[
                         { value: "", label: "＋ 添加处理节点" },
                         ...Object.keys(configs).map((kind) => ({
@@ -488,6 +494,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
         run={() => void startRun()}
       />
       {flow.selected&&<WorkflowResultCompare open={compareOpen} onClose={()=>setCompareOpen(false)} token={token} canvasId={props.canvasId} workflowId={flow.selected.id} history={history} disabled={locked} onReuse={reuseResult}/>}
+      {flow.selected&&<WorkflowVersionHistory open={versionsOpen} onClose={()=>setVersionsOpen(false)} token={token} canvasId={props.canvasId} document={flow.selected} disabled={locked||flow.dirty} onRestore={flow.restoreVersion} failure={flow.error}/>}
     </>
   );
 }

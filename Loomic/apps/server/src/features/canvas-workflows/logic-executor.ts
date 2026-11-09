@@ -4,6 +4,7 @@ import {
   type StepExecution,
 } from "../agent-goals/goal-step-worker.js";
 import { activeStepInputs } from "../agent-goals/step-routing.js";
+import { executeBatchNode } from "./batch-executor.js";
 
 const MAX_TEXT = 24000;
 export async function executeLogicNode(
@@ -48,6 +49,18 @@ export async function executeLogicNode(
         c.match === "all" ? matches.every(Boolean) : matches.some(Boolean),
     };
   }
+  if (c.executor === "flow.switch") {
+    const source = read(c.fromStep), branches: string[] = [];
+    for (const route of c.cases) {
+      const matches = route.conditions.map(rule => evaluateWorkflowCondition(source, rule));
+      if (route.match === "all" ? matches.every(Boolean) : matches.some(Boolean)) {
+        branches.push(route.id);
+        if (c.mode === "first") break;
+      }
+    }
+    return { ...source, branches: branches.length ? branches : ["default"] };
+  }
+  if (c.executor === "data.split" || c.executor === "flow.batch") return executeBatchNode(input, read(c.fromStep));
   if (c.executor === "text.transform") {
     const source = text(c.fromStep);
     if (c.operation === "replace" && !c.search)

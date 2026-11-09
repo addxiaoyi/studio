@@ -23,12 +23,14 @@ export const goalExecutionStepSchema = z.strictObject({
   when: workflowWhenSchema.optional(),
 });
 export const goalExecutionPlanSchema = z.strictObject({
-  summary: z.string().min(1).max(1500), steps: z.array(goalExecutionStepSchema).min(2).max(12),
+  summary: z.string().min(1).max(1500), steps: z.array(goalExecutionStepSchema).min(2).max(64),
 }).superRefine((plan, context) => {
   const seen = new Map<string, z.infer<typeof goalExecutionStepSchema>>();
   for (const step of plan.steps) {
     if (seen.has(step.id) || step.dependsOn.some(id => !seen.has(id))) context.addIssue({ code: "custom", message: "步骤ID重复或依赖顺序无效。" });
-    if(step.when?.some(rule=>!step.dependsOn.includes(rule.source)||seen.get(rule.source)?.command.executor!=="flow.if")||new Set(step.when?.map(rule=>rule.source)).size!==(step.when?.length??0))context.addIssue({code:"custom",message:"分支条件必须来自唯一的直接依赖 IF 节点。"});
+    if(step.when?.some(rule=>{const source=seen.get(rule.source)?.command;return !step.dependsOn.includes(rule.source)||!(source?.executor==="flow.if"?["true","false"].includes(rule.branch):source?.executor==="flow.switch"&&(rule.branch==="default"||source.cases.some(item=>item.id===rule.branch)));})||new Set(step.when?.map(rule=>rule.source)).size!==(step.when?.length??0))context.addIssue({code:"custom",message:"分支条件必须来自直接依赖的有效分支出口。"});
+    if(step.dependsOn.some(id=>["flow.if","flow.switch"].includes(seen.get(id)?.command.executor??"")&&!step.when?.some(rule=>rule.source===id)))context.addIssue({code:"custom",message:"分支节点的下游必须明确选择出口。"});
+    if(step.command.executor==="flow.switch"&&(step.command.cases.some(route=>route.id==="default")||new Set(step.command.cases.map(route=>route.id)).size!==step.command.cases.length))context.addIssue({code:"custom",message:"Switch 出口标识重复或占用了默认出口。"});
     if (step.command.executor === "web.capture") {
       const { url, fromStep } = step.command;
       if (Boolean(url) === Boolean(fromStep) || (fromStep && (seen.get(fromStep)?.command.executor !== "web.search" || !step.dependsOn.includes(fromStep)))) context.addIssue({ code: "custom", message: "浏览步骤需要网址或已完成的搜索依赖。" });
@@ -36,7 +38,7 @@ export const goalExecutionPlanSchema = z.strictObject({
     if (step.command.executor === "result.deliver" && step.command.sources.some(id => !seen.has(id) || !step.dependsOn.includes(id))) context.addIssue({ code: "custom", message: "结果步骤必须依赖其来源。" });
     if (step.command.executor === "media.trim") {
       const visited=new Set<string>();
-      const videoSource=(id:string):boolean=>{if(visited.has(id))return false;visited.add(id);const command=seen.get(id)?.command;return command?.executor==="web.capture"&&command.record||command?.executor==="canvas.asset"&&command.mediaType==="video"||command?.executor==="media.trim"||command?.executor==="media.compose"||command?.executor==="media.generate"&&command.mediaType==="video"||command?.executor==="result.pinned"&&command.outputType==="video"||Boolean(command&&(command.executor==="flow.if"||command.executor==="flow.delay")&&videoSource(command.fromStep));};
+      const videoSource=(id:string):boolean=>{if(visited.has(id))return false;visited.add(id);const command=seen.get(id)?.command;return command?.executor==="web.capture"&&command.record||command?.executor==="canvas.asset"&&command.mediaType==="video"||command?.executor==="media.trim"||command?.executor==="media.compose"||command?.executor==="media.generate"&&command.mediaType==="video"||command?.executor==="result.pinned"&&command.outputType==="video"||Boolean(command&&(command.executor==="flow.if"||command.executor==="flow.switch"||command.executor==="flow.delay")&&videoSource(command.fromStep));};
       const video = videoSource(step.command.fromStep);
       if (step.command.end <= step.command.start || !step.dependsOn.includes(step.command.fromStep) || !video) context.addIssue({ code: "custom", message: "剪辑步骤需要有效视频来源和时间范围。" });
     }

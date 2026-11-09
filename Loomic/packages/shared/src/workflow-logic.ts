@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { batchCommands, batchNodeConfigs } from "./workflow-batch.js";
 
 const path = z.string().max(120);
 export const validWorkflowPath = (value: string) =>
@@ -23,10 +24,11 @@ export const workflowConditionSchema = z
     value: z.string().max(2000),
   })
   .strict();
+export const workflowBranchSchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 export const workflowWhenSchema = z
   .array(
     z
-      .object({ source: z.string(), branch: z.enum(["true", "false"]) })
+      .object({ source: z.string(), branch: workflowBranchSchema })
       .strict(),
   )
   .max(8);
@@ -34,12 +36,18 @@ const condition = {
   conditions: z.array(workflowConditionSchema).min(1).max(8),
   match: z.enum(["all", "any"]),
 };
+export const workflowSwitchSettings = {
+  mode: z.enum(["first", "all"]),
+  cases: z.array(z.object({ id: workflowBranchSchema, title: z.string().min(1).max(40), ...condition }).strict()).min(1).max(6),
+};
 const transform = {
   operation: z.enum(["trim", "uppercase", "lowercase", "replace"]),
   search: z.string().max(1000),
   replacement: z.string().max(1000),
 };
 export const logicNodeConfigs = [
+  ...batchNodeConfigs,
+  z.object({ kind: z.literal("switch"), ...workflowSwitchSettings }).strict(),
   z.object({ kind: z.literal("condition"), ...condition }).strict(),
   z.object({ kind: z.literal("transform"), ...transform }).strict(),
   z
@@ -58,6 +66,8 @@ export const logicNodeConfigs = [
     .strict(),
 ] as const;
 export const logicCommands = [
+  ...batchCommands,
+  z.object({ executor: z.literal("flow.switch"), fromStep: z.string(), ...workflowSwitchSettings }).strict(),
   z
     .object({
       executor: z.literal("flow.if"),

@@ -15,10 +15,13 @@ const graphInput = z.object({
       pin:z.object({goalId:z.string().uuid(),nodeId:z.string()}).optional(),
       position: z.object({ x: z.number(), y: z.number() }),
       config: z.object({
-        kind: z.enum(["url", "search", "capture", "trim", "deliver", "asset", "text", "write", "shot", "generate", "compose", "frame","condition","transform","template","merge","json","extract","delay"]),
+        kind: z.enum(["url", "search", "capture", "trim", "deliver", "asset", "text", "write", "shot", "generate", "compose", "frame","condition","switch","split","batch","transform","template","merge","json","extract","delay"]),
+        cases:z.array(z.object({id:z.string(),title:z.string(),match:z.enum(["all","any"]),conditions:z.array(z.object({field:z.string(),operator:z.enum(["equals","not_equals","contains","not_empty","greater_than","less_than"]),value:z.string()}))})).optional(),
+        source:z.enum(["json","lines"]).optional(),maxItems:z.number().int().min(1).max(100).optional(),batchSize:z.number().int().min(1).max(10).optional(),
+        operations:z.array(z.object({kind:z.enum(["extract","template","transform"]),path:z.string().optional(),template:z.string().optional(),operation:z.enum(["trim","uppercase","lowercase","replace"]).optional(),search:z.string().optional(),replacement:z.string().optional()})).optional(),
         conditions:z.array(z.object({field:z.string(),operator:z.enum(["equals","not_equals","contains","not_empty","greater_than","less_than"]),value:z.string()})).optional(),match:z.enum(["all","any"]).optional(),operation:z.enum(["trim","uppercase","lowercase","replace"]).optional(),search:z.string().optional(),replacement:z.string().optional(),template:z.string().optional(),separator:z.string().optional(),json:z.string().optional(),path:z.string().optional(),seconds:z.number().optional(),
         text: z.string().optional(), role: z.enum(["story", "script", "character", "prompt"]).optional(),
-        mode: z.enum(["rewrite", "script", "storyboard"]).optional(), instruction: z.string().optional(), shotCount: z.number().optional(),
+        mode: z.enum(["rewrite", "script", "storyboard","first","all"]).optional(), instruction: z.string().optional(), shotCount: z.number().optional(),
         index: z.number().optional(), at: z.number().optional(), model: z.string().optional(), prompt: z.string().optional(),
         duration: z.number().optional(), resolution: z.enum(["480p", "720p", "768p", "1080p"]).optional(),
         aspectRatio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4"]).optional(),
@@ -36,7 +39,7 @@ const graphInput = z.object({
     }),
   ),
   edges: z.array(
-    z.object({ id: z.string(), source: z.string(), target: z.string(),branch:z.enum(["true","false"]).optional() }),
+    z.object({ id: z.string(), source: z.string(), target: z.string(),branch:z.string().optional() }),
   ),
   groups:z.array(z.object({id:z.string(),title:z.string(),note:z.string().optional(),nodeIds:z.array(z.string()),collapsed:z.boolean()})).optional(),
 });
@@ -66,7 +69,7 @@ export function createCanvasWorkflowTool(db: Pool) {
     {
       name: "draft_canvas_workflow",
       description:
-        "Propose creation or editing of native workflow nodes on this canvas. Returns a persistent confirmation card; does NOT apply or execute until user confirms. Inspect existing workflows first, preserve unrelated node IDs/positions/parameters. Configs: text {role:story|script|character|prompt,text}; write {mode:rewrite|script|storyboard,instruction,shotCount:1..6}; shot {index}; generate {mediaType:image|video,model,prompt,aspectRatio,duration:1..30,resolution}; compose {aspect}; frame {at}; url {url}; search {query}; capture {record,pageLimit}; trim {start,end,aspect}; asset {elementId,assetId,mediaType}; deliver {}. Also supports condition {conditions:[{field,operator,value}],match:all|any}; IF output edges require branch:true|false. Utilities: transform {operation:trim|uppercase|lowercase|replace,search,replacement}, template {template}, merge {separator}, json {json}, extract {path}, delay {seconds:1..60}. Nodes may have note and pin:{goalId,nodeId} from a verified successful run of the same node only. Groups:{id,title,note,nodeIds,collapsed}. Use real inspected model and asset IDs. Video references go through frame extraction. One deliver, at most12 execution nodes. Updates require workflowId and exact revision. Summary explains proposed changes. Never claim changes are already applied.",
+        "Propose creation or editing of native workflow nodes on this canvas. Returns a persistent confirmation card; does NOT apply or execute until user confirms. Inspect existing workflows first, preserve unrelated node IDs/positions/parameters. Configs: text {role:story|script|character|prompt,text}; write {mode:rewrite|script|storyboard,instruction,shotCount:1..6}; shot {index}; generate {mediaType:image|video,model,prompt,aspectRatio,duration:1..30,resolution}; compose {aspect}; frame {at}; url {url}; search {query}; capture {record,pageLimit}; trim {start,end,aspect}; asset {elementId,assetId,mediaType}; deliver {}. Also supports condition {conditions:[{field,operator,value}],match:all|any}; IF output edges require branch:true|false. Utilities: transform {operation:trim|uppercase|lowercase|replace,search,replacement}, template {template}, merge {separator}, json {json}, extract {path}, delay {seconds:1..60}. Nodes may have note and pin:{goalId,nodeId} from a verified successful run of the same node only. Groups:{id,title,note,nodeIds,collapsed}. Use real inspected model and asset IDs. Video references go through frame extraction. One deliver, at most64 execution nodes. Updates require workflowId and exact revision. Summary explains proposed changes. Never claim changes are already applied.",
       schema: z.object({
         graph: graphInput,
         requestKey: z.string().uuid(),

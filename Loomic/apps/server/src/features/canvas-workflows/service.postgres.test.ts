@@ -74,6 +74,7 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
       "20261108000005_creative_library",
       "20261108000006_workflow_assistant",
       "20261109000000_workflow_partial_runs",
+        "20261109000001_workflow_versions",
       "20261029000000_canvas_content_version",
       "20261017000000_automation_lifecycle",
     ])
@@ -446,6 +447,36 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
     for(let i=0;i<8;i++)await worker.tick();
     expect(effects).not.toHaveBeenCalled();expect((await db.query("select status from agent_goals where id=$1",[receipt.goalId])).rows[0].status).toBe("completed");
     const skipped=(await db.query("select state,approval,attempt,output from agent_goal_steps where goal_id=$1 and step_id='no'",[receipt.goalId])).rows[0];expect(skipped).toMatchObject({state:"succeeded",attempt:0,output:{skipped:true}});
+  });
+  it("records every save, previews history and restores atomically without executing",async()=>{
+    const draft=await service.create(user,canvas,ready(),randomUUID());
+    await service.save(user,canvas,draft.id,1,{...draft.graph,title:"第二版"});
+    expect((await service.versions(user,canvas,draft.id)).map(version=>version.revision)).toEqual([2,1]);
+    await expect(service.versions(randomUUID(),canvas,draft.id)).rejects.toThrow("权限");
+    await expect(service.restore(user,canvas,draft.id,1,1)).rejects.toThrow("版本已变化");
+    const restored=await service.restore(user,canvas,draft.id,2,1);
+    expect(restored).toMatchObject({revision:3,activeGoalId:null,graph:{title:draft.graph.title}});
+    expect((await service.versions(user,canvas,draft.id))[0]).toMatchObject({revision:3,restoredFrom:1});
+    expect(await service.runs(user,canvas,draft.id)).toHaveLength(0);
+    const run=await service.run(user,canvas,draft.id,3,randomUUID(),session);
+    await expect(service.restore(user,canvas,draft.id,3,2)).rejects.toThrow("尚未结束");
+    await db.query("update agent_goals set status='canceled' where id=$1",[run.goalId]);
+  });
+  it("resumes real batch checkpoints after worker replacement without duplicating items",async()=>{
+    const position={x:0,y:0};
+    const graph:WorkflowGraph={title:"批量",nodes:[
+      {id:"source",title:"列表",position,config:{kind:"json",json:'["a","b","c","d","e"]'}},
+      {id:"split",title:"拆分",position,config:{kind:"split",source:"json",path:"",separator:"\n",maxItems:5}},
+      {id:"batch",title:"逐项处理",position,config:{kind:"batch",maxItems:5,batchSize:2,operations:[{kind:"template",template:"{{index}}: {{text}}"}]}},
+      {id:"output",title:"输出",position,config:{kind:"deliver"}},
+    ],edges:[{id:"a",source:"source",target:"split"},{id:"b",source:"split",target:"batch"},{id:"c",source:"batch",target:"output"}]};
+    const draft=await service.create(user,canvas,graph,randomUUID()),run=await service.run(user,canvas,draft.id,1,randomUUID(),session);
+    const execute=async(input:Parameters<typeof executeLogicNode>[0])=>await executeLogicNode(input)??{summary:"done"};
+    const first=new GoalStepWorker(db,execute);for(let i=0;i<3;i++)await first.tick();
+    expect((await db.query("select state,output from agent_goal_steps where goal_id=$1 and step_id='batch'",[run.goalId])).rows[0]).toMatchObject({state:"waiting_desktop",output:{processed:2,total:5}});
+    first.stop();const resumed=new GoalStepWorker(db,execute);for(let i=0;i<5;i++)await resumed.tick();
+    expect((await db.query("select output,attempt from agent_goal_steps where goal_id=$1 and step_id='batch'",[run.goalId])).rows[0]).toMatchObject({attempt:1,output:{items:["1: a","2: b","3: c","4: d","5: e"],processed:5}});
+    expect((await db.query("select status from agent_goals where id=$1",[run.goalId])).rows[0].status).toBe("completed");
   });
   it("reuses a successful pinned generation receipt and rejects edits and unavailable assets",async()=>{
     const graph:WorkflowGraph={title:"固定结果",nodes:[{id:"source",title:"资料",position:{x:0,y:0},config:{kind:"text",role:"prompt",text:"one"}},{id:"generated",title:"已生成图片",position:{x:400,y:0},config:{kind:"generate",mediaType:"image",model:"fixture",prompt:"one",aspectRatio:"16:9",duration:5,resolution:"720p"}},{id:"output",title:"输出",position:{x:800,y:0},config:{kind:"deliver"}}],edges:[{id:"a",source:"source",target:"generated"},{id:"b",source:"generated",target:"output"}]};

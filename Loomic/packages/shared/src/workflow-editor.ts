@@ -1,3 +1,4 @@
+import { workflowOutlets } from "./workflow-branches.js";
 import {
   connectionIssue,
   workflowGraphSchema,
@@ -29,7 +30,7 @@ export function insertWorkflowNode(
   const inputIssue = connectionIssue(next, edge.source, node.id,edge.branch);
   if (inputIssue) throw new Error(inputIssue);
   next.edges.push({ id: inputEdgeId, source: edge.source, target: node.id,...(edge.branch?{branch:edge.branch}:{}) });
-  const outgoing=node.config.kind==="condition"?"true" as const:undefined;
+  const outgoing=workflowOutlets(node)[0]?.value;
   const outputIssue = connectionIssue(next, node.id, edge.target,outgoing);
   if (outputIssue) throw new Error(outputIssue);
   next.edges = graph.edges.flatMap((item) =>
@@ -52,7 +53,7 @@ export function workflowRunGraph(
   if (!targetId) return graph;
   const target = graph.nodes.find((node) => node.id === targetId);
   if (!target) throw new Error("目标节点不存在。");
-  if (["url", "search","condition"].includes(target.config.kind))
+  if (["url", "search","condition","switch"].includes(target.config.kind))
     throw new Error("请在使用该网址的下游处理节点执行。");
   const needed = new Set<string>(),
     queue = [target.id];

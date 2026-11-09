@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { creativeNodeConfigs } from "./creative-workflow.js";
-import { logicNodeConfigs,validWorkflowPath } from "./workflow-logic.js";
+import { logicNodeConfigs,validWorkflowPath, workflowBranchSchema } from "./workflow-logic.js";
+import { workflowLogicIssue, workflowOutlets } from "./workflow-branches.js";
 import { workflowValueKinds, prunePinnedAncestors } from "./workflow-types.js";
 import {
   goalExecutionPlanSchema,
@@ -49,11 +50,11 @@ export const workflowNodeSchema = z
 export const workflowGraphSchema = z
   .object({
     title: z.string().trim().min(1).max(120),
-    nodes: z.array(workflowNodeSchema).max(24),
+    nodes: z.array(workflowNodeSchema).max(64),
     edges: z
-      .array(z.object({ id: nodeId, source: nodeId, target: nodeId, branch:z.enum(["true","false"]).optional() }).strict())
-      .max(40),
-    groups:z.array(z.object({id:nodeId,title:z.string().min(1).max(100),note:z.string().max(2000).optional(),nodeIds:z.array(nodeId).min(1).max(24),collapsed:z.boolean()}).strict()).max(12).optional(),
+      .array(z.object({ id: nodeId, source: nodeId, target: nodeId, branch:workflowBranchSchema.optional() }).strict())
+      .max(128),
+    groups:z.array(z.object({id:nodeId,title:z.string().min(1).max(100),note:z.string().max(2000).optional(),nodeIds:z.array(nodeId).min(1).max(64),collapsed:z.boolean()}).strict()).max(24).optional(),
   })
   .strict();
 export type WorkflowNode = z.infer<typeof workflowNodeSchema>;
@@ -73,6 +74,7 @@ export const WORKFLOW_LABELS: Record<WorkflowNode["config"]["kind"], string> = {
   text: "创作资料", write: "AI 编剧", shot: "分镜镜头", generate: "图片 / 视频生成", compose: "镜头合成", frame: "视频抽帧",
   asset: "画布素材",
   condition:"IF 条件分支",transform:"文本处理",template:"文本模板",merge:"合并文本",json:"JSON 数据",extract:"提取字段",delay:"等待",
+  switch: "Switch 多路分支", split: "列表拆分", batch: "批量循环",
   url: "网址输入",
   search: "网页搜索",
   capture: "浏览与录制",
@@ -83,7 +85,7 @@ export function connectionIssue(
   graph: WorkflowGraph,
   sourceId: string,
   targetId: string,
-  branch?:"true"|"false",
+  branch?:string,
   typeGraph:WorkflowGraph=graph,
 ): string | null {
   const source = graph.nodes.find((node) => node.id === sourceId),
@@ -92,11 +94,14 @@ export function connectionIssue(
     return "不能连接自身或不存在的节点。";
   const a = source.config,
     b = target.config;
-  if(a.kind==="condition"&&!branch)return "请选择 IF 的“是”或“否”出口。";
-  if(a.kind!=="condition"&&branch)return "只有 IF 节点可以指定分支出口。";
+  const outlets = workflowOutlets(source);
+  if(outlets.length && !outlets.some(outlet => outlet.value === branch)) return a.kind === "condition" ? "请选择 IF 的“是”或“否”出口。" : "请选择有效的 Switch 出口。";
+  if(!outlets.length&&branch)return "只有分支节点可以指定分支出口。";
   const values=workflowValueKinds(typeGraph,sourceId),text=values.has("text"),image=values.has("image"),video=values.has("video");
   const compatible =
-    (["condition","delay"].includes(b.kind)&&!values.has("url")&&values.size>0)||
+    (["condition","switch","delay"].includes(b.kind)&&!values.has("url")&&values.size>0)||
+    (b.kind === "split" && (b.source === "lines" ? text : values.has("json"))) ||
+    (b.kind === "batch" && values.has("list")) ||
     (["transform","template","merge"].includes(b.kind)&&text)||
     (b.kind==="extract"&&values.has("json"))||
     (b.kind === "write" && text) || (b.kind === "shot" && a.kind === "write" && a.mode === "storyboard") ||
@@ -153,7 +158,9 @@ export function validateWorkflow(graph: WorkflowGraph): WorkflowIssue[] {
     issues.push({ message: "需要且只能有一个输出节点。" });
   for (const node of graph.nodes) {
     const input = graph.edges.filter((edge) => edge.target === node.id);
-    if(node.pin&&["url","search","condition","delay","deliver"].includes(node.config.kind))issues.push({nodeId:node.id,message:"该节点不能固定执行结果。"});
+    if(node.pin&&["url","search","condition","switch","delay","deliver"].includes(node.config.kind))issues.push({nodeId:node.id,message:"该节点不能固定执行结果。"});
+    const logicIssue = workflowLogicIssue(node.config);
+    if (logicIssue) issues.push({ nodeId: node.id, message: logicIssue });
     if(node.config.kind==="json"){try{const value=JSON.parse(node.config.json);if(value===null||typeof value!=="object")throw new Error();}catch{issues.push({nodeId:node.id,message:"JSON 数据需要有效的对象或数组。"});}}
     if(node.config.kind==="template"&&!node.config.template.trim())issues.push({nodeId:node.id,message:"请填写文本模板，可使用 {{text}} 引用输入。"});
     if(node.config.kind==="transform"&&node.config.operation==="replace"&&!node.config.search)issues.push({nodeId:node.id,message:"请填写要替换的文本。"});
@@ -161,7 +168,7 @@ export function validateWorkflow(graph: WorkflowGraph): WorkflowIssue[] {
     if(node.config.kind==="extract"&&!validWorkflowPath(node.config.path)||node.config.kind==="condition"&&node.config.conditions.some(rule=>!validWorkflowPath(rule.field)))issues.push({nodeId:node.id,message:"填写有效的字段路径，例如 text 或 json.score。"});
     if(node.config.kind==="asset"&&(!node.config.assetId||!node.config.elementId))issues.push({nodeId:node.id,message:`${node.title}需要重新选择画布素材。`});
     if (
-      ["capture", "trim", "deliver", "shot", "frame", "compose","condition","transform","template","merge","extract","delay"].includes(node.config.kind) &&
+      ["capture", "trim", "deliver", "shot", "frame", "compose","condition","switch","split","batch","transform","template","merge","extract","delay"].includes(node.config.kind) &&
       !input.length && !node.pin
     )
       issues.push({ nodeId: node.id, message: `${node.title}缺少输入连线。` });
@@ -214,8 +221,8 @@ export function validateWorkflow(graph: WorkflowGraph): WorkflowIssue[] {
   }
   const grouped=new Set<string>(),groupIds=new Set<string>();
   for(const group of graph.groups??[]){if(groupIds.has(group.id))issues.push({message:"分组标识重复。"});groupIds.add(group.id);for(const id of group.nodeIds){if(!nodes.has(id)||grouped.has(id))issues.push({nodeId:id,message:"分组包含不存在或重复归属的节点。"});grouped.add(id);}}
-  if (graph.nodes.filter((node) => node.config.kind !== "url").length > 12)
-    issues.push({ message: "单次流程最多12个执行节点。" });
+  if (graph.nodes.filter((node) => node.config.kind !== "url").length > 64)
+    issues.push({ message: "单次流程最多64个执行节点。" });
   return issues;
 }
 
@@ -263,6 +270,9 @@ export function compileWorkflow(raw: WorkflowGraph): GoalExecutionPlan {
     };
     if(node.pin){const kinds=workflowValueKinds(raw,node.id),outputType=kinds.has("video")?"video":kinds.has("image")?"image":kinds.has("json")?"json":"text";steps.push({...base,dependsOn:[],command:{executor:"result.pinned",sourceGoalId:node.pin.goalId,sourceNodeId:node.pin.nodeId,outputType}});continue;}
     if(config.kind==="condition")steps.push({...base,command:{executor:"flow.if",fromStep:inputs[0]!.id,conditions:config.conditions,match:config.match}});
+    if(config.kind==="switch"){const {kind,...settings}=config;steps.push({...base,command:{executor:"flow.switch",fromStep:inputs[0]!.id,...settings}});}
+    if(config.kind==="split"){const {kind,...settings}=config;steps.push({...base,command:{executor:"data.split",fromStep:inputs[0]!.id,...settings}});}
+    if(config.kind==="batch"){const {kind,...settings}=config;steps.push({...base,command:{executor:"flow.batch",fromStep:inputs[0]!.id,...settings}});}
     if(config.kind==="transform"){const {kind,...settings}=config;steps.push({...base,command:{executor:"text.transform",fromStep:inputs[0]!.id,...settings}});}
     if(config.kind==="template")steps.push({...base,command:{executor:"text.template",fromStep:inputs[0]!.id,template:config.template}});
     if(config.kind==="merge")steps.push({...base,command:{executor:"text.merge",sources:inputs.map(node=>node.id),separator:config.separator}});
@@ -360,6 +370,9 @@ export function workflowFromPlan(plan: GoalExecutionPlan): WorkflowGraph {
     if (c.executor === "content.text") nodes.push({ ...base, config: { kind: "text", role: c.role, text: c.text } });
     if(c.executor==="result.pinned")throw new Error("固定结果必须保留原工作流，请从已有节点固定。");
     if(c.executor==="flow.if"){nodes.push({...base,config:{kind:"condition",conditions:c.conditions,match:c.match}});connect(c.fromStep,step.id);}
+    if(c.executor==="flow.switch"){const {executor,fromStep,...settings}=c;nodes.push({...base,config:{kind:"switch",...settings}});connect(fromStep,step.id);}
+    if(c.executor==="data.split"){const {executor,fromStep,...settings}=c;nodes.push({...base,config:{kind:"split",...settings}});connect(fromStep,step.id);}
+    if(c.executor==="flow.batch"){const {executor,fromStep,...settings}=c;nodes.push({...base,config:{kind:"batch",...settings}});connect(fromStep,step.id);}
     if(c.executor==="text.transform"){const {executor,fromStep,...settings}=c;nodes.push({...base,config:{kind:"transform",...settings}});connect(fromStep,step.id);}
     if(c.executor==="text.template"){nodes.push({...base,config:{kind:"template",template:c.template}});connect(c.fromStep,step.id);}
     if(c.executor==="text.merge"){nodes.push({...base,config:{kind:"merge",separator:c.separator}});c.sources.forEach(id=>connect(id,step.id));}

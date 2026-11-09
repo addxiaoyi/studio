@@ -75,11 +75,10 @@ export function embedWorkflowMaterials(
     } else connect(source.id, target.id);
   }
   if (
-    next.nodes.length > 24 ||
-    next.nodes.filter((node) => node.config.kind !== "url").length > 12 ||
-    next.edges.length > 40
+    next.nodes.length > 64 ||
+    next.edges.length > 128
   )
-    throw new Error("流程节点已满，单次最多12个执行节点。请拆分流程后再添加。");
+    throw new Error("流程节点已满，单次最多64个执行节点。请拆分流程后再添加。");
   if (next.edges.filter((edge) => edge.target === targetId).length > 8)
     throw new Error("这个节点最多接入8项资料。");
   if (

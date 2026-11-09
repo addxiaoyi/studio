@@ -1,3 +1,4 @@
+import { workflowOutlets } from "@helstera/shared";
 import {
   connectionIssue,
   workflowNodeSchema,
@@ -271,7 +272,7 @@ export function projectWorkflow(
               link: null,
               backgroundColor: "#ffffff",
               width: Math.max(240, body.width),
-              height: Math.max(node.config.kind === "generate" ? 280 : 164, body.height),
+              height: Math.max(node.config.kind === "generate" ? 280 : node.config.kind === "switch" ? 40+(node.config.cases.length+1)*28 : 164, body.height),
               strokeColor: "transparent",
               roundness: null,
             }
@@ -386,7 +387,7 @@ export function readSceneWorkflow(
   for (const el of scene) {
     if (el.isDeleted&&!el.customData?.workflowCollapsed || el.type !== "arrow" || el.customData?.workflowResult)
       continue;
-    const known=el.customData?.workflowEdge as {workflowId?:string;edgeId?:string;source?:string;target?:string;branch?:"true"|"false"}|undefined;
+    const known=el.customData?.workflowEdge as {workflowId?:string;edgeId?:string;source?:string;target?:string;branch?:string}|undefined;
     const target = ids.get(el.endBinding?.elementId ?? "")??(el.endBinding?.elementId.startsWith(`wfg:${workflowId}:`)?known?.target:undefined);
     if (!target) continue;
     let source = ids.get(el.startBinding?.elementId ?? "")??(el.startBinding?.elementId.startsWith(`wfg:${workflowId}:`)?known?.source:undefined);
@@ -406,7 +407,7 @@ export function readSceneWorkflow(
       }
     }
     if (!source) continue;
-    const branch=graph.nodes.find(node=>node.id===source)?.config.kind==="condition"?(known?.branch??previous.edges.find(edge=>edge.id===known?.edgeId)?.branch??"true"):undefined;
+    const branch=workflowOutlets(graph.nodes.find(node=>node.id===source)).length?(known?.branch??previous.edges.find(edge=>edge.id===known?.edgeId)?.branch??workflowOutlets(graph.nodes.find(node=>node.id===source))[0]?.value):undefined;
     const issue = connectionIssue(graph, source, target,branch,{...previous,nodes});
     if (issue) {
       issues.push(issue);

@@ -6,6 +6,7 @@ import {
   type CreativeLibraryBody,
   type WorkflowGraph,
   workflowProposalSchema,
+  workflowVersionSchema,
 } from "@helstera/shared";
 import { getServerBaseUrl } from "./env";
 
@@ -117,6 +118,12 @@ export function openCanvasWorkflow(id?: string) {
   window.dispatchEvent(
     new CustomEvent("loomic:workflow-open", { detail: { id } }),
   );
+}
+export async function fetchWorkflowVersions(token:string,canvasId:string,id:string,before?:number) {
+  return workflowVersionSchema.array().parse(await workflowRequest(token,canvasId,`/${id}/versions${before?`?before=${before}`:""}`));
+}
+export async function restoreWorkflowVersion(token:string,canvasId:string,id:string,revision:number,targetRevision:number) {
+  return workflowDocumentSchema.parse(await workflowRequest(token,canvasId,`/${id}/restore`,"POST",{revision,targetRevision}));
 }
 export async function fetchWorkflowRuns(
   token: string,

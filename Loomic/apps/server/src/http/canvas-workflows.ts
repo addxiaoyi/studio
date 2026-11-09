@@ -81,6 +81,8 @@ export function registerCanvasWorkflowRoutes(
     "save",
     "run",
     "runs",
+    "versions",
+    "restore",
     "plan",
   ] as const) {
     const suffix =
@@ -92,7 +94,7 @@ export function registerCanvasWorkflowRoutes(
             ? "/:id"
             : `/:id/${operation}`;
     app.route<{ Params: { canvasId: string; id?: string } }>({
-      method: ["list", "get", "runs"].includes(operation)
+      method: ["list", "get", "runs", "versions"].includes(operation)
         ? "GET"
         : operation === "save"
           ? "PUT"
@@ -163,6 +165,14 @@ export function registerCanvasWorkflowRoutes(
           }
           if (operation === "runs")
             data = await service.runs(user.id, canvasId, id!);
+          if (operation === "versions") {
+            const query = z.object({before:z.coerce.number().int().positive().optional()}).parse(request.query);
+            data = await service.versions(user.id,canvasId,id!,query.before);
+          }
+          if (operation === "restore") {
+            const body = z.object({revision:z.number().int().positive(),targetRevision:z.number().int().positive()}).strict().parse(request.body);
+            data = await service.restore(user.id,canvasId,id!,body.revision,body.targetRevision);
+          }
           if (operation === "plan") {
             const body = z
               .object({
@@ -209,6 +219,7 @@ export function registerCanvasWorkflowRoutes(
                 dependsOn: step.dependsOn,
                 command: step.command,
                 completion: step.completion,
+                ...(step.when ? {when:step.when} : {}),
               })),
             });
             data = {

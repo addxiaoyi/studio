@@ -175,6 +175,7 @@ export function WorkflowRunPanel({
             {step.error && (
               <p className="mt-2 text-destructive">{step.error}</p>
             )}
+            {step.executor==="flow.batch"&&typeof step.output?.processed==="number"&&typeof step.output?.total==="number"&&<p role="status" className="mt-2 text-muted-foreground">已处理 {step.output.processed} / {step.output.total} 项 · 分批进度已保存</p>}
             {step.executor === "media.generate" && Boolean(step.output?.generationApproval) && <div className="mt-3"><GenerationApprovalCard {...step.output!.generationApproval as GenerationApprovalCardProps} onJobCreated={()=>void onRefresh()} /></div>}
             {step.executor === "media.generate" && <WorkflowGenerationInputs preview={step.output?.generationPreview} token={token} />}
             {Boolean(step.output?.generationJob) && <p className="mt-2 text-muted-foreground">{String((step.output!.generationJob as {stage?:string}).stage || "生成任务处理中")} · {Number((step.output!.generationJob as {progress?:number}).progress)||0}%</p>}

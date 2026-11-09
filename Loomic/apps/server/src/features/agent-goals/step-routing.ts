@@ -17,10 +17,12 @@ export function activeStepInputs(
     )
       return [];
     const required = rules.filter((rule) => rule.source === id);
-    if (required.length && typeof source.output?.condition !== "boolean")
-      throw new Error("IF 节点缺少可核验的分支结果。");
+    const executor = plan.steps.find(step => step.id === id)?.command?.executor;
+    const branches = source.output?.branches;
+    if (required.length && (executor === "flow.switch" ? !Array.isArray(branches) || branches.some(branch => typeof branch !== "string") : typeof source.output?.condition !== "boolean"))
+      throw new Error("分支节点缺少可核验的分支结果。");
     return required.every(
-      (rule) => String(source.output?.condition) === rule.branch,
+      (rule) => executor === "flow.switch" ? (branches as string[]).includes(rule.branch) : String(source.output?.condition) === rule.branch,
     )
       ? [source]
       : [];

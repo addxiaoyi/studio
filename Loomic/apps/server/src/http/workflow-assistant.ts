@@ -16,7 +16,7 @@ const askSchema = z
     requestKey: z.string().uuid(),
     workflowId: z.string().uuid().optional(),
     sessionId: z.string().uuid().optional(),
-    selectedNodeIds: z.array(z.string().max(64)).max(24).default([]),
+    selectedNodeIds: z.array(z.string().max(64)).max(64).default([]),
     referenceElementIds: z.array(z.string().max(200)).max(12).default([]),
   })
   .strict();

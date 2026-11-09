@@ -1,4 +1,5 @@
 "use client";
+import { workflowOutlets } from "@helstera/shared";
 import type { ReactNode } from "react";
 import {
   WORKFLOW_LABELS,
@@ -24,7 +25,7 @@ type Props = {
   materials?: WorkflowNode[]|undefined;
   onBindMaterial?: (()=>void)|undefined;
   referenceEditor?: ReactNode;
-  onBranch?:((id:string,branch:"true"|"false")=>void)|undefined;
+  onBranch?:((id:string,branch:string)=>void)|undefined;
 };
 export function NodeInspector({
   node,
@@ -233,7 +234,7 @@ export function NodeInspector({
                   }
                 </span>
                 {config.kind === "compose" && <span className="flex gap-1"><button disabled={disabled} onClick={()=>onReorder?.(edge.id,-1)} aria-label={`前移${edge.source}`}>↑</button><button disabled={disabled} onClick={()=>onReorder?.(edge.id,1)} aria-label={`后移${edge.source}`}>↓</button></span>}
-                {graph.nodes.find(node=>node.id===edge.source)?.config.kind==="condition"&&<StyledSelect aria-label={`分支${edge.id}`} value={edge.branch??"true"} disabled={busy} options={[{value:"true",label:"是分支"},{value:"false",label:"否分支"}]} onChange={value=>onBranch?.(edge.id,value as "true"|"false")}/>}
+                {!!workflowOutlets(graph.nodes.find(node=>node.id===edge.source)).length&&<StyledSelect aria-label={`分支${edge.id}`} value={edge.branch??""} disabled={busy} options={workflowOutlets(graph.nodes.find(node=>node.id===edge.source))} onChange={value=>onBranch?.(edge.id,value)}/>}
                 <button
                   disabled={disabled}
                   onClick={() => onDisconnect(edge.id)}
@@ -247,7 +248,7 @@ export function NodeInspector({
         </ul>
         {!disabled &&
           graph.nodes.some(
-            (source) => !connectionIssue(graph, source.id, node.id,source.config.kind==="condition"?"true":undefined),
+            (source) => !connectionIssue(graph, source.id, node.id,workflowOutlets(source)[0]?.value),
           ) && (
             <StyledSelect
               aria-label="连接上游节点"
@@ -257,7 +258,7 @@ export function NodeInspector({
                 { value: "", label: "选择上游节点…" },
                 ...graph.nodes
                   .filter(
-                    (source) => !connectionIssue(graph, source.id, node.id,source.config.kind==="condition"?"true":undefined),
+                    (source) => !connectionIssue(graph, source.id, node.id,workflowOutlets(source)[0]?.value),
                   )
                   .map((source) => ({ value: source.id, label: source.title })),
               ]}
