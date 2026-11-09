@@ -58,10 +58,11 @@ test("shows real browser actions, persists the view across refresh and respects 
     await frame.evaluate((img: HTMLImageElement) => img.naturalWidth),
   ).toBe(1280);
   await expect(
-    panel.getByText(fixture.engine === "chromix" ? "Chromix" : "Chromium", {
+    panel.getByText("Helstera", {
       exact: true,
     }),
   ).toBeVisible();
+  await expect(panel.getByText(/^(Chromix|Chromium)$/)).toHaveCount(0);
   await panel
     .getByRole("button", { name: "下一动作前暂停", exact: true })
     .click();

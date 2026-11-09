@@ -85,7 +85,8 @@ it("opens the live session from a task, pauses explicitly, and closes without ca
       }),
     ),
   );
-  expect(await screen.findByText("Chromix")).toBeVisible();
+  expect(await screen.findByText("Helstera")).toBeVisible();
+  expect(screen.queryByText("Chromix")).toBeNull();
   expect(await screen.findByAltText("浏览器画面：Example")).toHaveAttribute(
     "src",
     "blob:preview",
