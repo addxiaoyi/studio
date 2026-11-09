@@ -1,4 +1,5 @@
 "use client";
+import "./node-workbench.css";
 import { useEffect, useState } from "react";
 import type { AgentGoal } from "@helstera/shared";
 import { fetchAgentGoal, updateAgentGoal } from "@/lib/server-api";

@@ -170,8 +170,10 @@ test("workspace hierarchy, nested selects and recovery dialogs fit narrow window
     const proof=await service.create(fixture.userId,fixture.canvasId,{title:"界面任务回流",nodes:[{id:"text",title:"文字",position:{x:0,y:0},config:{kind:"text",role:"story",text:"历史记录可回到原画布"}},{id:"deliver",title:"输出",position:{x:400,y:0},config:{kind:"deliver"}}],edges:[{id:"a",source:"text",target:"deliver"}]},randomUUID());
     const proofRun=await service.run(fixture.userId,fixture.canvasId,proof.id,1,randomUUID(),fixture.sessionId);
     await page.goto("http://localhost:3228/agent-history/");
+    await page.reload();
     await expect(page.getByRole("button",{name:/界面任务回流/})).toBeVisible();
     await expect(page.getByRole("region",{name:"工作流运行记录"})).toContainText("全部完成",{timeout:20000});
+    expect(await page.getByRole("group",{name:"筛选执行步骤"}).evaluate(element=>getComputedStyle(element).display)).toBe("flex");
     await page.getByRole("link",{name:"打开对应画布与任务"}).click();await expect(page).toHaveURL(new RegExp(`goalId=${proofRun.goalId}`));
   } finally {
     await desktop?.close();
