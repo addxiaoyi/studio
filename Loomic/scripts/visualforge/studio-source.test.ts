@@ -85,6 +85,7 @@ describe("pinned Studio typography adapter", () => {
       "helpers/get-codex-annotation.ts", "components/AskAiModal.tsx",
       "components/MenuBuildIndicator.tsx",
       "components/Timeline/TimelineSequenceName.tsx", "components/Timeline/TimelineMediaInfo.tsx",
+      "components/RenderQueue/RenderQueueItemStatus.tsx",
     ]) {
       const lf = read(file).replaceAll("\r\n", "\n");
       const patched = patchStudioSource(file, lf);

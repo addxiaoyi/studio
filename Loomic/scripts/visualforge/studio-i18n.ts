@@ -236,6 +236,10 @@ const copy: Record<string, string> = {
 const ignored = "input, textarea, select, pre, code, [contenteditable=\"true\"]";
 
 export function translateStudioValue(value: string) {
+  if (value.trim() === "Cancel render") return "取消导出";
+  if (/^Collapse children of /.test(value)) return value.replace(/^Collapse children of /, "收起子图层：");
+  if (/^Expand children of /.test(value)) return value.replace(/^Expand children of /, "展开子图层：");
+  if (/^Rendering \d+\/\d+, time remaining: /.test(value)) return value.replace(/^Rendering (\d+\/\d+), time remaining: /, "正在导出 $1 帧，预计剩余：");
   const exact = copy[value.trim()];
   if (exact !== undefined) return value.replace(value.trim(), exact);
   return value.replace(/^Close (.+) tab$/, "关闭 $1 标签").replace(/^Timeline zoom (.+)$/, "时间线缩放 $1").replace(/^(Render|渲染) video/, "渲染视频");

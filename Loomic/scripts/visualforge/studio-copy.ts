@@ -1,4 +1,7 @@
 export const studioChinese: Record<string, string> = {
+  "View render status": "查看导出状态",
+  "Cancel render": "取消导出",
+  done: "已完成", failed: "失败", running: "正在导出", saving: "正在保存", cancelled: "已取消",
   "Disable snapping": "关闭吸附",
   "Drag to adjust source start": "拖动调整素材起点",
   Metadata: "属性",

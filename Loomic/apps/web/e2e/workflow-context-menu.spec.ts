@@ -68,6 +68,7 @@ test("node menu prioritizes editing and AI, isolates floating panels and support
       exact: true,
     });
     await page.getByRole("button", { name: "打开可视化工作流" }).click();
+    await expect(dock.getByText("正在读取画布流程…", { exact: true })).toBeHidden({ timeout: 20000 });
     await expect(
       dock.getByRole("button", { name: /网址输入 目标网址/ }),
     ).toBeVisible();

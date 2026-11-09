@@ -150,6 +150,12 @@ export function patchStudioSource(file: string, source: string) {
     if (file.endsWith("TimelineSequenceName.tsx")) replace("const text = getTruncatedDisplayName(editableDisplayName);", "const text = getTruncatedDisplayName(studioDisplayName(editableDisplayName, locale === 'en'));");
     else replace("\t\t\t\t{fileName}\n\t\t\t</div>", "\t\t\t\t{studioDisplayName(fileName, locale === 'en')}\n\t\t\t</div>");
   }
+  if (file === "components/RenderQueue/RenderQueueItemStatus.tsx") {
+    text = `import {useTranslation} from '../../i18n';\n${text}`;
+    replace("const {setSelectedModal}", "const {t} = useTranslation();\n\tconst {setSelectedModal}");
+    replace('type="button"', 'type="button" aria-label={`${t("View render status")}: ${job.compositionId} · ${t(job.status)}`}');
+    replace("\tpadding: 0,", "\tpadding: 4,\n\tminWidth: 28,\n\tminHeight: 28,");
+  }
   if(file==="helpers/document-title.ts")replace("const productName = 'VisualForge Studio';","const productName = 'Helstera 视频创作';");
   return patchStudioAiSource(file, text);
 }
