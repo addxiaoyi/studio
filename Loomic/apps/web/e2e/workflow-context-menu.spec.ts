@@ -60,6 +60,7 @@ test("node menu prioritizes editing and AI, isolates floating panels and support
       page = await desktop.firstWindow();
     }
     await page.setViewportSize({ width: 1440, height: 960 });
+    const loadedWorkflow = page.waitForResponse(response => response.request().method() === "GET" && new URL(response.url()).pathname === `/api/canvases/${fixture.canvasId}/workflows` && response.status() === 200);
     await page.goto(
       `http://localhost:3228/${desktop ? "desktop-app/" : ""}canvas/?id=${fixture.canvasId}&session=${fixture.sessionId}`,
     );
@@ -68,7 +69,8 @@ test("node menu prioritizes editing and AI, isolates floating panels and support
       exact: true,
     });
     await page.getByRole("button", { name: "打开可视化工作流" }).click();
-    await expect(dock.getByText("正在读取画布流程…", { exact: true })).toBeHidden({ timeout: 20000 });
+    expect((await (await loadedWorkflow).json()).data.workflows).toEqual(expect.arrayContaining([expect.objectContaining({ id: flow.id })]));
+    await expect(dock.getByRole("combobox", { name: "选择工作流" })).toContainText(graph.title);
     await expect(
       dock.getByRole("button", { name: /网址输入 目标网址/ }),
     ).toBeVisible();
