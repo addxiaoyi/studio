@@ -38,7 +38,7 @@ const icon = path => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
 const layout = body
   .replace(/<header class="hero">[\s\S]*?<\/header>/, header)
   .replace(/<button\b[^>]*id="fitThemeToggle"[\s\S]*?<\/button>/, "")
-  .replace(/<footer id="foot">[\s\S]*?<\/footer>/, '<footer id="foot"><span data-i18n="footerNote"></span> · <a href="/creative/fashion-LICENSE.txt" target="_blank" rel="noopener noreferrer">LICENSE</a></footer>')
+  .replace(/<footer id="foot">[\s\S]*?<\/footer>/, '<footer id="foot"><span data-i18n="footerNote"></span> · <a href="/creative/fashion-LICENSE.txt" target="_blank" rel="noopener noreferrer">开源许可</a></footer>')
   .replace('<span class="ico">📷</span>', `<span class="ico" aria-hidden="true">${icon('<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 16-5-5L5 21"/>')}</span>`)
   .replace('<span class="ico" aria-hidden="true">👗</span>', `<span class="ico" aria-hidden="true">${icon('<path d="m16 3 5 4-3 4-2-1v11H8V10l-2 1-3-4 5-4c0 4 8 4 8 0Z"/>')}</span>`)
   .replace('<span aria-hidden="true">🎲</span>', icon('<path d="m18 14 4 4-4 4M18 2l4 4-4 4M2 18h3c6 0 6-12 12-12h5M2 6h3c2 0 3 1 4 3m6 6c1 2 2 3 4 3h3"/>'))

@@ -1,4 +1,5 @@
 "use client";
+import {productLabel} from "@/lib/product-label";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { AgentGoal } from "@helstera/shared";
@@ -210,7 +211,7 @@ export function GoalHistory() {
 								aria-current={current?.id === goal.id ? "true" : undefined}
 								onClick={() => setSelected(goal.id)}
 							>
-								<strong>{goal.goal}</strong>
+								<strong>{productLabel(goal.goal)}</strong>
 								<small>
 									{labels[goal.status]} ·{" "}
 									{new Date(goal.updatedAt).toLocaleString()}

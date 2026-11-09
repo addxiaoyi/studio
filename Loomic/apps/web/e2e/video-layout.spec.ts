@@ -67,7 +67,7 @@ test("editor keeps a usable canvas, top-layer export and one locale across scree
   await expect(modal).toHaveCount(0);
   await page.evaluate(() => { localStorage.setItem("helstera.locale", "en-US"); window.dispatchEvent(new Event("helstera:locale-changed")); });
   await expect(page.getByLabel("Describe your video edit")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Import from Loomic library", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Import from Helstera library", exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath("video-en.png") });
   await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);

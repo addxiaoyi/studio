@@ -205,7 +205,7 @@ function BrowserSessionDock() {
                 <div className="agent-browser-state">
                   <span data-state={displayState}>{labels[displayState!]}</span>
                   <span>
-                    {selected.engine === "chromix" ? "Chromix" : "Chromium"}
+                    Helstera
                   </span>
                 </div>
                 <p className="agent-browser-url" title={selected.url}>

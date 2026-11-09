@@ -18,7 +18,7 @@ it("downloads the file identifier while preserving the library identifier for im
   api.readStudioAsset.mockResolvedValue(file);
   const importAsset = vi.fn();
   render(<StudioAssetPicker token="test" importAsset={importAsset} />);
-  fireEvent.click(screen.getByRole("button", { name: "从 Loomic 素材库导入" }));
+  fireEvent.click(screen.getByRole("button", { name: "从 Helstera 素材库导入" }));
   await selectOption(await screen.findByLabelText("选择素材"), "成片");
   fireEvent.click(screen.getByRole("button", { name: "导入编辑器" }));
   await waitFor(() => expect(importAsset).toHaveBeenCalledWith(file, id));
@@ -29,7 +29,7 @@ it("reports a missing file identity instead of requesting a record ID", async ()
   const id = "123e4567-e89b-42d3-a456-426614174000";
   api.fetchGeneratedAssets.mockResolvedValue({ assets: [{ id, title: "缺失文件" }] });
   render(<StudioAssetPicker token="test" importAsset={vi.fn()} />);
-  fireEvent.click(screen.getByRole("button", { name: "从 Loomic 素材库导入" }));
+  fireEvent.click(screen.getByRole("button", { name: "从 Helstera 素材库导入" }));
   await selectOption(await screen.findByLabelText("选择素材"), "缺失文件");
   fireEvent.click(screen.getByRole("button", { name: "导入编辑器" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("缺少文件标识");

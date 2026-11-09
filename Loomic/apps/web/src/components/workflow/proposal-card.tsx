@@ -1,4 +1,5 @@
 "use client";
+import {productLabel} from "@/lib/product-label";
 import { useEffect, useState } from "react";
 import { ChevronDown, Check, Clock3 } from "lucide-react";
 import {
@@ -137,7 +138,7 @@ export function WorkflowProposalCard({
       </header>
       {proposal.targetNodeId&&<div className="workflow-partial-scope"><strong>执行到：{proposal.before?.nodes.find(node=>node.id===proposal.targetNodeId)?.title??proposal.targetNodeId}</strong><p>仅运行以下步骤，未固定上游会重新执行；固定结果复用，生成费用仍逐次确认。</p><ol>{scopeSteps.map((title,index)=><li key={index}>{title}</li>)}</ol>{scopeError&&<p role="alert">{scopeError}</p>}</div>}
       {proposal.graph && (
-        <strong className="text-xs">{proposal.graph.title}</strong>
+        <strong className="text-xs">{productLabel(proposal.graph.title)}</strong>
       )}
       <details className="workflow-proposal-details" open={proposal.status === "pending" || proposal.action === "inspect"}>
       <summary><span>{changes.length ? `${changes.length} 项修改` : "操作说明"}</span><ChevronDown size={14} aria-hidden /></summary>
@@ -145,7 +146,7 @@ export function WorkflowProposalCard({
       {proposal.revision !== null && (
         <p className="workflow-proposal-version">
           基于第 {proposal.revision} 版
-          {proposal.before ? ` · ${proposal.before.title}` : ""}
+          {proposal.before ? ` · ${productLabel(proposal.before.title)}` : ""}
         </p>
       )}
       {!!changes.length && (

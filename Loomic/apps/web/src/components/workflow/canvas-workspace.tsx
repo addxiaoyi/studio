@@ -1,4 +1,5 @@
 "use client";
+import {productLabel} from "@/lib/product-label";
 import {
   GitBranch,
   LayoutGrid,
@@ -92,7 +93,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
       <WorkflowCanvasLayer api={api} token={token} workflowId={flow.selected?.id} graph={flow.graph} disabled={locked} onEdit={editNode} onAsk={askNode} onConnect={connect} onDisconnect={disconnect} onInsert={setInsertingEdge} onAdd={setAddingAfter} onError={flow.setError} onToggleGroup={id=>{if(!locked)flow.edit({...flow.graph,groups:flow.graph.groups?.map(group=>group.id===id?{...group,collapsed:!group.collapsed}:group)});}}/>
       <WorkflowNodePicker open={addingAfter!==null||insertingEdge!==null} onClose={()=>{setAddingAfter(null);setInsertingEdge(null);}} onAdd={addNode} disabled={locked} anchor={flow.graph.nodes.find(node=>node.id===addingAfter)?.title} insertion={insertingEdge?{graph:flow.graph,edgeId:insertingEdge}:undefined}/>
       <WorkflowMaterialDropCue cue={materialDrop.cue} onComplete={materialDrop.clearCue} />
-      {renaming && <WorkflowRenameDialog title={flow.graph.title} close={()=>setRenaming(false)} rename={title=>flow.edit({...flow.graph,title})} />}
+      {renaming && <WorkflowRenameDialog title={productLabel(flow.graph.title)} close={()=>setRenaming(false)} rename={title=>flow.edit({...flow.graph,title})} />}
       {!open && flow.selected && (
         <button
           className="canvas-workflow-launch"
@@ -100,7 +101,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
           aria-label="展开画布流程"
         >
           <GitBranch size={16} />
-          <span>{flow.graph.title}</span>
+          <span>{productLabel(flow.graph.title)}</span>
           <small>{flow.dirty ? "未保存" : active ? "执行中" : "流程"}</small>
         </button>
       )}
@@ -140,7 +141,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                 { value: "", label: "选择流程" },
                 ...flow.documents.map((doc) => ({
                   value: doc.id,
-                  label: doc.id === flow.selected?.id ? flow.graph.title : doc.graph.title,
+                  label: productLabel(doc.id === flow.selected?.id ? flow.graph.title : doc.graph.title),
                 })),
               ]}
               onChange={(id) => {
@@ -479,7 +480,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
       <Dialog open={Boolean(pendingSwitch)} onOpenChange={value=>{if(!value)setPendingSwitch(null);}}><DialogContent><DialogHeader><DialogTitle>切换前保留当前修改</DialogTitle><DialogDescription>当前流程有未保存修改。可以保存到工作区，也可以保留为本机草稿后切换；不会运行任何节点。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={()=>setPendingSwitch(null)}>继续编辑</Button><Button variant="outline" disabled={saving||flow.busy} onClick={()=>void confirmSwitch(false)}>保留本机草稿并切换</Button><Button disabled={saving||flow.busy} onClick={()=>void confirmSwitch(true)}>保存并切换</Button></DialogFooter></DialogContent></Dialog>
       <WorkflowDialogs
         proposal={proposal}
-        title={flow.graph.title}
+        title={productLabel(flow.graph.title)}
         revision={flow.selected?.revision}
         plan={confirmationPlan}
         targetTitle={runTarget?flow.graph.nodes.find(node=>node.id===runTarget)?.title:undefined}

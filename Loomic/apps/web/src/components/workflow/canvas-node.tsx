@@ -1,4 +1,5 @@
 "use client";
+import {productLabel} from "@/lib/product-label";
 import {
   ArrowRight,
   Film,
@@ -84,7 +85,7 @@ export function WorkflowCanvasNode({ element, accessToken, selected = false, con
       data-selected={selected}
       data-connectable={connecting}
       data-workflow-node={node.id}
-      aria-label={`${node.title}，${workflowStateLabel[state] ?? state}`}
+      aria-label={`${productLabel(node.title)}，${workflowStateLabel[state] ?? state}`}
     >
       <header>
         <span className="canvas-workflow-icon">
@@ -92,7 +93,7 @@ export function WorkflowCanvasNode({ element, accessToken, selected = false, con
         </span>
         <div>
           <small>{WORKFLOW_LABELS[config.kind]}</small>
-          <strong>{node.title}</strong>
+          <strong>{productLabel(node.title)}</strong>
         </div>
       </header>
       {node.pin&&<div className="workflow-pin-badge"><Pin size={11}/>已固定 · 不重复生成</div>}

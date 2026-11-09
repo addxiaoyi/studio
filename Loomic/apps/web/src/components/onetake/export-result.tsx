@@ -27,7 +27,7 @@ export function OneTakeExportResult({ output, token, userId, runtime, copy, onRe
   const inspect = () => act(async () => {
     if (!runtime) return;
     const blob = await oneTakeApi.media(token, `exports/${output.id}/file`);
-    const name = `OneTake-${output.id}.mp4`;
+    const name = `Helstera-${output.id}.mp4`;
     await runtime.importAsset(new File([blob], name, { type: "video/mp4" }), output.id);
     const imported = await runtime.readAsset(output.id);
     if (!imported) throw new Error("成片导入未完成，请重试。");
@@ -49,7 +49,7 @@ export function OneTakeExportResult({ output, token, userId, runtime, copy, onRe
     {["pending", "queued", "running"].includes(output.state) && <Button className="ml-2" size="sm" variant="outline" onClick={cancel} disabled={busy}>{copy.cancel}</Button>}
     {output.state === "completed" && <>
       {url ? output.options.format === "mp4" ? <video controls src={url} className="max-h-64 w-full rounded-md bg-black" aria-label={copy.download} /> : <p className="text-xs text-muted-foreground">{copy.movHint}</p> : <p role="status" className="text-xs">{copy.pendingFile}</p>}
-      <div className="flex flex-wrap gap-2">{url && <a href={url} download={`OneTake-${output.id}.${output.options.format}`} className="rounded-md border px-3 py-2 text-sm">{copy.download}</a>}
+      <div className="flex flex-wrap gap-2">{url && <a href={url} download={`Helstera-${output.id}.${output.options.format}`} className="rounded-md border px-3 py-2 text-sm">{copy.download}</a>}
         {output.options.format === "mp4" && <><Button size="sm" variant="outline" disabled={busy || !!assetId} onClick={save}>{assetId ? copy.savedAsset : copy.saveAsset}</Button><Button size="sm" variant="outline" disabled={busy || !runtime || applied} onClick={inspect}>{applied ? copy.applied : copy.useCurrent}</Button></>}
       </div>
       {assetId && <SendVideoToChat assetId={assetId} token={token} />}

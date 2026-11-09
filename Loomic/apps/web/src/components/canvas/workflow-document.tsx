@@ -1,4 +1,5 @@
 "use client";
+import {productLabel} from "@/lib/product-label";
 import { useState } from "react";
 import { readWorkflowDocument } from "@helstera/shared";
 import { FileText, Pencil } from "lucide-react";
@@ -73,11 +74,11 @@ export function CanvasWorkflowDocument({
     <>
       <article
         className="canvas-workflow-document"
-        aria-label={`${document.title}文稿`}
+        aria-label={`${productLabel(document.title)}文稿`}
       >
         <header>
           <FileText size={18} />
-          <strong>{document.title}</strong>
+          <strong>{productLabel(document.title)}</strong>
           <button aria-label="编辑画布文稿" onClick={edit} onPointerDown={stop}>
             <Pencil size={14} />
             编辑

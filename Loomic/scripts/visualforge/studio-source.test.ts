@@ -9,6 +9,9 @@ const studioRoot = resolve(import.meta.dir, "../../vendor/visualforge/packages/s
 const read = (file: string) => readFileSync(resolve(studioRoot, file), "utf8");
 
 describe("pinned Studio typography adapter", () => {
+  test("uses Helstera in the browser title",()=>{
+    const title=patchStudioSource("helpers/document-title.ts",read("helpers/document-title.ts"));expect(title).toContain("const productName = 'Helstera 视频创作';");expect(title).not.toContain("VisualForge Studio");
+  });
   test("localizes the composition menu and ruler labels without renaming user compositions",()=>{
     expect(translateStudioValue("Composition")).toBe("合成");expect(translateStudioValue("Horizontal ruler")).toBe("水平标尺");expect(translateStudioValue("Vertical ruler")).toBe("垂直标尺");expect(translateStudioValue("Loading Studio")).toBe("正在加载编辑器");expect(translateStudioValue("MyComp")).toBe("MyComp");
   });

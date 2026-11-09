@@ -90,7 +90,7 @@ const copy: Record<string, string> = {
   Redo: "重做",
   "Open in Folder": "在文件夹中打开",
   "Copy to clipboard": "复制到剪贴板",
-  "Remotion Agent Skills": "Remotion Agent 技能",
+  "Remotion Agent Skills": "Helstera Agent 技能",
   "Copy command": "复制命令",
   "Copy prompt": "复制提示词",
   "Import captions file": "导入字幕文件",
@@ -98,7 +98,7 @@ const copy: Record<string, string> = {
   "Default editor": "默认编辑器",
   "Default coding agent": "默认编码智能体",
   "License type": "许可证类型",
-  "That's it! Enjoy Remotion.": "完成，开始使用 Remotion。",
+  "That's it! Enjoy Remotion.": "完成，开始使用 Helstera。",
   Hex: "十六进制",
   "Pick color from screen": "从屏幕取色",
   "Request source": "请求来源",
@@ -200,7 +200,7 @@ const copy: Record<string, string> = {
   "No update information is available.": "暂无更新信息。",
   "Could not check for updates.": "无法检查更新。",
   "The update check timed out. Try again later.": "更新检查超时，请稍后重试。",
-  "A new Remotion update is available.": "有新的 Remotion 更新可用。",
+  "A new Remotion update is available.": "有新的 Helstera 编辑器更新可用。",
   "Loading release notes...": "正在加载更新说明…",
   "Reveal output": "显示输出文件",
   "Background removal progress": "抠像任务进度",
@@ -247,7 +247,7 @@ function translateText(node: Node, chinese: boolean) {
   if (!value?.trim() || node.parentElement?.closest(ignored)) return;
   const saved = originals.get(node);
   const original = saved && saved.translated === value ? saved.original : value;
-  const translated = chinese ? translateStudioValue(original) : original;
+  const translated = chinese ? translateStudioValue(original) : original.replace(/\bLoomic AI\b/g,"Helstera AI");
   originals.set(node, { original, translated });
   if (translated !== value) node.nodeValue = translated;
 }
@@ -259,7 +259,7 @@ function translateElement(element: Element, chinese: boolean) {
     if (!value) continue;
     const saved = attributes.get(attribute);
     const original = saved?.translated === value ? saved.original : value;
-    const translated = chinese ? translateStudioValue(original) : original;
+    const translated = chinese ? translateStudioValue(original) : original.replace(/\bLoomic AI\b/g,"Helstera AI");
     attributes.set(attribute, { original, translated });
     if (value !== translated) element.setAttribute(attribute, translated);
   }

@@ -20,3 +20,11 @@
 ## 发布
 
 候选包在生产现有基线上合入，继续保留已有视频、女装、登录和对象存储改动。新增表和触发器为兼容增量迁移；旧服务可继续使用原表。上线前核对迁移校验和、在途任务与文件哈希，上线后检查服务、真实保存/恢复和分支执行回执。最终部署与 CI 结果将在完成后补充。
+
+2026-11-09 已上线。版本迁移记录校验和 `dfbbab8a164a4f36e4309a14c2c48f820d3a0c19a99680c7799a64ee25c4d88a`，Server/Worker 在线。Web 核验3251文件。后续完成真实模型格式修正与审批参数展示修复，提交 `2df2c79`、`b15777b`。
+
+生产独立验收流程 `323ad276-e228-4000-ae8f-c8f06486d2ed` 有8节点8连线。真实模型首次给出无效分组ID，系统在原请求范围修正一次，再经确认应用；无付费生成。运行 `897d234a-c800-43dc-a57d-9798f56df070` 命中 alpha，输出 `MATCH 1. ALPHA 2. BETA 3. GAMMA`；运行 `49604194-3a3c-4037-8ee4-e52460c207b1` 命中 default，输出 `DEFAULT 1. ALPHA 2. BETA 3. GAMMA`。两次批量均 `attempt=1,processed=3,total=3`，未命中模板 `attempt=0,skipped=true`。
+
+UI 对比 `NOT_FOUND → ALPHA` 后将第3版恢复成第5版，运行总数仍为2，刷新保留节点与分组。生产截图 `M:/loomic-builds/workflow-advanced-versions.png`；数据库证据 `verify-workflow-advanced.log`。
+
+`b15777b` 的 [Agent Closure](https://github.com/addxiaoyi/studio/actions/runs/42551977992) 与 [Desktop Candidate](https://github.com/addxiaoyi/studio/actions/runs/42551977911) 均已成功；生产页面后续由 UI 统一改进发布接续。

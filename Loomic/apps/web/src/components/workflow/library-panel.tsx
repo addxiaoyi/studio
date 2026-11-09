@@ -1,4 +1,5 @@
 "use client";
+import {productLabel} from "@/lib/product-label";
 import { useEffect, useRef, useState } from "react";
 import { BookOpen, Save, Search, Undo2 } from "lucide-react";
 import {
@@ -282,7 +283,7 @@ export function WorkflowLibrary({
             const template = creativeWorkflow(id);
             return matches(template.title, "") ? (
               <article key={id}>
-                <h5>{template.title}</h5>
+                <h5>{productLabel(template.title)}</h5>
                 <p>{template.nodes.length} 个节点 · 参数可编辑</p>
                 <Button
                   size="sm"
@@ -339,7 +340,7 @@ export function WorkflowLibrary({
       ) : (
         personal.map((entry) => (
           <article key={entry.id}>
-            <h5>{entry.name}</h5>
+            <h5>{productLabel(entry.name)}</h5>
             <p>{entry.description || "个人保存的创作资源"}</p>
             {entry.body.kind === "workflow" ? (
               <>

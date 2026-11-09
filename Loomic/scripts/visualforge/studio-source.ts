@@ -140,5 +140,6 @@ export function patchStudioSource(file: string, source: string) {
     replace("tooltipLabel: showRenderLabel ? null : renderLabel", "tooltipLabel: showRenderLabel ? null : t(renderLabel)");
     replace("\n\t\trenderLabel,", "\n\t\tt,\n\t\trenderLabel,");
   }
+  if(file==="helpers/document-title.ts")replace("const productName = 'VisualForge Studio';","const productName = 'Helstera 视频创作';");
   return patchStudioAiSource(file, text);
 }

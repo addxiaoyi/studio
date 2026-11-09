@@ -156,7 +156,7 @@ export function FashionWorkspace() {
     setError("");
     setApproval(null);
     setLatest(null);
-    const moduleUrl = "/creative/fashion.mjs";
+    const moduleUrl = "/creative/fashion.mjs?release=helstera-20261109";
     const modelRequest = refreshModels().catch(() => {
       if (!abort.signal.aborted)
         setError(
