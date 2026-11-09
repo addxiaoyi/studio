@@ -1,4 +1,4 @@
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages";
 import {
   GOAL_PLAN_TIMEOUT_MS,
   workflowAssistantPlanSchema,
@@ -9,6 +9,10 @@ import { invokeEditorPlanner } from "../video-editor/planner.js";
 import type { ServerEnv } from "../../config/env.js";
 import type { SettingsService } from "../settings/settings-service.js";
 import type { AuthenticatedUser } from "../../auth/types.js";
+import { normalizeWorkflowSuggestion } from "./assistant-normalize.js";
+class WorkflowPlanFormatError extends Error {
+  constructor(readonly fields: string[]) { super("AI 返回的节点或操作格式不受支持，请调整要求后重试。"); }
+}
 export function parseWorkflowAssistantPlan(text: string) {
   let value: unknown;
   try {
@@ -21,9 +25,9 @@ export function parseWorkflowAssistantPlan(text: string) {
   } catch {
     throw new Error("AI 未返回有效的操作方案，请重试；工作流没有改变。");
   }
-  const checked = workflowAssistantPlanSchema.safeParse(value);
+  const checked = workflowAssistantPlanSchema.safeParse(normalizeWorkflowSuggestion(value));
   if (!checked.success)
-    throw new Error("AI 返回的节点或操作格式不受支持，请调整要求后重试。");
+    throw new WorkflowPlanFormatError(checked.error.issues.map(issue=>`${issue.path.join(".")}: ${issue.code}`));
   return checked.data;
 }
 export async function planWorkflowConversation(input: {
@@ -50,9 +54,7 @@ export async function planWorkflowConversation(input: {
       maxTokens: 7000,
     },
   );
-  const reply = await invokeEditorPlanner(
-    model,
-    [
+  const messages = [
       new SystemMessage(
         [
           "你是本站可视化工作流助手。根据用户对话和真实上下文返回严格JSON，禁止Markdown或可执行代码：{action,summary,graph?,targetNodeId?}。不要实际执行。",
@@ -69,9 +71,9 @@ export async function planWorkflowConversation(input: {
       new HumanMessage(
         JSON.stringify({ request: input.prompt, context: input.context }),
       ),
-    ],
-    GOAL_PLAN_TIMEOUT_MS,
-  );
+    ];
+  const startedAt=Date.now();
+  const reply = await invokeEditorPlanner(model,messages,GOAL_PLAN_TIMEOUT_MS);
   const text =
     typeof reply.content === "string"
       ? reply.content
@@ -79,5 +81,14 @@ export async function planWorkflowConversation(input: {
           .filter((part) => part.type === "text")
           .map((part) => part.text ?? "")
           .join("");
-  return parseWorkflowAssistantPlan(text);
+  try { return parseWorkflowAssistantPlan(text); }
+  catch(error) {
+    if(!(error instanceof WorkflowPlanFormatError))throw error;
+    console.warn("[workflow-assistant] correcting invalid structured fields",error.fields);
+    const remaining=GOAL_PLAN_TIMEOUT_MS-(Date.now()-startedAt);
+    if(remaining<1000)throw error;
+    const corrected=await invokeEditorPlanner(model,[...messages,new AIMessage(text),new HumanMessage(`只修复上一份JSON的结构，不改变原始需求、action或新增操作。以下字段不符合格式：${error.fields.join("；")}。根据系统中完整config格式补齐字段，不返回null或额外字段；action=edit 时需完整graph，其他action不得添加graph。只返回JSON。`)],remaining);
+    const content=typeof corrected.content==="string"?corrected.content:(corrected.content as Array<{type:string;text?:string}>).filter(part=>part.type==="text").map(part=>part.text??"").join("");
+    return parseWorkflowAssistantPlan(content);
+  }
 }
