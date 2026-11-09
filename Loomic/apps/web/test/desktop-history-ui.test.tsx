@@ -8,7 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { DesktopAgentHistoryPage } from "@/components/desktop-agent-history-page";
+import { DesktopTaskHistory as DesktopAgentHistoryPage } from "@/components/desktop-agent-history-page";
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   session: { access_token: "token", user: { id: "user" } },

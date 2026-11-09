@@ -72,7 +72,7 @@ function taskAsset(task: AgentGoal["tasks"][number], key: "screenshotAsset" | "r
 export function AgentGoalPanel({ accessToken, canvasId, chatSessionId, goalId, ws }: Props) {
   const english = useLocale() === "en-US";
   const locale = english ? "en-US" : "zh-CN";
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(Boolean(goalId));
   const [goals, setGoals] = useState<AgentGoal[]>([]);
   const [selectedId, setSelectedId] = useState(goalId);
   const [busy, setBusy] = useState(false);
