@@ -175,6 +175,7 @@ test("workspace hierarchy, nested selects and recovery dialogs fit narrow window
     await expect(page.getByRole("region",{name:"工作流运行记录"})).toContainText("全部完成",{timeout:20000});
     expect(await page.getByRole("group",{name:"筛选执行步骤"}).evaluate(element=>getComputedStyle(element).display)).toBe("flex");
     await page.getByRole("link",{name:"打开对应画布与任务"}).click();await expect(page).toHaveURL(new RegExp(`goalId=${proofRun.goalId}`));
+    await expect(page.getByRole("button",{name:"Agent 工作区",exact:true})).toHaveAttribute("aria-expanded","true");
   } finally {
     await desktop?.close();
     await fixture.close();

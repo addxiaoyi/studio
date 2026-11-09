@@ -220,7 +220,7 @@ function mergeGoals(current: AgentGoal[], next: AgentGoal[]): AgentGoal[] {
 export function AgentWorkspacePanel({ accessToken, canvasId, chatSessionId, goalId, ws }: Props) {
   const english = useLocale() === "en-US";
   const t = english ? copy["en-US"] : copy["zh-CN"];
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(Boolean(goalId));
   const [goals, setGoals] = useState<AgentGoal[]>([]);
   const [selectedId, setSelectedId] = useState(goalId);
   const [draft, setDraft] = useState("");
@@ -246,6 +246,7 @@ export function AgentWorkspacePanel({ accessToken, canvasId, chatSessionId, goal
       setSelectedId(goalId);
     }
   }, [canvasId, goalId, reportError]);
+  useEffect(()=>{if(goalId)setOpen(true);},[goalId]);
 
   const selectGoal = useCallback((id: string) => {
     setSelectedId(id || undefined);
