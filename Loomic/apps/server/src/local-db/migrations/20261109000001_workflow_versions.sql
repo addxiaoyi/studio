@@ -12,6 +12,7 @@ select id,revision,graph,updated_at from canvas_workflows on conflict do nothing
 insert into canvas_workflow_versions(workflow_id,revision,graph,created_at)
 select distinct on (workflow_id,revision) workflow_id,revision,graph,created_at
 from canvas_workflow_runs where target_node_id is null
+  and not jsonb_path_exists(graph, '$.nodes[*].pin')
 order by workflow_id,revision,created_at desc on conflict do nothing;
 
 create or replace function record_canvas_workflow_version() returns trigger language plpgsql as $$
