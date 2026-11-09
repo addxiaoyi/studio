@@ -2,6 +2,10 @@ import {studioChinese} from "./studio-copy";
 
 const copy: Record<string, string> = {
   ...studioChinese,
+  Composition: "合成",
+  "Horizontal ruler":"水平标尺",
+  "Vertical ruler":"垂直标尺",
+  "Loading Studio":"正在加载编辑器",
   Studio: "编辑器",
   Defaults: "默认设置",
   Shortcuts: "快捷键",

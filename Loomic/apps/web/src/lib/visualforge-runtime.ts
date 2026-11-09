@@ -42,6 +42,6 @@ export type StudioModule = {
 };
 
 export function loadVisualForge(): Promise<StudioModule> {
-  const entry = "/creative/visualforge/entry.mjs";
+  const entry = "/creative/visualforge/entry.mjs?release=ui-20261109";
   return import(/* webpackIgnore: true */ entry) as Promise<StudioModule>;
 }

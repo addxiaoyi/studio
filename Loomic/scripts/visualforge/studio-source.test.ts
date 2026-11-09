@@ -3,11 +3,15 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import ts from "typescript";
 import { patchStudioEnvironment, patchStudioSource } from "./studio-source";
+import {translateStudioValue} from "./studio-i18n";
 
 const studioRoot = resolve(import.meta.dir, "../../vendor/visualforge/packages/studio/src");
 const read = (file: string) => readFileSync(resolve(studioRoot, file), "utf8");
 
 describe("pinned Studio typography adapter", () => {
+  test("localizes the composition menu and ruler labels without renaming user compositions",()=>{
+    expect(translateStudioValue("Composition")).toBe("合成");expect(translateStudioValue("Horizontal ruler")).toBe("水平标尺");expect(translateStudioValue("Vertical ruler")).toBe("垂直标尺");expect(translateStudioValue("Loading Studio")).toBe("正在加载编辑器");expect(translateStudioValue("MyComp")).toBe("MyComp");
+  });
   test("removes the brand menu and routes agent actions through Loomic", () => {
     const menu = patchStudioSource("helpers/use-menu-structure.tsx", read("helpers/use-menu-structure.tsx"));
     expect(menu).toContain("struct = struct.filter(menu => menu.id !== 'remotion')");
