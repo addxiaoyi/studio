@@ -1,4 +1,5 @@
 "use client";
+import {keepStudioBrandTitle} from "@/lib/studio-brand";
 
 import { StudioAssetPicker } from "@/components/studio-asset-picker";
 import { CanvasVideoImport, CaptureRecordingImport } from "@/components/capture-recording-import";
@@ -22,6 +23,7 @@ import { useVideoText } from "@/lib/video-copy";
 import type { StudioAiContext } from "@/lib/studio-ai-context";
 
 export function VisualForgeWorkspace() {
+  useEffect(keepStudioBrandTitle,[]);
   const copy = useVideoText();
   const { session } = useAuth();
   const { resolvedTheme } = useTheme();

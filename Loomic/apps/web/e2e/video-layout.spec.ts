@@ -17,6 +17,7 @@ test("editor keeps a usable canvas, top-layer export and one locale across scree
   expect((await context.request.post("http://localhost:3311/api/local-auth/password", { data: { email: fixture.email, password: fixture.password } })).status()).toBe(200);
   await page.goto("/video/?/MyComp");
   await expect(page.getByLabel("导入本机素材", { exact: true })).toBeEnabled({ timeout: 90_000 });
+  await expect(page).toHaveTitle("视频创作 | Helstera");
   mediaFolder=await mkdtemp(resolve(tmpdir(),"loomic-layout-"));
   const video=resolve(mediaFolder,"layout.mp4");
   execFileSync(process.platform==='win32'?resolve('../desktop/resources/ffmpeg/win-x64/ffmpeg.exe'):'ffmpeg',['-v','error','-f','lavfi','-i','testsrc2=size=640x360:rate=30','-t','2','-c:v','libx264','-pix_fmt','yuv420p',video]);
