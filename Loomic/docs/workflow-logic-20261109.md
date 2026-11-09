@@ -16,9 +16,32 @@ IF 支持全部/任一条件，比较非空、相等、不等、包含、大于�
 - Shared 新旧流程、条件校验、固定结果剪枝、模板权限共 16 项通过；Web 场景与组件 17 项通过；服务执行器与权限 4 项通过。
 - 隔离 PostgreSQL 16 项通过，新增未命中生成节点 attempt=0、不调用执行器；固定已验证生成结果后再次运行只调用固定结果与交付；配置变化和失效素材拒绝执行。
 - Chromium 真实逻辑链路通过（52.8 秒），覆盖分组折叠保存、刷新、备注、IF→文本→合并→等待→交付与固定后再运行。Windows 0.2.21 隔离候选完整工作流 12 项通过（3.2 分钟），包含旧素材引用、拖动、撤销、恢复、节点菜单及 AI 方案。
-- Shared 构建，Server/Web 类型检查通过。最后的字数限制和防循环补充后，数据库16项、场景11项、执行器/规划器4项再次通过。
+- Shared 构建，Server/Web/Desktop 类型检查通过；Desktop 使用 `tsconfig.electron.json`。最后的字数限制和防循环补充后，数据库16项、场景11项、执行器/规划器4项再次通过。固定状态回归3项通过：下游即使继承回执字段，也必须实际使用 `result.pinned` 才显示“复用固定结果”。
 
 日志保存在 `M:/loomic-builds/`：`workflow-87cd-ci-failure.log`、`workflow-doubleclick.log`、`workflow-logic-shared.log`、`workflow-logic-web-unit.log`、`workflow-logic-postgres.log`、`workflow-logic-browser.log`、`workflow-logic-desktop.log`。本轮无新增数据库表或删除迁移，现有 JSON 图和步骤回执兼容扩展。
+
+## 生产验收与发布
+
+2026-11-09 已发布 `ca3ffdd` 的功能改动及 `aebd837` 的固定状态修正。按生产现有基线合入，保留视频、登录与七牛云已有改动；Server/Shared 校验79个文件，Web 更新163个文件并校验3251个文件。服务端和 Worker 均为 online，健康接口返回 `ok:true`；画布、视频、女装与桌面入口返回200。
+
+生产画布 HTML SHA256：`ff50c1ac48da168eb0da0424eee8510172c3f5808803b99e02eaad1436d331f1`。部署与核验日志：`workflow-logic-deploy.log`、`workflow-logic-publish.log`、`workflow-logic-production.log`。本轮未调用付费图片或视频生成。
+
+在生产用户画布中创建独立的“IF 分支与固定结果验收”流程（`41a9ea6d-7d0a-45b3-a0d3-1c2ce8cc3280`），真实 AI 返回结构化修改方案，确认后应用。图有7节点7连线，内容为 `hello → IF → 大写/备用模板 → 合并 → 等待1秒 → 交付`。
+
+- 首次运行 `70bce216-6a89-410d-b3a5-d285bd48534d` 完成；是分支输出 `HELLO`，否分支 `attempt=0` 且 `skipped=true`。
+- 固定创作资料后，第二次运行 `2ebe0647-28b4-46fb-b02b-0ec074892ff2` 完成；资料步骤执行器为 `result.pinned`，IF 仍实际执行，否分支仍零次调用，最终输出 `HELLO`。
+- 真实浏览器单击卡片时设置面板保持关闭，双击打开 IF 条件设置。分组折叠保存并刷新后，仍显示7节点7连线和折叠的“输入与判断”；运行历史保留两次成功回执。
+- 第二次运行的界面显示“复用固定结果”“已跳过”“全部完成”，与数据库执行器和尝试次数一致。生产截图保存在 `M:/loomic-builds/workflow-logic-production.png`。
+
+## GitHub CI
+
+代码提交 `aebd837f14f21f10634948f0f5faa1bed880bd1f`：
+
+- [Agent Closure 42542149617](https://github.com/addxiaoyi/studio/actions/runs/42542149617)：success；contracts-and-database 与 editor-browser 均成功。
+- [Desktop Candidate 42542149671](https://github.com/addxiaoyi/studio/actions/runs/42542149671)：success；Windows video tools、Windows x64、Linux x64、macOS arm64 均成功。
+- 主功能提交 `ca3ffdd593f2c1dd8ec76d9e339145674ca98cc4` 的 [Website Capture 42541996887](https://github.com/addxiaoyi/studio/actions/runs/42541996887)：success。后续 `aebd837` 仅修正工作流固定状态判定及回归测试。
+
+完整运行元数据保存在 `M:/loomic-builds/workflow-logic-ci-<runId>.json`。跨平台 CI 构建成功与本地 Windows 12项运行验收分别记录；未据此声称已在 macOS/Linux 真机操作本轮界面。
 
 ## 参考与边界
 
