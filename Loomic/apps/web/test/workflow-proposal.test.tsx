@@ -40,6 +40,15 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
+it("shows nested batch and Switch rules as readable parameters before confirmation",async()=>{
+  const pending={...proposal,graph:{title:"批量",nodes:[{id:"batch",title:"批量整理",position:{x:0,y:0},config:{kind:"batch" as const,maxItems:3,batchSize:1,operations:[{kind:"transform" as const,operation:"uppercase" as const,search:"",replacement:""}]}}],edges:[]}};
+  requests.getWorkflowProposal.mockResolvedValue(pending);
+  const {container}=render(<WorkflowProposalCard canvasId={pending.canvasId} id={pending.id} initial={pending}/>);
+  await waitFor(()=>expect(requests.getWorkflowProposal).toHaveBeenCalled());
+  fireEvent.click(screen.getByText("检查节点参数与输入"));
+  expect(container).toHaveTextContent("逐项动作");expect(container).toHaveTextContent("转大写");expect(container).not.toHaveTextContent("[object Object]");
+  expect(requests.decideWorkflowProposal).not.toHaveBeenCalled();
+});
 it("shows an inspectable diff and never applies without the explicit button", async () => {
   requests.getWorkflowProposal.mockResolvedValue(proposal);
   requests.decideWorkflowProposal.mockResolvedValue({

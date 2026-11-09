@@ -19,6 +19,7 @@ import {
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { Button } from "@/components/ui/button";
 import "./assistant.css";
+import {workflowFieldNames,formatWorkflowValue} from "./config-values";
 import { WorkflowProposalRun } from "./proposal-run";
 export function WorkflowProposalCard({
   canvasId,
@@ -178,33 +179,10 @@ export function WorkflowProposalCard({
                   .map(([key, value]) => (
                     <div key={key}>
                       <dt>
-                        {(
-                          {
-                            url: "网址",
-                            record: "录制视频",
-                            pageLimit: "页面数量",
-                            model: "模型",
-                            prompt: "提示词",
-                            text: "创作资料",
-                            instruction: "要求",
-                            duration: "时长",
-                            at: "取帧时刻",
-                            start: "开始秒数",
-                            end: "结束秒数",
-                            aspect: "画幅",
-                            aspectRatio: "画幅",
-                            mediaType: "素材类型",
-                            shotCount: "镜头数量",
-                            resolution: "分辨率",
-                          } as Record<string, string>
-                        )[key] ?? key}
+                        {workflowFieldNames[key] ?? key}
                       </dt>
                       <dd>
-                        {typeof value === "boolean"
-                          ? value
-                            ? "是"
-                            : "否"
-                          : String(value || "待填写")}
+                        {key === "path" && node.config.kind === "split" && value === "" ? "整个数组" : formatWorkflowValue(value,key)}
                       </dd>
                     </div>
                   ))}
