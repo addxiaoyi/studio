@@ -3,12 +3,17 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { AgentGoal } from "@helstera/shared";
 import { fetchAgentGoal } from "@/lib/server-api";
 import { useWorkflowRun } from "@/components/workflow/run-panel";
+import {workflowStepState} from "@/components/workflow/step-state";
 
 vi.mock("@/lib/server-api", () => ({ fetchAgentGoal: vi.fn(), updateAgentGoal: vi.fn() }));
 vi.mock("@/components/chat/markdown-renderer", () => ({ MarkdownRenderer: () => null }));
 vi.mock("@/components/chat/authenticated-recording", () => ({ AuthenticatedRecording: () => null }));
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
+it("does not label downstream work as pinned just because its input was pinned",()=>{
+  expect(workflowStepState({executor:"flow.if",state:"succeeded",output:{pinned:true,condition:true}} as never)).toBe("succeeded");
+  expect(workflowStepState({executor:"result.pinned",state:"succeeded",output:{pinned:true}} as never)).toBe("pinned");
+});
 
 it("refreshes the matching chat after completion and stops polling terminal runs", async () => {
   vi.useFakeTimers();
