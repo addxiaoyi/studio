@@ -81,4 +81,8 @@ it("uses one sequential visual clock and retains private material identity in ma
   expect(source).toContain("volume={0.3}");
   expect(source).toContain('"top":"8%"');
   expect(source).toContain("from={120} durationInFrames={750}");
+  const captionFirst = { ...timeline, items: [timeline.items[3]!, ...timeline.items.slice(0, 3)] };
+  const reordered = canvasTimelineSource(captionFirst, { image: "image.png", video: "video.webm", audio: "voice.wav" });
+  expect(reordered.indexOf("<Video")).toBeLessThan(reordered.indexOf('name="字幕"'));
+  expect(captionFirst.items[0]?.kind).toBe("subtitle");
 });

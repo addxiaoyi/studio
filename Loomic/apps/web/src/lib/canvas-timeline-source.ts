@@ -6,7 +6,9 @@ export function canvasTimelineSource(
 ) {
   validateCanvasTimeline(timeline);
   const frames = (seconds: number) => Math.max(0, Math.round(seconds * 30));
-  const tracks = timeline.items.map((item) => {
+  // Keep captions above visuals regardless of when they were added to the canvas.
+  const layers = [...timeline.items.filter(item => item.kind !== "subtitle"), ...timeline.items.filter(item => item.kind === "subtitle")];
+  const tracks = layers.map((item) => {
     const duration = Math.max(1, frames(item.trimEnd - item.trimStart));
     if (item.kind === "subtitle") {
       const position =

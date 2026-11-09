@@ -215,7 +215,7 @@ test("imports library IDs once, recovers failures, previews a real timeline and 
       [
         fixture.canvasId,
         JSON.stringify({
-          elements: [image, video, caption],
+          elements: [caption, image, video],
           files: {},
           appState: { scrollX: 0, scrollY: 0, zoom: { value: 1 } },
         }),
