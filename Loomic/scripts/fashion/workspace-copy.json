@@ -1,5 +1,7 @@
 {
   "zh": {
+    "historySubtitle": "生成记录保存在本机。主动保存到私有素材库后，结果副本可在同账号其他设备查看。",
+    "historyLocalOnly": "清除站点数据会删除本机记录；私有素材按素材库显示的到期时间保留。",
     "titleWord": "服装图集",
     "subtitle": "挑选参考款式，搭配你的照片，预览新的穿搭。",
     "fittingTab": "开始试穿",
@@ -27,6 +29,8 @@
     "pinduoduoSearchSame": "拼多多搜同款"
   },
   "en": {
+    "historySubtitle": "History stays on this device. Results explicitly saved to your private library are available on your other signed-in devices until expiry.",
+    "historyLocalOnly": "Clearing site data removes local history. Private copies follow the expiry shown in your library.",
     "titleWord": "Outfit library",
     "subtitle": "Choose an outfit, add your photo and preview a new look.",
     "fittingTab": "Start try-on",

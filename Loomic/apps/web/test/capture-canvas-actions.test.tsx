@@ -6,7 +6,7 @@ import { CaptureCanvasActions } from "@/components/chat/capture-canvas-actions";
 import { CaptureRecordingProgress } from "@/components/chat/capture-recording-progress";
 import { CaptureSkippedPages } from "@/components/chat/capture-skipped-pages";
 
-const api = vi.hoisted(() => ({ addWebsiteCaptureToCanvas: vi.fn(), openAgentBrowser: vi.fn() }));
+const api = vi.hoisted(() => ({ addWebsiteCaptureToCanvas: vi.fn(), openAgentBrowser: vi.fn(), fetchCanvas: vi.fn(async()=>({canvas:{name:"原录制画布"}})) }));
 vi.mock("@/lib/server-api", () => api);
 vi.mock("@/lib/agent-browser-api", () => api);
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -19,7 +19,8 @@ it("recovers pending canvas delivery and publishes a scoped refresh event", asyn
   window.addEventListener("loomic:capture-canvas", receive);
   const result = { canvasDelivery: { status: "pending", elementIds: [] } } as never;
   const view = render(<CaptureCanvasActions taskId="task-one" token="token" result={result} />);
-  expect(await screen.findByText("截图与录像已添加到画布")).toBeInTheDocument();
+  expect(await screen.findByText(/截图与录像已添加到原任务画布/)).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "打开原画布素材" })).toBeEnabled();
   view.rerender(<CaptureCanvasActions taskId="task-one" token="token" result={result} />);
   await waitFor(() => expect(api.addWebsiteCaptureToCanvas).toHaveBeenCalledTimes(1));
   expect(events).toContainEqual({ ...completed, focus: true });

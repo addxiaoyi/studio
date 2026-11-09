@@ -2,6 +2,7 @@ import type { StudioExport } from "./visualforge-storage";
 import type { StudioCut, StudioMedia } from "./studio-cut";
 import type { StudioAiContext } from "./studio-ai-context";
 import type { VideoEditorAction, VideoEditorLayer, VideoStudioState, VideoStudioControl } from "@helstera/shared";
+import type { CanvasTimeline } from "./canvas-timeline";
 
 export type StudioEditReceipt = { id: string; revision: string; originalRevision: string; undone: number[]; complete: boolean; canUndo: boolean };
 export type StudioUndo = { id: string; compositionId: string; revision: string; actionIndex?: number };
@@ -20,6 +21,7 @@ export type StudioRuntime = {
   snapshot(): Promise<StudioSnapshot>;
   applyEdit(edit: StudioEdit): Promise<void>;
   applyCut(cut: StudioCut): Promise<void>;
+  importCanvasTimeline?(timeline: CanvasTimeline, names: Record<string, string>, fingerprint: string): Promise<string>;
   openExport(): void;
   selectComposition(id: string): void;
   undoEdit(input: { id: string; compositionId: string; appliedRevision: string; originalRevision: string }): Promise<void>;
@@ -29,6 +31,7 @@ export type StudioRuntime = {
 };
 export type StudioHost = {
   userId: string;
+  projectKey?: string | undefined;
   theme: string;
   signal: AbortSignal;
   status(message: string): void;
@@ -42,6 +45,6 @@ export type StudioModule = {
 };
 
 export function loadVisualForge(): Promise<StudioModule> {
-  const entry = "/creative/visualforge/entry.mjs?release=helstera-20261109";
+  const entry = "/creative/visualforge/entry.mjs?release=canvas-closure-20261109";
   return import(/* webpackIgnore: true */ entry) as Promise<StudioModule>;
 }

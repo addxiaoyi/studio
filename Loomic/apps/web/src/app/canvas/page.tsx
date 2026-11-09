@@ -17,7 +17,8 @@ import { ChatSidebar } from "../../components/chat-sidebar";
 import { CanvasEmptyHint } from "../../components/canvas-empty-hint";
 import { CanvasLogoMenu } from "../../components/canvas-logo-menu";
 import { EditableProjectName } from "../../components/editable-project-name";
-import { createExcalidrawImageElement, insertImageOnCanvas, insertVideoOnCanvas } from "../../lib/canvas-elements";
+import { insertImageOnCanvas, insertVideoOnCanvas } from "../../lib/canvas-elements";
+import { useCanvasAssetImport } from "../../hooks/use-canvas-asset-import";
 import { getServerBaseUrl } from "../../lib/env";
 import { ApiApplicationError, ApiAuthError, createProject, deleteEmptyProject, fetchCanvas, fetchProject, fetchWorkspaceSettings } from "../../lib/server-api";
 import { canvasSessionHref, clearLastDesktopCanvas, getLastDesktopCanvasId, rememberDesktopCanvas } from "../../lib/desktop-canvas";
@@ -77,7 +78,6 @@ function CanvasPageContent() {
   const desktopMode = pathname.startsWith("/desktop-app/");
   const canvasId = searchParams.get("id");
   const assetId = searchParams.get("assetId");
-  const assetMediaType = searchParams.get("mediaType");
   const initialSessionId = searchParams.get("session") ?? undefined;
   const [requireInitialPaidConfirmation] = useState(() => searchParams.get("confirmPaid") === "1");
   // Capture the goal once. It stays in the URL until the send pipeline confirms the
@@ -144,7 +144,6 @@ function CanvasPageContent() {
   const [projectName, setProjectName] = useState("Untitled");
   const [autoDeleteEmptyCanvas, setAutoDeleteEmptyCanvas] = useState(false);
   const [selectedCanvasElements, setSelectedCanvasElements] = useState<CanvasSelectedElement[]>([]);
-  const openedAssetRef = useRef<string | null>(null);
   const canvasContentRef = useRef(canvasData?.content);
   canvasContentRef.current = canvasData?.content;
   const projectIdRef = useRef<string | null>(null);
@@ -256,7 +255,7 @@ function CanvasPageContent() {
     }
 
     return () => {
-      if (desktopMode || !autoDeleteEmptyCanvasRef.current || !projectIdRef.current) return;
+      if (desktopMode || assetId || !autoDeleteEmptyCanvasRef.current || !projectIdRef.current) return;
       emptyCleanupTimerRef.current = window.setTimeout(() => {
         const content = canvasContentRef.current;
         const token = accessTokenRef.current;
@@ -267,7 +266,7 @@ function CanvasPageContent() {
         emptyCleanupTimerRef.current = null;
       }, 2000);
     };
-  }, [desktopMode]);
+  }, [desktopMode, assetId]);
 
   useEffect(() => {
     // 只有确认目标已交给发送流程（发送成功或用户明确放弃）后才清理 URL。
@@ -288,52 +287,14 @@ function CanvasPageContent() {
   }, []);
   const handleCanvasReady = useCallback(() => setCanvasReady(true), []);
 
+  const assetImport = useCanvasAssetImport({ api: excalidrawApi, ready: canvasReady && canvasData?.id === canvasId,
+    token: accessToken, canvasId, assetId });
   useEffect(() => {
-    if (!assetId || !excalidrawApi || !accessToken || openedAssetRef.current === assetId) return;
-    openedAssetRef.current = assetId;
-    let cancelled = false;
-    void fetch(`${getServerBaseUrl()}/api/uploads/${encodeURIComponent(assetId)}/file`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    }).then(async (response) => {
-      if (!response.ok) throw new Error(`资产加载失败（${response.status}）`);
-      const blob = await response.blob();
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error("资产读取失败"));
-        reader.readAsDataURL(blob);
-      });
-      if (cancelled) return;
-      if (assetMediaType === "video") {
-        await insertVideoOnCanvas(excalidrawApi, {
-          type: "video",
-          url: `${getServerBaseUrl()}/api/uploads/${encodeURIComponent(assetId)}/file`,
-          mimeType: blob.type || "video/mp4",
-          width: 800,
-          height: 450,
-          durationSeconds: 0,
-          title: "资产视频",
-        });
-        return;
-      }
-      const fileId = crypto.randomUUID();
-      const image = await createImageBitmap(blob);
-      const maxSize = 900;
-      const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
-      const width = Math.round(image.width * scale);
-      const height = Math.round(image.height * scale);
-      excalidrawApi.addFiles([{ id: fileId, dataURL: dataUrl, mimeType: blob.type || "image/png", created: Date.now() }]);
-      excalidrawApi.updateScene({
-        elements: [...excalidrawApi.getSceneElements(), createExcalidrawImageElement({ fileId, x: 0, y: 0, width, height, title: "资产图片", source: "uploaded" })],
-        captureUpdate: "IMMEDIATELY",
-      });
-      image.close();
-    }).catch((cause) => {
-      openedAssetRef.current = null;
-      console.error("[canvas] failed to open asset:", cause);
-    });
-    return () => { cancelled = true; };
-  }, [accessToken, assetId, assetMediaType, excalidrawApi]);
+    if (!canvasReady || !excalidrawApi || !searchParams.has("focusElements")) return;
+    const ids = new Set((searchParams.get("focusElements") ?? "").split(",").slice(0,20));
+    const elements = excalidrawApi.getSceneElements().filter((item: { id: string; isDeleted?: boolean }) => !item.isDeleted && ids.has(item.id));
+    if (elements.length) excalidrawApi.scrollToContent(elements, { fitToContent: true });
+  }, [canvasReady, excalidrawApi, searchParams]);
 
   const handleImageGenerated = useCallback((artifact: ImageArtifact) => {
     const api = excalidrawApiRef.current;
@@ -375,6 +336,11 @@ function CanvasPageContent() {
     }
   }, [canvasId]);
   const editTimelineVideo = useCallback((elementId: string) => openCanvasVideo(elementId, "ai"), [openCanvasVideo]);
+  const createTimelineVideo = useCallback(async () => {
+    if (!canvasId || !saveBeforeVideo.current) throw new Error("画布尚未就绪，请稍后重试。");
+    await saveBeforeVideo.current();
+    window.location.assign(`/video/?${new URLSearchParams({ timelineCanvas: canvasId })}`);
+  }, [canvasId]);
 
   // Must be defined BEFORE useJobFallbackPolling which references it
   const handleCanvasSync = useCallback(async () => {
@@ -619,10 +585,14 @@ function CanvasPageContent() {
         />
         <CanvasEmptyHint
           excalidrawApi={excalidrawApi}
-          ready={canvasReady}
+          ready={canvasReady && !assetId}
           desktopMode={desktopMode}
           onOpenChat={handleOpenChat}
         />
+        {assetId && <section aria-label="素材导入状态" role={assetImport.error ? "alert" : "status"} className="absolute left-20 top-16 z-30 max-w-[min(28rem,calc(100%-6rem))] rounded-xl border bg-background p-3 text-sm shadow-sm">
+          <p>{assetImport.error || (assetImport.status === "imported" ? "素材已在画布中，保存状态请看顶部提示。" : assetImport.status === "loading" ? "正在读取并导入素材…" : "正在等待画布就绪，随后导入素材…")}</p>
+          {assetImport.error && <div className="mt-2 flex gap-3"><button type="button" onClick={assetImport.retry} className="min-h-9 rounded-md bg-foreground px-3 text-background focus-visible:ring-2 focus-visible:ring-ring">重试导入</button><Link href={desktopMode ? "/desktop-app/assets/" : "/assets/"} className="inline-flex min-h-9 items-center underline">回素材库核对</Link></div>}
+        </section>}
         <CanvasBottomBar
           excalidrawApi={excalidrawApi}
           layersOpen={layersOpen}
@@ -648,6 +618,8 @@ function CanvasPageContent() {
           accessToken={accessToken}
           projectId={canvasData.projectId}
           onEditVideo={editTimelineVideo}
+          canvasId={canvasData.id}
+          onCreateVideo={createTimelineVideo}
         />
         {videoActionError && <p role="alert" className="absolute bottom-20 left-4 z-50 max-w-md rounded-lg border border-destructive/30 bg-background p-3 text-sm text-destructive">{videoActionError}</p>}
         <CanvasLayersPanel

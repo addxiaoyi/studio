@@ -1,4 +1,4 @@
-export type StudioExport = { id: string; name: string; blob: Blob; createdAt: number; assetId?: string };
+export type StudioExport = { id: string; name: string; blob: Blob; createdAt: number; assetId?: string; canvasId?: string; compositionId?: string };
 const databaseName = "loomic-visualforge-projects";
 
 function openDatabase() {

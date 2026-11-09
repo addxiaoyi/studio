@@ -7,6 +7,7 @@ import type { ViewerService } from "../features/bootstrap/ensure-user-foundation
 import { loadAdminOverviewCharts } from "../local-db/admin-overview-charts.js";
 import { loadHomeOverview, type HomeOverviewRange } from "../local-db/home-overview-service.js";
 import { sealModelSecret } from "../local-db/model-settings-crypto.js";
+import { findCanvasAssetSource } from "../features/assets/canvas-source.js";
 
 type GrowthOptions = {
   auth: RequestAuthenticator;
@@ -115,6 +116,16 @@ export function registerLocalGrowthRoutes(
         and ($2::text is null or case when ao.mime_type like 'video/%' then 'video' else 'image' end=$2)
         and ($3::text = '' or coalesce(ga.title,'') ilike '%' || $3 || '%' or coalesce(ga.prompt,'') ilike '%' || $3 || '%')`, [session.viewer.workspace.id, mediaType, query, session.user.id]);
     return { ok: true, data: rows, pagination: { page, pageSize, total: count.rows[0]?.total ?? 0, hasMore: offset + rows.length < (count.rows[0]?.total ?? 0) } };
+  });
+  app.get<{ Params: { assetId: string } }>("/api/assets/:assetId/canvas-source", async (request, reply) => {
+    const session = await requireSession(request, reply); if (!session) return;
+    const id = request.params.assetId;
+    if (!/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(id))
+      return reply.code(400).send({ ok: false, error: { code: "invalid_asset_id", message: "素材标识无效。" } });
+    const source = await findCanvasAssetSource(options.db, id, session.viewer.workspace.id, session.user.id);
+    if (!source) return reply.code(404).send({ ok: false, error: { code: "asset_not_found", message: "素材已过期、已删除或无权访问。" } });
+    reply.header("Cache-Control", "private, no-store");
+    return { ok: true, data: source };
   });
   app.get("/api/assets/:assetId/retention", async (request: any, reply: any) => {
     const session = await requireSession(request, reply); if (!session) return;

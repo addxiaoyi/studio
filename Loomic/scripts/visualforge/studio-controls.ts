@@ -20,6 +20,18 @@ async function invoke<T>(name:string,args:Record<string,unknown>={}):Promise<T> 
   const tool=toolRegistry().get(name);if(!tool)throw new Error("预览控制尚未就绪，请稍后重试。");
   return await tool.execute(args) as T;
 }
+export async function waitForStudioComposition(id: string, signal: AbortSignal) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    signal.throwIfAborted();
+    const tool = toolRegistry().get("get_composition");
+    const selected = tool ? await tool.execute({}) as { compositionName: string | null } : null;
+    const render = [...document.querySelectorAll<HTMLButtonElement>('#render-modal-button-client')].some(button => button.dataset.compositionId === id);
+    if (selected?.compositionName === id && render) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error("时间线已保存，但编辑器仍未切换到新合成。请等待编译完成后重试，避免导出其他视频。");
+}
 function compositionNames(tree:unknown):string[]{
   if(Array.isArray(tree))return tree.flatMap(compositionNames);
   if(!tree||typeof tree!=="object")return [];

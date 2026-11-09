@@ -1,4 +1,5 @@
 "use client";
+import { studioDisplayName } from "@/lib/studio-display-name";
 import { useEffect, useRef, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { ArrowUp, Bot, Square } from "lucide-react";
 import { Button } from "./ui/button";
@@ -38,7 +39,7 @@ export function StudioConversationPanel(props:Props){
   const suggestions=english?["Explain the current video and suggest improvements.","Add a short opening title.","Change this video to portrait without replacing its content."]:["看看当前视频，给我剪辑建议","在开头加一条简短标题","保留画面，把视频改成竖屏"];
   return <aside aria-label={english?"Video AI conversation":"视频 AI 对话"} className="flex h-full min-h-0 w-full flex-col bg-card text-card-foreground">
     <header className="flex shrink-0 items-start justify-between gap-2 border-b px-4 py-3">
-      <div><h2 className="flex items-center gap-2 text-sm font-semibold"><Bot className="size-4"/>{english?"Create with AI":"对话创作"}</h2><p aria-label={copy("修改对象")} className="mt-1 break-all text-xs text-muted-foreground">{flow.target?`${flow.target.compositionId} · ${flow.target.duration.toFixed(1)}s${flow.target.width?` · ${flow.target.width}×${flow.target.height}`:""}`:english?"Reading your project…":"正在读取工程…"}</p></div>
+      <div><h2 className="flex items-center gap-2 text-sm font-semibold"><Bot className="size-4"/>{english?"Create with AI":"对话创作"}</h2><p title={flow.target?.compositionId} aria-label={copy("修改对象")} className="mt-1 break-all text-xs text-muted-foreground">{flow.target?`${studioDisplayName(flow.target.compositionId, english)} · ${flow.target.duration.toFixed(1)}s${flow.target.width?` · ${flow.target.width}×${flow.target.height}`:""}`:english?"Reading your project…":"正在读取工程…"}</p></div>
       <Button size="sm" variant="ghost" onClick={props.onViewTimeline}>{english?"Timeline":"时间线"}</Button>
     </header>
     <div ref={scroll} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
@@ -56,7 +57,7 @@ export function StudioConversationPanel(props:Props){
         </article>)}
       </div>
       {!inlinePlan&&<StudioChatPlan flow={flow} locked={locked}/>}
-      {(flow.notice||chat.sending)&&<p role="status" className="text-xs leading-5 text-muted-foreground">{chat.sending?english?"Reading the project and preparing a response…":"正在读取工程并处理你的要求…":copy(flow.notice)}</p>}
+      {(flow.notice||chat.sending)&&<p role="status" className="text-xs leading-5 text-muted-foreground">{chat.sending?`${chat.stage} · ${chat.elapsed}s · ${english?"You can stop waiting; edits require confirmation.":"可以停止等待，修改仍需确认。"}`:copy(flow.notice)}</p>}
       {(chat.error||flow.error)&&<p role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm leading-5 text-destructive">{chat.error||flow.error}</p>}
     </div>
     <form onSubmit={submit} className="shrink-0 space-y-2 border-t bg-card p-3">

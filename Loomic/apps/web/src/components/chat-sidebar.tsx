@@ -144,7 +144,7 @@ export function ChatSidebar({
   desktopExecutionContext,
 }: ChatSidebarProps) {
   const breakpoint = useBreakpoint();
-  const isOverlay = breakpoint !== "desktop";
+  const isOverlay = breakpoint === "mobile";
   const [canvasApproval, setCanvasApproval] = useState<Record<string, unknown> | null>(null);
   const [canvasApprovalJob, setCanvasApprovalJob] = useState<{
     id: string;
@@ -1983,7 +1983,7 @@ export function ChatSidebar({
   return (
     <div
       className="flex h-full shrink-0"
-      style={{ width: sidebarWidth }}
+      style={{ width: breakpoint === "tablet" ? Math.min(sidebarWidth, 340) : sidebarWidth }}
       {...eventIsolationProps}
     >
       {/* Resize handle -- supports mouse, touch, and keyboard (ArrowLeft/ArrowRight) */}

@@ -1508,7 +1508,7 @@ export async function uploadFile(
   accessToken: string,
   file: File,
   projectId?: string,
-  purpose?: "try-on",
+  purpose?: "try-on" | "timeline-audio",
 ): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);

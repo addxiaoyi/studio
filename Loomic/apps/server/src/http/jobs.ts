@@ -33,6 +33,7 @@ import type { ViewerService } from "../features/bootstrap/ensure-user-foundation
 import type { RequestAuthenticator } from "../auth/types.js";
 import type { StorageProvider } from "../storage/index.js";
 import { syncGenerationJob } from "../features/jobs/sync-service.js";
+import { cancelUnstartedJob } from "../features/jobs/cancel-unstarted-job.js";
 import { resolveConfiguredModel } from "./model-availability.js";
 import { isRemovedImageModelId } from "../generation/removed-models.js";
 import { approvalRequiredResponse } from "./generation-approvals.js";
@@ -502,23 +503,14 @@ export async function registerJobRoutes(
       if (!user) return sendUnauthenticated(reply);
 
       const { jobId } = request.params as { jobId: string };
-      let billing: { workspaceId: string; amount: number } | null = null;
-      if (options.localDb && options.creditService) {
-        const billingRow = await options.localDb.query<{ workspace_id: string; credits_cost: number | null }>(
-          "select workspace_id, credits_cost from background_jobs where id = $1 and created_by = $2",
-          [jobId, user.id],
-        );
-        const amount = Number(billingRow.rows[0]?.credits_cost ?? 0);
-        if (billingRow.rows[0]?.workspace_id && amount > 0) {
-          billing = { workspaceId: billingRow.rows[0].workspace_id, amount };
-        }
+      const currentJob = await options.jobService.getJob(user, jobId);
+      if (options.localDb && options.creditService && ["image_generation", "video_generation"].includes(currentJob.job_type)) {
+        const billing = await cancelUnstartedJob(options.localDb, jobId, user.id);
+        if (billing.amount > 0) await options.creditService.refundCredits(billing.workspaceId, user.id, billing.amount, jobId, "任务开始前取消，释放预占积分");
+        const job = await options.jobService.getJob(user, jobId);
+        return reply.code(200).send(jobResponseSchema.parse({ job }));
       }
       const job = await options.jobService.cancelJob(user, jobId);
-      if (billing && options.creditService) {
-        await options.creditService
-          .refundCredits(billing.workspaceId, user.id, billing.amount, jobId, "Auto-refund: job canceled")
-          .catch((refundError) => console.error(`[jobs] cancel refund failed for ${jobId}`, refundError));
-      }
 
       return reply.code(200).send(jobResponseSchema.parse({ job }));
     } catch (error) {

@@ -40,6 +40,10 @@ describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("private media lifecycle", 
       };
       const privatePhoto = await makeAsset("private-try-on");
       const shared = await makeAsset("project-assets");
+      const source = await app.inject({ url: `/api/assets/${privatePhoto.assetId}/canvas-source`, headers: { authorization: "owner" } });
+      expect(source.statusCode).toBe(200);
+      expect(source.json().data).toMatchObject({ assetId: privatePhoto.objectId, libraryAssetId: privatePhoto.assetId });
+      expect((await app.inject({ url: `/api/assets/${privatePhoto.objectId}/canvas-source`, headers: { authorization: "peer" } })).statusCode).toBe(404);
       const list = async (actor: string, query = "") => (await app.inject({ url: "/api/assets/history" + query, headers: { authorization: actor } })).json();
       const peerList = await list("peer");
       expect(peerList.data.map((asset: { id: string }) => asset.id)).toEqual([shared.assetId]);
@@ -47,6 +51,7 @@ describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("private media lifecycle", 
       expect((await app.inject({ url: `/api/assets/${privatePhoto.assetId}/retention`, headers: { authorization: "peer" } })).statusCode).toBe(404);
       expect((await list("owner")).pagination.total).toBe(2);
       await app.inject({ method: "DELETE", url: `/api/assets/${privatePhoto.assetId}` });
+      expect((await app.inject({ url: `/api/assets/${privatePhoto.assetId}/canvas-source`, headers: { authorization: "owner" } })).statusCode).toBe(404);
       expect((await list("owner")).data.map((asset: { id: string }) => asset.id)).toEqual([shared.assetId]);
       expect((await list("owner", "?includeDeleted=1")).pagination.total).toBe(2);
       await app.inject({ method: "POST", url: `/api/assets/${privatePhoto.assetId}/restore` });

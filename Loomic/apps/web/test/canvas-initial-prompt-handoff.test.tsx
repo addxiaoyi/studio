@@ -130,6 +130,7 @@ function primeCanvasRequests() {
 }
 
 beforeEach(() => {
+  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
   installStorage("localStorage");
   installStorage("sessionStorage");
   mocks.replace.mockReset();

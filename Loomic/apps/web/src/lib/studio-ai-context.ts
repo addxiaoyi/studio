@@ -14,8 +14,9 @@ export function creatorCompositionMenu<T extends { id: string; type: string }>(i
   return items.filter(item => CREATOR_ACTIONS.has(item.id));
 }
 
-export function openStudioExport() {
-  const button = document.getElementById("render-modal-button-client");
+export function openStudioExport(compositionId?: string) {
+  const selected = compositionId ?? (location.search.startsWith("?/") ? decodeURIComponent(location.search.slice(2)).split("?")[0] : undefined);
+  const button = [...document.querySelectorAll<HTMLButtonElement>('#render-modal-button-client')].find(candidate => !selected || candidate.dataset.compositionId === selected);
   if (!(button instanceof HTMLButtonElement) || button.disabled) throw new Error("请先选择可导出的视频，再打开导出设置。");
   button.click();
 }

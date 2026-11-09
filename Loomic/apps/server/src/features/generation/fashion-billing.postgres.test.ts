@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { registerJobRoutes } from "../../http/jobs.js";
 import { readFile } from "node:fs/promises";
 import Fastify from "fastify";
 import { Pool } from "pg";
@@ -115,6 +116,7 @@ describe.skipIf(!databaseUrl)("try-on billing with PostgreSQL", () => {
         ensureViewer: async () => ({ workspace: { id: workspaceId } }),
       } as never,
     });
+    await registerJobRoutes(app, { localDb: db, jobService: jobs, creditService: credits, auth: { authenticate: async () => user }, viewerService: { ensureViewer: async () => ({ workspace: { id: workspaceId } }) } as never });
     const input = {
       workspaceId,
       userId,
@@ -173,6 +175,29 @@ describe.skipIf(!databaseUrl)("try-on billing with PostgreSQL", () => {
     } finally {
       await f.app.close();
     }
+  });
+
+  it("refunds an unstarted cancellation once and never refunds a started task as canceled", async () => {
+    const f = await fixture();
+    try {
+      const jobId = (await f.confirm()).json().data.jobId;
+      const cancel = async () => {
+        const reply = await f.app.inject({ method: "POST", url: `/api/jobs/${jobId}/cancel` });
+        expect(reply.statusCode, reply.body).toBe(200);
+      };
+      await Promise.all(Array.from({ length: 5 }, cancel));
+      expect((await f.credits.getBalance(f.workspaceId)).balance).toBe(100);
+      expect((await f.credits.getTransactions(f.workspaceId)).filter(row=>row.transaction_type === "generation_refund")).toHaveLength(1);
+      expect(await f.jobs.claimJob(jobId)).toBeNull();
+      const running = await fixture();
+      try {
+        const runningId = (await running.confirm()).json().data.jobId;
+        expect(await running.jobs.claimJob(runningId)).not.toBeNull();
+        expect((await running.app.inject({ method: "POST", url: `/api/jobs/${runningId}/cancel` })).statusCode).toBe(409);
+        expect((await running.credits.getBalance(running.workspaceId)).balance).toBe(96.5);
+        expect((await running.jobs.getJob({ id: running.userId } as never, runningId)).status).toBe("running");
+      } finally { await running.app.close(); }
+    } finally { await f.app.close(); }
   });
 
   it("blocks rejected and expired confirmations without charging", async () => {

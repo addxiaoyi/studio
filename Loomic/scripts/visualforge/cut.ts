@@ -1,8 +1,10 @@
 import type { VirtualProject } from "../../vendor/visualforge/packages/browser-studio/src/types";
 import { getBrowserStudioStoredPublicFile } from "../../vendor/visualforge/packages/browser-studio/src/opfs-public-files";
 import { studioCutSource, cutFrames, STUDIO_FPS, type StudioCut } from "../../apps/web/src/lib/studio-cut";
+import { canvasTimelineSource } from "../../apps/web/src/lib/canvas-timeline-source";
+import type { CanvasTimeline } from "../../apps/web/src/lib/canvas-timeline";
 
-const VIDEO_MIMES: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4",png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",webp:"image/webp",gif:"image/gif" };
+const VIDEO_MIMES: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4", flac: "audio/flac",png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",webp:"image/webp",gif:"image/gif" };
 export function listStudioMedia(project: VirtualProject) {
   return Object.keys(project.publicFiles || {}).flatMap(name => {
     const mimeType = VIDEO_MIMES[name.split(".").pop()?.toLowerCase() || ""];
@@ -31,20 +33,28 @@ export function currentCompositionId() {
 }
 
 export async function applyStudioCut(cut: StudioCut) {
+  return installTimeline(studioCutSource(cut), cutFrames(cut), cut.format);
+}
+
+export async function installCanvasTimeline(timeline: CanvasTimeline, names: Record<string,string>, fingerprint: string) {
+  return installTimeline(canvasTimelineSource(timeline, names), Math.ceil(timeline.duration * STUDIO_FPS), timeline.format, `Canvas-${fingerprint.slice(0,16)}`);
+}
+
+async function installTimeline(sourceCode: string, durationInFrames: number, format: StudioCut["format"], canvasCompositionId?: string) {
   const operations = window.remotion_browserStudio;
   if (!operations) throw new Error("请等待编辑器就绪。");
   const suffix = crypto.randomUUID().slice(0, 8);
-  const compositionId = `Cut-${suffix}`;
+  const compositionId = canvasCompositionId ?? `Cut-${suffix}`;
   const componentName = `LoomicCut${suffix}`;
   const element = {
-    assets: [], dependencies: [], durationInFrames: cutFrames(cut), initialProps: null,
+    assets: [], dependencies: [], durationInFrames, initialProps: null,
     installationMode: "wrapped" as const, isCaptionStyle: false,
-    slug: `loomic-cut-${suffix}`, displayName: "快剪方案", sourceCode: studioCutSource(cut),
-    dimensions: cut.format === "portrait" ? { width: 720, height: 1280 } : { width: 1280, height: 720 },
+    slug: `loomic-cut-${suffix}`, displayName: canvasCompositionId ? "画布成片" : "快剪方案", sourceCode,
+    dimensions: format === "portrait" ? { width: 720, height: 1280 } : { width: 1280, height: 720 },
   };
   const selectedCompositionId = currentCompositionId();
   const selectedCompositionFile = selectedCompositionId ? operations.getCompositionFile(selectedCompositionId) : null;
-  const destination = selectedCompositionId && selectedCompositionFile
+  const destination = !canvasCompositionId && selectedCompositionId && selectedCompositionFile
     ? { type: "current-composition" as const, compositionFile: selectedCompositionFile, compositionId: selectedCompositionId }
     : { type: "new-composition" as const, compositionFile: null };
   const targetCompositionId = destination.type === "current-composition" ? destination.compositionId : compositionId;
@@ -74,4 +84,5 @@ export async function applyStudioCut(cut: StudioCut) {
     history.pushState({}, "Studio", url);
     window.dispatchEvent(new Event("remotion-pending-composition-selection"));
   }
+  return targetCompositionId;
 }

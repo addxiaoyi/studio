@@ -1178,6 +1178,7 @@ export function CanvasEditor({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       retrySave();
       await saveQueueRef.current;
+      if (conflictRef.current || pendingSaveRef.current || recoveryHeldRef.current) throw new Error("画布尚未保存成功，已保留本机副本。请先处理保存提示，再继续创建成片。");
     });
     return () => onSaveReady?.(null);
   }, [excalidrawApi, onSaveReady, retrySave]);

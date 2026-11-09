@@ -84,6 +84,7 @@ describe("pinned Studio typography adapter", () => {
       "components/Timeline/get-copy-context-for-agents-menu-item.ts", "components/get-annotate-with-chatgpt-menu-item.ts",
       "helpers/get-codex-annotation.ts", "components/AskAiModal.tsx",
       "components/MenuBuildIndicator.tsx",
+      "components/Timeline/TimelineSequenceName.tsx", "components/Timeline/TimelineMediaInfo.tsx",
     ]) {
       const lf = read(file).replaceAll("\r\n", "\n");
       const patched = patchStudioSource(file, lf);

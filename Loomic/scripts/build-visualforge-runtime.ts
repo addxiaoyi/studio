@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, mkdirSync, cpSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, mkdirSync, cpSync, realpathSync } from "node:fs";
 import { resolve, dirname, relative, isAbsolute, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -10,9 +10,11 @@ import { bundleMotionFiles } from "./visualforge/motion-bundle";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const lock = JSON.parse(readFileSync(resolve(root, "scripts/creative-sources.json"), "utf8")).video;
-const source = resolve(root, lock.directory);
+// Bun resolves imported files through Windows junctions before calling onLoad.
+const source = realpathSync(resolve(root, lock.directory));
 if (execFileSync("git", ["-C", source, "rev-parse", "HEAD"], { encoding: "utf8" }).trim() !== lock.commit) throw new Error("VisualForge source differs from the lock.");
 const outdir = resolve(root, "apps/web/public/creative/visualforge");
+const adaptedSources = new Set<string>();
 mkdirSync(outdir, { recursive: true });
 const catalog = JSON.parse(readFileSync(join(source, "package.json"), "utf8")).workspaces.catalog;
 const packages = new Map<string, { directory: string; manifest: any }>();
@@ -73,15 +75,16 @@ const plugin: BunPlugin = { name: "pinned-visualforge-source", setup(build) {
     .replace("abandonedProjectSweep ??= sweepAbandonedBrowserStudioProjectStorages();", "abandonedProjectSweep ??= Promise.resolve();")
     .replace("removeBrowserStudioProjectStorage({", "releaseBrowserStudioProjectStorageLease({"), loader:"ts" }));
   build.onLoad({ filter: /[\\/]studio[\\/]src[\\/]previewEntry\.tsx$/ }, args => ({ contents: readFileSync(args.path,"utf8") + "\nwindow.loomicDisposeStudio = () => { root?.unmount(); root = null; };\n", loader:"tsx" }));
-  build.onLoad({ filter: /[\\/]ClientRenderQueueProcessor\.tsx$/ }, args => ({ contents: readFileSync(args.path,"utf8").replace("downloadBlob(blob, job.outName);", "void window.loomicSaveStudioExport?.({id:job.id,name:job.outName,blob,createdAt:Date.now()});\n\t\t\t\t\tdownloadBlob(blob, job.outName);"), loader:"tsx" }));
+  build.onLoad({ filter: /[\\/]ClientRenderQueueProcessor\.tsx$/ }, args => ({ contents: readFileSync(args.path,"utf8").replace("downloadBlob(blob, job.outName);", "void window.loomicSaveStudioExport?.({id:job.id,name:job.outName,blob,createdAt:Date.now(),compositionId:job.compositionId});\n\t\t\t\t\tdownloadBlob(blob, job.outName);"), loader:"tsx" }));
   build.onLoad({ filter: /[\\/]client-render-queue\.ts$/ }, args => ({
     contents: readFileSync(args.path, "utf8").replace(/return `client-\$\{Date\.now\(\)\}-\$\{Math\.random\(\)\.toString\(36\)\.substring\(2, 11\)\}`;/, "return crypto.randomUUID();"),
     loader: "ts",
   }));
-  build.onLoad({ filter: /[\\/]studio[\\/]src[\\/].*\.[tj]sx?$/ }, args => ({
-    contents: patchStudioSource(relative(join(source, "packages/studio/src"), args.path).replaceAll("\\", "/"), readFileSync(args.path, "utf8")),
-    loader: args.path.endsWith("tsx") ? "tsx" : "ts",
-  }));
+  build.onLoad({ filter: /[\\/]studio[\\/]src[\\/].*\.[tj]sx?$/ }, args => {
+    const file = relative(join(source, "packages/studio/src"), args.path).replaceAll("\\", "/");
+    adaptedSources.add(file);
+    return { contents: patchStudioSource(file, readFileSync(args.path, "utf8")), loader: args.path.endsWith("tsx") ? "tsx" : "ts" };
+  });
 } };
 const refreshRuntime = Bun.resolveSync("@rspack/plugin-react-refresh/react-refresh", join(source, "packages/browser-bundler"));
 const define = {
@@ -105,6 +108,9 @@ for (const entry of entries) {
   console.log(`${entry.split(/[\\/]/).pop()}: ${output.outputs.reduce((sum,file)=>sum+file.size,0)} bytes`);
 }
 const rspackDir = join(source,"packages/browser-studio/node_modules/@rspack/browser/dist");
+for (const file of ["helpers/document-title.ts", "helpers/use-menu-structure.tsx", "components/InspectorSourceLocation.tsx"]) {
+  if (!adaptedSources.has(file)) throw new Error(`Studio source adaptation was not bundled: ${file}; resolved: ${[...adaptedSources].slice(0, 4).join(", ")}`);
+}
 cpSync(join(rspackDir,"rspack.wasm32-wasi.wasm"),join(outdir,"rspack.wasm32-wasi.wasm"));
 const wasi = await Bun.build({entrypoints:[join(rspackDir,"wasi-worker-browser.mjs")],outdir,naming:"[name].mjs",target:"browser",format:"iife",minify:true});
 if(!wasi.success)throw new AggregateError(wasi.logs,"VisualForge WASI worker build failed");

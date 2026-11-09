@@ -46,6 +46,10 @@ export function patchStudioAiSource(file: string, source: string) {
     if (!/<InspectorOpenInEditor[\s\S]*?\/>/.test(text)) throw new Error("Pinned inspector link changed.");
     text = text.replace(/<InspectorOpenInEditor[\s\S]*?\/>/, "");
   }
+  if (file === "components/InspectorSourceLocation.tsx") {
+    // Browser users cannot open a source file; retain developer locations only when actionable.
+    replace("if (!label) {", "if (!label || !canOpen) {");
+  }
   if (file === "components/MenuBuildIndicator.tsx") {
     text = `import {useTranslation} from '../i18n';\n${text}`;
     replace("const [isBuilding, setIsBuilding]", "const {t}=useTranslation();\n\tconst [isBuilding, setIsBuilding]");

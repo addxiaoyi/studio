@@ -94,8 +94,8 @@ export function VideoPlayerPanel({
       aria-label={title || "视频预览"}
       aria-labelledby="video-player-panel-title"
       aria-describedby="video-player-panel-description"
-      className="fixed z-[100] w-[min(400px,calc(100vw-1rem))] rounded-lg border border-border/60 glass-soft shadow-card-hover backdrop-blur-lg overflow-hidden"
-      onKeyDown={(e) => e.stopPropagation()}
+      className="fixed z-[100] max-h-[calc(100dvh-5rem)] w-[min(400px,calc(100vw-1rem))] overflow-y-auto rounded-lg border border-border bg-background shadow-xl"
+      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
       onWheel={(e) => e.stopPropagation()}
     >
       {/* Header */}
@@ -122,7 +122,7 @@ export function VideoPlayerPanel({
           ref={closeButtonRef}
           onClick={onClose}
           aria-label="关闭视频预览"
-          className="rounded-full p-1 hover:bg-foreground/[0.04]/80 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex size-9 shrink-0 items-center justify-center rounded-full hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <svg
             className="h-4 w-4 text-muted-foreground"

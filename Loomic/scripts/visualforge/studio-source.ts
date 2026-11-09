@@ -1,5 +1,7 @@
 import { studioChinese } from "./studio-copy";
 import { patchStudioAiSource } from "./studio-ai-source";
+import { resolve } from "node:path";
+const displayNameModule = JSON.stringify(resolve(import.meta.dir, "../../apps/web/src/lib/studio-display-name.ts").replaceAll("\\", "/"));
 
 const UI_FONT = 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
 
@@ -135,10 +137,18 @@ export function patchStudioSource(file: string, source: string) {
     replace("fontFamily: 'sans-serif'", "fontFamily: 'inherit'");
   }
   if (file === "components/RenderButton.tsx") {
+    replace('id="render-modal-button-client"', 'id="render-modal-button-client" data-composition-id={video.id}');
     replace("{renderLabel}", "{t(renderLabel)}");
     replace("ariaLabel: showRenderLabel ? tooltip : renderLabel", "ariaLabel: t(showRenderLabel ? tooltip : renderLabel)");
     replace("tooltipLabel: showRenderLabel ? null : renderLabel", "tooltipLabel: showRenderLabel ? null : t(renderLabel)");
     replace("\n\t\trenderLabel,", "\n\t\tt,\n\t\trenderLabel,");
+  }
+  if (file === "components/Timeline/TimelineSequenceName.tsx" || file === "components/Timeline/TimelineMediaInfo.tsx") {
+    text = `import {studioDisplayName} from ${displayNameModule};\nimport {useTranslation} from '../../i18n';\n${text}`;
+    const marker = file.endsWith("TimelineSequenceName.tsx") ? "const inputRef = useRef" : "const fileName = useMemo";
+    replace(marker, `const {locale} = useTranslation();\n\t${marker}`);
+    if (file.endsWith("TimelineSequenceName.tsx")) replace("const text = getTruncatedDisplayName(editableDisplayName);", "const text = getTruncatedDisplayName(studioDisplayName(editableDisplayName, locale === 'en'));");
+    else replace("\t\t\t\t{fileName}\n\t\t\t</div>", "\t\t\t\t{studioDisplayName(fileName, locale === 'en')}\n\t\t\t</div>");
   }
   if(file==="helpers/document-title.ts")replace("const productName = 'VisualForge Studio';","const productName = 'Helstera 视频创作';");
   return patchStudioAiSource(file, text);

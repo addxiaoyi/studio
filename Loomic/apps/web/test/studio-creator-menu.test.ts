@@ -18,3 +18,14 @@ it("describes the selection without displaying source paths", () => {
   expect(studioTargetLabel({compositionId:"MyComp",label:"Title",context:"Title in src/Title.tsx:11"})).toBe("Title");
   expect(studioTargetLabel({compositionId:"MyComp",label:"MyComp",context:"MyComp in src/Composition.tsx:11"})).toBe("");
 });
+it("targets the compiled composition when several export controls are mounted", () => {
+  const old = document.createElement("button"), current = document.createElement("button");
+  old.id = current.id = "render-modal-button-client";
+  old.dataset.compositionId = "MyComp"; current.dataset.compositionId = "Canvas-test";
+  const wrongExport = vi.fn(), correctExport = vi.fn();
+  old.onclick = wrongExport; current.onclick = correctExport;
+  document.body.append(old, current);
+  openStudioExport("Canvas-test");
+  expect(correctExport).toHaveBeenCalledOnce(); expect(wrongExport).not.toHaveBeenCalled();
+  current.remove(); expect(() => openStudioExport("Canvas-test")).toThrow("选择");
+});

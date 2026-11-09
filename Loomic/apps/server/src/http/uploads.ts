@@ -21,6 +21,15 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/gif",
   "image/svg+xml",
 ]);
+const AUDIO_TYPES = new Set(["audio/wav", "audio/x-wav", "audio/mpeg", "audio/mp4", "audio/ogg", "audio/flac"]);
+function hasAudioHeader(bytes: Buffer, mime: string) {
+  if (bytes.length < 12) return false;
+  const head = bytes.toString("ascii", 0, 4);
+  if (mime === "audio/wav" || mime === "audio/x-wav") return head === "RIFF" && bytes.toString("ascii", 8, 12) === "WAVE";
+  if (mime === "audio/mpeg") return head.startsWith("ID3") || bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0;
+  if (mime === "audio/mp4") return bytes.toString("ascii", 4, 8) === "ftyp";
+  return mime === "audio/ogg" ? head === "OggS" : mime === "audio/flac" && head === "fLaC";
+}
 
 function inferMimeType(fileName: string): string | null {
   const extension = fileName.toLowerCase().split(".").pop();
@@ -45,11 +54,11 @@ export async function registerUploadRoutes(
     try {
       const user = await options.auth.authenticate(request);
       if (!user) return sendUnauthorized(reply);
-      if (request.query.purpose && request.query.purpose !== "try-on") {
+      if (request.query.purpose && !["try-on", "timeline-audio"].includes(request.query.purpose)) {
         return reply.code(400).send({ error: { code: "invalid_purpose", message: "Unsupported upload purpose." } });
       }
 
-      const file = await request.file();
+      const file = await request.file({ limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 1, parts: 2 } });
       if (!file) {
         return reply.code(400).send(
           applicationErrorResponseSchemaLoose.parse({
@@ -64,18 +73,20 @@ export async function registerUploadRoutes(
       const mimeType = file.mimetype === "application/octet-stream" || !file.mimetype
         ? inferMimeType(file.filename)
         : file.mimetype;
-      if (!mimeType || !ALLOWED_MIME_TYPES.has(mimeType)) {
+      const audio = request.query.purpose === "timeline-audio";
+      if (!mimeType || !(audio ? AUDIO_TYPES : ALLOWED_MIME_TYPES).has(mimeType)) {
         return reply.code(400).send(
           applicationErrorResponseSchemaLoose.parse({
             error: {
               code: "upload_failed",
-              message: `Unsupported file type: ${mimeType}. Allowed: ${[...ALLOWED_MIME_TYPES].join(", ")}`,
+              message: audio ? "请选择 WAV、MP3、M4A、OGG 或 FLAC 音频。" : "请选择支持的图片文件。",
             },
           }),
         );
       }
 
       const fileBuffer = await file.toBuffer();
+      if (audio && !hasAudioHeader(fileBuffer, mimeType)) return reply.code(400).send({ error: { code: "upload_failed", message: "音频内容与文件格式不符，请重新导出后上传。" } });
 
       // Resolve workspace from viewer
       const viewer = await options.viewerService.ensureViewer(user);
@@ -90,7 +101,7 @@ export async function registerUploadRoutes(
           : undefined;
 
       const result = await options.uploadService.uploadFile(user, {
-        bucket: request.query.purpose === "try-on" ? "private-try-on" : "project-assets",
+        bucket: audio ? "private-video" : request.query.purpose === "try-on" ? "private-try-on" : "project-assets",
         fileName: file.filename,
         fileBuffer,
         mimeType,
@@ -102,6 +113,8 @@ export async function registerUploadRoutes(
         .code(201)
         .send(uploadResponseSchema.parse(result));
     } catch (error) {
+      request.log.error({ err: error }, "media upload failed");
+      if ((error as { code?: string }).code === "FST_REQ_FILE_TOO_LARGE") return reply.code(413).send({ error: { code: "upload_failed", message: "素材不能超过 25 MB。" } });
       return sendUploadError(error, reply);
     }
   });

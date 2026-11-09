@@ -294,7 +294,7 @@ export const chatMessageCreateRequestSchema = z.object({
   contentBlocks: z.array(contentBlockSchema).nullable().optional(),
 });
 
-export const assetBucketSchema = z.enum(["project-assets", "user-avatars", "private-try-on"]);
+export const assetBucketSchema = z.enum(["project-assets", "user-avatars", "private-try-on", "private-video"]);
 
 export const assetObjectSchema = z.object({
   id: identifierSchema,

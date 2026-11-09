@@ -1,16 +1,35 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/lib/server-api", () => ({
   uploadFile: vi.fn(),
 }));
 
 import { CanvasTimelinePanel } from "../src/components/canvas-timeline-panel";
+import { uploadFile } from "../src/lib/server-api";
 
 describe("CanvasTimelinePanel", () => {
+  beforeEach(() => { vi.spyOn(HTMLMediaElement.prototype,"pause").mockImplementation(()=>{}); });
   afterEach(cleanup);
+  it("shows a recoverable audio upload failure and keeps the selected file", async () => {
+    vi.mocked(uploadFile).mockRejectedValueOnce(new Error("上传连接中断"));
+    const api = { getSceneElements: () => [], onChange: () => () => {}, updateScene: vi.fn() };
+    render(<CanvasTimelinePanel excalidrawApi={api} open onClose={vi.fn()} accessToken="token" projectId="project" />);
+    fireEvent.change(screen.getByLabelText("上传音频"), { target: { files: [new File(["audio"], "voice.wav", { type: "audio/wav" })] } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("上传连接中断");
+    expect(screen.getByRole("button", { name: "重试音频上传" })).toBeEnabled();
+    expect(api.updateScene).not.toHaveBeenCalled();
+  });
+  it("lets captions extend beyond one minute within the real video duration", () => {
+    const api = { getSceneElements: () => [
+      { id: "video", type: "embeddable", link: "/video.webm", customData: { isVideo: true, durationSeconds: 125, trimStart: 0, trimEnd: 125 } },
+      { id: "caption", type: "text", text: "结尾", customData: { isSubtitle: true, subtitleStart: 100, subtitleEnd: 120 } },
+    ], onChange: () => () => {}, updateScene: vi.fn() };
+    render(<CanvasTimelinePanel excalidrawApi={api} open onClose={vi.fn()} accessToken="token" projectId="project" />);
+    expect(screen.getByRole("slider", { name: "结尾字幕结束时间" })).toHaveAttribute("max", "125");
+  });
   it("dismisses only a blank canvas click, keeping item edits and drag gestures open",()=>{
     vi.stubGlobal("PointerEvent",MouseEvent);
     const close=vi.fn();

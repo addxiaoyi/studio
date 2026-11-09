@@ -63,6 +63,7 @@ const copy: Record<string, string> = {
   "Disable shortcut": "禁用快捷键",
   "Change shortcut for": "修改快捷键：",
   "Actions for": "操作：",
+  Metadata: "属性", Actions: "操作", "Collapse Metadata": "收起属性", "Expand Metadata": "展开属性", "Collapse Actions": "收起操作", "Expand Actions": "展开操作", "Disable snapping": "关闭吸附", "Drag to adjust source start": "拖动调整素材起点",
   "Press shortcut…": "请按下快捷键…",
   "Press shortcut...": "请按下快捷键…",
   "Add package": "添加依赖包",

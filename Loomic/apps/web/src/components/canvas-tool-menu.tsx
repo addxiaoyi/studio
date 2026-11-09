@@ -226,6 +226,7 @@ export function CanvasToolMenu({
   activeVideoGenIdRef.current = activeVideoGenId;
   const activeVideoPlayerIdRef = useRef(activeVideoPlayerId);
   activeVideoPlayerIdRef.current = activeVideoPlayerId;
+  const dismissedVideoId = useRef<string | null>(null);
 
   // Track previous generating element IDs to avoid re-renders when nothing changed
   const prevGeneratingKeyRef = useRef("");
@@ -275,6 +276,7 @@ export function CanvasToolMenu({
         const selectedElements = elements.filter(
           (el: any) => selectedIds[el.id] && !el.isDeleted,
         );
+        if (selectedElements.length !== 1 || selectedElements[0].id !== dismissedVideoId.current) dismissedVideoId.current = null;
         const editableImage = selectedElements.length === 1 && selectedElements[0].type === "image" && selectedElements[0].customData?.source === "generated" ? selectedElements[0] : null;
         setSelectedGeneratedImage((current: any) => current?.id === editableImage?.id ? current : editableImage);
 
@@ -334,7 +336,7 @@ export function CanvasToolMenu({
             sel.type === "embeddable" &&
             (isVideoUrl(sel.link as string) || sel.customData?.isVideo === true)
           ) {
-            if (activeVideoPlayerIdRef.current !== sel.id) {
+            if (activeVideoPlayerIdRef.current !== sel.id && dismissedVideoId.current !== sel.id) {
               const videoLink = sel.link as string;
               setActiveVideoPlayerId(sel.id as string);
               setVideoPlayerData({
@@ -480,6 +482,9 @@ export function CanvasToolMenu({
   }, []);
 
   const handleCloseVideoPlayer = useCallback(() => {
+    // Resize and autosave emit selection changes too; closing stays closed until reselection.
+    dismissedVideoId.current = activeVideoPlayerIdRef.current;
+    activeVideoPlayerIdRef.current = null;
     setActiveVideoPlayerId(null);
     setVideoPlayerData(null);
     setVideoPlayerBounds(null);

@@ -206,13 +206,14 @@ export default function AssetsPage() {
     if (!session?.access_token || !asset.url) return;
     setOpeningId(asset.id);
     try {
+      if (!asset.assetObjectId) throw new Error("素材文件尚未保存完整，请刷新素材库后重试。");
       const { project } = await createProject(
         session.access_token,
         { name: assetDisplayName(asset) },
         { idempotencyKey: `asset-editor:${asset.id}` },
       );
       const canvasRoute = pathname.startsWith("/desktop-app/") ? "/desktop-app/canvas" : "/canvas";
-      router.push(`${canvasRoute}?id=${project.primaryCanvas.id}&assetId=${encodeURIComponent(asset.id)}&mediaType=${asset.mediaType}`);
+      router.push(`${canvasRoute}?id=${project.primaryCanvas.id}&assetId=${encodeURIComponent(asset.assetObjectId)}&mediaType=${asset.mediaType}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "无法打开图片编辑器");
       setErrorAction({ type: "editor", assetId: asset.id });

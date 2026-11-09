@@ -40,6 +40,7 @@ export function StudioExportCard({ output, userId, token }: { output: StudioExpo
       <a href={preview} download={output.name.split(/[\\/]/).pop()} className="rounded border px-3 py-2">{copy("下载文件")}</a>
       {video && !assetId && <button type="button" disabled={busy} onClick={save} className="rounded border px-3 py-2">{copy(busy ? "正在保存…" : "保存到私有素材库（三天临时副本）")}</button>}
       {assetId && <SendVideoToChat assetId={assetId} token={token} />}
+      {assetId && output.canvasId && <a className="rounded border px-3 py-2" href={`/canvas/?${new URLSearchParams({ id: output.canvasId, assetId, mediaType: "video" })}`}>添加成片到原画布</a>}
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{copy(error)}</p>}
   </article>;

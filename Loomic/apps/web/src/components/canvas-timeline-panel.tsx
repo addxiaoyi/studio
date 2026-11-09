@@ -1,323 +1,149 @@
 "use client";
 
-import { Download, Film, Image as ImageIcon, Music, Pause, Play, Plus, Type, Upload, X } from "lucide-react";
+import { Download, Film, Image as ImageIcon, Music, Plus, Type, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { uploadFile } from "../lib/server-api";
 import { OperationStatus, type OperationStatusKind } from "./operation-status";
-import {useCanvasBlankDismiss} from "../hooks/use-canvas-dismiss";
-import {useFloatingPanel} from "../hooks/use-floating-panel";
+import { useCanvasBlankDismiss } from "../hooks/use-canvas-dismiss";
+import { useFloatingPanel } from "../hooks/use-floating-panel";
+import { inspectCanvasMedia } from "../lib/canvas-media-file";
+import { canvasTimelineManifest, readCanvasTimeline, validateCanvasTimeline, type CanvasTimelineItem } from "../lib/canvas-timeline";
+import { CanvasTimelinePreview } from "./canvas/timeline-preview";
 
 type TimelinePanelProps = {
-  excalidrawApi: any;
-  open: boolean;
-  onClose: () => void;
-  triggerRef?: React.RefObject<HTMLButtonElement | null>;
-  accessToken: string;
-  projectId: string;
+  excalidrawApi: any; open: boolean; onClose(): void; triggerRef?: React.RefObject<HTMLButtonElement | null>;
+  accessToken: string; projectId: string; canvasId?: string;
   onEditVideo?: ((elementId: string) => void) | undefined;
+  onCreateVideo?: (() => Promise<void>) | undefined;
 };
 
-type TimelineItem = {
-  id: string;
-  label: string;
-  kind: "image" | "video" | "subtitle" | "audio";
-  duration: number;
-  trimStart: number;
-  trimEnd: number;
-  sourceUrl?: string;
-};
-
-function readItems(api: any): TimelineItem[] {
-  return (api?.getSceneElements?.() ?? [])
-    .filter((element: any) => !element.isDeleted && element.customData?.timelineIncluded !== false && (element.type === "image" || element.customData?.isVideo === true || element.customData?.isSubtitle === true || element.customData?.isAudio === true))
-    .map((element: any, index: number) => ({
-      id: element.id,
-      label: element.customData?.title?.slice(0, 32) || element.text?.slice(0, 32) || `${element.type === "image" ? "图片" : "视频"} ${index + 1}`,
-      kind: element.customData?.isSubtitle === true ? "subtitle" : element.customData?.isVideo === true ? "video" : element.customData?.isAudio === true ? "audio" : "image",
-      duration: Number(element.customData?.durationSeconds) || (element.customData?.isVideo ? 5 : 0),
-      trimStart: Number(element.customData?.isSubtitle ? element.customData?.subtitleStart : element.customData?.trimStart) || 0,
-      trimEnd: Number(element.customData?.isSubtitle ? element.customData?.subtitleEnd : element.customData?.trimEnd) || Number(element.customData?.durationSeconds) || (element.customData?.isVideo || element.customData?.isAudio ? 5 : element.customData?.isSubtitle ? 5 : 0),
-      sourceUrl: element.customData?.isAudio ? element.customData?.audioUrl : undefined,
-    }));
-}
-
-export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, accessToken, projectId, onEditVideo }: TimelinePanelProps) {
-  const [items, setItems] = useState<TimelineItem[]>([]);
+export function CanvasTimelinePanel({ excalidrawApi, open, onClose, triggerRef, accessToken, projectId, canvasId, onEditVideo, onCreateVideo }: TimelinePanelProps) {
+  const [timeline, setTimeline] = useState(() => readCanvasTimeline([], {}, canvasId));
   const [subtitle, setSubtitle] = useState("");
-  const [playhead, setPlayhead] = useState(0);
-  const [previewing, setPreviewing] = useState(false);
-  const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState<OperationStatusKind>("idle");
   const [exportError, setExportError] = useState<string | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const wasOpenRef = useRef(false);
-  const closedOnCanvas=useRef(false),panel=useFloatingPanel(open,"bottom");
-  useCanvasBlankDismiss(open,excalidrawApi,()=>{closedOnCanvas.current=true;setPreviewing(false);onClose();});
-
-  useEffect(() => {
-    if (open) closeButtonRef.current?.focus();
-  }, [open]);
-
-  useEffect(() => {
-    if (open) {
-      wasOpenRef.current = true;
-    } else if (wasOpenRef.current) {
-      wasOpenRef.current = false;
-      if(!closedOnCanvas.current)triggerRef?.current?.focus();
-      closedOnCanvas.current=false;
-    }
-  }, [open, triggerRef]);
-
-  const totalDuration = Math.max(5, ...items.map((item) => item.kind === "video" || item.kind === "audio" || item.kind === "subtitle" ? item.trimEnd : 0));
-  useEffect(()=>{
-    if(open)return;
-    setPreviewing(false);setActiveAudioId(null);
-    document.querySelectorAll<HTMLAudioElement>("audio[data-timeline-audio]").forEach(audio=>audio.pause());
-    const elements=excalidrawApi?.getSceneElements?.()??[];
-    const restored=elements.map((element:any)=>element.customData?.isSubtitle&&element.customData.previewOpacity!==undefined?{...element,opacity:Number(element.customData.previewOpacity)||100}:element);
-    if(restored.some((element:any,index:number)=>element.opacity!==elements[index].opacity))excalidrawApi.updateScene({elements:restored,captureUpdate:"NEVER"});
-  },[open,excalidrawApi]);
-
-  const refresh = useCallback(() => setItems(readItems(excalidrawApi)), [excalidrawApi]);
-
+  const [audioError, setAudioError] = useState(""), [audioBusy, setAudioBusy] = useState(false), [creating, setCreating] = useState(false);
+  const audioUpload = useRef<{ file: File; uploaded?: Awaited<ReturnType<typeof uploadFile>> } | null>(null);
+  const audioLock = useRef(false), audioAbort = useRef<AbortController | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null), wasOpenRef = useRef(false), closedOnCanvas = useRef(false);
+  const panel = useFloatingPanel(open, "bottom");
+  useCanvasBlankDismiss(open, excalidrawApi, () => { closedOnCanvas.current = true; onClose(); });
+  const items = timeline.items, totalDuration = timeline.duration;
+  const refresh = useCallback(() => setTimeline(readCanvasTimeline(excalidrawApi?.getSceneElements?.() ?? [], excalidrawApi?.getFiles?.() ?? {}, canvasId)), [excalidrawApi, canvasId]);
   useEffect(() => {
     if (!open || !excalidrawApi) return;
-    refresh();
-    const unsubscribe = excalidrawApi.onChange(refresh);
+    refresh(); const unsubscribe = excalidrawApi.onChange(refresh);
     return () => { if (typeof unsubscribe === "function") unsubscribe(); };
   }, [excalidrawApi, open, refresh]);
-
+  useEffect(() => { if (open) closeButtonRef.current?.focus(); }, [open]);
   useEffect(() => {
-    if (!previewing) return;
-    const timer = window.setInterval(() => {
-      setPlayhead((value) => {
-        const next = value + 0.1;
-        if (next >= totalDuration) {
-          setPreviewing(false);
-          return 0;
-        }
-        return next;
-      });
-    }, 100);
-    return () => window.clearInterval(timer);
-  }, [previewing, totalDuration]);
+    if (open) wasOpenRef.current = true;
+    else if (wasOpenRef.current) { wasOpenRef.current = false; if (!closedOnCanvas.current) triggerRef?.current?.focus(); closedOnCanvas.current = false; }
+  }, [open, triggerRef]);
+  useEffect(() => () => audioAbort.current?.abort(), [projectId]);
 
-  useEffect(() => {
-    if (!open || !excalidrawApi) return;
-    const elements = excalidrawApi.getSceneElements?.() ?? [];
-    const nextElements = elements.map((element: any) => {
-      if (!element.customData?.isSubtitle) return element;
-      const customData = element.customData;
-      const start = Number(customData.subtitleStart) || 0;
-      const end = Number(customData.subtitleEnd) || 5;
-      const visible = !previewing || (playhead >= start && playhead < end);
-      const originalOpacity = Number(customData.previewOpacity) || Number(element.opacity) || 100;
-      if (element.opacity === (visible ? originalOpacity : 0)) return element;
-      return { ...element, opacity: visible ? originalOpacity : 0, customData: { ...customData, previewOpacity: originalOpacity } };
-    });
-    if (nextElements.some((element: any, index: number) => element !== elements[index])) {
-      excalidrawApi.updateScene({ elements: nextElements, captureUpdate: "NEVER" });
-    }
-  }, [excalidrawApi, open, playhead, previewing]);
-
-  const selectItem = useCallback((id: string) => {
-    const element = excalidrawApi?.getSceneElements?.().find((candidate: any) => candidate.id === id);
-    if (!element) return;
-    excalidrawApi.updateScene({ appState: { selectedElementIds: { [id]: true } } });
-    excalidrawApi.scrollToContent?.([element], { fitToContent: false, duration: 250 });
-  }, [excalidrawApi]);
-
-  const removeItem = useCallback((id: string) => {
+  function changeItem(id: string, values: Record<string, unknown>) {
     const elements = excalidrawApi?.getSceneElements?.() ?? [];
-    excalidrawApi?.updateScene({ elements: elements.map((element: any) => element.id === id ? { ...element, isDeleted: true } : element), captureUpdate: "IMMEDIATELY" });
-  }, [excalidrawApi]);
-
-  const updateTrim = useCallback((id: string, key: "trimStart" | "trimEnd", value: number) => {
+    excalidrawApi?.updateScene({ elements: elements.map((element: any) => element.id === id ? { ...element, version: (element.version ?? 0) + 1,
+      versionNonce: Math.floor(Math.random() * 2_000_000_000), updated: Date.now(), customData: { ...element.customData, ...values } } : element), captureUpdate: "IMMEDIATELY" });
+    refresh();
+  }
+  function selectItem(id: string) {
+    const element = excalidrawApi?.getSceneElements?.().find((candidate: any) => candidate.id === id); if (!element) return;
+    excalidrawApi.updateScene({ appState: { selectedElementIds: { [id]: true } } }); excalidrawApi.scrollToContent?.([element], { fitToContent: false });
+  }
+  function removeItem(id: string) {
     const elements = excalidrawApi?.getSceneElements?.() ?? [];
-    const element = elements.find((candidate: any) => candidate.id === id);
-    if (!element) return;
-    const current = element.customData ?? {};
-    const nextStart = key === "trimStart" ? value : Number(current.trimStart) || 0;
-    const nextEnd = key === "trimEnd" ? value : Number(current.trimEnd) || 5;
-    if (nextStart >= nextEnd) return;
-    excalidrawApi.updateScene({ elements: elements.map((candidate: any) => candidate.id === id ? { ...candidate, version: (candidate.version ?? 0) + 1, versionNonce: Math.floor(Math.random()*2_000_000_000), updated: Date.now(), customData: { ...current, [key]: value } } : candidate), captureUpdate: "IMMEDIATELY" });
-  }, [excalidrawApi]);
-
-  const updateSubtitle = useCallback((id: string, key: "trimStart" | "trimEnd", value: number) => {
+    excalidrawApi?.updateScene({ elements: elements.map((element: any) => element.id === id ? { ...element, isDeleted: true } : element), captureUpdate: "IMMEDIATELY" }); refresh();
+  }
+  function updateTrim(item: CanvasTimelineItem, edge: "start" | "end", value: number) {
+    const start = edge === "start" ? value : item.trimStart, end = edge === "end" ? value : item.trimEnd;
+    if (!Number.isFinite(value) || start < 0 || start >= end) return;
+    if (item.kind !== "subtitle" && end > item.duration) return;
+    changeItem(item.id, item.kind === "subtitle" ? { subtitleStart: start, subtitleEnd: end } : { trimStart: start, trimEnd: end });
+  }
+  function applySubtitleStyle(id: string, style: "bottom" | "title" | "emphasis") {
     const elements = excalidrawApi?.getSceneElements?.() ?? [];
-    const element = elements.find((candidate: any) => candidate.id === id);
-    if (!element) return;
-    const current = element.customData ?? {};
-    const start = key === "trimStart" ? value : Number(current.subtitleStart) || 0;
-    const end = key === "trimEnd" ? value : Number(current.subtitleEnd) || 5;
-    if (start >= end) return;
-    excalidrawApi.updateScene({ elements: elements.map((candidate: any) => candidate.id === id ? { ...candidate, customData: { ...current, subtitleStart: start, subtitleEnd: end } } : candidate), captureUpdate: "IMMEDIATELY" });
-  }, [excalidrawApi]);
-
-  const applySubtitleStyle = useCallback((id: string, style: "bottom" | "title" | "emphasis") => {
-    const elements = excalidrawApi?.getSceneElements?.() ?? [];
-    const element = elements.find((candidate: any) => candidate.id === id);
-    if (!element) return;
-    const styles = {
-      bottom: { x: 120, y: 520, fontSize: 28, strokeColor: "#ffffff", backgroundColor: "#111111" },
-      title: { x: 120, y: 100, fontSize: 42, strokeColor: "#ffffff", backgroundColor: "transparent" },
-      emphasis: { x: 120, y: 420, fontSize: 34, strokeColor: "#ffe066", backgroundColor: "transparent" },
-    } as const;
-    const next = styles[style];
-    excalidrawApi.updateScene({ elements: elements.map((candidate: any) => candidate.id === id ? { ...candidate, ...next, customData: { ...(candidate.customData ?? {}), subtitleStyle: style } } : candidate), captureUpdate: "IMMEDIATELY" });
-  }, [excalidrawApi]);
-
-  const addSubtitle = useCallback(async () => {
-    const text = subtitle.trim();
-    if (!text || !excalidrawApi) return;
-    const { convertToExcalidrawElements } = await import("@excalidraw/excalidraw");
-    const element = convertToExcalidrawElements([{
-      type: "text",
-      text,
-      x: 120,
-      y: 420,
-      fontSize: 28,
-      fontFamily: 1,
-      textAlign: "center",
-      verticalAlign: "middle",
-      customData: { isSubtitle: true, title: text, subtitleStart: 0, subtitleEnd: 5 },
-    } as any])[0];
-    if (!element) return;
-    excalidrawApi.updateScene({ elements: [...(excalidrawApi.getSceneElements?.() ?? []), element], captureUpdate: "IMMEDIATELY" });
-    setSubtitle("");
-  }, [excalidrawApi, subtitle]);
-
-  const addAudio = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file || !excalidrawApi) return;
+    const visual = elements.find((item: any) => !item.isDeleted && (item.type === "image" || item.customData?.isVideo));
+    const width = visual?.width || 1280, height = visual?.height || 720;
+    const x = (visual?.x || 0) + width * 0.05, y = (visual?.y || 0) + height * (style === "title" ? 0.08 : style === "emphasis" ? 0.7 : 0.85);
+    excalidrawApi.updateScene({ elements: elements.map((item: any) => item.id === id ? { ...item, x, y, width: width * 0.9, fontSize: Math.max(16, height * 0.05), textAlign: "center", customData: { ...item.customData, subtitleStyle: style } } : item), captureUpdate: "IMMEDIATELY" }); refresh();
+  }
+  async function addSubtitle() {
+    if (!subtitle.trim() || !excalidrawApi) return;
     try {
-      const uploaded = await uploadFile(accessToken, file, projectId);
       const { convertToExcalidrawElements } = await import("@excalidraw/excalidraw");
-      const element = convertToExcalidrawElements([{
-        type: "rectangle",
-        x: 0,
-        y: 0,
-        width: 1,
-        height: 1,
-        opacity: 0,
-        customData: {
-          isAudio: true,
-          title: file.name,
-          audioUrl: uploaded.url,
-          audioAssetId: uploaded.asset.id,
-          durationSeconds: 5,
-          trimStart: 0,
-          trimEnd: 5,
-        },
-      } as any])[0];
-      if (!element) return;
-      excalidrawApi.updateScene({ elements: [...(excalidrawApi.getSceneElements?.() ?? []), element], captureUpdate: "IMMEDIATELY" });
-      const audio = new Audio(uploaded.url);
-      audio.addEventListener("loadedmetadata", () => {
-        if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
-        const elements = excalidrawApi.getSceneElements?.() ?? [];
-        excalidrawApi.updateScene({
-          elements: elements.map((candidate: any) => candidate.id === element.id ? {
-            ...candidate,
-            customData: { ...(candidate.customData ?? {}), durationSeconds: audio.duration, trimEnd: audio.duration },
-          } : candidate),
-          captureUpdate: "IMMEDIATELY",
-        });
-      }, { once: true });
-    } catch (error) {
-      console.error("[timeline] audio upload failed:", error);
-    }
-  }, [accessToken, excalidrawApi, projectId]);
-
-  const exportProject = useCallback(() => {
-    if (exportStatus === "saving" || exportStatus === "running") return;
-    setExportStatus("running");
-    setExportError(null);
+      const element = convertToExcalidrawElements([{ type: "text", text: subtitle.trim(), x: 0, y: 0, fontSize: 28, fontFamily: 1,
+        textAlign: "center", customData: { isSubtitle: true, title: subtitle.trim(), subtitleStart: 0, subtitleEnd: Math.min(totalDuration || 5, 5), subtitleStyle: "bottom" } }])[0];
+      if (!element) throw new Error("字幕未能加入画布，请重试。");
+      excalidrawApi.updateScene({ elements: [...excalidrawApi.getSceneElements(), element], captureUpdate: "IMMEDIATELY" });
+      applySubtitleStyle(element.id, "bottom"); setSubtitle("");
+    } catch (cause) { setExportError(cause instanceof Error ? cause.message : "字幕添加失败。"); }
+  }
+  async function uploadAudio(file: File) {
+    if (audioLock.current || !excalidrawApi) return;
+    if (!file.type.startsWith("audio/")) { setAudioError("请选择音频文件。"); return; }
+    if (file.size > 25 * 1024 * 1024) { setAudioError("音频不能超过 25 MB，请压缩后上传。"); return; }
+    audioLock.current = true; setAudioBusy(true); setAudioError("");
+    const abort = new AbortController(); audioAbort.current = abort;
+    const pending = audioUpload.current?.file === file ? audioUpload.current : { file };
+    audioUpload.current = pending;
     try {
-      const elements = (excalidrawApi?.getSceneElements?.() ?? []).filter((element: any) => !element.isDeleted);
-    const manifest = {
-      format: "helstera-timeline-v1",
-      exportedAt: new Date().toISOString(),
-      durationSeconds: totalDuration,
-      tracks: elements
-        .filter((element: any) => element.type === "image" || element.customData?.isVideo || element.customData?.isSubtitle || element.customData?.isAudio)
-        .map((element: any) => ({ id: element.id, type: element.customData?.isAudio ? "audio" : element.customData?.isSubtitle ? "subtitle" : element.customData?.isVideo ? "video" : "image", title: element.customData?.title ?? element.text ?? null, url: element.customData?.audioUrl ?? element.customData?.url ?? null, start: Number(element.customData?.subtitleStart ?? element.customData?.trimStart ?? 0), end: Number(element.customData?.subtitleEnd ?? element.customData?.trimEnd ?? element.customData?.durationSeconds ?? 0), text: element.customData?.isSubtitle ? element.text : undefined })),
-    };
-      const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "helstera-timeline.json";
-      link.click();
-      URL.revokeObjectURL(url);
+      pending.uploaded ??= await uploadFile(accessToken, file, projectId, "timeline-audio");
+      abort.signal.throwIfAborted();
+      const info = await inspectCanvasMedia(file, abort.signal);
+      const { convertToExcalidrawElements } = await import("@excalidraw/excalidraw");
+      abort.signal.throwIfAborted();
+      const element = convertToExcalidrawElements([{ type: "rectangle", x: 0, y: 0, width: 1, height: 1, opacity: 0,
+        customData: { isAudio: true, title: file.name, audioUrl: pending.uploaded.url, audioAssetId: pending.uploaded.asset.id,
+          durationSeconds: info.duration, trimStart: 0, trimEnd: info.duration, timelineStart: 0, timelineVolume: 1 } }])[0];
+      if (!element) throw new Error("音轨未能加入画布，请重试。");
+      excalidrawApi.updateScene({ elements: [...excalidrawApi.getSceneElements(), element], captureUpdate: "IMMEDIATELY" });
+      audioUpload.current = null; refresh();
+    } catch (cause) { if (!abort.signal.aborted) setAudioError(cause instanceof Error ? cause.message : "音频上传失败，已保留所选文件，可重试。"); }
+    finally { audioLock.current = false; if (!abort.signal.aborted) setAudioBusy(false); }
+  }
+  function chooseAudio(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]; event.target.value = ""; if (file) void uploadAudio(file);
+  }
+  function retryAudio() { if (audioUpload.current) void uploadAudio(audioUpload.current.file); }
+  function exportManifest() {
+    setExportStatus("running"); setExportError(null);
+    try {
+      const current = readCanvasTimeline(excalidrawApi.getSceneElements(), excalidrawApi.getFiles?.() ?? {}, canvasId);
+      const blob = new Blob([JSON.stringify(canvasTimelineManifest(current), null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob), link = document.createElement("a");
+      link.href = url; link.download = "helstera-timeline.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
       setExportStatus("success");
-    } catch (error) {
-      setExportError(error instanceof Error ? error.message : "导出失败，请重试");
-      setExportStatus("error-retryable");
-    }
-  }, [excalidrawApi, exportStatus, totalDuration]);
-
-  const syncAudioPreview = useCallback((id: string, audio: HTMLAudioElement) => {
-    const item = items.find((candidate) => candidate.id === id);
-    if (!item) return;
-    if (audio.currentTime < item.trimStart || audio.currentTime >= item.trimEnd) audio.currentTime = item.trimStart;
-    if (activeAudioId === id) {
-      audio.pause();
-      setActiveAudioId(null);
-      return;
-    }
-    document.querySelectorAll<HTMLAudioElement>("audio[data-timeline-audio]").forEach((candidate) => candidate.pause());
-    void audio.play().then(() => setActiveAudioId(id)).catch(() => setActiveAudioId(null));
-  }, [activeAudioId, items]);
-
+    } catch (cause) { setExportError(cause instanceof Error ? cause.message : "导出清单失败。"); setExportStatus("error-retryable"); }
+  }
+  async function createVideo() {
+    if (!onCreateVideo || creating) return;
+    setCreating(true); setExportError(null);
+    try { validateCanvasTimeline(timeline); await onCreateVideo(); }
+    catch (cause) { setExportError(cause instanceof Error ? cause.message : "无法准备成片，请重试。"); }
+    finally { setCreating(false); }
+  }
   if (!panel.present) return null;
-
-  return (
-    <aside ref={panel.ref} aria-hidden={!open} inert={!open} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }} className="canvas-timeline-panel absolute bottom-[calc(4.25rem+env(safe-area-inset-bottom))] left-4 right-4 z-30 max-h-[min(52dvh,480px)] max-w-3xl overflow-y-auto rounded-2xl border border-border/60 bg-background/95 p-3 shadow-2xl backdrop-blur-xl sm:bottom-16" aria-label="媒体时间线">
-      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border/60 bg-background/95 pb-2">
-        <div>
-          <h2 className="text-xs font-medium text-foreground">媒体时间线</h2>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">素材、字幕和裁剪参数会随项目自动保存</p>
-        </div>
-        <button ref={closeButtonRef} type="button" onClick={onClose} className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="关闭时间线"><X className="size-4" /></button>
-      </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <input aria-label="字幕内容" value={subtitle} onChange={(event) => setSubtitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addSubtitle(); }} placeholder="输入字幕内容" className="h-10 min-w-0 basis-full rounded-lg border border-border/60 bg-muted/40 px-2.5 text-base outline-none focus:border-foreground/30 focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:flex-1 sm:basis-auto sm:text-xs" />
-        <button type="button" onClick={() => void addSubtitle()} disabled={!subtitle.trim()} className="inline-flex min-h-10 items-center gap-1 rounded-lg bg-foreground px-2.5 text-xs text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 sm:h-8 sm:min-h-0"><Plus className="size-3.5" aria-hidden="true" />添加字幕</button>
-        <label className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-lg border border-border/60 px-2.5 text-xs text-foreground hover:bg-muted focus-within:outline-none focus-within:ring-2 focus-within:ring-ring sm:h-8 sm:min-h-0"><Upload className="size-3.5" aria-hidden="true" />音频<input aria-label="上传音频" type="file" accept="audio/*" className="sr-only" onChange={(event) => void addAudio(event)} /></label>
-        <button type="button" onClick={exportProject} disabled={exportStatus === "running"} className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-border/60 px-2.5 text-xs text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:min-h-0"><Download className="size-3.5" aria-hidden="true" />{exportStatus === "running" ? "导出中…" : "导出清单"}</button>
-        <OperationStatus
-          status={exportStatus}
-          label="时间线导出"
-          {...(exportError || exportStatus === "success" ? { detail: exportError ?? "文件已下载到本地" } : {})}
-          {...(exportStatus === "error-retryable" ? { actionLabel: "重试", onAction: exportProject } : {})}
-        />
-      </div>
-      <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-2">
-        <div className="flex items-center gap-2"><button type="button" onClick={() => setPreviewing((value) => !value)} className="flex size-7 items-center justify-center rounded-full bg-foreground text-background" aria-label={previewing ? "暂停预览" : "播放预览"}>{previewing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}</button><input aria-label="时间线播放头" type="range" min="0" max={totalDuration} step="0.1" value={playhead} onChange={(event) => { setPreviewing(false); setPlayhead(Number(event.target.value)); }} className="h-1 flex-1 accent-foreground" /><span className="w-20 text-right text-[10px] tabular-nums text-muted-foreground">{playhead.toFixed(1)} / {totalDuration.toFixed(1)}s</span></div>
-        <div className="mt-1 flex justify-between px-9 text-[9px] text-muted-foreground"><span>0s</span><span>{(totalDuration / 2).toFixed(1)}s</span><span>{totalDuration.toFixed(1)}s</span></div>
-      </div>
-      {items.length === 0 ? (
-        <div className="flex h-20 items-center justify-center text-xs text-muted-foreground">添加图片或视频后会显示在这里</div>
-      ) : (
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          {items.map((item, index) => (
-            <div key={item.id} className="group relative min-w-40 rounded-xl border border-border/60 bg-muted/40 p-2">
-              <button type="button" onClick={() => selectItem(item.id)} aria-label={`选择${item.label}`} className="flex min-h-10 w-full items-center gap-2 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">{item.kind === "video" ? <Film className="size-4" /> : item.kind === "subtitle" ? <Type className="size-4" /> : item.kind === "audio" ? <Music className="size-4" /> : <ImageIcon className="size-4" />}</span>
-                <span className="min-w-0 flex-1"><span className="block truncate text-xs text-foreground">{index + 1}. {item.label}</span><span className="mt-0.5 block text-[10px] text-muted-foreground">{item.kind === "video" ? `${item.duration}s 视频` : item.kind === "audio" ? `${item.trimStart.toFixed(1)}s - ${item.trimEnd.toFixed(1)}s 音频` : item.kind === "subtitle" ? `${item.trimStart.toFixed(1)}s - ${item.trimEnd.toFixed(1)}s 字幕` : "图片素材"}</span></span>
-                {item.kind === "video" && <Play className="size-3 text-muted-foreground" />}
-              </button>
-              {item.kind === "video" && onEditVideo && <button type="button" className="mt-2 min-h-9 w-full rounded-md bg-foreground px-3 text-xs text-background focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onEditVideo(item.id)} aria-label={`让 AI 剪辑${item.label}`}>让 AI 剪辑</button>}
-              {item.kind === "video" && <div className="mt-2 space-y-1"><div className="flex justify-between text-[10px] text-muted-foreground"><span>入点 {item.trimStart.toFixed(1)}s</span><span>出点 {item.trimEnd.toFixed(1)}s</span></div><input aria-label={`${item.label}入点`} type="range" min="0" max={Math.max(item.duration, 0.1)} step="0.1" value={item.trimStart} onChange={(event) => updateTrim(item.id, "trimStart", Number(event.target.value))} className="h-1 w-full accent-foreground" /><input aria-label={`${item.label}出点`} type="range" min="0" max={Math.max(item.duration, 0.1)} step="0.1" value={item.trimEnd} onChange={(event) => updateTrim(item.id, "trimEnd", Number(event.target.value))} className="h-1 w-full accent-foreground" /></div>}
-              {item.kind === "subtitle" && <div className="mt-2 space-y-2"><div className="flex justify-between text-[10px] text-muted-foreground"><span>{item.trimStart.toFixed(1)}s</span><span>{item.trimEnd.toFixed(1)}s</span></div><input aria-label={`${item.label}字幕开始时间`} type="range" min="0" max="60" step="0.1" value={item.trimStart} onChange={(event) => updateSubtitle(item.id, "trimStart", Number(event.target.value))} className="h-1 w-full accent-foreground" /><input aria-label={`${item.label}字幕结束时间`} type="range" min="0" max="60" step="0.1" value={item.trimEnd} onChange={(event) => updateSubtitle(item.id, "trimEnd", Number(event.target.value))} className="h-1 w-full accent-foreground" /><div className="flex flex-wrap gap-1"><button type="button" onClick={() => applySubtitleStyle(item.id, "bottom")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">底部</button><button type="button" onClick={() => applySubtitleStyle(item.id, "title")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">标题</button><button type="button" onClick={() => applySubtitleStyle(item.id, "emphasis")} className="rounded-md border px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">强调</button></div></div>}
-              {item.kind === "audio" && <div className="mt-2 space-y-1"><div className="flex justify-between text-[10px] text-muted-foreground"><span>起点 {item.trimStart.toFixed(1)}s</span><span>终点 {item.trimEnd.toFixed(1)}s</span></div>{item.sourceUrl && <div className="flex items-center gap-2"><button type="button" onClick={(event) => syncAudioPreview(item.id, event.currentTarget.parentElement?.querySelector("audio")!)} className="flex size-6 items-center justify-center rounded-full bg-foreground text-background" aria-label={activeAudioId === item.id ? "暂停音频" : "播放音频"}>{activeAudioId === item.id ? <Pause className="size-3" /> : <Play className="size-3" />}</button><audio data-timeline-audio src={item.sourceUrl} preload="metadata" onPause={() => { if (activeAudioId === item.id) setActiveAudioId(null); }} onTimeUpdate={(event) => { if (event.currentTarget.currentTime >= item.trimEnd) { event.currentTarget.pause(); event.currentTarget.currentTime = item.trimStart; } }} /></div>}<input aria-label={`${item.label}音频开始时间`} type="range" min="0" max="60" step="0.1" value={item.trimStart} onChange={(event) => updateTrim(item.id, "trimStart", Number(event.target.value))} className="h-1 w-full accent-foreground" /><input aria-label={`${item.label}音频结束时间`} type="range" min="0" max="60" step="0.1" value={item.trimEnd} onChange={(event) => updateTrim(item.id, "trimEnd", Number(event.target.value))} className="h-1 w-full accent-foreground" /></div>}
-              <button type="button" onClick={() => removeItem(item.id)} className="absolute right-1 top-1 flex size-8 items-center justify-center rounded bg-background/90 text-muted-foreground hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`删除${item.label}`}><X className="size-3.5" aria-hidden="true" /></button>
-            </div>
-          ))}
-        </div>
-      )}
-    </aside>
-  );
+  return <aside ref={panel.ref} aria-hidden={!open} inert={!open} onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }} className="canvas-timeline-panel absolute bottom-[calc(4.25rem+env(safe-area-inset-bottom))] left-4 right-4 z-30 max-h-[min(72dvh,680px)] max-w-3xl overflow-y-auto rounded-2xl border border-border bg-background p-3 shadow-xl sm:bottom-16" aria-label="媒体时间线">
+    <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background pb-2"><div><h2 className="text-sm font-medium">媒体时间线</h2><p className="mt-0.5 text-xs text-muted-foreground">画面按顺序播放；字幕与音轨使用同一时间轴，修改随画布保存</p></div><button ref={closeButtonRef} type="button" onClick={onClose} className="flex size-9 items-center justify-center rounded-lg hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring" aria-label="关闭时间线"><X className="size-4"/></button></div>
+    <div className="mt-3 flex flex-wrap items-center gap-2"><input aria-label="字幕内容" value={subtitle} onChange={event => setSubtitle(event.target.value)} onKeyDown={event => { if (event.key === "Enter") void addSubtitle(); }} placeholder="输入字幕内容" className="h-10 min-w-0 basis-full rounded-lg border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:flex-1 sm:basis-auto sm:text-sm"/><button type="button" onClick={addSubtitle} disabled={!subtitle.trim()} className="flex min-h-10 items-center gap-1 rounded-lg border px-3 text-sm disabled:opacity-40"><Plus className="size-4"/>添加字幕</button><label className="flex min-h-10 cursor-pointer items-center gap-1 rounded-lg border px-3 text-sm focus-within:ring-2 focus-within:ring-ring"><Upload className="size-4"/>{audioBusy ? "正在上传音频…" : "音频"}<input aria-label="上传音频" disabled={audioBusy} type="file" accept="audio/*" className="sr-only" onChange={chooseAudio}/></label>
+      {onCreateVideo && <button type="button" onClick={createVideo} disabled={creating || !items.length} className="min-h-10 rounded-lg bg-foreground px-3 text-sm text-background disabled:opacity-40">{creating ? "正在保存时间线…" : "创建成片"}</button>}
+      <button type="button" onClick={exportManifest} className="flex min-h-10 items-center gap-1 rounded-lg border px-3 text-sm"><Download className="size-4"/>导出清单</button></div>
+    {audioError && <div role="alert" className="mt-2 text-sm text-destructive">{audioError}<button type="button" onClick={retryAudio} disabled={audioBusy} className="ml-3 min-h-9 underline">重试音频上传</button></div>}
+    {exportError && <p role="alert" className="mt-2 text-sm text-destructive">{exportError}</p>}
+    <OperationStatus status={exportStatus} label="时间线清单" {...(exportStatus === "success" ? { detail: "已发起清单下载，请检查浏览器下载记录。成片请使用创建成片。" } : {})}/>
+    {open && items.length > 0 && <CanvasTimelinePreview timeline={timeline} token={accessToken}/>}
+    {!items.length ? <p className="py-6 text-center text-sm text-muted-foreground">添加图片或视频后会显示在这里</p> : <div className="mt-3 flex gap-2 overflow-x-auto pb-1">{items.map((item, index) => <div key={item.id} className="relative min-w-48 rounded-xl border bg-muted/20 p-3">
+      <button type="button" onClick={() => selectItem(item.id)} aria-label={`选择${item.title}`} className="flex min-h-10 w-full items-center gap-2 pr-6 text-left focus-visible:ring-2 focus-visible:ring-ring"><span aria-hidden="true">{item.kind === "video" ? <Film className="size-4"/> : item.kind === "audio" ? <Music className="size-4"/> : item.kind === "subtitle" ? <Type className="size-4"/> : <ImageIcon className="size-4"/>}</span><span className="min-w-0 flex-1"><span className="block max-w-48 truncate text-sm" title={item.title}>{index + 1}. {item.title}</span><span className="block text-xs text-muted-foreground">{item.start.toFixed(1)}s · {(item.trimEnd - item.trimStart).toFixed(1)}s</span></span></button>
+      {item.kind === "video" && onEditVideo && <button type="button" onClick={() => onEditVideo(item.id)} aria-label={`让 AI 剪辑${item.title}`} className="mt-2 min-h-9 w-full rounded-md border px-3 text-xs">让 AI 剪辑</button>}
+      {item.kind === "image" ? <label className="mt-2 block text-xs">展示秒数<input type="number" min="0.1" max="7200" step="0.1" value={item.duration} onChange={event => { const seconds = Number(event.target.value); if (seconds > 0 && seconds <= 7200) changeItem(item.id, { timelineDuration: seconds, trimStart: 0, trimEnd: seconds }); }} className="ml-2 w-20 rounded border bg-background p-1 text-base"/></label> : <div className="mt-2 space-y-2">
+        <div className="flex justify-between text-xs"><span>{item.trimStart.toFixed(1)}s</span><span>{item.trimEnd.toFixed(1)}s</span></div>
+        {(["start", "end"] as const).map(edge => <input key={edge} aria-label={`${item.title}${item.kind === "subtitle" ? "字幕" : item.kind === "audio" ? "音频" : ""}${edge === "start" ? item.kind === "video" ? "入点" : "开始时间" : item.kind === "video" ? "出点" : "结束时间"}`} type="range" min={0} max={item.kind === "subtitle" ? Math.max(totalDuration, item.trimEnd) : item.duration} step="0.1" value={edge === "start" ? item.trimStart : item.trimEnd} onChange={event => updateTrim(item, edge, Number(event.target.value))} className="w-full"/>)}
+      </div>}
+      {item.kind === "subtitle" && <div className="mt-2 flex gap-1">{([['bottom','底部'],['title','标题'],['emphasis','强调']] as const).map(([style,label]) => <button key={style} type="button" onClick={() => applySubtitleStyle(item.id, style)} className="min-h-9 rounded-md border px-2 text-xs focus-visible:ring-2">{label}</button>)}</div>}
+      {item.kind === "audio" && <div className="mt-2 space-y-2"><label className="block text-xs">音量 {Math.round(item.volume * 100)}%<input aria-label={`${item.title}音量`} type="range" min="0" max="1" step="0.01" value={item.volume} onChange={event => changeItem(item.id, { timelineVolume: Number(event.target.value) })} className="w-full"/></label><label className="block text-xs">时间线起点<input aria-label={`${item.title}时间线起点`} type="number" min="0" step="0.1" value={item.start} onChange={event => { const start = Number(event.target.value); if (Number.isFinite(start) && start >= 0) changeItem(item.id, { timelineStart: start }); }} className="ml-2 w-20 rounded border bg-background p-1 text-base"/></label></div>}
+      <button type="button" onClick={() => removeItem(item.id)} className="absolute right-1 top-1 flex size-8 items-center justify-center rounded hover:text-destructive focus-visible:ring-2" aria-label={`删除${item.title}`}><X className="size-4"/></button>
+    </div>)}</div>}
+  </aside>;
 }

@@ -12,12 +12,13 @@ import { studioVideoDuration } from "@/lib/studio-video-metadata";
 import { useLocale } from "@/lib/i18n";
 
 export type StudioWorkflowProps = {
+  projectKey?: string | undefined;
   runtime: StudioRuntime | null; mediaRevision: number; userId: string; token: string;
   exported(output: StudioExport): void; contextRequest?: StudioAiContext | null;
   active?: boolean; onBusyChange?: (busy: boolean) => void;
 };
 
-export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exported, contextRequest, active = true, onBusyChange }: StudioWorkflowProps) {
+export function useStudioAiWorkflow({ runtime, mediaRevision, userId, projectKey = userId, token, exported, contextRequest, active = true, onBusyChange }: StudioWorkflowProps) {
   const english = useLocale() === "en-US";
   const [prompt, updatePrompt] = useState("");
   const [context, setContext] = useState<StudioAiContext | null>(null);
@@ -87,7 +88,7 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
     let alive = true;
     const version = requestVersion.current;
     setRestoring(true);
-    void readRecoveredStudioSession(userId, runtime).then(async session => {
+    void readRecoveredStudioSession(projectKey, runtime).then(async session => {
       if (!alive || !session || version !== requestVersion.current) return;
       setPlan(session.plan);setApplied(session.appliedRevision ?? null);setExportedOnce(Boolean(session.exportedOnce));setExportReceipt(session.exportReceipt);
       setUndoneActions(session.undoneActions ?? []);setActionUndoAvailable(Boolean(session.actionUndoAvailable));setCanUndo(Boolean(session.actionUndoAvailable));setCompletelyUndone(Boolean(session.completelyUndone));
@@ -95,17 +96,17 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
       setConfirmed(new Set(session.plan.actions.map((_, index) => index)));setReceiptPending(!session.receiptSynced);
       if (session.receiptSynced) return;
       await completeStudioPlan(token, session.plan, session.exportReceipt);
-      await saveStudioPlan(userId, { ...session, receiptSynced: true });
+      await saveStudioPlan(projectKey, { ...session, receiptSynced: true });
       if (alive) { setReceiptPending(false);setNotice("已恢复修改记录，时间线未重复修改。"); }
     }).catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : "编辑记录恢复失败，请重试。"); }).finally(() => { if (alive) setRestoring(false); });
     return () => { alive = false; };
-  }, [runtime, userId, token]);
+  }, [runtime, projectKey, token]);
 
   function changeRequest() {
     requestVersion.current += 1;
     if (plan && !applied) {
       setPlan(null);setConfirmed(new Set());
-      void clearStudioPlan(userId).catch(() => setError("旧方案清理失败，请刷新前保留当前要求。"));
+      void clearStudioPlan(projectKey).catch(() => setError("旧方案清理失败，请刷新前保留当前要求。"));
     }
     setError("");
   }
@@ -144,18 +145,18 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
         ...(music ? { music: { assetName: music, volume: volume / 100, startMs: Math.round(musicStart * 1000) } } : {}) }, snapshot);
       if (!mounted.current || version !== requestVersion.current || runtime.projectId() !== snapshot.compositionId) return;
       if (!music && next.actions.some(action => action.type === "audio")) throw new Error("方案包含未选择的音乐，请先选择配乐后重新预览。");
-      await saveStudioPlan(userId, { plan: next });
+      await saveStudioPlan(projectKey, { plan: next });
       if (mounted.current && version === requestVersion.current) setPlan(next);
     });
   }
 
-  async function discardPlan() { await run(async () => { await clearStudioPlan(userId);clearPreview();setNotice("方案已放弃，视频没有修改。"); }); }
+  async function discardPlan() { await run(async () => { await clearStudioPlan(projectKey);clearPreview();setNotice("方案已放弃，视频没有修改。"); }); }
   async function acceptPlan(next:StudioAiPlan) {
     if(lock.current||receiptPending)throw new Error("请先完成当前修改记录同步。");
     if(!runtime||!next.snapshot)throw new Error("当前视频不可用。");
     const current=await runtime.snapshot();
     if(current.revision!==next.snapshot.revision||current.compositionId!==next.snapshot.compositionId)throw new Error("生成方案期间视频已改变，请重新发送要求。");
-    await saveStudioPlan(userId,{plan:next});clearPreview();setPlan(next);setTarget(current);setNotice("");setError("");
+    await saveStudioPlan(projectKey,{plan:next});clearPreview();setPlan(next);setTarget(current);setNotice("");setError("");
   }
   function toggleAction(index: number, checked: boolean) { setConfirmed(current => { const next = new Set(current);if (checked) next.add(index);else next.delete(index);return next; }); }
 
@@ -177,14 +178,14 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
       const saved = await runtime.snapshot();setTarget(saved);setApplied(saved.revision);setCanUndo(plan.actions.some(action => action.type !== "export"));setActionUndoAvailable(saved.editReceipt?.canUndo ?? false);setReceiptPending(true);
       setNotice("修改已应用。可在时间线预览，满意后导出视频。");
       const session: StudioAiSession = { plan, appliedRevision: saved.revision, receiptSynced: false, undoneActions: saved.editReceipt?.undone ?? [], actionUndoAvailable: saved.editReceipt?.canUndo ?? false };
-      await saveStudioPlan(userId, session);await completeStudioPlan(token, plan);
-      await saveStudioPlan(userId, { ...session, receiptSynced: true });setReceiptPending(false);
+      await saveStudioPlan(projectKey, session);await completeStudioPlan(token, plan);
+      await saveStudioPlan(projectKey, { ...session, receiptSynced: true });setReceiptPending(false);
     });
   }
 
   async function retryReceipt() {
     if (!plan) return;
-    await run(async () => { await completeStudioPlan(token, plan, exportReceipt);await saveStudioPlan(userId, { plan, appliedRevision: applied, receiptSynced: true, exportedOnce, exportReceipt, undoneActions, actionUndoAvailable, completelyUndone });setReceiptPending(false);if (runtime?.projectId() !== plan.snapshot?.compositionId) clearPreview();setNotice("修改记录已同步，没有重复修改视频。"); });
+    await run(async () => { await completeStudioPlan(token, plan, exportReceipt);await saveStudioPlan(projectKey, { plan, appliedRevision: applied, receiptSynced: true, exportedOnce, exportReceipt, undoneActions, actionUndoAvailable, completelyUndone });setReceiptPending(false);if (runtime?.projectId() !== plan.snapshot?.compositionId) clearPreview();setNotice("修改记录已同步，没有重复修改视频。"); });
   }
 
   async function undoAppliedAction(actionIndex?: number) {
@@ -194,7 +195,7 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
       const receipt = saved.editReceipt;
       if (!receipt || receipt.id !== plan.approval!.id) throw new Error("撤销已执行，但动作回执不可用，请刷新恢复记录。");
       setTarget(saved);setApplied(saved.revision);setUndoneActions(receipt.undone);setActionUndoAvailable(receipt.canUndo);setCanUndo(receipt.canUndo);setCompletelyUndone(receipt.complete);
-      await saveStudioPlan(userId, { plan, appliedRevision: saved.revision, receiptSynced: true, exportedOnce, exportReceipt, undoneActions: receipt.undone, actionUndoAvailable: receipt.canUndo, completelyUndone: receipt.complete });
+      await saveStudioPlan(projectKey, { plan, appliedRevision: saved.revision, receiptSynced: true, exportedOnce, exportReceipt, undoneActions: receipt.undone, actionUndoAvailable: receipt.canUndo, completelyUndone: receipt.complete });
       setNotice(actionIndex === undefined ? "已撤销本次修改，可以调整要求后重新预览方案。" : "该动作已撤销，其他动作保留。已导出的文件不受影响。");
     });
   }
@@ -204,7 +205,7 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
     if (actionUndoAvailable) { await undoAppliedAction();return; }
     await run(async () => {
       await runtime.undoEdit({ id: plan.approval!.id, compositionId: plan.snapshot!.compositionId, appliedRevision: applied, originalRevision: plan.snapshot!.revision });
-      await clearStudioPlan(userId);clearPreview();await refreshTarget();setNotice("已撤销本次修改，可以调整要求后重新预览方案。");
+      await clearStudioPlan(projectKey);clearPreview();await refreshTarget();setNotice("已撤销本次修改，可以调整要求后重新预览方案。");
     });
   }
 
@@ -221,14 +222,14 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, token, exp
       if (!saved) { setNotice("已取消导出，没有生成文件。");return; }
       setExportedOnce(true);setNotice(`成片已保存：${saved.path}`);
       const name = saved.path.split(/[\\/]/).pop();
-      if (!saved.previewId || !name) { await saveStudioPlan(userId, { plan, appliedRevision: applied, receiptSynced: true, exportedOnce: true });throw new Error("成片已保存，但预览未登记，请从素材目录打开。"); }
+      if (!saved.previewId || !name) { await saveStudioPlan(projectKey, { plan, appliedRevision: applied, receiptSynced: true, exportedOnce: true });throw new Error("成片已保存，但预览未登记，请从素材目录打开。"); }
       const receipt = { previewId: saved.previewId, name };setExportReceipt(receipt);setReceiptPending(true);
       const session = { plan, appliedRevision: applied, receiptSynced: false, exportedOnce: true, exportReceipt: receipt };
-      await saveStudioPlan(userId, session);
+      await saveStudioPlan(projectKey, session);
       const entry = (await desktopVideoBridge()!.listExportPreviews()).find(item => item.id === saved.previewId);
       if (!entry) throw new Error("成片已保存，但预览尚不可用，请从素材目录打开。");
       exported(await recoverDesktopExport(userId, entry));await completeStudioPlan(token, plan, receipt);
-      await saveStudioPlan(userId, { ...session, receiptSynced: true });setReceiptPending(false);
+      await saveStudioPlan(projectKey, { ...session, receiptSynced: true });setReceiptPending(false);
     });
   }
 

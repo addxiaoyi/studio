@@ -23,6 +23,7 @@ import { useVideoModelPreference } from "../hooks/use-video-model-preference";
 import { AgentModelSelector } from "./agent-model-selector";
 import { ImageAttachmentBar } from "./image-attachment-bar";
 import { ImageModelPreferencePopover } from "./image-model-preference";
+import { useLocale } from "@/lib/i18n";
 
 /** #27 输入框字数上限，集中定义，textarea 的 maxLength 与剩余字数提示共用同一常量 */
 export const MAX_INPUT_LENGTH = 8000;
@@ -88,6 +89,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   selectedCanvasElements,
   onCancel,
 }, ref) {
+  const english = useLocale() === "en-US";
   const router = useRouter();
   const [value, setValue] = useState(() => draftStore?.current ?? "");
   const previousDraftStore = useRef(draftStore);
@@ -556,7 +558,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="flex h-8 w-8 items-center justify-center rounded-full border-[0.5px] border-border text-muted-foreground transition-all duration-300 hover:bg-foreground/[0.04] hover:text-foreground"
-                  title="Attach images"
+                  title={english ? "Attach images" : "添加图片"}
+                  aria-label={english ? "Attach images" : "添加图片"}
                 >
                   <svg
                     className="h-[14px] w-[14px]"
@@ -576,7 +579,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 ref={modelBtnRef}
                 type="button"
                 onClick={() => setModelPopoverOpen((prev) => !prev)}
-                title="Image model"
+                title={english ? "Image model" : "图像模型"}
+                aria-label={english ? "Image model" : "图像模型"}
                 className={`flex h-8 w-8 items-center justify-center rounded-full border-[0.5px] transition-all duration-300 ${
                   preference.mode === "manual" || videoPreference.mode === "manual"
                     ? "border-accent bg-accent/20 text-accent-foreground"

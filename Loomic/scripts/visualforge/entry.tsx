@@ -7,10 +7,11 @@ import { readStudioProject, saveStudioProject, saveStudioExport, type StudioExpo
 import { lockStudio, studioImportName } from "../../apps/web/src/lib/visualforge-session";
 import type { StudioHost, StudioSnapshot, StudioEdit, StudioUndo } from "../../apps/web/src/lib/visualforge-runtime";
 import type { StudioCut } from "../../apps/web/src/lib/studio-cut";
-import { applyStudioCut, currentCompositionId, listStudioMedia, readStudioMedia } from "./cut";
+import type { CanvasTimeline } from "../../apps/web/src/lib/canvas-timeline";
+import { applyStudioCut, installCanvasTimeline, currentCompositionId, listStudioMedia, readStudioMedia } from "./cut";
 import { installStudioChinese } from "./studio-i18n";
 import { installStudioAiContext, openStudioExport } from "../../apps/web/src/lib/studio-ai-context";
-import { readStudioState, controlStudio } from "./studio-controls";
+import { readStudioState, controlStudio, waitForStudioComposition } from "./studio-controls";
 declare global {
   interface Window {
     loomicSaveStudioExport?: ((output: StudioExport) => Promise<void>) | undefined;
@@ -21,20 +22,24 @@ declare global {
 export async function mountVisualForge(container: HTMLElement, host: StudioHost) {
   if (!crossOriginIsolated) throw new Error("视频编辑器需要隔离的浏览器环境。请通过侧栏重新打开；若仍失败，请检查网站响应头。");
   host.signal.throwIfAborted();
-  const release = await lockStudio(host.userId);
+  const projectKey = host.projectKey ?? host.userId;
+  const release = await lockStudio(projectKey);
   let project: VirtualProject & { loomicCut?: StudioCut };
   try {
-    project = await readStudioProject<VirtualProject & { loomicCut?: StudioCut }>(host.userId) ?? createBlankTemplateProject();
+    project = await readStudioProject<VirtualProject & { loomicCut?: StudioCut }>(projectKey) ?? createBlankTemplateProject();
     host.signal.throwIfAborted();
   } catch (cause) { release(); throw cause; }
   let currentProject = project;
   let currentCut = project.loomicCut ?? null;
+  const canvasImports = ((project as typeof project & { canvasImports?: Record<string,{canvasId:string;fingerprint:string}> }).canvasImports ?? {});
   const imports = new Set<string>();
   const assetImports = new Map<string, Promise<void>>();
   const notifyReady = () => { if (!host.signal.aborted) host.ready(); };
   window.addEventListener("remotion-browser-studio-operations-ready", notifyReady);
   localStorage.setItem("remotion.studio.theme", host.theme);
   window.loomicSaveStudioExport = async output => {
+    const origin = canvasImports[output.compositionId ?? currentCompositionId() ?? ""];
+    if (origin) output = { ...output, canvasId: origin.canvasId };
     try {
       await saveStudioExport(host.userId, output);
       host.exported(output);
@@ -51,9 +56,9 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
   let saveFailure: Error | null = null;
   root.render(<BrowserStudio project={project} initialElement={null} readOnly={false}
     onProjectChange={next => {
-      currentProject = { ...next, ...(currentCut ? { loomicCut: currentCut } : {}) };
+      currentProject = { ...next, canvasImports, ...(currentCut ? { loomicCut: currentCut } : {}) } as typeof currentProject;
       const saved = currentProject;
-      queue = queue.then(() => saveStudioProject(host.userId, saved)).then(() => { saveFailure = null; host.status("工程已保存在本机"); })
+      queue = queue.then(() => saveStudioProject(projectKey, saved)).then(() => { saveFailure = null; host.status("工程已保存在本机"); })
         .catch(cause => { saveFailure = cause instanceof Error ? cause : new Error(String(cause)); host.error(`工程保存失败：${saveFailure.message}`); });
     }}
     onCompileStateChange={state => {
@@ -75,8 +80,23 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
       return media ? readStudioMedia(currentProject, media.name) : null;
     },
     readCut: () => currentCut,
+    async importCanvasTimeline(timeline: CanvasTimeline, names: Record<string, string>, fingerprint: string) {
+      host.signal.throwIfAborted();
+      if (!/^[a-f\d]{64}$/.test(fingerprint)) throw new Error("时间线指纹无效。");
+      const id = `Canvas-${fingerprint.slice(0,16)}`;
+      // The deterministic composition ID is a durable receipt if saving the host record fails.
+      if (!window.remotion_browserStudio?.getCompositionFile(id)) await installCanvasTimeline(timeline, names, fingerprint);
+      canvasImports[id] = { canvasId: timeline.canvasId, fingerprint };
+      currentProject = { ...currentProject, canvasImports } as typeof currentProject;
+      await queue;
+      if (saveFailure) throw saveFailure;
+      await saveStudioProject(projectKey, currentProject);
+      const url = new URL(location.href); url.search = `/${id}`; history.pushState({}, "Helstera", url); window.dispatchEvent(new Event("remotion-pending-composition-selection"));
+      await waitForStudioComposition(id, host.signal);
+      return id;
+    },
     projectId: () => currentCompositionId() ?? "current-project",
-    openExport: openStudioExport,
+    openExport: () => openStudioExport(currentCompositionId() ?? undefined),
     studioState: readStudioState,
     control: controlStudio,
     async undoAction(input: StudioUndo): Promise<StudioSnapshot> {
@@ -88,7 +108,7 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
       if (!operations?.loomicUndoAction) throw new Error("此编辑器版本不支持逐项撤销，请刷新。");
       await operations.loomicUndoAction(input);await queue;
       if (saveFailure) throw saveFailure;
-      await saveStudioProject(host.userId, currentProject);
+      await saveStudioProject(projectKey, currentProject);
       const snapshot = await operations.loomicSnapshot(input.compositionId);
       const saved = (currentProject as typeof currentProject & {loomicCuts?: Record<string,{revision:string;cut:StudioCut}>}).loomicCuts?.[input.compositionId];
       return {...snapshot,cut:saved?.revision===snapshot.revision?saved.cut:null,appliedEdits:(currentProject as typeof currentProject & {loomicAppliedEdits?:string[]}).loomicAppliedEdits??[]};
@@ -111,7 +131,7 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
       await queue;
       if (saveFailure) throw saveFailure;
       if ((await operations.loomicSnapshot(input.compositionId)).revision !== input.originalRevision) throw new Error("撤销结果与原视频不一致，请检查时间线。");
-      await saveStudioProject(host.userId, currentProject);
+      await saveStudioProject(projectKey, currentProject);
     },
     async snapshot(): Promise<StudioSnapshot> {
       const operations = window.remotion_browserStudio as typeof window.remotion_browserStudio & {
@@ -132,7 +152,7 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
       await operations.loomicApplyEdit(edit);
       await queue;
       if (saveFailure) throw saveFailure;
-      await saveStudioProject(host.userId, currentProject);
+      await saveStudioProject(projectKey, currentProject);
       host.status("AI 计划已保存到当前合成，可使用撤销恢复");
     },
     async applyCut(cut: StudioCut) {
@@ -148,7 +168,7 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
       if (saveFailure) throw saveFailure;
       currentCut = structuredClone(cut);
       currentProject = { ...currentProject, loomicCut: currentCut };
-      await saveStudioProject(host.userId, currentProject);
+      await saveStudioProject(projectKey, currentProject);
       host.status("快剪方案已加入当前工程，可在时间线继续编辑");
     },
     async importAsset(file: File, assetId?: string) {

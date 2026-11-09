@@ -55,4 +55,11 @@ describe("VideoPlayerPanel", () => {
     await user.click(screen.getByRole("button", { name: "关闭视频预览" }));
     expect(trigger).toHaveFocus();
   });
+  it("closes with Escape from the focused player control", async () => {
+    const user = userEvent.setup(); render(<VideoPreviewHarness />);
+    await user.click(screen.getByRole("button", { name: "打开视频预览" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开视频预览" })).toHaveFocus();
+  });
 });

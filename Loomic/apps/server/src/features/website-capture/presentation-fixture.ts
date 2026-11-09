@@ -150,7 +150,7 @@ export async function createPresentationFixture(
       reply
         .header("Access-Control-Allow-Origin", origin)
         .header("Access-Control-Allow-Credentials", "true")
-        .header("Access-Control-Allow-Headers", "authorization,content-type,if-match")
+        .header("Access-Control-Allow-Headers", "authorization,content-type,if-match,idempotency-key")
         .header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
       if (request.method === "OPTIONS") return reply.code(204).send();
     });

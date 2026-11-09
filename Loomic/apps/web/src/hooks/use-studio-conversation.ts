@@ -14,8 +14,11 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
   const {onBusyChange:_busyChange,...workflowProps}=props;
   const flow=useStudioAiWorkflow(workflowProps);
   const locale=useLocale();
+  const projectKey=props.projectKey??props.userId;
   const [turns,setTurns]=useState<StudioChatTurn[]>([]),[draft,setDraft]=useState("");
   const [sending,setSending]=useState(false),[restoring,setRestoring]=useState(true),[error,setError]=useState("");
+  const [stage,setStage]=useState(""),[elapsed,setElapsed]=useState(0);
+  useEffect(()=>{if(!sending){setElapsed(0);return;}const started=Date.now();const timer=setInterval(()=>setElapsed(Math.floor((Date.now()-started)/1000)),1000);return()=>clearInterval(timer);},[sending]);
   const controller=useRef<AbortController|null>(null);
   const mounted=useRef(true),history=useRef(turns);history.current=turns;
   const saving=useRef(Promise.resolve<unknown>(undefined));
@@ -29,13 +32,13 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;controller.current?.abort();};},[]);
   useEffect(()=>{
     let alive=true;loaded.current=false;setRestoring(true);
-    void readStudioChat<StudioConversation>(props.userId).then(saved=>{if(alive){updateTurns(()=>saved?.turns??[]);setDraft(saved?.draft??"");loaded.current=true;}}).catch(()=>{if(alive)setError("无法读取本机对话记录，请刷新后重试。");}).finally(()=>{if(alive)setRestoring(false);});
+    void readStudioChat<StudioConversation>(projectKey).then(saved=>{if(alive){updateTurns(()=>saved?.turns??[]);setDraft(saved?.draft??"");loaded.current=true;}}).catch(()=>{if(alive)setError("无法读取本机对话记录，请刷新后重试。");}).finally(()=>{if(alive)setRestoring(false);});
     return()=>{alive=false;};
-  },[props.userId]);
+  },[projectKey]);
   useEffect(()=>{
     if(!loaded.current)return;
-    saving.current=saving.current.then(()=>saveStudioChat(props.userId,{turns,draft})).catch(cause=>{if(mounted.current)setError(`对话保存失败：${cause instanceof Error?cause.message:"请检查本机存储"}`);});
-  },[turns,draft,props.userId]);
+    saving.current=saving.current.then(()=>saveStudioChat(projectKey,{turns,draft})).catch(cause=>{if(mounted.current)setError(`对话保存失败：${cause instanceof Error?cause.message:"请检查本机存储"}`);});
+  },[turns,draft,projectKey]);
   useEffect(()=>{props.onBusyChange?.(sending||flow.busy||flow.receiptPending);},[sending,flow.busy,flow.receiptPending,props.onBusyChange]);
   useEffect(()=>{
     if(!flow.plan?.approval?.id||!flow.applied)return;
@@ -49,7 +52,7 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
   }
   async function send() {
     if(!props.runtime||!draft.trim()||controller.current||flow.busy||flow.receiptPending||restoring||flow.restoring)return;
-    const runtime=props.runtime,prompt=draft.trim(),abort=new AbortController();controller.current=abort;
+    const runtime=props.runtime,prompt=draft.trim(),abort=new AbortController();controller.current=abort;setStage(locale==="en-US"?"Reading project":"读取工程与素材");
     setSending(true);setError("");
     let compositionId=runtime.projectId();
     try {
@@ -77,10 +80,12 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
       for(const item of runtime.listMedia())media.push({name:item.name,mimeType:item.mimeType as VideoChatRequest["media"][number]["mimeType"],duration:item.mimeType.startsWith("image/")?snapshot.duration:await studioVideoDuration(await runtime.readMedia(item.name))});
       abort.signal.throwIfAborted();
       const previous=chatHistory(history.current,compositionId,flow.plan,flow.applied,flow.undoneActions);
+      setStage(locale==="en-US"?"Waiting for model":"等待模型回复");
       append({role:"user",content:prompt,compositionId});setDraft("");
       const response=await requestStudioChat(props.token,{prompt,projectId:runtime.projectId(),compositionId,revision:snapshot.revision,compositionDuration:snapshot.duration,layers:snapshot.layers??[],timelineClips:snapshot.cut?.clips.map(({id:_id,...clip})=>clip),timelineTransitions:snapshot.cut?.transitions,media,history:previous,studio,locale,...(flow.plan&&!flow.applied?{pendingPlan:flow.plan.commands}:{})},abort.signal);
       abort.signal.throwIfAborted();
       const current=await runtime.snapshot();
+      setStage(locale==="en-US"?"Validating proposal":"校验方案与当前工程");
       if(current.compositionId!==compositionId||current.revision!==snapshot.revision)throw new Error("对话期间工程已改变，本次操作未执行，请重新发送。");
       const answer=response.reply;
       if(answer.plan){
@@ -109,7 +114,7 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
       if(snapshot.compositionId!==turn.compositionId||snapshot.revision!==turn.revision)throw new Error("当前视频已改变，请重新发送此操作。");
       // Consume the UI action before dispatch. A refresh cannot replay an uncertain action.
       const consumed=history.current.map(item=>item.id===turn.id?{...item,status:"superseded" as const}:item);
-      await saving.current;await saveStudioChat(props.userId,{turns:consumed,draft});updateTurns(()=>consumed);
+      await saving.current;await saveStudioChat(projectKey,{turns:consumed,draft});updateTurns(()=>consumed);
       const command=turn.control;
       let content:string;
       if(command.type==="undo"){
@@ -127,5 +132,5 @@ export function useStudioConversation(props:StudioWorkflowProps & {onOpenPanel?(
     finally{acting.current=false;setSending(false);}
   }
   async function materialImported(compositionId:string,name:string){append({role:"assistant",content:`素材 ${name} 已加入当前工程，可以继续描述剪辑或动画要求。`,compositionId});await flow.refreshTarget();}
-  return {flow,turns,draft,setDraft,sending,restoring,error,send,stop,executeControl,materialImported};
+  return {flow,turns,draft,setDraft,sending,stage,elapsed,restoring,error,send,stop,executeControl,materialImported};
 }

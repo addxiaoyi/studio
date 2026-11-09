@@ -2,6 +2,7 @@
 
 import type { ChatSessionSummary } from "@helstera/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocale } from "@/lib/i18n";
 
 type SessionSelectorProps = {
   sessions: ChatSessionSummary[];
@@ -64,6 +65,8 @@ export function SessionSelector({
   onNewChat,
   onDelete,
 }: SessionSelectorProps) {
+  const english = useLocale() === "en-US";
+  const sessionTitle = (title?: string) => !title || title === "New Chat" ? english ? "New conversation" : "新对话" : title;
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const [open, setOpen] = useState(false);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
@@ -112,6 +115,8 @@ export function SessionSelector({
       <div className="relative" ref={panelRef}>
         <button
           type="button"
+          aria-expanded={open}
+          aria-label={english ? "Conversation history" : "历史对话"}
           onClick={() => {
             setOpen(!open);
             setConfirmingId(null);
@@ -121,7 +126,7 @@ export function SessionSelector({
         >
           <HistoryIcon className="h-3.5 w-3.5" />
           <span className="max-w-[140px] truncate">
-            {activeSession?.title ?? "History"}
+            {sessionTitle(activeSession?.title)}
           </span>
           <svg
             className={`h-3 w-3 opacity-50 transition-all duration-300 ${open ? "rotate-180" : ""}`}
@@ -133,10 +138,10 @@ export function SessionSelector({
         </button>
 
         {open && (
-          <div className="absolute left-0 top-full mt-1.5 z-50 w-[260px] rounded-2xl border border-border/60 glass shadow-soft overflow-hidden">
+          <div className="absolute left-0 top-full mt-1.5 z-50 w-[min(300px,calc(100vw-2rem))] rounded-xl border border-border bg-background shadow-md overflow-hidden" onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); setOpen(false); panelRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); } }}>
             {/* Header */}
             <div className="px-3 pt-3 pb-2">
-              <p className="text-xs font-medium text-foreground mb-2">历史对话</p>
+              <p className="text-xs font-medium text-foreground mb-2">{english ? "Conversation history" : "历史对话"}</p>
               {/* Search */}
               <div className="relative">
                 <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/70" />
@@ -144,7 +149,8 @@ export function SessionSelector({
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="请输入搜索关键词"
+                  placeholder={english ? "Search conversations" : "搜索对话"}
+                  aria-label={english ? "Search conversations" : "搜索对话"}
                   className="w-full rounded-md border border-input bg-muted py-1.5 pl-7 pr-2 text-xs text-foreground placeholder:text-muted-foreground/70 outline-none focus:border-input-border focus:bg-background transition-all duration-300"
                 />
               </div>
@@ -154,7 +160,7 @@ export function SessionSelector({
             <div className="max-h-[240px] overflow-y-auto px-1 pb-1">
               {filtered.length === 0 && (
                 <p className="px-3 py-4 text-center text-xs text-muted-foreground/70">
-                  {search ? "无匹配结果" : "暂无对话"}
+                  {search ? english ? "No matches" : "无匹配结果" : english ? "No conversations" : "暂无对话"}
                 </p>
               )}
               {filtered.map((s) => (
@@ -180,7 +186,7 @@ export function SessionSelector({
                   {confirmingId === s.id ? (
                     /* Inline confirm */
                     <>
-                      <span className="truncate flex-1">{s.title}</span>
+                      <span className="truncate flex-1">{sessionTitle(s.title)}</span>
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
@@ -190,7 +196,7 @@ export function SessionSelector({
                             setConfirmingId(null);
                           }}
                         >
-                          取消
+                          {english ? "Cancel" : "取消"}
                         </button>
                         <button
                           type="button"
@@ -200,18 +206,18 @@ export function SessionSelector({
                             handleDelete(s.id);
                           }}
                         >
-                          删除
+                          {english ? "Delete" : "删除"}
                         </button>
                       </div>
                     </>
                   ) : (
                     /* Normal state */
                     <>
-                      <span className="truncate flex-1">{s.title}</span>
+                      <span className="truncate flex-1">{sessionTitle(s.title)}</span>
                       <button
                         type="button"
-                        aria-label={`Delete ${s.title}`}
-                        className="hidden group-hover:flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-destructive transition-all duration-300 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                        aria-label={`${english ? "Delete" : "删除"} ${sessionTitle(s.title)}`}
+                        className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-destructive outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         onClick={(e) => {
                           e.stopPropagation();
                           setConfirmingId(s.id);
@@ -233,7 +239,8 @@ export function SessionSelector({
         type="button"
         onClick={onNewChat}
         className="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground transition-all duration-300 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-        title="New Chat"
+        title={english ? "New conversation" : "新建对话"}
+        aria-label={english ? "New conversation" : "新建对话"}
       >
         <NewChatIcon className="h-5 w-5" />
       </button>

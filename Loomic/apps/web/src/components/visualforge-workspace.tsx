@@ -3,6 +3,8 @@ import {keepStudioBrandTitle} from "@/lib/studio-brand";
 
 import { StudioAssetPicker } from "@/components/studio-asset-picker";
 import { CanvasVideoImport, CaptureRecordingImport } from "@/components/capture-recording-import";
+import { CanvasTimelineImport } from "@/components/canvas-timeline-import";
+import { rememberStudioProject } from "@/lib/studio-project-key";
 import { StudioConversationPanel } from "@/components/studio-conversation-panel";
 import { StudioExportCard } from "@/components/studio-export-card";
 import { OneTakeWorkspace } from "@/components/onetake/workspace";
@@ -61,6 +63,8 @@ export function VisualForgeWorkspace() {
   const theme = useRef(resolvedTheme || "dark");
   theme.current = resolvedTheme || "dark";
   const userId = session?.user.id;
+  const [projectAddress] = useState(() => typeof location === "undefined" ? "https://helstera.invalid/video/" : location.href);
+  const projectKey = userId ? rememberStudioProject(userId, projectAddress) : undefined;
   const token = session?.access_token;
 
   useEffect(() => {
@@ -95,6 +99,7 @@ export function VisualForgeWorkspace() {
         if (abort.signal.aborted || !container.current) return;
         mounted = await module.mountVisualForge(container.current, {
           userId,
+          projectKey,
           theme: theme.current,
           signal: abort.signal,
           status: (message) => {
@@ -137,7 +142,7 @@ export function VisualForgeWorkspace() {
       setMountedRuntime(null);
       if (runtime.current === mounted) runtime.current = null;
     };
-  }, [userId, retry]);
+  }, [userId, projectKey, retry]);
 
   const importAsset = useCallback(async (file: File, assetId?: string) => {
     if (!runtime.current) throw new Error("请等待编辑器就绪后导入素材。");
@@ -203,9 +208,10 @@ export function VisualForgeWorkspace() {
         )}
         {userId&&token&&<CaptureRecordingImport userId={userId} token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
         {token&&<CanvasVideoImport token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
+        {token&&<CanvasTimelineImport token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
         <div className={styles.body} hidden={transcriptOpen}>
           <div ref={container} data-testid="video-studio" className={styles.studio} />
-          <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioConversationPanel runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} token={token} exported={exported} contextRequest={aiContext} active={aiOpen} onBusyChange={updateAiBusy} onViewTimeline={viewTimeline} onOpenPanel={openPanel} />}</div>
+          <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioConversationPanel key={projectKey} runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} projectKey={projectKey} token={token} exported={exported} contextRequest={aiContext} active={aiOpen} onBusyChange={updateAiBusy} onViewTimeline={viewTimeline} onOpenPanel={openPanel} />}</div>
         </div>
         {transcriptOpen && token && userId && <div className={styles.transcript}><OneTakeWorkspace token={token} userId={userId} runtime={ready ? mountedRuntime : null} onExport={exported} onDirty={setTranscriptDirty} /></div>}
       </div>

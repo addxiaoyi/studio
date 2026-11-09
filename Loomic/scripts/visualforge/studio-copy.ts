@@ -1,4 +1,8 @@
 export const studioChinese: Record<string, string> = {
+  "Disable snapping": "关闭吸附",
+  "Drag to adjust source start": "拖动调整素材起点",
+  Metadata: "属性",
+  Actions: "操作",
   Settings: "设置",
   编辑器: "编辑器",
   "默认设置": "默认设置",
