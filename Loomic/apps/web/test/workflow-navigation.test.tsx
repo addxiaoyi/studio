@@ -51,7 +51,7 @@ it("searches notes and moves the view without opening node settings", () => {
   fireEvent.change(screen.getByRole("textbox", { name: "查找节点或备注" }), {
     target: { value: "待发布" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "步骤 48", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: /^步骤 48$/ }));
   expect(locate).toHaveBeenCalledWith(["node-47"]);
   fireEvent.change(screen.getByRole("textbox", { name: "查找节点或备注" }), {
     target: { value: "不存在" },
