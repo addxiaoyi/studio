@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { StyledSelect } from "@/components/ui/styled-select";
 import { WorkflowMap } from "./navigation-map";
+import { WorkflowVersionValues } from "./version-values";
 
 export function WorkflowVersionHistory({
   open,
@@ -208,6 +209,7 @@ export function WorkflowVersionHistory({
                   </li>
                 ))}
               </ol>
+              <WorkflowVersionValues before={document.graph} after={version.graph}/>
               {!changes.length && (
                 <p className="text-sm text-muted-foreground">
                   与当前图内容一致。
