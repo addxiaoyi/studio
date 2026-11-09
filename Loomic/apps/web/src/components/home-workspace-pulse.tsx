@@ -14,6 +14,7 @@ type Props = {
   accessToken: string | undefined;
   projects: ProjectSummary[];
   projectsLoading: boolean;
+  showProjects?:boolean;
 };
 
 type PulseState = {
@@ -24,7 +25,7 @@ type PulseState = {
 const activeJobStatuses = new Set(["queued", "running", "sync_pending", "sync_failed"]);
 const attentionJobStatuses = new Set(["failed", "dead_letter", "sync_failed"]);
 
-export function HomeWorkspacePulse({ accessToken, projects, projectsLoading }: Props) {
+export function HomeWorkspacePulse({ accessToken, projects, projectsLoading,showProjects=true }: Props) {
   const [state, setState] = useState<PulseState>({ packages: [], jobs: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,8 +86,8 @@ export function HomeWorkspacePulse({ accessToken, projects, projectsLoading }: P
           <Link href="/brand-kit" className="mt-4 inline-flex items-center gap-1 text-xs font-medium underline underline-offset-2">配置品牌资产 <ArrowRight className="size-3.5" /></Link>
         </div>
       ) : (
-        <div className="mt-6 grid gap-3 sm:grid-cols-3">
-          <PulseColumn title="最近项目" href="/projects">
+        <div className={`mt-6 grid gap-3 ${showProjects?"sm:grid-cols-3":"sm:grid-cols-2"}`}>
+          {showProjects&&<PulseColumn title="最近项目" href="/projects">
             {projectsLoading ? <LoadingRow /> : projects.slice(0, 3).map((project) => (
               <Link key={project.id} href={`/canvas?id=${project.primaryCanvas.id}`} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2.5 text-xs hover:bg-muted/40">
                 <span className="min-w-0 truncate font-medium">{project.name}</span>
@@ -94,7 +95,7 @@ export function HomeWorkspacePulse({ accessToken, projects, projectsLoading }: P
               </Link>
             ))}
             {!projectsLoading && projects.length === 0 && <EmptyRow text="暂无项目" />}
-          </PulseColumn>
+          </PulseColumn>}
 
           <PulseColumn title="内容包" href="/feed">
             {state.packages.length ? state.packages.slice(0, 3).map((item) => (
@@ -105,8 +106,8 @@ export function HomeWorkspacePulse({ accessToken, projects, projectsLoading }: P
             )) : <EmptyRow text="暂无内容包" />}
           </PulseColumn>
 
-          <PulseColumn title="后台任务" href="/admin/jobs">
-            {activeJobs.length || attentionJobs.length ? [...attentionJobs, ...activeJobs].slice(0, 3).map((job) => (
+          <PulseColumn title="后台任务" href="/assets">
+            {activeJobs.length || attentionJobs.length ? [...new Map([...attentionJobs, ...activeJobs].map(job=>[job.id,job])).values()].slice(0, 3).map((job) => (
               <Link key={job.id} href="/assets" className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2.5 text-xs hover:bg-muted/40">
                 {attentionJobStatuses.has(job.status) ? <AlertTriangle className="size-3.5 shrink-0 text-amber-600" /> : activeJobStatuses.has(job.status) ? <Loader2 className="size-3.5 shrink-0 animate-spin text-blue-600" /> : <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600" />}
                 <span className="min-w-0 truncate font-medium">{job.stage ?? job.job_type}</span>

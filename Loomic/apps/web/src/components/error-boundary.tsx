@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { workspaceHomePath } from "@/lib/navigation";
 
 type ErrorBoundaryProps = {
   children: React.ReactNode;
@@ -100,13 +101,12 @@ export class ErrorBoundary extends React.Component<
             >
               重试当前区域
             </button>
-            <button
-              type="button"
-              onClick={() => { window.location.hash = "#/"; }}
+            <a
+              href={workspaceHomePath()}
               className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-all duration-300 hover:bg-foreground/[0.04] hover:text-foreground"
             >
               返回工作台
-            </button>
+            </a>
           </div>
         </div>
       </div>

@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "../components/ui/form-surfaces.css";
+@import "../components/ui/workspace-surfaces.css";
 
 .desktop-home {
     min-height: calc(100dvh - 46px);
@@ -173,7 +174,7 @@ html[data-helstera-desktop="true"] .workspace-shell { flex-direction: row; }
 html[data-helstera-desktop="true"] .desktop-workspace-sidebar { display: flex; width: var(--desktop-sidebar-width); flex: 0 0 var(--desktop-sidebar-width); flex-direction: column; justify-content: space-between; height: calc(100dvh - 46px); padding: 10px 7px; border-right: 1px solid var(--border); background: var(--background); transition: width .16s ease, flex-basis .16s ease, padding .16s ease; }
 html[data-helstera-desktop="true"] .workspace-shell > aside:not(.desktop-workspace-sidebar), html[data-helstera-desktop="true"] .workspace-shell > nav, html[data-helstera-desktop="true"] #workspace-more-navigation { display: none !important; }
 html[data-helstera-desktop="true"] .desktop-workspace-sidebar__section { display: grid; gap: 4px; align-content: start; }
-html[data-helstera-desktop="true"] .desktop-workspace-sidebar__label { padding: 8px 0 10px; color: var(--muted-foreground); font-size: 7px; font-weight: 700; text-align: center; letter-spacing: .08em; }
+html[data-helstera-desktop="true"] .desktop-workspace-sidebar__label { padding: 8px 0 10px; color: var(--muted-foreground); font-size: 10px; font-weight: 600; text-align: center; letter-spacing: .08em; }
 html[data-helstera-desktop="true"] .desktop-workspace-sidebar__item, html[data-helstera-desktop="true"] .desktop-workspace-sidebar__settings { display: grid; justify-items: center; align-content: center; gap: 5px; min-height: 48px; padding: 5px 2px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted-foreground); font: inherit; cursor: pointer; }
 html[data-helstera-desktop="true"] .desktop-workspace-sidebar__item:hover, html[data-helstera-desktop="true"] .desktop-workspace-sidebar__settings:hover, html[data-helstera-desktop="true"] .desktop-workspace-sidebar__item[aria-current="page"] { border-color: var(--border); background: color-mix(in srgb, var(--foreground) 5%, transparent); color: var(--foreground); }
 /* Sidebar shortcuts are reached with roving tabindex, so the focus ring is the only
@@ -181,7 +182,7 @@ html[data-helstera-desktop="true"] .desktop-workspace-sidebar__item:hover, html[
 html[data-helstera-desktop="true"] .desktop-workspace-sidebar__item:focus-visible,
 html[data-helstera-desktop="true"] .desktop-workspace-sidebar__settings:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-color: var(--ring); }
 html[data-helstera-desktop="true"] .desktop-workspace-sidebar__item svg, html[data-helstera-desktop="true"] .desktop-workspace-sidebar__settings svg { width: 17px; height: 17px; }
-html[data-helstera-desktop="true"] .desktop-workspace-sidebar__item span, html[data-helstera-desktop="true"] .desktop-workspace-sidebar__settings span { max-width: 64px; overflow: hidden; font-size: 8px; white-space: nowrap; text-overflow: ellipsis; }
+html[data-helstera-desktop="true"] .desktop-workspace-sidebar__item span, html[data-helstera-desktop="true"] .desktop-workspace-sidebar__settings span { max-width: 64px; overflow: hidden; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
 /* 展开态：窄轨图标栏切换为「图标 + 可读标签」的宽栏，标签字号回到正文可读尺寸。 */
 html[data-helstera-desktop="true"][data-sidebar-collapsed="false"] .desktop-workspace-sidebar { padding-inline: 10px; }
 html[data-helstera-desktop="true"][data-sidebar-collapsed="false"] .desktop-workspace-sidebar__label { padding-inline: 6px; font-size: 9px; text-align: left; }
@@ -445,10 +446,6 @@ html[data-helstera-desktop="true"] .workspace-shell > main > .absolute { display
 .desktop-empty-state strong { color: var(--foreground); font-size: 14px; font-weight: 600; }
 .desktop-empty-state p { max-width: 42ch; margin: 0; font-size: 12px; line-height: 1.6; }
 .desktop-empty-state__action { margin-top: 4px; }
-@media (prefers-reduced-motion: no-preference) {
-  .desktop-toast { animation: desktop-toast-in 160ms ease-out; }
-}
-@keyframes desktop-toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .mcp-panel__privacy summary { display: flex; width: fit-content; align-items: center; gap: 8px; color: var(--muted-foreground); font-size: 12px; cursor: pointer; }
 .mcp-panel__privacy summary svg { color: #39836e; }
 .mcp-panel details summary > svg:last-child { width: 14px; height: 14px; color: var(--muted-foreground); transition: transform .16s ease; }
@@ -1335,9 +1332,6 @@ html[data-helstera-desktop="true"][data-sidebar-collapsed="false"] {
     }
   body {
     @apply bg-background text-foreground;
-    /* Subtle film grain across the entire page */
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
-    background-size: 180px 180px;
     /* Refined typography features */
     font-feature-settings: "ss01" 1, "cv11" 1, "kern" 1;
     text-rendering: optimizeLegibility;

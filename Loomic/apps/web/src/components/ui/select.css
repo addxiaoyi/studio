@@ -6,7 +6,7 @@
 .loomic-select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .loomic-select-icon, .loomic-select-check { display: inline-flex; flex: 0 0 16px; width: 16px; align-items: center; justify-content: center; }
 .loomic-select-icon svg, .loomic-select-check svg, .loomic-select-scroll svg { width: 16px; height: 16px; }
-.loomic-select-positioner { z-index: 100; outline: none; width: var(--anchor-width); max-width: calc(100vw - 24px); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+.loomic-select-positioner { z-index: 1200; outline: none; width: var(--anchor-width); max-width: calc(100vw - 24px); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
 .loomic-select-popup { box-sizing: border-box; min-width: 100%; max-width: min(440px, calc(100vw - 24px)); overflow: hidden; border: 1px solid var(--border); border-radius: 11px; background: var(--popover, var(--card)); color: var(--popover-foreground, var(--foreground)); box-shadow: 0 12px 32px rgb(0 0 0 / .18), 0 2px 8px rgb(0 0 0 / .08); outline: none; }
 .loomic-select-list { box-sizing: border-box; max-height: min(320px, var(--available-height)); overflow-y: auto; overscroll-behavior: contain; padding: 5px; scrollbar-width: thin; }
 .loomic-select-option { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 10px; border-radius: 7px; color: inherit; font-size: 14px; line-height: 1.45; cursor: pointer; outline: none; user-select: none; }

@@ -1,4 +1,5 @@
 "use client";
+import "@/components/ui/surfaces.css";
 
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -40,7 +41,7 @@ export default function WorkspaceLayout({
 }: {
   children: ReactNode;
 }) {
-  const { user, loading } = useAuth();
+  const { user, loading,sessionError,retrySession } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -54,16 +55,17 @@ export default function WorkspaceLayout({
   }, [pathname]);
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (!loading && !user && !sessionError) {
       const currentPath = `${window.location.pathname}${window.location.search}`;
       router.replace(loginPath(currentPath));
     }
-  }, [loading, user, router]);
+  }, [loading, user, router,sessionError]);
 
   if (loading) {
     return <LoadingScreen />;
   }
 
+  if (!user&&sessionError) return <main className="session-recovery"><div role="alert"><h1>暂时无法连接工作区</h1><p>登录状态尚未确认。重新连接后可继续当前页面。</p><button type="button" onClick={()=>void retrySession()}>重新连接</button></div></main>;
   if (!user) {
     return null;
   }

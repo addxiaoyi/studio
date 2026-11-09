@@ -1,6 +1,8 @@
 "use client";
+import "./ui/surfaces.css";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { useNoticeTimer } from "@/hooks/use-notice-timer";
+import { useSurfaceEntry } from "@/hooks/use-surface-entry";
 import {
   createContext,
   useCallback,
@@ -38,7 +40,7 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 // Provider
 // ---------------------------------------------------------------------------
 
-const TOAST_DURATION = 3000;
+const TOAST_DURATION = 5000;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -50,8 +52,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const add = useCallback(
     (message: string, variant: ToastVariant = "info") => {
       const id = crypto.randomUUID();
-      setToasts((prev) => [...prev, { id, message, variant }]);
-      setTimeout(() => remove(id), TOAST_DURATION);
+      setToasts((prev) => [...prev.filter(notice=>notice.message!==message||notice.variant!==variant), { id, message, variant }].slice(-4));
     },
     [remove],
   );
@@ -69,12 +70,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={ctx}>
       {children}
 
-      <div className="fixed bottom-6 left-1/2 z-[9999] flex -translate-x-1/2 flex-col items-center gap-2" aria-label="通知">
-        <AnimatePresence>
+      <div className="app-notice-viewport" aria-label="通知">
           {toasts.map((t) => (
             <ToastItem key={t.id} toast={t} onDismiss={() => remove(t.id)} />
           ))}
-        </AnimatePresence>
       </div>
     </ToastContext.Provider>
   );
@@ -118,27 +117,24 @@ const variantStyles: Record<ToastVariant, { dot: string; icon: ReactNode }> = {
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
   const { icon } = variantStyles[toast.variant];
   const role = toast.variant === "error" ? "alert" : "status";
+  const timer=useNoticeTimer(toast.variant==="error"?0:TOAST_DURATION,onDismiss);
+  const ref=useSurfaceEntry<HTMLDivElement>();
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 16, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -8, scale: 0.95 }}
-      transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
+    <div ref={ref} {...timer}
       role={role}
-      className="flex items-center gap-2.5 rounded-full glass-strong border border-border/40 px-4 py-2.5 text-sm font-light text-foreground/90 shadow-card-hover"
+      className="app-notice"
     >
       {icon}
-      <span className="text-foreground/80">{toast.message}</span>
+      <span className="min-w-0 flex-1 break-words">{toast.message}</span>
       <button
         type="button"
         onClick={onDismiss}
         aria-label="关闭通知"
-        className="ml-1 inline-flex size-6 items-center justify-center rounded-full text-foreground/60 hover:bg-foreground/10 hover:text-foreground"
+        className="ml-1 inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
       >
         <span aria-hidden="true">×</span>
       </button>
-    </motion.div>
+    </div>
   );
 }

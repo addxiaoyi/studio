@@ -2,7 +2,6 @@
 
 import type { ImageGenerationPreference, ProjectSummary, VideoGenerationPreference } from "@helstera/shared";
 import type { ReadyAttachment } from "@/hooks/use-image-attachments";
-import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -14,11 +13,9 @@ import { DeleteProjectDialog } from "@/components/delete-project-dialog";
 import { HomeExampleBrowser } from "@/components/home-example-browser";
 import { HomePrompt, type HomePromptHandle } from "@/components/home-prompt";
 import { HomeModelPricePreview } from "@/components/home-model-price-preview";
-import { TechText } from "@/components/tech-text";
 import { HomeWorkspacePulse } from "@/components/home-workspace-pulse";
 import { HomeFirstRunGuide } from "@/components/home-first-run-guide";
 import { LoadingScreen } from "@/components/loading-screen";
-import { HelsteraBrandMark } from "@/components/helstera-brand-mark";
 import { ProjectThumbnail } from "@/components/project-thumbnail";
 import { HomeProjectsSkeleton } from "@/components/skeletons/home-skeleton";
 import { useCreateProject } from "@/hooks/use-create-project";
@@ -47,33 +44,6 @@ const HomeActivityChart = dynamic(
   () => import("@/components/home-activity-chart").then((module) => module.HomeActivityChart),
   { ssr: false },
 );
-
-// ---------------------------------------------------------------------------
-// Animation variants
-// ---------------------------------------------------------------------------
-const fadeUp = {
-  hidden: { opacity: 0, y: 20 },
-  visible: (i: number) => ({
-    opacity: 1,
-    y: 0,
-    transition: { delay: i * 0.1, duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] as const },
-  }),
-};
-
-const cardStagger = {
-  hidden: {},
-  visible: { transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
-};
-
-const cardItem = {
-  hidden: { opacity: 0, y: 16, scale: 0.97 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    scale: 1,
-    transition: { duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] as const },
-  },
-};
 
 // ---------------------------------------------------------------------------
 // Home Page
@@ -132,7 +102,6 @@ export default function HomePage() {
   signOutRef.current = signOut;
   const routerRef = useRef(router);
   routerRef.current = router;
-  const hasInitialized = useRef(false);
 
   const getToken = useCallback(() => accessTokenRef.current, []);
 
@@ -153,19 +122,14 @@ export default function HomePage() {
         routerRef.current.replace("/login");
         return;
       }
-      // Silently fail — the section just stays empty.
-      setProjectsError(err instanceof Error ? err.message : "Recent projects could not be loaded.");
+      setProjectsError(err instanceof Error ? err.message : "最近项目读取失败，请重试。");
       console.warn("[home] failed to load recent projects", err);
     } finally {
       setProjectsLoading(false);
     }
   }, [getToken]);
 
-  useEffect(() => {
-    if (hasInitialized.current) return;
-    hasInitialized.current = true;
-    loadProjects();
-  }, [loadProjects]);
+  useEffect(() => { if(session?.access_token) void loadProjects(); }, [loadProjects,session?.access_token]);
 
   useEffect(() => {
     const selectedPrompt = window.sessionStorage.getItem("helstera_selected_prompt");
@@ -314,69 +278,22 @@ export default function HomePage() {
   }
 
   return (
-    <div data-home-scroll className="flex h-full flex-col items-center overflow-auto px-4 py-8 sm:px-6 sm:py-10">
-      {/* Workspace stats strip — glass cards */}
-      <motion.div
-        initial="hidden"
-        animate="visible"
-        variants={cardStagger}
-        className="mb-12 w-full max-w-6xl grid grid-cols-2 gap-3 sm:mb-14 sm:grid-cols-4 sm:gap-4"
-      >
-        {[
-          {
-            label: "积分余额",
-            value: creditsLoading ? "—" : creditBalance.toLocaleString("zh-CN"),
-          },
-          { label: "活跃项目", value: overviewLoading && !homeOverview ? "--" : `${homeOverview?.activeProjects ?? 0}` },
-          {
-            label: "本月生成",
-            value: overviewLoading && !homeOverview ? "--" : `${homeOverview?.monthlyGenerations ?? 0}`,
-          },
-          { label: "团队成员", value: overviewLoading && !homeOverview ? "--" : `${homeOverview?.teamMembers ?? 0}` },
-        ].map((stat) => (
-          <motion.div
-            key={stat.label}
-            variants={cardItem}
-            className="glass-soft rounded-xl border border-border/40 p-4 sm:p-5"
-          >
-            <p className="eyebrow">{stat.label}</p>
-            <div className="mt-3 text-3xl font-light text-foreground tabular-nums tracking-tight">
-              {stat.value}
-            </div>
-          </motion.div>
-        ))}
-      </motion.div>
-
+    <div data-home-scroll className="home-workspace flex min-h-full flex-col items-center px-4 py-12 sm:px-6 sm:py-14">
       {/* Hero */}
-      <motion.div
-        initial="hidden"
-        animate="visible"
+      <div
         className="flex w-full max-w-3xl flex-col items-center text-center"
       >
-        {/* Logo + brand name */}
-        <motion.div
-          variants={fadeUp}
-          custom={0}
-          className="mb-5 flex items-center gap-2"
+        <h1
+          className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl"
+        >开始今天的 AI 创作</h1>
+        <p
+          className="mt-3 mb-5 max-w-xl text-sm leading-6 text-muted-foreground"
         >
-          <HelsteraBrandMark size="md" className="text-foreground" />
-        </motion.div>
-
-        <motion.h1
-          variants={fadeUp}
-          custom={1}
-          className="display-md text-foreground"
-        ><TechText text="开始今天的 AI 创作" /></motion.h1>
-        <motion.p
-          variants={fadeUp}
-          custom={2}
-          className="mt-5 body-relaxed max-w-md"
-        >
-          描述你的创意，AI 自动遵循团队品牌规范，秒级生成专业设计
-        </motion.p>
+          描述目标，让 AI 在画布中帮你整理资料、生成内容和搭建流程。
+        </p>
 
         {/* Prompt input */}
-        <motion.div variants={fadeUp} custom={3} className="w-full">
+        <div className="w-full">
           <HomePrompt
             ref={promptRef}
             onSubmit={handlePromptSubmit}
@@ -406,11 +323,9 @@ export default function HomePage() {
               </button>
             </div>
           )}
-        </motion.div>
+        </div>
 
-        <motion.div
-          variants={fadeUp}
-          custom={4}
+        <div
           className="mt-4 flex w-full items-start gap-2 border-y border-border/60 py-3 text-left text-xs text-muted-foreground"
         >
           <Clock3 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
@@ -420,42 +335,26 @@ export default function HomePage() {
               查看我的资产
             </Link>
           </p>
-        </motion.div>
+        </div>
 
-        <motion.div variants={fadeUp} custom={5} className="w-full">
+        <div className="w-full">
           <HomeExampleBrowser
             categories={homeExampleCategories}
             selectedExample={selectedExample}
             onExampleSelect={handleExampleSelect}
           />
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
 
-      <HomeModelPricePreview />
-
-      <HomeFirstRunGuide />
-
-      <HomeWorkspacePulse
-        accessToken={session?.access_token}
-        projects={projects}
-        projectsLoading={projectsLoading}
-      />
-
-      <HomeActivityChart
-        data={homeOverview}
-        rangeDays={overviewRange}
-        loading={overviewLoading}
-        error={overviewError}
-        onRangeChange={setOverviewRange}
-        onRetry={() => setOverviewRetry((attempt) => attempt + 1)}
-      />
-
+      <nav className="home-shortcuts" aria-label="创作快捷入口">
+        <button type="button" onClick={()=>void createNewProject()} disabled={creating}><strong>新建画布</strong><span>自由创作与可视化工作流</span></button>
+        <a href="/video/"><strong>视频创作</strong><span>对话剪辑、字幕与导出</span></a>
+        <Link href="/fashion-gallery/"><strong>女装试穿</strong><span>参考图、人物照片与生成</span></Link>
+        <Link href="/assets/"><strong>我的资产</strong><span>继续编辑或保存到本机</span></Link>
+      </nav>
       {/* Recent projects */}
       <div className="mt-4 w-full">
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5, duration: 0.4, ease: "easeOut" }}
+        <div
           className="mb-6 flex items-center justify-between"
         >
           <h2 className="text-sm font-medium text-foreground tracking-tight">
@@ -480,27 +379,21 @@ export default function HomePage() {
               </svg>
             </span>
           </Link>
-        </motion.div>
+        </div>
 
         {projectsError ? (
           <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
             <span>{projectsError}</span>
-            <button type="button" onClick={() => void loadProjects()} className="min-h-9 rounded-md border border-destructive/30 px-3 text-xs font-medium hover:bg-destructive/5">Retry</button>
+            <button type="button" onClick={() => void loadProjects()} className="min-h-9 rounded-md border border-destructive/30 px-3 text-xs font-medium hover:bg-destructive/5">重新加载</button>
           </div>
         ) : projectsLoading ? (
           <HomeProjectsSkeleton />
         ) : (
-          <motion.div
-            variants={cardStagger}
-            initial="hidden"
-            animate="visible"
+          <div
             className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
           >
             {/* New project card */}
-            <motion.button
-              variants={cardItem}
-              whileHover={{ y: -4 }}
-              whileTap={{ scale: 0.98 }}
+            <button
               type="button"
               disabled={creating}
               onClick={() => createNewProject()}
@@ -520,18 +413,16 @@ export default function HomePage() {
                     clipRule="evenodd"
                   />
                 </svg>
-                <span className="text-xs font-medium text-foreground sm:text-sm">
+                <span className="text-xs font-medium text-background sm:text-sm">
                   新建项目
                 </span>
               </div>
-            </motion.button>
+            </button>
 
             {/* Project cards */}
             {projects.map((project) => (
-              <motion.article
+              <article
                 key={project.id}
-                variants={cardItem}
-                whileHover={{ y: -4 }}
                 className="group relative min-h-[180px] rounded-2xl glass-soft p-3 transition-all duration-300 hover:glass sm:min-h-[208px]"
               >
                 {/* Trash icon -- hover reveal */}
@@ -541,8 +432,8 @@ export default function HomePage() {
                     e.stopPropagation();
                     requestDelete(project.id);
                   }}
-                  aria-label={`Delete ${project.name}`}
-                  className="absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-[4px] bg-foreground/70 text-background opacity-0 transition-all duration-300 hover:bg-foreground/80 group-hover:opacity-100 sm:right-5 sm:top-5"
+                  aria-label={`移到回收站 ${project.name}`}
+                  className="absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-[4px] bg-foreground/70 text-background opacity-0 transition-all duration-300 hover:bg-foreground/80 group-hover:opacity-100 focus-visible:opacity-100 sm:right-5 sm:top-5"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -568,11 +459,59 @@ export default function HomePage() {
                     {project.primaryCanvas.name}
                   </p>
                 </Link>
-              </motion.article>
+              </article>
             ))}
-          </motion.div>
+          </div>
         )}
       </div>
+
+      {/* Workspace stats strip — glass cards */}
+      <div
+        className="home-stats"
+      >
+        {[
+          {
+            label: "积分余额",
+            value: creditsLoading ? "—" : creditBalance.toLocaleString("zh-CN"),
+          },
+          { label: "活跃项目", value: overviewLoading && !homeOverview ? "--" : `${homeOverview?.activeProjects ?? 0}` },
+          {
+            label: "本月生成",
+            value: overviewLoading && !homeOverview ? "--" : `${homeOverview?.monthlyGenerations ?? 0}`,
+          },
+          { label: "团队成员", value: overviewLoading && !homeOverview ? "--" : `${homeOverview?.teamMembers ?? 0}` },
+        ].map((stat) => (
+          <div
+            key={stat.label}
+            className="home-stat"
+          >
+            <p className="text-xs text-muted-foreground">{stat.label}</p>
+            <div className="text-lg font-semibold text-foreground tabular-nums">
+              {stat.value}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <details className="home-secondary"><summary>模型价格与费用说明</summary><HomeModelPricePreview /></details>
+
+      <HomeFirstRunGuide />
+
+      <HomeWorkspacePulse
+        accessToken={session?.access_token}
+        projects={projects}
+        projectsLoading={projectsLoading}
+        showProjects={false}
+      />
+
+      <details className="home-secondary"><summary>工作区使用趋势</summary><HomeActivityChart
+        data={homeOverview}
+        rangeDays={overviewRange}
+        loading={overviewLoading}
+        error={overviewError}
+        onRangeChange={setOverviewRange}
+        onRetry={() => setOverviewRetry((attempt) => attempt + 1)}
+      /></details>
 
       <HomeDiscoveryGallery
         categories={homeDiscoveryCategories}

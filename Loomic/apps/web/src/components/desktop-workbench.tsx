@@ -4,7 +4,7 @@ import { AppSelect } from "@/components/ui/app-select";
 
 import dynamic from "next/dynamic";
 import { DesktopMcpPanel } from "@/components/desktop-mcp-panel";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef,useState } from "react";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -92,13 +92,14 @@ export function DesktopWorkbench() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const fileRequest=useRef(0);
   const visible = useMemo(() => visibleEntries(entries, expanded), [entries, expanded]);
   const dirty = Boolean(file && file.content !== file.savedContent);
 
   const refreshProject = useCallback(async () => {
     if (!api) return;
     const [nextEntries, nextScripts, nextGit] = await Promise.all([
-      api.getWorkspaceTree(), api.getWorkspaceScripts(), api.getWorkspaceGitStatus().catch(() => "Not a Git repository."),
+      api.getWorkspaceTree(), api.getWorkspaceScripts(), api.getWorkspaceGitStatus().catch(() => "当前目录未初始化 Git。"),
     ]);
     setEntries(nextEntries);
     setScripts(nextScripts);
@@ -113,8 +114,8 @@ export function DesktopWorkbench() {
     const stopFinished = api.onWorkspaceScriptFinished((event) => {
       if (event.runId !== runId) return;
       setRunId(null);
-      setOutput((current) => `${current}\n${event.ok ? `Finished with exit code ${event.exitCode ?? 0}.` : event.message ?? "Script failed."}\n`);
-      void refreshProject();
+      setOutput((current) => `${current}\n${event.ok ? `已退出，退出码 ${event.exitCode ?? 0}。` : event.message ?? "脚本执行失败。"}\n`);
+      void refreshProject().catch(cause=>setError(cause instanceof Error?cause.message:"项目状态刷新失败，请重试。"));
     });
     return () => { stopOutput(); stopFinished(); };
   }, [api, refreshProject, runId]);
@@ -137,22 +138,25 @@ export function DesktopWorkbench() {
   }
 
   async function openFile(path: string) {
-    if (!api) return;
+    if (!api||busy) return;
     if (dirty && !window.confirm("当前文件有未保存修改。继续打开其他文件？")) return;
     setError(null); setShowDiff(false);
+    const request=++fileRequest.current;
     try {
       const opened = await api.readWorkspaceFile(path);
+      if(request!==fileRequest.current)return;
       setFile({ ...opened, savedContent: opened.content, snapshotId: null });
       setPanel("terminal");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法打开文件。"); }
+    } catch (cause) { if(request===fileRequest.current)setError(cause instanceof Error ? cause.message : "无法打开文件。"); }
   }
 
   async function saveFile() {
     if (!api || !file || !dirty || busy) return;
     setBusy(true); setError(null);
+    const submitted=file;
     try {
-      const saved = await api.writeWorkspaceFile({ path: file.path, content: file.content });
-      setFile((current) => current ? { ...current, savedContent: current.content, snapshotId: saved.snapshotId } : current);
+      const saved = await api.writeWorkspaceFile({ path: submitted.path, content: submitted.content });
+      setFile((current) => current?.path===submitted.path ? { ...current, savedContent: submitted.content, snapshotId: saved.snapshotId } : current);
       setNotice(`已保存。恢复点 ${saved.snapshotId.slice(0, 8)} 已保存在 Helstera 应用数据目录。`);
       await refreshProject();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "保存失败。"); }
@@ -189,15 +193,15 @@ export function DesktopWorkbench() {
 
   async function runScript(name: string) {
     if (!api || runId) return;
-    setPanel("terminal"); setOutput(`$ project script: ${name}\n`); setError(null);
+    setPanel("terminal"); setOutput(`$ 执行脚本: ${name}\n`); setError(null);
     try { setRunId((await api.runWorkspaceScript(name)).runId); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "脚本启动失败。"); }
   }
 
   async function cancelScript() {
     if (!api || !runId) return;
-    await api.cancelWorkspaceScript(runId);
-    setOutput((current) => `${current}\nCancel requested.\n`);
+    try{await api.cancelWorkspaceScript(runId);setOutput((current) => `${current}\n已请求停止，正在等待脚本退出。\n`);}
+    catch(cause){setError(cause instanceof Error?cause.message:"停止请求失败，请重试。");}
   }
 
   if (!api) return <main className="desktop-workbench-unavailable"><h1>桌面工作台需要 Helstera Desktop</h1><p>本页面的本地文件与 Git 功能不会在普通浏览器中启用。</p></main>;

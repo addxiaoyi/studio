@@ -46,6 +46,7 @@ export function localizeHomeExampleCategories(
   let imageIndex = 1;
   return categories.map((category) => ({
     ...category,
+    label:({Design:"设计",Branding:"品牌",Illustration:"插画","E-Commerce":"电商",Video:"视频"} as Record<string,string>)[category.label]??category.label,
     examples: category.examples.map((example) => ({
       ...example,
       previewImages: example.previewImages.map(() => {

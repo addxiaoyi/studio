@@ -6,3 +6,6 @@ export function getSafeRedirect(value: string | null | undefined): string {
 export function loginPath(currentPath: string): string {
   return `/login?redirect=${encodeURIComponent(currentPath || "/home")}`;
 }
+export function workspaceHomePath():string {
+  return typeof document!=="undefined"&&document.documentElement.dataset.helsteraDesktop==="true"?"/desktop-app/":"/home/";
+}

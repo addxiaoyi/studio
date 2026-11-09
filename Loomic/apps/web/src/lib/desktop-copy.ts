@@ -467,15 +467,17 @@ const zhCN = {
   chrome: {
     sidebar: {
       ariaLabel: "桌面模块",
-      group: "WORKSPACE",
+      group: "工作区",
       canvas: "画布",
-      fashion: "女装图集",
+      fashion: "女装试穿",
       video: "视频创作",
       advanced: "高级能力",
       projects: "项目",
       assets: "素材",
       mcp: "MCP 工具",
       development: "本地开发",
+      marketplace:"扩展市场",
+      agentHistory:"任务历史",
       settings: "设置",
     },
     titlebar: {
@@ -996,6 +998,8 @@ const enUS: DeepPartial<DesktopCopy> = {
       assets: "Assets",
       mcp: "MCP tools",
       development: "Local development",
+      marketplace:"Marketplace",
+      agentHistory:"Task history",
       settings: "Settings",
     },
     titlebar: {

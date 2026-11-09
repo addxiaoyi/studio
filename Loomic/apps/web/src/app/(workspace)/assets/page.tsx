@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Download, FolderOpen, Images, RefreshCw, Save, Search, Share2, Trash2, Undo2, Video, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef,useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "@/lib/auth-context";
@@ -104,6 +104,8 @@ export default function AssetsPage() {
   const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<"all" | "image" | "video">("all");
   const [loading, setLoading] = useState(true);
+  const loadId=useRef(0);
+  const [batchBusy,setBatchBusy]=useState(false);
   const [error, setError] = useState("");
   const [errorAction, setErrorAction] = useState<
     | { type: "load" }
@@ -126,7 +128,7 @@ export default function AssetsPage() {
       setLocalFolder(await chooseLocalAssetFolder());
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "AbortError") return;
-      setLocalSaveError(cause instanceof Error ? cause.message : "Could not choose a local folder.");
+      setLocalSaveError(cause instanceof Error ? cause.message : "无法选择本地文件夹，请重试。");
     }
   };
 
@@ -217,19 +219,21 @@ export default function AssetsPage() {
     } finally {
       setOpeningId(null);
     }
-  }, [router, session?.access_token]);
+  }, [router, session?.access_token,pathname]);
 
   const load = useCallback(async () => {
     if (!session?.access_token) return;
+    const requestId=++loadId.current;
     setLoading(true);
     setError("");
     setErrorAction(null);
-    try { const options = filter === "all" ? { page, pageSize: ASSETS_PER_PAGE, query, includeDeleted: showRecovery } : { page, pageSize: ASSETS_PER_PAGE, query, includeDeleted: showRecovery, mediaType: filter }; const response = await fetchGeneratedAssets(session.access_token, options); setAssets(response.assets); setPagination(response.pagination); setSelectedIds(new Set()); }
+    try { const options = filter === "all" ? { page, pageSize: ASSETS_PER_PAGE, query, includeDeleted: showRecovery } : { page, pageSize: ASSETS_PER_PAGE, query, includeDeleted: showRecovery, mediaType: filter }; const response = await fetchGeneratedAssets(session.access_token, options);if(requestId!==loadId.current)return; setAssets(response.assets); setPagination(response.pagination); setSelectedIds(new Set()); }
     catch (cause) {
+      if(requestId!==loadId.current)return;
       setError(cause instanceof Error ? cause.message : "资产加载失败");
       setErrorAction({ type: "load" });
     }
-    finally { setLoading(false); }
+    finally { if(requestId===loadId.current)setLoading(false); }
   }, [session?.access_token, page, query, filter, showRecovery]);
 
   const restore = useCallback(async (asset: GeneratedAsset) => {
@@ -246,7 +250,7 @@ export default function AssetsPage() {
     }
   }, [load, session?.access_token]);
 
-  useEffect(() => { const timer = setTimeout(() => void load(), 250); return () => clearTimeout(timer); }, [load]);
+  useEffect(() => { const timer = setTimeout(() => void load(), 250); return () => {loadId.current++;clearTimeout(timer);}; }, [load]);
   useEffect(() => {
     const token = session?.access_token;
     if (!token || assets.length === 0) {
@@ -298,7 +302,8 @@ export default function AssetsPage() {
     }
   };
   const restoreSelected = async () => {
-    if (!session?.access_token || selectedIds.size === 0) return;
+    if (!session?.access_token || selectedIds.size === 0 || batchBusy) return;
+    setBatchBusy(true);
     setError("");
     try {
       const recoverable = assets.filter((asset) => selectedIds.has(asset.id) && asset.retentionState === "soft_deleted");
@@ -307,7 +312,7 @@ export default function AssetsPage() {
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "批量恢复失败。未成功的项目仍保留在恢复区。");
-    }
+    }finally{setBatchBusy(false);}
   };
 
   const retryErrorAction = () => {
@@ -330,7 +335,7 @@ export default function AssetsPage() {
 
   return <main data-assets-scroll aria-busy={loading} className="relative mx-auto max-h-[calc(100vh-4rem)] min-h-full max-w-7xl overflow-y-auto p-6 pb-24 md:p-10 md:pb-28">
     {!loading && !error && visible.length > 0 && <GradualBlur autoHide height="4rem" className="bottom-24 z-0" />}
-    {showRecovery && <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs"><span>恢复区资产将在 7 天后清理</span><button type="button" onClick={() => void restoreSelected()} disabled={selectedIds.size === 0} className="rounded-md border px-2 py-1 disabled:opacity-40">恢复所选</button></div>}
+    {showRecovery && <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs"><span>恢复区资产将在 7 天后清理</span><button type="button" onClick={() => void restoreSelected()} disabled={selectedIds.size === 0||batchBusy} className="rounded-md border px-2 py-1 disabled:opacity-40">{batchBusy?"正在恢复…":"恢复所选"}</button></div>}
     <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-muted-foreground">图片与视频云端副本 · 保留 3 天</p><h1 className="mt-1 text-3xl font-semibold">我的资产</h1><p className="mt-2 text-sm text-muted-foreground">推荐保存到电脑上的文件夹；本地副本只保存在你的设备，云端副本 3 天后自动清理。</p></div><div className="flex gap-2"><button type="button" onClick={() => void chooseLocalFolder()} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm"><FolderOpen className="size-4" />{localFolder ? `本地：${localFolder}` : "选择本地文件夹"}</button><button type="button" onClick={() => void load()} disabled={loading} aria-label="刷新资产" className="flex size-10 items-center justify-center rounded-lg border disabled:opacity-50"><RefreshCw className="size-4" /></button></div></header>
     <p className="mt-3 text-xs text-muted-foreground" role="note">{localFolder ? `本地保存位置：${localFolder}` : "尚未选择本地保存位置"}</p>
     {localSaveError && <p role="alert" className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{localSaveError}</p>}
@@ -348,7 +353,7 @@ export default function AssetsPage() {
     </div>}
     {!loading && error && <div role="alert" className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive"><span>{error}</span><button type="button" onClick={retryErrorAction} className="inline-flex h-9 items-center gap-2 rounded-md border border-destructive/30 px-3 text-xs font-medium hover:bg-destructive/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><RefreshCw className="size-3.5" />{errorAction?.type === "editor" ? "重试打开画布" : errorAction?.type === "publish" ? "重试公开作品" : errorAction?.type === "unpublish" ? "重试取消公开" : errorAction?.type === "restore" ? "重试恢复" : "重试加载"}</button></div>}
     {!loading && !error && visible.length === 0 && <div className="mt-8 flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed text-center"><Images className="size-10 text-muted-foreground/40" /><h2 className="mt-4 font-medium">还没有资产</h2><p className="mt-1 text-sm text-muted-foreground">从图片或视频创作页开始生成。</p></div>}
-    {publishNotice && <p role="status" className="mt-5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">{publishNotice}，可在左侧“作品库”查看。</p>}
+    {publishNotice && <p role="status" className="mt-5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">{publishNotice}</p>}
     {!loading && !error && visible.length > 0 && (
       <div className="relative z-10 mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {visible.map((asset) => {

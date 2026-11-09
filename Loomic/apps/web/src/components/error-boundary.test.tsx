@@ -14,7 +14,7 @@ describe("ErrorBoundary recovery", () => {
       </ErrorBoundary>,
     );
     expect(screen.getByRole("button", { name: "重试当前区域" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "返回工作台" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "返回工作台" }).getAttribute("href")).toBe("/home/");
     expect(screen.getByText("技术详情")).toBeTruthy();
     expect(screen.getByText("secret technical failure").closest("details")?.open).toBe(false);
   });

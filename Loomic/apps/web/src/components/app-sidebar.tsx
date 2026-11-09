@@ -21,6 +21,7 @@ import {
   Sparkles,
   Users,
   Wrench,
+  PanelLeftClose,PanelLeftOpen,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -192,6 +193,7 @@ export function AppSidebar() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
   const [labelsVisible, setLabelsVisible] = useState(false);
+  const [pinned,setPinned]=useState(false);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
@@ -202,6 +204,7 @@ export function AppSidebar() {
   }
 
   function collapseSidebar() {
+    if(pinned)return;
     if (revealTimer.current) clearTimeout(revealTimer.current);
     setLabelsVisible(false);
     setCollapsed(true);
@@ -210,6 +213,10 @@ export function AppSidebar() {
   useEffect(() => () => {
     if (revealTimer.current) clearTimeout(revealTimer.current);
   }, []);
+  useEffect(()=>{
+    try{const saved=localStorage.getItem("helstera:sidebar-pinned");const expanded=saved==="true"||(saved===null&&window.innerWidth>=1100);setPinned(expanded);setCollapsed(!expanded);setLabelsVisible(expanded);}catch{setPinned(false);}
+  },[]);
+  function togglePinned(){const next=!pinned;setPinned(next);setCollapsed(!next);setLabelsVisible(next);try{localStorage.setItem("helstera:sidebar-pinned",String(next));}catch(error){console.warn("[sidebar] preference was not saved",error);}}
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -240,11 +247,12 @@ export function AppSidebar() {
         }
       }}
       aria-label="工作区侧栏"
-      className={cn("relative z-30 hidden h-[100dvh] shrink-0 flex-col overflow-hidden border-r border-border/40 bg-background/75 px-3 py-4 backdrop-blur transition-[width] duration-200 md:flex", collapsed ? "w-16" : "w-56")}
+      className={cn("relative z-30 hidden h-[100dvh] shrink-0 flex-col overflow-y-auto border-r border-border bg-background px-3 py-4 md:flex", collapsed ? "w-16" : "w-56")}
     >
       <Link href="/home" title="Helstera" className={cn("mb-4 flex h-8 items-center px-2", labelsHidden && "justify-center px-0")}>
         <HelsteraBrandMark size="sm" />
       </Link>
+      <button type="button" className="mb-3 flex min-h-8 items-center gap-2 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted" aria-label={pinned?"收起侧栏":"固定展开侧栏"} aria-pressed={pinned} onClick={togglePinned}>{pinned?<PanelLeftClose size={16}/>:<PanelLeftOpen size={16}/>} {!labelsHidden&&<span>{pinned?"收起导航":"固定导航"}</span>}</button>
       <div className="space-y-1">{primaryItems.map((item) => <NavLink key={item.href} item={{ ...item, label: item.href === "/home" ? labels.home : item.label }} active={isPathActive(pathname, item.href)} collapsed={labelsHidden} />)}</div>
       <div className="my-3 border-t border-border/40" />
       <AgentBrowserButton compact={labelsHidden}/>

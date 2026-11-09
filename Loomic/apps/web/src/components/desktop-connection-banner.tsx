@@ -40,7 +40,10 @@ export function DesktopConnectionBanner({ locale = "zh-CN" }: { locale?: keyof t
   const sawConnected = useRef(hasEverConnected());
   const copy = COPY[locale];
   // Optional: the banner also renders outside the provider (tests, bare routes).
-  const sessionFailed = useOptionalAuth()?.sessionError != null;
+  const auth=useOptionalAuth();
+  const sessionFailed = auth?.sessionError != null;
+  const [retrying,setRetrying]=useState(false);
+  const retry=async()=>{if(!auth||retrying)return;setRetrying(true);try{await auth.retrySession();}finally{setRetrying(false);}};
 
   useEffect(() => {
     const unsubscribe = subscribeRealtimeStatus((status) => {
@@ -82,6 +85,7 @@ export function DesktopConnectionBanner({ locale = "zh-CN" }: { locale?: keyof t
       <div className="desktop-connection-banner desktop-connection-banner--error" role="alert">
         <WifiOff aria-hidden="true" />
         <span>{copy.sessionFailed}</span>
+        <button type="button" disabled={retrying} onClick={()=>void retry()}>{locale==="en-US"?(retrying?"Reconnecting…":"Retry"):(retrying?"正在重连…":"重新连接")}</button>
       </div>
     );
   }

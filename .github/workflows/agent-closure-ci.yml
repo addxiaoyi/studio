@@ -66,6 +66,8 @@ jobs:
           node scripts/test-local-postgres.mjs src/features/canvas-workflows/service.postgres.test.ts
           pnpm --filter @helstera/server exec vitest run src/features/canvas-workflows/execution-access.test.ts src/features/canvas-workflows/logic-executor.test.ts src/features/canvas-workflows/batch-executor.test.ts src/features/canvas-workflows/generation.test.ts src/features/agent-goals/agent-goal-background.test.ts src/agent/tools/index.test.ts
           pnpm --filter @helstera/web exec vitest run test/workflow-navigation.test.tsx test/workflow-node-inspector.test.tsx test/workflow-run.test.tsx test/workflow-scene.test.ts test/workflow-groups.test.ts test/workflow-references.test.tsx test/canvas-workflow-document.test.tsx test/canvas-timeline-panel.test.tsx test/agent-workflow-card.test.tsx test/canvas-save-conflict.test.tsx test/canvas-save-merge.test.ts test/canvas-recovery-copy.test.ts
+      - name: Shared UI recovery and desktop navigation
+        run: pnpm --filter @helstera/web exec vitest run test/ui-recovery.test.tsx test/workspace-session.test.tsx test/desktop-navigation.test.tsx test/desktop-history-ui.test.tsx test/assets-latest-request.test.tsx test/workbench-save.test.tsx test/styled-select.test.tsx src/components/toast.test.tsx src/components/error-boundary.test.tsx
       - name: Try-on billing and shared form regressions
         run: |
           pnpm --filter @helstera/server exec vitest run src/features/generation/fashion-billing.postgres.test.ts src/http/fashion-billing.test.ts src/http/image-models-route.test.ts src/http/generation-approvals.test.ts src/http/media-connector-gate.test.ts

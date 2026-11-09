@@ -26,7 +26,10 @@ const routeLabels: Record<string, string> = {
   storyboard: "分镜工作台",
   team: "团队",
   "texture-lab": "纹理工坊",
-  video: "视频生成",
+  video: "视频创作",
+  "fashion-gallery":"女装试穿",
+  "agent-history":"任务历史",
+  marketplace:"扩展市场",
   archived: "回收站",
   dashboard: "运营总览",
 };

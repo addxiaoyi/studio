@@ -13,19 +13,21 @@ interface ErrorProps {
 
 export default function GlobalError({ error, reset }: ErrorProps) {
   const [copied, setCopied] = useState(false);
+  const [copyErrorMessage,setCopyErrorMessage]=useState("");
 
   useEffect(() => {
     console.error("[Helstera] Unhandled error:", error);
   }, [error]);
 
   const copyError = async () => {
+    setCopyErrorMessage("");
     const text = `Error: ${error.message}${error.digest ? `\nDigest: ${error.digest}` : ""}`;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // ignore
+      setCopyErrorMessage("复制失败，请选中下方错误代码手动复制。");
     }
   };
 
@@ -67,6 +69,7 @@ export default function GlobalError({ error, reset }: ErrorProps) {
               </div>
             )}
 
+            {copyErrorMessage&&<p role="alert" className="mb-4 text-sm text-destructive">{copyErrorMessage}</p>}
             <div className="flex flex-wrap items-center justify-center gap-3">
               <Button
                 onClick={reset}

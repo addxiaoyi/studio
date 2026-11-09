@@ -4,6 +4,8 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState, type
 import { CheckCircle2, Info, TriangleAlert, X } from "lucide-react";
 
 import { useDesktopCopy } from "@/lib/desktop-copy";
+import {useNoticeTimer} from "@/hooks/use-notice-timer";
+import {useSurfaceEntry} from "@/hooks/use-surface-entry";
 
 export type DesktopToastTone = "success" | "error" | "info";
 
@@ -54,8 +56,6 @@ export function DesktopToastProvider({ children }: { children: ReactNode }) {
 
     const id = nextId.current++;
     setToasts((current) => [...current, { ...toast, tone, id }].slice(-MAX_VISIBLE_TOASTS));
-    const duration = toast.durationMs ?? DEFAULT_DURATION_MS;
-    if (duration > 0) setTimeout(() => dismiss(id), duration);
   }, [dismiss]);
 
   const api = useMemo<DesktopToastApi>(() => ({ push, dismiss }), [push, dismiss]);
@@ -63,9 +63,16 @@ export function DesktopToastProvider({ children }: { children: ReactNode }) {
   return (
     <DesktopToastContext.Provider value={api}>
       {children}
-      <div className="desktop-toast-viewport" role="status" aria-live="polite" aria-atomic="false">
-        {toasts.map((toast) => (
-          <div key={toast.id} className={`desktop-toast desktop-toast--${toast.tone}`}>
+      <div className="desktop-toast-viewport" aria-label="桌面通知">
+        {toasts.map((toast) => <DesktopNotice key={toast.id} toast={toast} onDismiss={()=>dismiss(toast.id)} closeLabel={copy.chrome.toast.close}/>)}
+      </div>
+    </DesktopToastContext.Provider>
+  );
+}
+function DesktopNotice({toast,onDismiss,closeLabel}:{toast:DesktopToast;onDismiss():void;closeLabel:string}) {
+  const timer=useNoticeTimer(toast.durationMs??(toast.tone==="error"?0:DEFAULT_DURATION_MS),onDismiss);
+  const ref=useSurfaceEntry<HTMLDivElement>();
+  return <div ref={ref} {...timer} role={toast.tone==="error"?"alert":"status"} className={`desktop-toast desktop-toast--${toast.tone}`}>
             <span className="desktop-toast__icon" aria-hidden="true">
               {toast.tone === "success" ? <CheckCircle2 /> : toast.tone === "error" ? <TriangleAlert /> : <Info />}
             </span>
@@ -73,16 +80,12 @@ export function DesktopToastProvider({ children }: { children: ReactNode }) {
             <button
               type="button"
               className="desktop-toast__dismiss"
-              aria-label={copy.chrome.toast.close}
-              onClick={() => dismiss(toast.id)}
+              aria-label={closeLabel}
+              onClick={onDismiss}
             >
               <X aria-hidden="true" />
             </button>
-          </div>
-        ))}
-      </div>
-    </DesktopToastContext.Provider>
-  );
+          </div>;
 }
 
 /** Returns the toast API, or a no-op when used outside the provider so a missing

@@ -82,6 +82,7 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
   const [updateBusy, setUpdateBusy] = useState(false);
   const [signOutBusy, setSignOutBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [permissionError,setPermissionError]=useState<string|null>(null);
   const [nativePermissions, setNativePermissions] = useState<Awaited<ReturnType<NonNullable<DesktopSettingsApi["getNativePermissions"]>>> | null>(null);
 
   const refreshFolder = useCallback(async () => {
@@ -111,7 +112,7 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
       toast.push({ tone: "error", message: failure, key: "settings:version-load" });
     });
     setPlatform(api.getPlatform());
-    void api.getNativePermissions?.().then(setNativePermissions).catch(() => undefined);
+    void api.getNativePermissions?.().then(setNativePermissions).catch(cause=>setPermissionError(cause instanceof Error?cause.message:"无法读取本机权限，请重试。"));
     void api.getUpdateState().then(setUpdate).catch((cause) => {
       const message = cause instanceof Error ? cause.message : copy.settings.updateStateReadFailed;
       const failure = formatDesktopCopy(copy.settings.updateStateReadFailToast, { reason: message });
@@ -286,10 +287,10 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
       </section>
 
       <section className="desktop-settings__section" aria-labelledby="desktop-settings-native">
-        <div className="desktop-settings__section-heading"><h2 id="desktop-settings-native">Native controls</h2><p>Desktop Agent permissions and backend readiness.</p></div>
+        <div className="desktop-settings__section-heading"><h2 id="desktop-settings-native">本机操作权限</h2><p>辅助功能、录屏权限与桌面执行器状态</p></div>
         <div className="desktop-settings__row">
-          <div><strong>{nativePermissions?.backend ?? "Checking native backend"}</strong><p>{nativePermissions?.reason ?? (nativePermissions?.supported ? "Ready for native control tasks." : "Permission status is not ready.")}</p></div>
-          <span className="desktop-settings__version">{nativePermissions?.permission ?? "unknown"}</span>
+          <div><strong>{nativePermissions?.backend ?? "本机操作权限"}</strong><p>{permissionError??nativePermissions?.reason ?? (nativePermissions?.supported ? "本机操作能力已就绪，执行动作仍需审批。" : "正在检查辅助功能与录屏权限…")}</p>{permissionError&&<button type="button" onClick={()=>{setPermissionError(null);void api?.getNativePermissions?.().then(setNativePermissions).catch(cause=>setPermissionError(cause instanceof Error?cause.message:"权限读取失败"));}}>重新检查权限</button>}</div>
+          <span className="desktop-settings__version">{({granted:"已授权",denied:"未授权",prompt:"待授权",unsupported:"不支持",unknown:"未确认"} as Record<string,string>)[nativePermissions?.permission??"unknown"]??nativePermissions?.permission}</span>
         </div>
       </section>
 
