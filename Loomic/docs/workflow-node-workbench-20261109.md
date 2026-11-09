@@ -28,3 +28,13 @@
 日志在 `M:/loomic-builds/`：`workflow-n8n-shared.log`、`workflow-n8n-postgres.log`、`workflow-n8n-unit.log`、`workflow-n8n-tools.log`、`workflow-n8n-browser-final.log`、`workflow-n8n-desktop.log`、`workflow-n8n-build.log`、`workflow-n8n-candidate-types.log`、`workflow-n8n-production-types.log`。
 
 本轮没有实现 n8n 的完整第三方连接器库、通用脚本执行、触发器平台或固定数据替代运行；本站现有创作节点、普通画布及审批语义保持兼容。
+
+## 生产验收
+
+功能提交 `87cd824` 已推送至 `codex/agent-workspace-ci` 并发布。26 个 Server/Shared 文件校验通过，增量迁移已核验；Web 校验 3251 个文件，四个主要入口返回 200。线上画布 HTML SHA-256 与候选一致：`8b7b66c9328ad41967ebfcbbe912f1ea5b31ca6e28d84377531c1aa2fb2feda9`。Server/Worker 均 online，健康接口正常，未登录工作流接口返回 401。
+
+在已登录原画布建立独立的“节点调试验收 · Example Domain”，保留原工作流及本机恢复草稿。通过节点确认卡只执行 `https://example.com` 的读取与截图及本次结果保存，生产运行 `ebee1a88-84da-419a-8ca7-0c0cef837de9` 为 completed，target_node_id=capture。刷新后展开节点，输入、参数及输出仍可读取，图片实际加载为 1280×720；结果也已回到画布及原聊天。
+
+生产真实模型随后生成局部运行方案 `613efcd8-4238-4721-9231-7211ad84354f`，action=run、target_node_id=capture、status=pending。确认卡列出读取/截图及结果保存，未自动再执行。数据库最终仍只有一条本轮局部运行，未调用生产图片/视频生成。
+
+发布日志：`workflow-n8n-deploy.log`、`workflow-n8n-publish.log`；数据库和健康证据：`workflow-n8n-production.log`；截图：`workflow-n8n-live-workbench.png`、`workflow-n8n-live-output.png`、`workflow-n8n-ai-proposal.png`，均在 `M:/loomic-builds/`。功能提交的网站捕获 CI 已通过；最后检查时 Agent Closure 与 Desktop Candidate CI 仍在运行，不能将本地候选版验收称作新 CI 全绿。
