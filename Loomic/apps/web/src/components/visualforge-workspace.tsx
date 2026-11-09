@@ -23,6 +23,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import styles from "./visualforge-workspace.module.css";
 import { useVideoText } from "@/lib/video-copy";
 import type { StudioAiContext } from "@/lib/studio-ai-context";
+import { watchStudioStartup, studioPhaseLabels, type StudioStartup } from "@/lib/studio-startup";
+import { StudioLoading } from "./studio-loading";
 
 export function VisualForgeWorkspace() {
   useEffect(keepStudioBrandTitle,[]);
@@ -35,6 +37,7 @@ export function VisualForgeWorkspace() {
   const [error, setError] = useState("");
   const [outputs, setOutputs] = useState<StudioExport[]>([]);
   const [ready, setReady] = useState(false);
+  const [startup, setStartup] = useState<StudioStartup>({ phase: "runtime", elapsedSeconds: 0, phaseSeconds: 0, timedOut: false });
   const [mountedRuntime, setMountedRuntime] = useState<StudioRuntime | null>(null);
   const [mediaRevision, setMediaRevision] = useState(0);
   const [retry, setRetry] = useState(0);
@@ -85,6 +88,15 @@ export function VisualForgeWorkspace() {
     if (!userId || !container.current) return;
     const abort = new AbortController();
     let mounted: StudioRuntime | null = null;
+    const watchdog = watchStudioStartup(setStartup, state => {
+      setReady(false);
+      setError(`${studioPhaseLabels[state.phase]}超时，请重新打开已保存工程。`);
+      abort.abort();
+      mounted?.dispose();
+      if (runtime.current === mounted) runtime.current = null;
+      mounted = null;
+      setMountedRuntime(null);
+    });
     void listStudioExports(userId)
       .then((saved) => {
         if (!abort.signal.aborted)
@@ -94,7 +106,7 @@ export function VisualForgeWorkspace() {
         if (!abort.signal.aborted)
           setError(`无法读取本机导出记录：${cause.message}`);
       });
-    void loadVisualForge()
+    void loadVisualForge(retry)
       .then(async (module) => {
         if (abort.signal.aborted || !container.current) return;
         mounted = await module.mountVisualForge(container.current, {
@@ -105,12 +117,13 @@ export function VisualForgeWorkspace() {
           status: (message) => {
             if (!abort.signal.aborted) setStatus(message);
           },
+          stage: stage => { if (!abort.signal.aborted) watchdog.stage(stage); },
           ready: () => {
-            if (!abort.signal.aborted) setReady(true);
+            if (!abort.signal.aborted) { watchdog.stage({ phase: "ready" }); setReady(true); }
           },
           openAi: context => receiveAi.current(context),
           error: (message) => {
-            if (!abort.signal.aborted) setError(message);
+            if (!abort.signal.aborted) { watchdog.dispose(); setError(message); }
           },
           exported: (output) => {
             if (!abort.signal.aborted)
@@ -129,6 +142,7 @@ export function VisualForgeWorkspace() {
       })
       .catch((cause) => {
         if (abort.signal.aborted) return;
+        watchdog.dispose();
         setStatus("编辑器暂不可用");
         setError(
           cause instanceof Error
@@ -138,6 +152,7 @@ export function VisualForgeWorkspace() {
       });
     return () => {
       abort.abort();
+      watchdog.dispose();
       mounted?.dispose();
       setMountedRuntime(null);
       if (runtime.current === mounted) runtime.current = null;
@@ -210,7 +225,10 @@ export function VisualForgeWorkspace() {
         {token&&<CanvasVideoImport token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
         {token&&<CanvasTimelineImport token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
         <div className={styles.body} hidden={transcriptOpen}>
-          <div ref={container} data-testid="video-studio" className={styles.studio} />
+          <div className={styles.studio}>
+            <div ref={container} data-testid="video-studio" className="h-full" />
+            {startup.phase !== "ready" && <StudioLoading state={startup} error={error} onRetry={reopen} />}
+          </div>
           <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioConversationPanel key={projectKey} runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} projectKey={projectKey} token={token} exported={exported} contextRequest={aiContext} active={aiOpen} onBusyChange={updateAiBusy} onViewTimeline={viewTimeline} onOpenPanel={openPanel} />}</div>
         </div>
         {transcriptOpen && token && userId && <div className={styles.transcript}><OneTakeWorkspace token={token} userId={userId} runtime={ready ? mountedRuntime : null} onExport={exported} onDirty={setTranscriptDirty} /></div>}

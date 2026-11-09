@@ -200,6 +200,21 @@ describe.skipIf(!databaseUrl)("try-on billing with PostgreSQL", () => {
     } finally { await f.app.close(); }
   });
 
+  it("does not refund a requeued provider checkpoint or a reset attempt counter", async () => {
+    for (const checkpoint of [true, false]) {
+      const f = await fixture();
+      try {
+        const jobId = (await f.confirm()).json().data.jobId;
+        await db.query("update background_jobs set status='queued',attempt_count=0,started_at=$2,provider_result=$3::jsonb where id=$1", [jobId, checkpoint ? null : new Date(), checkpoint ? JSON.stringify({ taskId: "provider-accepted", url: "https://example.test/result.mp4" }) : null]);
+        const reply = await f.app.inject({ method: "POST", url: `/api/jobs/${jobId}/cancel` });
+        expect(reply.statusCode, reply.body).toBe(409);
+        expect((await f.credits.getBalance(f.workspaceId)).balance).toBe(96.5);
+        expect((await f.credits.getTransactions(f.workspaceId)).filter(row => row.transaction_type === "generation_refund")).toHaveLength(0);
+        expect((await f.jobs.getJob({ id: f.userId } as never, jobId)).status).toBe("queued");
+      } finally { await f.app.close(); }
+    }
+  });
+
   it("blocks rejected and expired confirmations without charging", async () => {
     for (const state of ["rejected", "expired"]) {
       const f = await fixture();

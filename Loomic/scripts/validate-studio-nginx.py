@@ -157,6 +157,7 @@ def prepare_creative_isolation(config: str) -> str:
     blocks = []
     for location, files in locations:
         blocks.append(f"    location {location} {{\n"
+                      + ('        gzip_static on;\n        gzip_vary on;\n' if location == "^~ /creative/" else '') +
                       '        add_header Cross-Origin-Opener-Policy "same-origin" always;\n'
                       '        add_header Cross-Origin-Embedder-Policy "credentialless" always;\n'
                       '        add_header Cache-Control "no-cache" always;\n'
@@ -166,7 +167,10 @@ def prepare_creative_isolation(config: str) -> str:
     insert = marker + "\n" + "\n".join(blocks) + "\n"
     if marker in config:
         if insert not in config:
-            raise ValueError("Video isolation configuration differs; review before replacing")
+            legacy = insert.replace('        gzip_static on;\n        gzip_vary on;\n', '')
+            if legacy not in config:
+                raise ValueError("Video isolation configuration differs; review before replacing")
+            return config.replace(legacy, insert, 1)
         return config
     if re.search(r"location\s+(?:=\s*|\^~\s*)?/(?:video(?:/|\s)|creative/)", config):
         raise ValueError("Existing video location needs manual isolation review")

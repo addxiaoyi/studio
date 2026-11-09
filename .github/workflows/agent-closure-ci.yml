@@ -130,6 +130,8 @@ jobs:
           pnpm --filter @helstera/web exec playwright install --with-deps chromium
       - name: Confirm, compare, undo, reload and decode export (injected model plan)
         run: pnpm --filter @helstera/web exec playwright test --config playwright.diff-undo.config.ts
+      - name: Editor startup recovery, high DPI and long export cancellation
+        run: pnpm --filter @helstera/web exec playwright test --config playwright.studio-health.config.ts
       - name: Prepare pinned fashion runtime
         run: |
           node scripts/prepare-creative-sources.mjs fashion
@@ -157,6 +159,8 @@ jobs:
           path: |
             Loomic/.creative-test-results/video-diff-undo.json
             Loomic/.creative-test-results/video-diff-undo/
+            Loomic/.creative-test-results/studio-health.json
+            Loomic/.creative-test-results/studio-health/
             Loomic/.creative-test-results/fashion-billing.json
             Loomic/.creative-test-results/fashion-billing/
             Loomic/.creative-test-results/agent-browser.json

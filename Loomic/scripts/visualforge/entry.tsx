@@ -12,6 +12,7 @@ import { applyStudioCut, installCanvasTimeline, currentCompositionId, listStudio
 import { installStudioChinese } from "./studio-i18n";
 import { installStudioAiContext, openStudioExport } from "../../apps/web/src/lib/studio-ai-context";
 import { readStudioState, controlStudio, waitForStudioComposition } from "./studio-controls";
+import { STUDIO_STAGE_EVENT, type StudioStage } from "../../apps/web/src/lib/studio-startup";
 declare global {
   interface Window {
     loomicSaveStudioExport?: ((output: StudioExport) => Promise<void>) | undefined;
@@ -23,6 +24,7 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
   if (!crossOriginIsolated) throw new Error("视频编辑器需要隔离的浏览器环境。请通过侧栏重新打开；若仍失败，请检查网站响应头。");
   host.signal.throwIfAborted();
   const projectKey = host.projectKey ?? host.userId;
+  host.stage?.({ phase: "project" });
   const release = await lockStudio(projectKey);
   let project: VirtualProject & { loomicCut?: StudioCut };
   try {
@@ -33,8 +35,11 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
   let currentCut = project.loomicCut ?? null;
   const canvasImports = ((project as typeof project & { canvasImports?: Record<string,{canvasId:string;fingerprint:string}> }).canvasImports ?? {});
   const imports = new Set<string>();
+  const progress = (event: Event) => host.stage?.((event as CustomEvent<StudioStage>).detail);
+  window.addEventListener(STUDIO_STAGE_EVENT, progress);
   const assetImports = new Map<string, Promise<void>>();
-  const notifyReady = () => { if (!host.signal.aborted) host.ready(); };
+  let hasPreview = false;
+  const notifyReady = () => { if (!host.signal.aborted) { hasPreview = true; host.ready(); host.status("编辑器已就绪"); } };
   window.addEventListener("remotion-browser-studio-operations-ready", notifyReady);
   localStorage.setItem("remotion.studio.theme", host.theme);
   window.loomicSaveStudioExport = async output => {
@@ -50,6 +55,7 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
     }
   };
   const root = createRoot(container);
+  let disposed = false;
   const disposeTranslations = installStudioChinese(container);
   const disposeAi = installStudioAiContext(context => host.openAi?.(context) ?? false, currentCompositionId);
   let queue = Promise.resolve();
@@ -63,11 +69,14 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
     }}
     onCompileStateChange={state => {
       if (state.status === "error") host.error(state.error.message);
-      else host.status(state.status === "compiling" ? "正在编译工程…" : "编辑器已就绪");
+      else {
+        host.stage?.({ phase: state.status === "compiled" ? (hasPreview ? "ready" : "preview") : "compile" });
+        host.status(state.status === "compiling" ? "正在编译工程…" : hasPreview ? "编辑器已就绪" : "正在准备时间线预览…");
+      }
     }}
   />);
   return {
-    dispose() { disposeAi(); disposeTranslations(); window.removeEventListener("remotion-browser-studio-operations-ready", notifyReady); root.unmount(); window.loomicSaveStudioExport = undefined; void queue.finally(release); },
+    dispose() { if (disposed) return; disposed = true; disposeAi(); disposeTranslations(); window.removeEventListener(STUDIO_STAGE_EVENT, progress); window.removeEventListener("remotion-browser-studio-operations-ready", notifyReady); root.unmount(); window.loomicSaveStudioExport = undefined; void queue.finally(release); },
     setTheme(theme: string) {
       localStorage.setItem("remotion.studio.theme", theme);
       document.documentElement.setAttribute("data-remotion-studio-theme", theme);

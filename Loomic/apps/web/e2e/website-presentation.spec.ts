@@ -207,6 +207,18 @@ test('plans from conversation, resumes human verification after refresh and reme
   const task=(await fixture.db.query("select id from website_capture_tasks where stage='waiting_login'")).rows[0].id;
   await page.reload();await page.getByRole('button',{name:'展开 Agent 浏览器',exact:true}).click();
   await expect(handoff.getByRole('img',{name:'待接管的登录页面'})).toBeVisible();
+  if (desktop) await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.setZoomFactor(2));
+  else await page.setViewportSize({ width: 640, height: 480 });
+  const resumeControl = handoff.getByRole('button',{name:'验证完成，继续录制'});
+  await resumeControl.focus();
+  await expect(resumeControl).toBeFocused();
+  await resumeControl.scrollIntoViewIfNeeded();
+  expect(await resumeControl.evaluate(el=>{const box=el.getBoundingClientRect();return box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight;})).toBe(true);
+  await page.keyboard.press('Shift+Tab');
+  expect(await handoff.evaluate(el=>el.contains(document.activeElement))).toBe(true);
+  await page.screenshot({path:info.outputPath('handoff-200-percent.png')});
+  if (desktop) await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.setZoomFactor(1));
+  else await page.setViewportSize({ width: 1280, height: 900 });
   const screen=handoff.getByRole('group',{name:'登录页面操作区域'}),bounds=await screen.boundingBox();
   if(!bounds)throw new Error('Handoff preview missing');
   await screen.click({position:{x:bounds.width*160/1280,y:bounds.height*140/720}});

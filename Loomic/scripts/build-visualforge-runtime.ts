@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, readdirSync, mkdirSync, cpSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, mkdirSync, cpSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { resolve, dirname, relative, isAbsolute, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -7,6 +8,7 @@ import { patchStudioEnvironment, patchStudioSource } from "./visualforge/studio-
 import { registerPinnedSourceResolver } from "./visualforge/source-resolver";
 import { studioOperations } from "./visualforge/operations-adapter";
 import { bundleMotionFiles } from "./visualforge/motion-bundle";
+import { patchStudioStartup } from "./visualforge/startup-source";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const lock = JSON.parse(readFileSync(resolve(root, "scripts/creative-sources.json"), "utf8")).video;
@@ -45,6 +47,7 @@ const plugin: BunPlugin = { name: "pinned-visualforge-source", setup(build) {
   registerPinnedSourceResolver(build, source);
   build.onLoad({ filter: /[\\/]BrowserStudio\.tsx$/ }, async args => {
     let contents = readFileSync(args.path, "utf8").replaceAll("\r\n", "\n");
+    contents = patchStudioStartup(contents);
     contents = contents.replace("fontFamily: 'Arial, Helvetica, sans-serif'", "fontFamily: 'inherit'");
     const beforeUnloadEffect = `\n\tuseEffect(() => {\n\t\tconst onBeforeUnload = (event: BeforeUnloadEvent) => {\n\t\t\tevent.preventDefault();\n\t\t\tevent.returnValue = true;\n\t\t};\n\n\t\twindow.addEventListener('beforeunload', onBeforeUnload);\n\t\treturn () => {\n\t\t\twindow.removeEventListener('beforeunload', onBeforeUnload);\n\t\t};\n\t}, []);\n`;
     if (!contents.includes(beforeUnloadEffect)) throw new Error("BrowserStudio beforeunload guard changed; review navigation behavior before rebuilding.");
@@ -101,8 +104,12 @@ const define = {
   }),
   __BROWSER_BUNDLER_DEPENDENCY_VERSIONS__: JSON.stringify({ react: catalog.react, "react-dom": catalog["react-dom"], remotion: packages.get("remotion")!.manifest.version }),
 };
-const entries = [resolve(root,"scripts/visualforge/entry.tsx"),join(source,"packages/browser-studio/src/browser-studio-worker.ts"),join(source,"packages/browser-studio/src/browser-studio-vendor-entry.ts"),join(source,"packages/browser-studio/src/browser-studio-transformers-entry.ts")];
+const entries = [join(source,"packages/browser-studio/src/browser-studio-vendor-entry.ts"),resolve(root,"scripts/visualforge/entry.tsx"),join(source,"packages/browser-studio/src/browser-studio-worker.ts"),join(source,"packages/browser-studio/src/browser-studio-transformers-entry.ts")];
 for (const entry of entries) {
+  define.__BROWSER_STUDIO_ASSET_SIZES__ = JSON.stringify({
+    rspackWasm: statSync(join(source,"packages/browser-studio/node_modules/@rspack/browser/dist/rspack.wasm32-wasi.wasm")).size,
+    vendorBundle: existsSync(join(outdir,"browser-studio-vendor-entry.mjs")) ? statSync(join(outdir,"browser-studio-vendor-entry.mjs")).size : 0,
+  });
   const output = await Bun.build({ entrypoints:[entry], outdir, naming:"[name].mjs",target:"browser",format:"esm",minify:true,plugins:[plugin],define,external:entry.includes("transformers-entry") ? [] : ["@huggingface/transformers"] });
   if (!output.success) throw new AggregateError(output.logs, `VisualForge build failed: ${entry}`);
   console.log(`${entry.split(/[\\/]/).pop()}: ${output.outputs.reduce((sum,file)=>sum+file.size,0)} bytes`);
@@ -116,3 +123,9 @@ const wasi = await Bun.build({entrypoints:[join(rspackDir,"wasi-worker-browser.m
 if(!wasi.success)throw new AggregateError(wasi.logs,"VisualForge WASI worker build failed");
 cpSync(join(source,"LICENSE.md"),join(outdir,"LICENSE.md"));
 await Bun.write(join(outdir,"source.json"),JSON.stringify(lock,null,2));
+for (const name of readdirSync(outdir).filter(name => /\.(mjs|wasm)$/.test(name))) {
+  const bytes = readFileSync(join(outdir, name));
+  const compressed = gzipSync(bytes, { level: 9 });
+  writeFileSync(join(outdir, `${name}.gz`), compressed);
+  console.log(`compressed ${name}: ${bytes.length} -> ${compressed.length} bytes`);
+}

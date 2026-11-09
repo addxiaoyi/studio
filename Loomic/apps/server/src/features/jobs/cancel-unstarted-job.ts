@@ -15,8 +15,10 @@ export async function cancelUnstartedJob(
         attempt_count: number;
         workspace_id: string;
         credits_cost: number | null;
+        started_at: Date | null;
+        provider_result: unknown;
       }>(
-        "select status,attempt_count,workspace_id,credits_cost from background_jobs where id=$1 and created_by=$2 for update",
+        "select status,attempt_count,workspace_id,credits_cost,started_at,provider_result from background_jobs where id=$1 and created_by=$2 for update",
         [jobId, userId],
       )
     ).rows[0];
@@ -24,7 +26,9 @@ export async function cancelUnstartedJob(
       throw new JobServiceError("job_not_found", "任务不存在或无权访问。", 404);
     if (
       !["queued", "canceled"].includes(row.status) ||
-      Number(row.attempt_count) > 0
+      Number(row.attempt_count) > 0 ||
+      row.started_at != null ||
+      row.provider_result != null
     )
       throw new JobServiceError(
         "job_cancel_failed",

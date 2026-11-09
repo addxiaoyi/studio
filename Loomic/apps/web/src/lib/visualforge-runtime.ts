@@ -3,6 +3,7 @@ import type { StudioCut, StudioMedia } from "./studio-cut";
 import type { StudioAiContext } from "./studio-ai-context";
 import type { VideoEditorAction, VideoEditorLayer, VideoStudioState, VideoStudioControl } from "@helstera/shared";
 import type { CanvasTimeline } from "./canvas-timeline";
+import type { StudioStage } from "./studio-startup";
 
 export type StudioEditReceipt = { id: string; revision: string; originalRevision: string; undone: number[]; complete: boolean; canUndo: boolean };
 export type StudioUndo = { id: string; compositionId: string; revision: string; actionIndex?: number };
@@ -35,6 +36,7 @@ export type StudioHost = {
   theme: string;
   signal: AbortSignal;
   status(message: string): void;
+  stage?(stage: StudioStage): void;
   ready(): void;
   error(message: string): void;
   exported(output: StudioExport): void;
@@ -44,7 +46,7 @@ export type StudioModule = {
   mountVisualForge(container: HTMLElement, host: StudioHost): Promise<StudioRuntime>;
 };
 
-export function loadVisualForge(): Promise<StudioModule> {
-  const entry = "/creative/visualforge/entry.mjs?release=canvas-closure-20261109";
+export function loadVisualForge(attempt = 0): Promise<StudioModule> {
+  const entry = `/creative/visualforge/entry.mjs?release=studio-startup-20261109&attempt=${attempt}`;
   return import(/* webpackIgnore: true */ entry) as Promise<StudioModule>;
 }

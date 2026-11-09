@@ -19,9 +19,18 @@ class NginxGuardTests(unittest.TestCase):
         self.assertEqual(MODULE.prepare_creative_isolation(updated), updated)
         self.assertEqual(updated.count('Cross-Origin-Embedder-Policy "credentialless" always;'), 3)
         self.assertIn("application/wasm wasm", updated)
+        self.assertEqual(updated.count("gzip_static on;"), 1)
+        self.assertIn("gzip_vary on;", updated)
         self.assertIn("location / { try_files $uri $uri/ =404; }", updated)
         with self.assertRaisesRegex(ValueError, "manual isolation"):
             MODULE.prepare_creative_isolation(original.replace("server {", "server {\nlocation /video/ { return 200; }"))
+
+    def test_upgrades_only_the_known_uncompressed_creative_block(self) -> None:
+        current = MODULE.prepare_creative_isolation("server {\n    location / { try_files $uri $uri/ =404; }\n}")
+        legacy = current.replace("        gzip_static on;\n        gzip_vary on;\n", "")
+        self.assertEqual(MODULE.prepare_creative_isolation(legacy), current)
+        with self.assertRaisesRegex(ValueError, "differs"):
+            MODULE.prepare_creative_isolation(legacy.replace('Cache-Control "no-cache"', 'Cache-Control "private"'))
 
     def test_accepts_static_storyboard_payload(self) -> None:
         config = """
