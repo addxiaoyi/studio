@@ -23,6 +23,7 @@ jobs:
       - name: Upgrade the real 0.2.27 AppImage to 0.2.28 and restore local media
         working-directory: Loomic
         env:
+          DEBUG: pw:browser
           HELT_TEST_TOOLS: ${{ runner.temp }}/test-tools/package.json
           HELT_UPGRADE_TEST_DIR: ${{ runner.temp }}/linux-upgrade
         run: xvfb-run -a node apps/desktop/e2e/linux-installed-upgrade.mjs
