@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
 import { chmod, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -72,11 +72,10 @@ try {
     session.fromPartition("electron-updater", { cache: false }).webRequest.onBeforeRequest({ urls: ["https://studio.0st.top/downloads/updates/*"] }, (details, callback) => callback({ redirectURL: `${origin}/channel/${new URL(details.url).pathname.split("/").pop()}` }));
   }, origin);
   await app.evaluate(({ app }, root) => {
-    const { createRequire } = process.mainModule.require("node:module"), { openSync } = process.mainModule.require("node:fs");
-    const { autoUpdater } = createRequire(`${app.getAppPath()}/package.json`)("electron-updater");
-    const spawn = autoUpdater.spawnLog.bind(autoUpdater), descriptor = openSync(`${root}/updated-app.log`, "a");
+    const child = process.mainModule.require("node:child_process"), { openSync } = process.mainModule.require("node:fs");
+    const spawn = child.spawn.bind(child), descriptor = openSync(`${root}/updated-app.log`, "a");
     // Preserve the updater's command, arguments and environment; capture only child diagnostics.
-    autoUpdater.spawnLog = (command, args, env) => spawn(command, args, env, ["ignore", descriptor, descriptor]);
+    child.spawn = (command, args, options) => spawn(command, args, command === process.env.APPIMAGE ? { ...options, stdio: ["ignore", descriptor, descriptor] } : options);
   }, root);
   await page.evaluate(() => window.electronAPI.checkForUpdates());
   await expect.poll(() => page.evaluate(() => window.electronAPI.getUpdateState()).then(state => state.status), { timeout: 180000 }).toBe("downloaded");
@@ -95,6 +94,8 @@ try {
   console.error("UPGRADE_FAILURE", error.message);
   console.error("INSTALLED_FILE_SHA256", await sha(versions[0].path).catch(() => "missing"));
   console.error("UPDATED_APP_LOG", await readFile(join(root, "updated-app.log"), "utf8").catch(() => "not started"));
+  const diagnosis = spawnSync(versions[0].path, [], { env, timeout: 15000, encoding: "utf8", maxBuffer: 256 * 1024 });
+  console.error("DIRECT_LAUNCH_DIAGNOSTICS", diagnosis.status, diagnosis.error?.code, diagnosis.stderr?.slice(-5000));
   throw error;
 } finally {
   // Only stop processes launched with this exact isolated test profile.
