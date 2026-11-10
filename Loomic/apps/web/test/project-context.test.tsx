@@ -53,6 +53,12 @@ it("blocks navigation when saving fails and exposes a retryable error", async ()
   expect(screen.getByRole("link",{name:"视频剪辑"}).getAttribute("aria-current")).toBe("page");
 });
 
+it("keeps project switching disabled until its persistence boundary is ready", () => {
+  render(<ProjectViewNav context={context} current="canvas" compact disabled/>);
+  expect(screen.getByRole("combobox",{name:"切换工程视图"}).hasAttribute("disabled")).toBe(true);
+  expect(screen.getByRole("status").textContent).toContain("准备工程保存");
+});
+
 it("keeps unavailable or unowned contexts from opening a different draft", async () => {
   vi.mocked(fetchProjectContext).mockRejectedValue(new Error("当前账号无权访问"));
   const {result}=renderHook(()=>useProjectContext({userId:"peer",token:"token",address:`https://test.invalid/video/?projectId=${context.project.id}`,view:"video"}));

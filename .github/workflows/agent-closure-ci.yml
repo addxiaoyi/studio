@@ -53,7 +53,7 @@ jobs:
         run: |
           psql "$HELT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;'
           node scripts/test-local-postgres.mjs src/features/agent-goals/goal-steps.postgres.test.ts src/runtime/media-admission.postgres.test.ts src/features/projects/project-context.postgres.test.ts src/features/assets/private-lifecycle.postgres.test.ts src/local-db/private-upload-ownership.postgres.test.ts src/local-db/viewer-locks.postgres.test.ts src/features/onetake/onetake.postgres.test.ts src/features/video-editor/plan-store.postgres.test.ts
-          pnpm --filter @helstera/web exec vitest run test/project-context.test.tsx test/studio-project-key.test.ts
+          pnpm --filter @helstera/web exec vitest run test/project-context.test.tsx test/studio-project-key.test.ts test/select-pointer.test.tsx test/styled-select.test.tsx test/snapshot-thumbnail-ready.test.ts
       - name: Readiness, graceful drain and release retention
         run: |
           pnpm --filter @helstera/server exec vitest run src/http/health.test.ts src/queue/local-job-queue.test.ts src/runtime/queue-runner.test.ts src/runtime/periodic-tasks.test.ts src/runtime/drain-gate.test.ts src/features/agent-goals/worker-drain.test.ts

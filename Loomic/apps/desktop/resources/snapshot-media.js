@@ -12,7 +12,7 @@ window.showSnapshotMedia = (items, context) => {
     let loadingCover = false;
     const thumbnail = async () => {
       if (loadingCover) return; loadingCover = true;
-      try { const file = await api.getSnapshotThumbnail(context.id, context.account, item.assetId); if (!active) return; const image = document.createElement("img"); image.src = file.url; image.alt = "本地素材缩略图"; cover.replaceChildren(image); thumbnailState.textContent = ""; }
+      try { const file = await api.getSnapshotThumbnail(context.id, context.account, item.assetId); if (!active) return; const image = document.createElement("img"); image.src = file.url; image.alt = "本地素材缩略图"; await image.decode(); if (!active) return; cover.replaceChildren(image); thumbnailState.textContent = ""; }
       catch (error) { if (active) { cover.textContent = "封面不可用"; thumbnailState.textContent = errorText(error); } }
       finally { loadingCover = false; }
     };

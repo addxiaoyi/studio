@@ -1,7 +1,7 @@
 "use client";
 import { Select } from "@base-ui/react/select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, type PointerEvent } from "react";
 import "./select.css";
 
 export type SelectOption = {
@@ -11,6 +11,12 @@ export type SelectOption = {
   badge?: string | undefined;
   disabled?: boolean | undefined;
 };
+
+function focusPressedOption(event: PointerEvent<HTMLDivElement>) {
+  if (event.pointerType!=="touch" && event.button===0 && !event.currentTarget.hasAttribute("data-disabled")) {
+    event.currentTarget.focus({preventScroll:true});
+  }
+}
 export type StyledSelectProps = {
   value: string;
   options: SelectOption[];
@@ -107,6 +113,7 @@ export function StyledSelect({
                     key={option.value}
                     value={option.value}
                     disabled={option.disabled}
+                    onPointerDown={focusPressedOption}
                     className="loomic-select-option"
                   >
                     <span className="loomic-select-copy">

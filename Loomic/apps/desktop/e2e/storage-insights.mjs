@@ -28,6 +28,8 @@ try {
   const before = requests; server.closeAllConnections(); await new Promise(done => server.close(done));
   await page.locator("#list button").first().click(); await page.locator("#media-list").scrollIntoViewIfNeeded();
   await expect(page.locator("#media-list img")).toHaveCount(2, { timeout: 45000 });
+  // IPC completion inserts the image before Chromium finishes loading and decoding it.
+  await expect.poll(() => page.locator("#media-list img").evaluateAll(images => images.map(image => ({ complete:image.complete, width:image.naturalWidth>0 }))), { timeout:15000 }).toEqual([{complete:true,width:true},{complete:true,width:true}]);
   assert.ok(await page.locator("#media-list img").evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0)));
   const usage = await page.evaluate(account => window.electronAPI.getThumbnailUsage(account), account); assert.equal(usage.files, 2); assert.ok(usage.bytes > 0 && usage.bytes < usage.limitBytes);
   const catalog = await page.evaluate(account => window.electronAPI.listLocalSnapshots({ accountId: account, accessToken: "" }), account);

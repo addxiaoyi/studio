@@ -319,8 +319,9 @@ function CanvasPageContent() {
   }, []);
 
   const saveBeforeVideo = useRef<(() => Promise<void>) | null>(null);
+  const [canvasSaveReady,setCanvasSaveReady]=useState(false);
   const [videoActionError, setVideoActionError] = useState("");
-  const receiveCanvasSave = useCallback((save: (() => Promise<void>) | null) => { saveBeforeVideo.current = save; }, []);
+  const receiveCanvasSave = useCallback((save: (() => Promise<void>) | null) => { saveBeforeVideo.current = save;setCanvasSaveReady(Boolean(save)); }, []);
   const openCanvasVideo = useCallback(async (elementId: string, action: "timeline" | "ai") => {
     const api = excalidrawApiRef.current;
     const elements = api?.getSceneElements() ?? [];
@@ -573,7 +574,7 @@ function CanvasPageContent() {
           currentBrandKitId={brandKitId}
           onBrandKitChange={(kitId) => setBrandKitId(kitId)}
         />
-        {projectContext.context && <ProjectViewNav context={projectContext.context} current={activeProjectView} desktop={desktopMode} compact beforeNavigate={beforeProjectView}/>}
+        {projectContext.context && <ProjectViewNav context={projectContext.context} current={activeProjectView} desktop={desktopMode} compact disabled={!canvasSaveReady} beforeNavigate={beforeProjectView}/>}
         {projectContext.error && <button type="button" onClick={projectContext.retry} className="min-h-9 rounded-md border bg-background px-2 text-xs text-destructive" title={projectContext.error}>工程位置未同步，重试</button>}
       </div>
       {/* Canvas always takes full width; on mobile/tablet, ChatSidebar overlays instead of side-by-side */}
