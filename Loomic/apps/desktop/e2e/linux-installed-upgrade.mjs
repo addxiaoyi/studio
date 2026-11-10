@@ -25,9 +25,8 @@ for (const artifact of versions) {
   assert.equal(await sha(artifact.path), artifact.hash); await chmod(artifact.path, 0o755);
 }
 execFileSync(versions[0].path, ["--appimage-extract"], { cwd: root, stdio: "ignore" });
-const extracted = join(root, "squashfs-root"), desktopFile = (await readdir(extracted)).find(name => name.endsWith(".desktop"));
-const desktopEntry = await readFile(join(extracted, desktopFile), "utf8"), binary = desktopEntry.match(/^Exec=([^\s]+)/m)?.[1];
-if (!binary || binary.includes("/")) throw new Error("Unexpected AppImage entry point.");
+const extracted = join(root, "squashfs-root"), binary = "@helsteradesktop";
+assert.ok((await stat(join(extracted, binary))).isFile(), "Pinned AppImage Electron executable is missing");
 const sandbox = join(extracted, "chrome-sandbox");
 execFileSync("sudo", ["chown", "root:root", sandbox]); execFileSync("sudo", ["chmod", "4755", sandbox]);
 const profile = join(root, "profile"), workspace = join(root, "工作区"), account = randomUUID(), asset = randomUUID(), upload = randomUUID();
@@ -61,7 +60,8 @@ const server = createServer((req, res) => { void (async () => {
 })().catch(error => { requestError = error; res.writeHead(500); res.end(); }); });
 await new Promise(done => server.listen(0, "127.0.0.1", done));
 const origin = `http://127.0.0.1:${server.address().port}`;
-const env = { ...process.env, HELSTERA_ISOLATED_TEST: "1", HELSTERA_TEST_USER_DATA: profile, HELSTERA_DESKTOP_LOCAL_URL: origin, APPIMAGE: versions[0].path, APPIMAGE_EXTRACT_AND_RUN: "1", CHROME_DEVEL_SANDBOX: sandbox };
+const runtimeEnv = Object.fromEntries(["PATH", "HOME", "DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "LANG"].filter(key => process.env[key]).map(key => [key, process.env[key]]));
+const env = { ...runtimeEnv, HELSTERA_ISOLATED_TEST: "1", HELSTERA_TEST_USER_DATA: profile, HELSTERA_DESKTOP_LOCAL_URL: origin, APPIMAGE: versions[0].path, APPIMAGE_EXTRACT_AND_RUN: "1", CHROME_DEVEL_SANDBOX: sandbox };
 delete env.ELECTRON_RUN_AS_NODE; delete env.NODE_OPTIONS;
 let app;
 try {
