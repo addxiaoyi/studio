@@ -21,6 +21,7 @@ export class MediaRelink {
   get busy() { return this.running; }
   async prepare(account: unknown, assetId: unknown, chosen: string): Promise<RelinkPlan> {
     assertAccount(account);
+    assertAccount(assetId);
     if (this.running) throw new Error("正在关联素材，请稍候。");
     const setup = await this.setup.status();
     if (!setup.available || !setup.root) throw new Error("本地工作区不可用，请重新连接磁盘。");

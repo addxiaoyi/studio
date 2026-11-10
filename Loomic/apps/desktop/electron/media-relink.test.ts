@@ -17,6 +17,7 @@ it("relinks renamed media without copying, imports external originals only on co
     await writeFile(indexPath, JSON.stringify({ account, items: [{ key: `asset:${asset}`, receipt: { path: original, bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), savedAt: new Date().toISOString() } }] }));
     const nested = join(media, "新目录"); await mkdir(nested); const renamed = join(nested, "改名.png"); await rename(original, renamed);
     const relink = new MediaRelink(setup);
+    await expect(relink.prepare(account, "../outside", renamed)).rejects.toThrow("标识无效");
     const plan = await relink.prepare(account, asset, renamed); expect(plan.willCopy).toBe(false);
     expect(JSON.parse(await readFile(indexPath, "utf8")).items[0].receipt.path).toBe(original);
     await relink.apply(plan.id);
