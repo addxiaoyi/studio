@@ -95,6 +95,7 @@ import { CloudCopies } from "./cloud-copies.js";
 import { ThumbnailCache } from "./thumbnail-cache.js";
 import { renderLocalThumbnail } from "./thumbnail-renderer.js";
 import { MediaRelink } from "./media-relink.js";
+import { MediaRelinkBatch } from "./media-relink-batch.js";
 import { WorkspaceUsage } from "./workspace-usage.js";
 import {
   decideMainWindowNavigation,
@@ -126,8 +127,9 @@ const cloudCopies = new CloudCopies({ setup: desktopSetup, identity: input => pr
 protocol.registerSchemesAsPrivileged([{ scheme: "helstera-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }]);
 const thumbnails = new ThumbnailCache(source => renderLocalThumbnail(source, localMedia, desktopResource("thumbnail.html")));
 const mediaRelink = new MediaRelink(desktopSetup);
-const workspaceUsage = new WorkspaceUsage(desktopSetup);
-const storageMaintenanceBusy = () => workspaceCleanup.busy || cloudCopies.busy || mediaRelink.busy || workspaceUsage.busy;
+const mediaBatch = new MediaRelinkBatch(desktopSetup);
+const workspaceUsage = new WorkspaceUsage(desktopSetup, state => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:scan-state", state); });
+const storageMaintenanceBusy = () => workspaceCleanup.busy || cloudCopies.busy || mediaRelink.busy || mediaBatch.busy || workspaceUsage.busy;
 function requireStorageIdle() {
   if (cloudBackup.busy || projectRestore.busy || storageMaintenanceBusy()) throw new Error("请先完成或暂停当前保存、恢复或清理任务。");
 }
@@ -865,8 +867,11 @@ ipcMain.handle("desktop.snapshot-thumbnail", async (event, id: unknown, account:
 });
 ipcMain.handle("desktop.thumbnail-usage", async (event, account: string) => { requireStorageWindow(event); const state = await desktopSetup.status(); if (!state.available || !state.root) throw new Error("工作区不可用。"); return thumbnails.usage(state.root, account); });
 ipcMain.handle("desktop.thumbnail-clear", async (event, account: string) => { requireStorageWindow(event); requireStorageIdle(); const state = await desktopSetup.status(); if (!state.available || !state.root) throw new Error("工作区不可用。"); return thumbnails.clear(state.root, account); });
+ipcMain.handle("desktop.thumbnail-configure", async (event, account: string, input: unknown) => { requireStorageWindow(event); requireStorageIdle(); const state = await desktopSetup.status(); if (!state.available || !state.root) throw new Error("工作区不可用。"); return thumbnails.configure(state.root, account, input); });
 ipcMain.handle("desktop.workspace-usage", (event, account: unknown, duplicates: unknown) => { requireStorageWindow(event); requireStorageIdle(); return workspaceUsage.scan(account, duplicates); });
 ipcMain.handle("desktop.workspace-scan-cancel", event => { requireStorageWindow(event); workspaceUsage.cancel(); });
+ipcMain.handle("desktop.workspace-scan-state", (event, account: unknown) => { requireStorageWindow(event); return workspaceUsage.savedState(account); });
+ipcMain.handle("desktop.workspace-scan-clear", (event, account: unknown) => { requireStorageWindow(event); requireStorageIdle(); return workspaceUsage.clearProgress(account); });
 ipcMain.handle("desktop.workspace-reveal", async (event, id: unknown) => { requireStorageWindow(event); shell.showItemInFolder(await workspaceUsage.reveal(id)); });
 ipcMain.handle("desktop.media-relink-choose", async (event, account: unknown, asset: unknown) => {
   const window = requireStorageWindow(event); requireStorageIdle();
@@ -874,6 +879,14 @@ ipcMain.handle("desktop.media-relink-choose", async (event, account: unknown, as
   return chosen.canceled || !chosen.filePaths[0] ? null : mediaRelink.prepare(account, asset, chosen.filePaths[0]);
 });
 ipcMain.handle("desktop.media-relink-apply", (event, id: unknown) => { requireStorageWindow(event); requireStorageIdle(); localMedia.revoke(); return mediaRelink.apply(id); });
+ipcMain.handle("desktop.media-batch-choose", async (event, account: unknown) => {
+  const window = requireStorageWindow(event); requireStorageIdle();
+  const chosen = await dialog.showOpenDialog(window, { title: "选择移动或改名后的素材目录", properties: ["openDirectory"] });
+  requireStorageIdle();
+  return chosen.canceled || !chosen.filePaths[0] ? null : mediaBatch.prepare(account, chosen.filePaths[0]);
+});
+ipcMain.handle("desktop.media-batch-cancel", event => { requireStorageWindow(event); mediaBatch.cancel(); });
+ipcMain.handle("desktop.media-batch-apply", (event, id: unknown, selections: unknown) => { requireStorageWindow(event); requireStorageIdle(); localMedia.revoke(); return mediaBatch.apply(id, selections); });
 ipcMain.handle("desktop.local-projects", (event, account: unknown) => { requireStorageWindow(event); requireStorageIdle(); return workspaceCleanup.projects(account); });
 ipcMain.handle("desktop.cleanup-preview", (event, account: unknown, project: unknown) => { requireStorageWindow(event); requireStorageIdle(); return workspaceCleanup.prepare(account, project); });
 ipcMain.handle("desktop.cleanup-apply", (event, id: unknown) => { requireStorageWindow(event); requireStorageIdle(); localMedia.revoke(); return workspaceCleanup.apply(id); });

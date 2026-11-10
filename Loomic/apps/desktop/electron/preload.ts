@@ -144,11 +144,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getSnapshotThumbnail: (id: string, accountId: string, assetId: string) => ipcRenderer.invoke("desktop.snapshot-thumbnail", id, accountId, assetId),
   getThumbnailUsage: (accountId: string) => ipcRenderer.invoke("desktop.thumbnail-usage", accountId),
   clearThumbnailCache: (accountId: string) => ipcRenderer.invoke("desktop.thumbnail-clear", accountId),
+  configureThumbnailCache: (accountId: string, input: { capacityMiB: number }) => ipcRenderer.invoke("desktop.thumbnail-configure", accountId, input),
   getWorkspaceUsage: (accountId: string, duplicates: boolean) => ipcRenderer.invoke("desktop.workspace-usage", accountId, duplicates),
   cancelWorkspaceScan: () => ipcRenderer.invoke("desktop.workspace-scan-cancel"),
+  getWorkspaceScanState: (accountId: string) => ipcRenderer.invoke("desktop.workspace-scan-state", accountId),
+  clearWorkspaceScan: (accountId: string) => ipcRenderer.invoke("desktop.workspace-scan-clear", accountId),
+  onWorkspaceScan: (callback: (state: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state);
+    ipcRenderer.on("desktop:scan-state", listener);
+    return () => ipcRenderer.removeListener("desktop:scan-state", listener);
+  },
   revealWorkspaceFile: (id: string) => ipcRenderer.invoke("desktop.workspace-reveal", id),
   chooseRelinkMedia: (accountId: string, assetId: string) => ipcRenderer.invoke("desktop.media-relink-choose", accountId, assetId),
   applyMediaRelink: (id: string) => ipcRenderer.invoke("desktop.media-relink-apply", id),
+  chooseRelinkDirectory: (accountId: string) => ipcRenderer.invoke("desktop.media-batch-choose", accountId),
+  cancelRelinkDirectory: () => ipcRenderer.invoke("desktop.media-batch-cancel"),
+  applyRelinkDirectory: (id: string, selections: Array<{ assetId: string; candidateId: string }>) => ipcRenderer.invoke("desktop.media-batch-apply", id, selections),
   getLocalProjects: (accountId: string) => ipcRenderer.invoke("desktop.local-projects", accountId),
   previewLocalCleanup: (accountId: string, projectId: string) => ipcRenderer.invoke("desktop.cleanup-preview", accountId, projectId),
   applyLocalCleanup: (id: string) => ipcRenderer.invoke("desktop.cleanup-apply", id),

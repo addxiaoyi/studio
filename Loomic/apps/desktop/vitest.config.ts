@@ -5,6 +5,6 @@ export default defineConfig({
     environment: "node",
     clearMocks: true,
     restoreMocks: true,
-    exclude: [...configDefaults.exclude, "**/.candidate-*/**"],
+    exclude: [...configDefaults.exclude, "**/.candidate-*/**", "dist-electron/**", "dist/**"],
   },
 });

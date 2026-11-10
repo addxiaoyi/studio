@@ -4,9 +4,24 @@
   const labels = { media: "素材原文件", projects: "工程与对话快照", exports: "导出成片", cache: "预览缓存", other: "其他文件" };
   const status = text => { el("usage-status").textContent = text; };
   const cacheUsage = async () => {
+    el("cache-capacity").disabled = true; el("cache-save").disabled = true;
+    try {
     const usage = await api.getThumbnailUsage(el("account").value);
     el("cache-status").textContent = `当前账户封面 ${size(usage.bytes)} · ${usage.files} 张；工作区总缓存 ${size(usage.workspaceBytes)} / ${size(usage.limitBytes)}，最多 ${usage.limitFiles} 张，${usage.retentionDays} 天未使用自动淘汰。`;
+    el("cache-capacity").value = String(usage.limitBytes / 1024 ** 2);
+    const cleanup = usage.lastCleanup;
+    el("cache-cleanup").textContent = cleanup ? `上次${{ automatic: "自动淘汰", manual: "手动清理", settings: "调整容量" }[cleanup.reason]}：${new Date(cleanup.at).toLocaleString()} · ${cleanup.files} 张 · ${size(cleanup.bytes)}` : "尚无清理记录。";
+    if (!usage.enabled) el("cache-cleanup").textContent += " 封面缓存已关闭，仍可打开原文件。";
+    } finally { el("cache-capacity").disabled = false; el("cache-save").disabled = false; }
   };
+  const progress = state => {
+    if (!state || state.accountId !== el("account").value) return;
+    const running = state.phase === "hashing" || state.phase === "discovering";
+    el("usage-scan").disabled = running; el("usage-duplicates").disabled = running; el("usage-cancel").hidden = !running; el("usage-reset").disabled = running;
+    el("usage-duplicates").textContent = state.phase === "paused" ? "继续校验重复素材" : "校验重复素材";
+    el("usage-progress").textContent = `${state.phase === "paused" ? "已暂停，可退出应用后继续。" : state.phase === "completed" ? "扫描完成，再次校验会复用未改变的内容。" : "正在校验"} ${size(state.verifiedBytes)} / ${size(state.totalBytes)} · 已复用 ${size(state.reusedBytes)} ${state.fileName}`;
+  };
+  api.onWorkspaceScan(progress);
   const scan = async duplicates => {
     el("usage-scan").disabled = true; el("usage-duplicates").disabled = true; el("usage-cancel").hidden = false; status("正在读取本地磁盘，内容校验可能需要一些时间…");
     try {
@@ -26,6 +41,8 @@
   };
   el("usage-scan").addEventListener("click", () => void scan(false)); el("usage-duplicates").addEventListener("click", () => void scan(true));
   el("usage-cancel").addEventListener("click", () => api.cancelWorkspaceScan().catch(error => status(error.message)));
+  el("usage-reset").addEventListener("click", async () => { try { await api.clearWorkspaceScan(el("account").value); el("usage-progress").textContent = ""; el("usage-duplicates").textContent = "校验重复素材"; status("扫描进度已清除，素材原文件保留。"); } catch (error) { status(error.message); } });
+  el("cache-save").addEventListener("click", async () => { el("cache-save").disabled = true; try { await api.configureThumbnailCache(el("account").value, { capacityMiB: Number(el("cache-capacity").value) }); await cacheUsage(); status("缓存容量已保存，超出上限的封面已清理，原文件保留。"); } catch (error) { status(error.message); } finally { el("cache-save").disabled = false; } });
   el("cache-clear").addEventListener("click", async () => { el("cache-clear").disabled = true; try { const cleared = await api.clearThumbnailCache(el("account").value); await cacheUsage(); el("usage-result").replaceChildren(); status(`已清理 ${size(cleared.bytes)} 封面缓存，原文件保留。`); } catch (error) { status(error.message); } finally { el("cache-clear").disabled = false; } });
-  el("manage").addEventListener("click", () => { el("usage-result").replaceChildren(); status(""); void cacheUsage().catch(error => status(error.message)); });
+  el("manage").addEventListener("click", () => { el("usage-result").replaceChildren(); status(""); el("usage-progress").textContent = ""; void cacheUsage().catch(error => status(error.message)); void api.getWorkspaceScanState(el("account").value).then(progress).catch(error => status(error.message)); });
 })();

@@ -41,6 +41,8 @@ try {
   if (offline.status !== 0) throw new Error(`Offline workspace migration test failed (${offline.status}).`);
   const insights = spawnSync(process.execPath, ["apps/desktop/e2e/storage-insights.mjs"], { env: { ...env, HELT_INSIGHTS_TEST_DIR: join(output, "insights") }, stdio: "inherit" });
   if (insights.status !== 0) throw new Error(`Storage insights test failed (${insights.status}).`);
+  const resumed = spawnSync(process.execPath, ["apps/desktop/e2e/storage-resume.mjs"], { env: { ...env, HELT_RESUME_TEST_DIR: join(output, "resume") }, stdio: "inherit" });
+  if (resumed.status !== 0) throw new Error(`Storage resume and directory relink test failed (${resumed.status}).`);
   if (process.env.HELT_VERIFY_PUBLIC_UPDATE === "1") {
     const appImage = process.platform === "linux" ? join(release, readdirSync(release).find(name => name.endsWith(".AppImage"))) : undefined;
     const update = spawnSync(process.execPath, ["apps/desktop/e2e/update-channel.mjs"], { env: { ...env, HELT_UPDATE_TEST_DIR: join(output, "update"), ...(appImage ? { APPIMAGE: appImage } : {}) }, stdio: "inherit" });
