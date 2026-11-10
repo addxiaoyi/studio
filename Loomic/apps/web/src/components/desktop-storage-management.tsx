@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { desktopStorageError, type CloudCopy, type CloudReleasePlan, type DesktopSetupState, type DesktopStorageApi, type LocalCleanupPlan, type LocalProjectStorage } from "@/lib/desktop-storage";
 
-const size = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GiB` : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+const size = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GiB` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MiB` : bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${bytes} B`;
 export function DesktopStorageManagement({ api, accountId, accessToken, disabled, setup }: { api: DesktopStorageApi; accountId?: string | undefined; accessToken?: string | undefined; disabled: boolean; setup: DesktopSetupState | null }) {
   const [open, setOpen] = useState(false), [mode, setMode] = useState<"local" | "cloud">("local");
   const [disk, setDisk] = useState<DesktopSetupState | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");

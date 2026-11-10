@@ -449,6 +449,8 @@ const zhCN = {
     emptyBody: "发布清单里还没有可下载的安装包。重新读取版本，或稍后再来看一次。",
     reread: "重新读取版本",
     portableBadge: "免安装",
+    windowsInstaller: "Windows 安装版",
+    installerHint: "支持应用内更新",
     readingVersion: "正在读取版本…",
     versionUnavailable: "版本信息暂不可用",
     notPublished: "尚未发布",
@@ -460,7 +462,7 @@ const zhCN = {
     portableSuffix: "（免安装版）",
     architectureSuffix: " {architecture}",
     footerLoading: "正在读取 Helstera 发布清单…",
-    footerHint: "Windows 便携包解压后启动；登录和助手数据保存在本机用户目录。",
+    footerHint: "Windows 便携 EXE 可直接运行；安装版支持应用内更新。macOS 使用 DMG 手动替换，Linux 使用 AppImage。工作区由你选择的本地目录保管。",
   },
   // 桌面壳自身（侧栏 / 标题栏 / toast 视口）。壳层文案与模块文案分开，是因为
   // 壳层在任何桌面页面都存在：英文界面里壳层说中文比面板说中文更显眼。
@@ -973,6 +975,8 @@ const enUS: DeepPartial<DesktopCopy> = {
     emptyBody: "The release manifest has no downloadable installer yet. Read versions again or check back later.",
     reread: "Read versions again",
     portableBadge: "Portable",
+    windowsInstaller: "Windows installer",
+    installerHint: "Supports in-app updates",
     readingVersion: "Reading version…",
     versionUnavailable: "Version information unavailable",
     notPublished: "Not published",
@@ -984,7 +988,7 @@ const enUS: DeepPartial<DesktopCopy> = {
     portableSuffix: " (portable)",
     architectureSuffix: " {architecture}",
     footerLoading: "Reading the Helstera release manifest…",
-    footerHint: "Unzip the Windows portable build to start it; sign-in and assistant data stay in your local user folder.",
+    footerHint: "Run the Windows portable EXE directly, or use the installer for in-app updates. macOS uses a manual DMG replacement; Linux uses AppImage. Your workspace stays in the local folder you choose.",
   },
   chrome: {
     sidebar: {

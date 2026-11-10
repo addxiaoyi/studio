@@ -29,6 +29,7 @@ describe("DesktopDownloadList", () => {
     expect(portableLink.getAttribute("href")).toBe("/downloads/Helstera-0.2.2-win-x64.zip");
     expect(portableLink.textContent).toContain("v0.2.2");
     expect(portableLink.textContent).toContain("免安装");
+    expect(screen.getByRole("link", { name: /Windows 安装版/ }).getAttribute("href")).toBe("/downloads/Helstera-Setup-0.2.2-Windows-x64.exe");
   });
 
   it("does not invent a version when a platform has no published manifest", async () => {

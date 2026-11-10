@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -89,7 +89,7 @@ describe("DesktopDownloadList feedback", () => {
     expect(toastMessage.textContent).toBe("下载清单读取失败：网络连接被重置");
     expect(toastByClassName("error")).not.toBeNull();
     // The inline alert kept its reason too: a silent "稍后重试" was the old behaviour.
-    expect(screen.getByRole("alert").textContent).toContain("网络连接被重置");
+    expect(within(screen.getByRole("region", { name: "可用平台" })).getByRole("alert").textContent).toContain("网络连接被重置");
     expect(screen.queryByText("暂无下载记录")).toBeNull();
   });
 

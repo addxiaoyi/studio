@@ -174,8 +174,13 @@ export function DesktopDownloadList({ locale }: { locale?: DesktopLocale | null 
             );
   
             return release && fileName ? (
+              <div key={platform.id} className="space-y-2">
+              {isPortableWindows && <a href={`/downloads/${encodeURIComponent(release.fileName)}`} download className={cardClass}>
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground"><Download className="size-[18px]" aria-hidden="true"/></span>
+                <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{copy.downloads.windowsInstaller}</span><span className="mt-1 block text-xs text-muted-foreground">v{release.version} · {copy.downloads.installerHint}</span></span>
+                <span className="sr-only">SHA-256 {release.sha256}</span>
+              </a>}
               <a
-                key={platform.id}
                 href={`/downloads/${encodeURIComponent(fileName)}`}
                 download
                 className={cardClass}
@@ -193,6 +198,7 @@ export function DesktopDownloadList({ locale }: { locale?: DesktopLocale | null 
                 {details}
                 <span className="sr-only">SHA-256 {isPortableWindows ? release.portableSha256 ?? release.sha256 : release.sha256}</span>
               </a>
+              </div>
             ) : (
               <button key={platform.id} type="button" disabled={!failed} onClick={() => void loadReleases()} aria-busy={loading} className={`${cardClass} w-full opacity-75 disabled:cursor-default`}>
                 {details}

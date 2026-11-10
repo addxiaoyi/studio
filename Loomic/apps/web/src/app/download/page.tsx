@@ -55,7 +55,7 @@ export default function DownloadPage() {
               <Laptop className="mt-0.5 size-4 shrink-0 text-emerald-700" aria-hidden="true" />
               <div>
                 <h2 className="text-sm font-medium">Windows 免安装</h2>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">下载 ZIP，解压后运行 Helstera.exe。无需管理员权限；应用数据保存在当前用户目录。</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">下载便携 EXE 后直接运行。安装版支持选择安装目录和应用内更新；首次启动可选择本地工作区。</p>
               </div>
             </div>
             <div className="flex gap-3">
@@ -69,7 +69,7 @@ export default function DownloadPage() {
               <Sparkles className="mt-0.5 size-4 shrink-0 text-amber-700" aria-hidden="true" />
               <div>
                 <h2 className="text-sm font-medium">安装版更新</h2>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">Windows 安装版与 Linux 安装包支持应用内更新。便携 ZIP 请在下载新版后重新解压。</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Windows 安装版与 Linux AppImage 支持应用内更新。macOS 下载 DMG 后退出应用并替换，便携版下载新版 EXE；本地工作区与设置保留。</p>
               </div>
             </div>
           </aside>
