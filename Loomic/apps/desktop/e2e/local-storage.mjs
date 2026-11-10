@@ -47,9 +47,11 @@ try {
   await page.locator("#agent").check();
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ width: 720, height: 600 }));
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
+  await expect.poll(() => page.evaluate(() => innerWidth)).toBeLessThan(380);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await page.getByRole("button", { name: "保存配置并进入工作台" }).scrollIntoViewIfNeeded();
-  await page.screenshot({ path: join(output, "setup-200-percent.png"), fullPage: true });
+  const setupScreenshot = await desktop.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString("base64"));
+  await writeFile(join(output, "setup-200-percent.png"), Buffer.from(setupScreenshot, "base64"));
   await page.keyboard.press("Tab");
   await page.getByRole("button", { name: "保存配置并进入工作台" }).click();
   await expect(page.getByRole("heading", { name: "Helstera 工作区验收" })).toBeVisible();
