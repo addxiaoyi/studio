@@ -38,7 +38,7 @@ export function DesktopMediaCard({ api, snapshotId, accountId, item, disabled, o
   };
   return <div ref={thumbnail.ref} className="min-w-0 space-y-2 rounded-lg border p-2">
     <button type="button" disabled={disabled || busy} onClick={() => onPreview(item.assetId)} className="w-full space-y-2 text-left" aria-label={`预览 ${item.name}`}>
-      {thumbnail.url ? <img src={thumbnail.url} alt="本地素材缩略图" className="aspect-video w-full rounded-md bg-muted object-contain"/> : <span className="flex aspect-video items-center justify-center rounded-md bg-muted px-2 text-xs text-muted-foreground">{thumbnail.error ? "封面不可用，可打开原文件" : "正在准备本地封面…"}</span>}
+      {thumbnail.url ? <img src={thumbnail.url} alt="本地素材缩略图" className="aspect-video w-full rounded-md bg-muted px-2 object-contain"/> : <span className="flex aspect-video items-center justify-center rounded-md bg-muted px-2 text-xs text-muted-foreground">{thumbnail.error ? "封面不可用，可打开原文件" : api.getSnapshotThumbnail ? "正在准备本地封面…" : "打开本地原文件"}</span>}
       <span className="block break-words text-sm">{item.name}</span>
     </button>
     {api.chooseRelinkMedia && api.applyMediaRelink && <button type="button" disabled={disabled || busy} onClick={() => void choose()} className="min-h-9 text-xs underline underline-offset-4">{busy ? "正在校验…" : "重新关联原文件"}</button>}

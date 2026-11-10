@@ -26,6 +26,7 @@ it("scans locally on request, shows verified duplicate paths and clears only the
 it("previews a renamed source but only updates its link after confirmation", async () => {
   const api = { chooseRelinkMedia: vi.fn().mockResolvedValue({ id: "plan", filename: "renamed.mp4", willCopy: false, bytes: 100 }), applyMediaRelink: vi.fn().mockResolvedValue({ filename: "renamed.mp4", copied: false, bytes: 100 }) };
   render(<DesktopMediaCard api={api as unknown as DesktopStorageApi} snapshotId="snapshot" accountId="owner" item={{ assetId: "asset", name: "录像" }} disabled={false} onPreview={vi.fn()}/>);
+  expect(screen.getByText("打开本地原文件")).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "重新关联原文件" }));
   expect(await screen.findByText(/renamed.mp4 内容校验一致/)).toBeVisible();
   expect(api.applyMediaRelink).not.toHaveBeenCalled();
