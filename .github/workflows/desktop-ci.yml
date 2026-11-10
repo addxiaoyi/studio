@@ -7,12 +7,18 @@ on:
   pull_request:
     paths: ['Loomic/**', '.github/workflows/desktop-ci.yml']
   workflow_dispatch:
+    inputs:
+      native_only:
+        description: "Verify macOS and Linux native packages without rebuilding Windows video tools"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   video-tools:
+    if: ${{ !inputs.native_only }}
     name: Windows video tools
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -31,21 +37,13 @@ jobs:
   desktop:
     name: Desktop ${{ matrix.platform }}
     needs: video-tools
+    if: ${{ always() && (needs.video-tools.result == 'success' || (inputs.native_only && needs.video-tools.result == 'skipped')) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: windows-x64
-            os: windows-2022
-            args: --win nsis --x64
-          - platform: macos-arm64
-            os: macos-15
-            args: --mac dmg --arm64
-          - platform: linux-x64
-            os: ubuntu-24.04
-            args: --linux AppImage --x64
+        include: ${{ fromJSON(inputs.native_only && '[{"platform":"macos-arm64","os":"macos-15","args":"--mac dmg --arm64"},{"platform":"linux-x64","os":"ubuntu-24.04","args":"--linux AppImage --x64"}]' || '[{"platform":"windows-x64","os":"windows-2022","args":"--win nsis --x64"},{"platform":"macos-arm64","os":"macos-15","args":"--mac dmg --arm64"},{"platform":"linux-x64","os":"ubuntu-24.04","args":"--linux AppImage --x64"}]') }}
     defaults:
       run:
         working-directory: Loomic
