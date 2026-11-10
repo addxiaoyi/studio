@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
+import { DesktopDiskUsage } from "./desktop-disk-usage";
 import { desktopStorageError, type CloudCopy, type CloudReleasePlan, type DesktopSetupState, type DesktopStorageApi, type LocalCleanupPlan, type LocalProjectStorage } from "@/lib/desktop-storage";
 
 const size = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GiB` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MiB` : bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${bytes} B`;
@@ -58,6 +59,7 @@ export function DesktopStorageManagement({ api, accountId, accessToken, disabled
     <button type="button" className="desktop-settings__command" disabled={disabled || !accountId} onClick={browse}>管理本地空间与云端副本</button>
     <Dialog open={open} onOpenChange={value => { if (!busy) setOpen(value); }}><DialogContent className="sm:max-w-2xl" showCloseButton={!busy}>
       <DialogHeader><DialogTitle>存储管理</DialogTitle><DialogDescription>本地原文件由当前工作区保管。先检查具体范围，再确认清理。</DialogDescription></DialogHeader>
+      {accountId && <DesktopDiskUsage api={api} accountId={accountId}/>}
       <div className="flex flex-wrap gap-2" aria-label="存储位置">
         <button type="button" className="desktop-settings__command" aria-pressed={mode === "local"} disabled={busy} onClick={() => { setMode("local"); setNotice(""); void load("local"); }}>清理本地工程</button>
         {api.getLocalCloudCopies && <button type="button" className="desktop-settings__command" aria-pressed={mode === "cloud"} disabled={busy} onClick={() => { setMode("cloud"); setNotice(""); void load("cloud"); }}>释放云端副本</button>}

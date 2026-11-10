@@ -47,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.native_only && '[{"platform":"macos-arm64","os":"macos-15","args":"--mac dmg --arm64"},{"platform":"linux-x64","os":"ubuntu-24.04","args":"--linux AppImage --x64"}]' || '[{"platform":"windows-x64","os":"windows-2022","args":"--win nsis --x64"},{"platform":"macos-arm64","os":"macos-15","args":"--mac dmg --arm64"},{"platform":"linux-x64","os":"ubuntu-24.04","args":"--linux AppImage --x64"}]') }}
+        include: ${{ fromJSON(inputs.native_only && '[{"platform":"macos-arm64","os":"macos-15","args":"--mac dmg --arm64"},{"platform":"macos-x64","os":"macos-15-intel","args":"--mac dmg --x64"},{"platform":"linux-x64","os":"ubuntu-24.04","args":"--linux AppImage --x64"}]' || '[{"platform":"windows-x64","os":"windows-2022","args":"--win nsis --x64"},{"platform":"macos-arm64","os":"macos-15","args":"--mac dmg --arm64"},{"platform":"macos-x64","os":"macos-15-intel","args":"--mac dmg --x64"},{"platform":"linux-x64","os":"ubuntu-24.04","args":"--linux AppImage --x64"}]') }}
     defaults:
       run:
         working-directory: Loomic
@@ -131,6 +131,8 @@ jobs:
           node apps/desktop/e2e/local-storage.mjs
           $env:HELT_OFFLINE_TEST_DIR = Join-Path $env:RUNNER_TEMP 'desktop-offline'
           node apps/desktop/e2e/offline-migration.mjs
+          $env:HELT_INSIGHTS_TEST_DIR = Join-Path $env:RUNNER_TEMP 'desktop-insights'
+          node apps/desktop/e2e/storage-insights.mjs
       - name: Upload Windows lifecycle evidence
         if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -143,6 +145,7 @@ jobs:
             ${{ runner.temp }}/desktop-local-storage/setup-200-percent.png
             ${{ runner.temp }}/desktop-offline/report.json
             ${{ runner.temp }}/desktop-offline/offline-preview.png
+            ${{ runner.temp }}/desktop-insights/
           if-no-files-found: ignore
           retention-days: 7
       - name: Installed macOS package workspace and restore
@@ -168,6 +171,7 @@ jobs:
             ${{ runner.temp }}/desktop-native/offline/report.json
             ${{ runner.temp }}/desktop-native/offline/offline-preview.png
             ${{ runner.temp }}/desktop-native/update/report.json
+            ${{ runner.temp }}/desktop-native/insights/
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4

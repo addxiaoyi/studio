@@ -28,7 +28,7 @@ extraResources:
     to: icon.png
   - from: resources
     to: .
-    filter: [startup.html, startup.css, startup.js, setup.html, setup.css, setup.js, snapshots.html, snapshots.css, snapshots.js]
+    filter: [startup.html, startup.css, startup.js, setup.html, setup.css, setup.js, snapshots.html, snapshots.css, snapshots.js, thumbnail.html, thumbnail.js, snapshot-media.js, snapshot-storage.js]
   - from: node_modules/react/LICENSE
     to: licenses/react.txt
   - from: node_modules/react-dom/LICENSE

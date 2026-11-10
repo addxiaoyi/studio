@@ -6,7 +6,7 @@ export type WorkspaceReceipt = LocalReceipt & { relativePath?: string; restoreEp
 export function workspaceReceiptPath(root: string, kind: "Media" | "Projects", account: string, receipt: WorkspaceReceipt | undefined): string | null {
   if (!receipt || typeof receipt.path !== "string") return null;
   const segments = (receipt.relativePath ?? receipt.path.replaceAll("\\", "/").split("/").slice(-3).join("/")).split("/");
-  if (segments.length !== 3 || segments[0] !== kind || segments[1] !== account || !segments[2] || /[\\/:\x00-\x1f]/.test(segments[2]) || [".", ".."].includes(segments[2])) return null;
+  if (segments.length < 3 || segments.length > 20 || kind === "Projects" && segments.length !== 3 || segments[0] !== kind || segments[1] !== account || segments.slice(2).some(segment => !segment || /[\\/:\x00-\x1f]/.test(segment) || [".", ".."].includes(segment))) return null;
   return join(root, ...segments);
 }
 export function recordWorkspaceReceipt(root: string, receipt: LocalReceipt): WorkspaceReceipt {

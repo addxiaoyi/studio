@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { desktopStorageError, type DesktopStorageApi } from "@/lib/desktop-storage";
+import { DesktopMediaCard } from "./desktop-media-card";
 
 export function DesktopSnapshotMedia({ api, snapshotId, accountId, media }: { api: DesktopStorageApi; snapshotId: string; accountId: string; media: Array<{ assetId: string; name: string }> }) {
   const [selected, setSelected] = useState<{ name: string; mime: string; bytes: number; url: string } | null>(null);
@@ -17,7 +18,8 @@ export function DesktopSnapshotMedia({ api, snapshotId, accountId, media }: { ap
   return <section aria-label="本地素材预览" className="space-y-3 border-t pt-3">
     <h3 className="text-sm font-medium">图片与视频原文件</h3>
     <p className="text-xs text-muted-foreground">点击后在本机校验并预览，不上传素材。视频支持拖动播放进度。</p>
-    <div className="flex flex-wrap gap-2">{media.slice(0, limit).map(item => <button key={item.assetId} type="button" disabled={busy} className="desktop-settings__command" onClick={() => void preview(item.assetId)}>{item.name}</button>)}{media.length > limit && <button type="button" className="desktop-settings__command" onClick={() => setLimit(value => value + 20)}>显示更多素材</button>}</div>
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{media.slice(0, limit).map(item => <DesktopMediaCard key={item.assetId} api={api} snapshotId={snapshotId} accountId={accountId} item={item} disabled={busy} onPreview={assetId => void preview(assetId)}/>)}</div>
+    {media.length > limit && <button type="button" className="desktop-settings__command" onClick={() => setLimit(value => value + 20)}>显示更多素材</button>}
     {busy && <p role="status" className="text-sm">正在校验本地原文件…</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {selected && <figure className="space-y-2"><figcaption className="break-all text-xs text-muted-foreground">{selected.name} · {(selected.bytes / 1024 ** 2).toFixed(1)} MiB</figcaption>

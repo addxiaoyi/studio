@@ -3,6 +3,9 @@ export type LocalProjectStorage = { id: string; name: string; snapshots: number;
 export type LocalCleanupPlan = { id: string; name: string; projectId: string; snapshots: number; mediaFiles: number; sharedMedia: number; canceledTasks?: number; bytes: number; files: string[] };
 export type CloudCopy = { assetId: string; name: string; bytes: number; cloudState: "unknown" | "released" | "pending" };
 export type CloudReleasePlan = { id: string; name: string; assetId: string; bytes: number; filename: string };
+export type RelinkPlan = { id: string; assetId: string; filename: string; bytes: number; willCopy: boolean };
+export type ThumbnailUsage = { bytes: number; files: number; workspaceBytes: number; limitBytes: number; limitFiles: number; retentionDays: number };
+export type WorkspaceUsageReport = { categories: Array<{ id: string; bytes: number; files: number }>; totalBytes: number; totalFiles: number; duplicates: Array<{ bytes: number; extraBytes: number; files: Array<{ id: string; name: string; relativePath: string; bytes: number }> }>; duplicateGroups: number; duplicateBytes: number; hashedBytes: number; truncated: boolean; warnings: string[]; scannedAt: string };
 export type CloudBackupState = {
   status: "idle" | "running" | "completed" | "partial" | "canceled" | "failed";
   completed: number; skipped: number; failed: number; current: string; bytes: number; totalBytes: number | null;
@@ -18,6 +21,14 @@ export type RestoreTaskList = { tasks: Array<{ id: string; name: string; status:
 export type SnapshotList = { snapshots: LocalSnapshot[]; unreadable: number; truncated: boolean };
 export type RestoreProgress = { phase: "uploading" | "restoring" | "completed" | "paused" | "failed"; name: string; bytes: number; totalBytes: number; resumedBytes: number; bytesPerSecond: number; remainingSeconds: number | null };
 export type DesktopStorageApi = {
+  getSnapshotThumbnail?: (id: string, accountId: string, assetId: string) => Promise<{ url: string; bytes: number; cached: boolean }>;
+  getThumbnailUsage?: (accountId: string) => Promise<ThumbnailUsage>;
+  clearThumbnailCache?: (accountId: string) => Promise<{ bytes: number; files: number }>;
+  getWorkspaceUsage?: (accountId: string, duplicates: boolean) => Promise<WorkspaceUsageReport>;
+  cancelWorkspaceScan?: () => Promise<void>;
+  revealWorkspaceFile?: (id: string) => Promise<void>;
+  chooseRelinkMedia?: (accountId: string, assetId: string) => Promise<RelinkPlan | null>;
+  applyMediaRelink?: (id: string) => Promise<{ filename: string; copied: boolean; bytes: number }>;
   previewSnapshotMedia?: (id: string, accountId: string, assetId: string) => Promise<{ name: string; mime: string; bytes: number; url: string }>;
   getLocalProjects?: (accountId: string) => Promise<LocalProjectStorage[]>;
   previewLocalCleanup?: (accountId: string, projectId: string) => Promise<LocalCleanupPlan>;

@@ -13,7 +13,7 @@ function renderList() {
   el("status").textContent = `${filtered.length} 份本地快照 · 预览不会联网或上传素材`;
 }
 async function refresh() {
-  el("error").hidden = true; el("status").textContent = "正在读取本地文件…"; el("preview").hidden = true; previewRevision++; el("media-preview").replaceChildren();
+  el("error").hidden = true; el("status").textContent = "正在读取本地文件…"; el("preview").hidden = true; previewRevision++; window.stopSnapshotMedia?.(); el("media-preview").replaceChildren();
   try {
     if (!el("account").value) { snapshots = []; renderList(); return; }
     const list = await api.listLocalSnapshots({ accountId: el("account").value, accessToken: "" }); snapshots = list.snapshots; renderList();
@@ -40,28 +40,10 @@ el("folder").addEventListener("click", () => api.openDesktopWorkspaceFolder().ca
 api.getLocalSnapshotAccounts().then(accounts => { for (const account of accounts) { const option = document.createElement("option"); option.value = account; option.textContent = `本地账户 ${account.slice(0, 8)}`; el("account").append(option); } return refresh(); }).catch(message);
 
 function renderMedia(media) {
-  previewRevision++; el("media-list").replaceChildren(); el("media-preview").replaceChildren();
-  const revision = previewRevision;
-  for (const item of media) {
-    const button = document.createElement("button"); button.textContent = `预览 ${item.name}`;
-    button.addEventListener("click", async () => {
-      button.disabled = true; el("media-preview").textContent = "正在校验本地原文件…";
-      try {
-        const file = await api.previewSnapshotMedia(selected.id, el("account").value, item.assetId);
-        if (revision !== previewRevision) return;
-        const title = document.createElement("p"); title.textContent = file.name;
-        const player = document.createElement(file.mime.startsWith("image/") ? "img" : file.mime.startsWith("video/") ? "video" : "audio");
-        if (player.tagName === "IMG") player.alt = file.name;
-        else { player.controls = true; player.preload = "metadata"; player.setAttribute("aria-label", file.name); }
-        player.addEventListener("error", () => { el("media-preview").textContent = "本地预览已失效或格式暂不支持，请重新打开素材。原文件保留。"; });
-        player.src = file.url; el("media-preview").replaceChildren(title, player);
-      } catch (error) { if (revision === previewRevision) el("media-preview").textContent = error.message.replace(/^Error invoking remote method '[^']+': Error: /, ""); }
-      finally { button.disabled = false; }
-    });
-    el("media-list").append(button);
-  }
-  if (!media.length) el("media-list").textContent = "这份快照没有本地媒体引用。";
+  previewRevision++;
+  window.showSnapshotMedia(media, { id: selected.id, account: el("account").value });
 }
+
 async function refreshDisk() {
   try {
     const disk = await api.getDesktopSetup();

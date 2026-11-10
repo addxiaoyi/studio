@@ -92,6 +92,10 @@ import { SnapshotCatalog } from "./snapshot-catalog.js";
 import { LocalMedia } from "./local-media.js";
 import { WorkspaceCleanup } from "./workspace-cleanup.js";
 import { CloudCopies } from "./cloud-copies.js";
+import { ThumbnailCache } from "./thumbnail-cache.js";
+import { renderLocalThumbnail } from "./thumbnail-renderer.js";
+import { MediaRelink } from "./media-relink.js";
+import { WorkspaceUsage } from "./workspace-usage.js";
 import {
   decideMainWindowNavigation,
   observeMainWindowLifecycle,
@@ -120,7 +124,10 @@ const cloudCopies = new CloudCopies({ setup: desktopSetup, identity: input => pr
   return mainWindow.webContents.session.fetch(String(url), options);
 } });
 protocol.registerSchemesAsPrivileged([{ scheme: "helstera-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }]);
-const storageMaintenanceBusy = () => workspaceCleanup.busy || cloudCopies.busy;
+const thumbnails = new ThumbnailCache(source => renderLocalThumbnail(source, localMedia, desktopResource("thumbnail.html")));
+const mediaRelink = new MediaRelink(desktopSetup);
+const workspaceUsage = new WorkspaceUsage(desktopSetup);
+const storageMaintenanceBusy = () => workspaceCleanup.busy || cloudCopies.busy || mediaRelink.busy || workspaceUsage.busy;
 function requireStorageIdle() {
   if (cloudBackup.busy || projectRestore.busy || storageMaintenanceBusy()) throw new Error("请先完成或暂停当前保存、恢复或清理任务。");
 }
@@ -850,6 +857,23 @@ ipcMain.handle("desktop.snapshot-media", async (event, id: unknown, account: unk
   const media = await snapshotCatalog.media(id, account, asset);
   return { name: media.name, mime: media.mime, bytes: media.bytes, url: await localMedia.grant(media.root, media.path, media.mime) };
 });
+ipcMain.handle("desktop.snapshot-thumbnail", async (event, id: unknown, account: unknown, asset: unknown) => {
+  requireStorageWindow(event);
+  const source = await snapshotCatalog.media(id, account, asset);
+  const thumbnail = await thumbnails.get({ ...source, account: String(account) });
+  return { url: await localMedia.grant(source.root, thumbnail.path, "image/jpeg"), bytes: thumbnail.bytes, cached: thumbnail.cached };
+});
+ipcMain.handle("desktop.thumbnail-usage", async (event, account: string) => { requireStorageWindow(event); const state = await desktopSetup.status(); if (!state.available || !state.root) throw new Error("工作区不可用。"); return thumbnails.usage(state.root, account); });
+ipcMain.handle("desktop.thumbnail-clear", async (event, account: string) => { requireStorageWindow(event); requireStorageIdle(); const state = await desktopSetup.status(); if (!state.available || !state.root) throw new Error("工作区不可用。"); return thumbnails.clear(state.root, account); });
+ipcMain.handle("desktop.workspace-usage", (event, account: unknown, duplicates: unknown) => { requireStorageWindow(event); requireStorageIdle(); return workspaceUsage.scan(account, duplicates); });
+ipcMain.handle("desktop.workspace-scan-cancel", event => { requireStorageWindow(event); workspaceUsage.cancel(); });
+ipcMain.handle("desktop.workspace-reveal", async (event, id: unknown) => { requireStorageWindow(event); shell.showItemInFolder(await workspaceUsage.reveal(id)); });
+ipcMain.handle("desktop.media-relink-choose", async (event, account: unknown, asset: unknown) => {
+  const window = requireStorageWindow(event); requireStorageIdle();
+  const chosen = await dialog.showOpenDialog(window, { title: "选择改名或移动后的原素材", properties: ["openFile"], filters: [{ name: "媒体原文件", extensions: ["png", "jpg", "jpeg", "webp", "gif", "avif", "mp4", "webm", "mov", "mp3", "wav", "ogg"] }] });
+  return chosen.canceled || !chosen.filePaths[0] ? null : mediaRelink.prepare(account, asset, chosen.filePaths[0]);
+});
+ipcMain.handle("desktop.media-relink-apply", (event, id: unknown) => { requireStorageWindow(event); requireStorageIdle(); localMedia.revoke(); return mediaRelink.apply(id); });
 ipcMain.handle("desktop.local-projects", (event, account: unknown) => { requireStorageWindow(event); requireStorageIdle(); return workspaceCleanup.projects(account); });
 ipcMain.handle("desktop.cleanup-preview", (event, account: unknown, project: unknown) => { requireStorageWindow(event); requireStorageIdle(); return workspaceCleanup.prepare(account, project); });
 ipcMain.handle("desktop.cleanup-apply", (event, id: unknown) => { requireStorageWindow(event); requireStorageIdle(); localMedia.revoke(); return workspaceCleanup.apply(id); });

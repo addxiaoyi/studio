@@ -75,7 +75,7 @@ export class SnapshotCatalog {
     if (!receipt) throw new Error("本地原文件缺失或校验失败。请连接原磁盘，或联网重新保存素材。");
     const mime = ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif", ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg" } as Record<string, string>)[extname(receipt.path).toLowerCase()];
     if (!mime) throw new Error("此文件格式暂不能在离线预览中播放，请在工作区查看原文件。");
-    return { root, path: receipt.path, mime, name: basename(receipt.path), bytes: receipt.bytes };
+    return { root, path: receipt.path, mime, name: basename(receipt.path), bytes: receipt.bytes, sha256: receipt.sha256 };
   }
   async resolve(id: unknown, accountId: unknown): Promise<string> {
     const file = typeof id === "string" ? this.files.get(id) : undefined;

@@ -9,17 +9,18 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { rec
 it("resumes a real interrupted HTTP transfer after restart and verifies the final bytes", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "helstera-resume-"))); roots.push(root);
   const bytes = Buffer.alloc(1024 * 256, 7), ranges: string[] = []; let first = true;
+  let disconnect: (() => void) | undefined;
   const server = createServer((req, res) => {
     const offset = Number(req.headers.range?.match(/bytes=(\d+)-/)?.[1] ?? 0); ranges.push(req.headers.range ?? "full");
     if (offset) expect(req.headers["if-range"]).toBe('"v1"');
     res.writeHead(offset ? 206 : 200, { "content-type": "video/webm", "content-length": bytes.length - offset, etag: '"v1"', ...(offset ? { "content-range": `bytes ${offset}-${bytes.length - 1}/${bytes.length}` } : {}) });
-    if (first) { first = false; res.write(bytes.subarray(0, 65536)); setTimeout(() => res.destroy(), 30); }
+    if (first) { first = false; disconnect = () => res.destroy(); res.write(bytes.subarray(0, 65536)); }
     else res.end(bytes.subarray(offset));
   });
   await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
   try {
     const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-    const options = { directory: root, key: "account:video", name: "录像", mediaType: "video" as const, signal: new AbortController().signal, request: (headers: Record<string, string>) => fetch(url, { headers }) };
+    const options = { directory: root, key: "account:video", name: "录像", mediaType: "video" as const, signal: new AbortController().signal, request: (headers: Record<string, string>) => fetch(url, { headers }), onProgress: (progress: { bytes: number }) => { if (progress.bytes >= 65536 && disconnect) { const close = disconnect; disconnect = undefined; close(); } } };
     await expect(resumeDownload(options)).rejects.toThrow();
     expect((await readdir(root)).filter(name => !name.startsWith("."))).toEqual([]);
     const receipt = await resumeDownload(options);

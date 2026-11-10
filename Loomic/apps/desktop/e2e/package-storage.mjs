@@ -9,8 +9,8 @@ const output = realpathSync(root), release = resolve("apps/desktop/release");
 let executable, mount;
 try {
   if (process.platform === "darwin") {
-    const dmg = readdirSync(release).find(name => name.endsWith("arm64.dmg"));
-    if (!dmg) throw new Error("Built arm64 DMG is missing.");
+    const dmg = readdirSync(release).find(name => name.endsWith(`${process.arch}.dmg`));
+    if (!dmg) throw new Error(`Built ${process.arch} DMG is missing.`);
     mount = join(output, "mounted"); mkdirSync(mount);
     execFileSync("hdiutil", ["attach", "-nobrowse", "-readonly", "-mountpoint", mount, join(release, dmg)], { stdio: "inherit" });
     const bundles = readdirSync(mount).filter(name => name.endsWith(".app"));
@@ -39,6 +39,8 @@ try {
   if (test.status !== 0) throw new Error(`Native package storage test failed (${test.status}).`);
   const offline = spawnSync(process.execPath, ["apps/desktop/e2e/offline-migration.mjs"], { env: { ...env, HELT_OFFLINE_TEST_DIR: join(output, "offline") }, stdio: "inherit" });
   if (offline.status !== 0) throw new Error(`Offline workspace migration test failed (${offline.status}).`);
+  const insights = spawnSync(process.execPath, ["apps/desktop/e2e/storage-insights.mjs"], { env: { ...env, HELT_INSIGHTS_TEST_DIR: join(output, "insights") }, stdio: "inherit" });
+  if (insights.status !== 0) throw new Error(`Storage insights test failed (${insights.status}).`);
   if (process.env.HELT_VERIFY_PUBLIC_UPDATE === "1") {
     const appImage = process.platform === "linux" ? join(release, readdirSync(release).find(name => name.endsWith(".AppImage"))) : undefined;
     const update = spawnSync(process.execPath, ["apps/desktop/e2e/update-channel.mjs"], { env: { ...env, HELT_UPDATE_TEST_DIR: join(output, "update"), ...(appImage ? { APPIMAGE: appImage } : {}) }, stdio: "inherit" });
