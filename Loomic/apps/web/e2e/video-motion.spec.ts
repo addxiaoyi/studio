@@ -61,7 +61,7 @@ test("GSAP frames, transition blending and export survive refresh and per-action
   expect((await snapshot()).layers.some((layer:{motion?:unknown[]})=>layer.motion?.length)).toBe(true);
   await send("导出视频");const dialog=page.locator("dialog[open]");await expect(dialog).toBeVisible();
   await dialog.getByRole("button",{name:"视频",exact:true}).click();await dialog.getByRole("button",{name:"容器",exact:true}).click();await dialog.getByText("WebM",{exact:true}).click();
-  const download=desktop?null:page.waitForEvent("download",{timeout:90000});await dialog.getByRole("button",{name:/渲染.*视频/}).click();
+  const download=desktop?null:page.waitForEvent("download",{timeout:90000});await dialog.getByRole("button",{name:/导出.*视频/}).click();
   const output=info.outputPath("motion-transition.webm");
   if(desktop){await expect.poll(async()=>{try{return (await stat(join(folder,"MyComp.webm"))).size;}catch{return 0;}},{timeout:90000}).toBeGreaterThan(1000);await copyFile(join(folder,"MyComp.webm"),output);}
   else await(await download!).saveAs(output);

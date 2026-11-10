@@ -45,7 +45,7 @@ test("one menu guides a confirmed edit through playable export and undo", async 
   await dialog.getByRole("button", { name: "容器", exact: true }).click();
   await dialog.getByText("WebM", { exact: true }).click();
   const downloaded = page.waitForEvent("download", { timeout: 90_000 });
-  await dialog.getByRole("button", { name: /渲染.*视频/ }).click();
+  await dialog.getByRole("button", { name: /导出.*视频/ }).click();
   const file = info.outputPath("creator-flow.webm");await (await downloaded).saveAs(file);
   expect((await readFile(file)).length).toBeGreaterThan(1000);
   const ffmpeg = process.platform === "win32" ? resolve("../desktop/resources/ffmpeg/win-x64/ffmpeg.exe") : "ffmpeg";

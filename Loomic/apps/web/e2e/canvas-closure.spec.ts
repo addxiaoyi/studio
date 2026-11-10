@@ -275,7 +275,7 @@ test("imports library IDs once, recovers failures, previews a real timeline and 
           ),
         output,
       );
-      await exportDialog.getByRole("button", { name: /渲染.*视频/ }).click();
+      await exportDialog.getByRole("button", { name: /导出.*视频/ }).click();
       await expect
         .poll(
           async () => {
@@ -291,7 +291,7 @@ test("imports library IDs once, recovers failures, previews a real timeline and 
         .toBeGreaterThan(1000);
     } else {
       const downloading = page.waitForEvent("download", { timeout: 90000 });
-      await exportDialog.getByRole("button", { name: /渲染.*视频/ }).click();
+      await exportDialog.getByRole("button", { name: /导出.*视频/ }).click();
       await (await downloading).saveAs(output);
     }
     expect((await readFile(output)).length).toBeGreaterThan(1000);

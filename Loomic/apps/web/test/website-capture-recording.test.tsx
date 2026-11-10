@@ -33,14 +33,16 @@ describe("website recording in chat", () => {
     expect(view.container.querySelector("script")).toBeNull();
   });
   it("renders a saved video export using authenticated asset access", async () => {
-    const fetchVideo = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "video/mp4" } }));
+    const assetId = "123e4567-e89b-42d3-a456-426614174000";
+    const fetchVideo = vi.fn().mockResolvedValue(Response.json({ok:true,data:{path:`/api/uploads/${assetId}/file`,mimeType:"video/mp4",byteSize:3,expiresAt:null,grantSeconds:300}}));
     const NativeURL = globalThis.URL;
     vi.stubGlobal("fetch", fetchVideo);
     vi.stubGlobal("URL", Object.assign(class extends NativeURL {}, { createObjectURL: vi.fn(() => "blob:export"), revokeObjectURL: vi.fn() }));
-    const assetId = "123e4567-e89b-42d3-a456-426614174000";
     render(<ToolBlockView block={{ type: "tool", toolCallId: "export-1", toolName: "video_export", status: "completed", output: { assetId } }} />);
-    expect(await screen.findByLabelText("视频成片")).toHaveAttribute("src", "blob:export");
-    expect(fetchVideo).toHaveBeenCalledWith(expect.stringContaining(`/api/uploads/${assetId}/file`), expect.objectContaining({ headers: { Authorization: "Bearer token" }, redirect: "error" }));
+    expect(await screen.findByLabelText("视频成片")).toHaveAttribute("src", expect.stringContaining(`/api/uploads/${assetId}/file`));
+    expect(screen.getByLabelText("视频成片")).toHaveAttribute("crossorigin","use-credentials");
+    expect(fetchVideo).toHaveBeenCalledWith(expect.stringContaining(`/api/uploads/${assetId}/playback`), expect.objectContaining({method:"POST",credentials:"include",headers:{Authorization:"Bearer token"},redirect:"error"}));
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
   it("restores the video after remount without depending on the pending actions endpoint", async () => {
     api.fetchWebsiteCapture.mockResolvedValue({

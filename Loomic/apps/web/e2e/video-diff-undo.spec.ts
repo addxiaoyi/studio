@@ -11,7 +11,7 @@ if (existsSync(resolve("../../.env.local"))) loadEnvFile(resolve("../../.env.loc
 const realModel = process.env.HELT_TEST_REAL_MODEL === "1";
 let fixture: Awaited<ReturnType<typeof createEditorBrowserFixture>>;
 let folder: string;
-const ffmpeg = process.platform === "win32" ? resolve("../desktop/resources/ffmpeg/win-x64/ffmpeg.exe") : "ffmpeg";
+const ffmpeg = process.env.HELSTERA_FFMPEG ?? (process.platform === "win32" ? resolve("../desktop/resources/ffmpeg/win-x64/ffmpeg.exe") : "ffmpeg");
 
 test.beforeAll(async () => {
   const plan = { summary: "剪辑两段视频并添加字幕和音乐", actions: [
@@ -81,7 +81,7 @@ test("complex plan previews the timeline, persists individual undo, and exports 
   const exportDialog=page.locator('dialog[open]');await expect(exportDialog).toBeVisible();
   await exportDialog.getByRole("button",{name:"视频",exact:true}).click();
   await exportDialog.getByRole("button",{name:"容器",exact:true}).click();await exportDialog.getByText("WebM",{exact:true}).click();
-  const downloading=page.waitForEvent("download",{timeout:90000});await exportDialog.getByRole("button",{name:/渲染.*视频/}).click();
+  const downloading=page.waitForEvent("download",{timeout:90000});await exportDialog.getByRole("button",{name:/导出.*视频/}).click();
   const videoFile=info.outputPath("partial-undo.webm");await (await downloading).saveAs(videoFile);
   expect((await readFile(videoFile)).length).toBeGreaterThan(1000);
   execFileSync(ffmpeg,["-v","error","-xerror","-i",videoFile,"-f","null","-"],{timeout:30000});

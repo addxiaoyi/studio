@@ -59,7 +59,7 @@ test("editor, export and transcript controls remain keyboard reachable at high D
       await dialog.getByText("WebM", { exact: true }).click();
       await page.keyboard.press("Tab");
       expect(await dialog.evaluate(el => el.contains(document.activeElement))).toBe(true);
-      const exportButton = dialog.getByRole("button", { name: /渲染.*视频/ });
+      const exportButton = dialog.getByRole("button", { name: /导出.*视频/ });
       await exportButton.scrollIntoViewIfNeeded();
       const box = await exportButton.boundingBox();
       expect(box && box.x >= 0 && box.x + box.width <= width + 1 && box.y + box.height <= 481).toBe(true);

@@ -45,7 +45,7 @@ test("exports mixed-frame-rate footage with audio and captions after cancellatio
       await modal.getByRole("button", { name: "视频", exact: true }).click();
       await modal.getByRole("button", { name: "容器", exact: true }).click();
       await modal.getByText("WebM", { exact: true }).click();
-      await modal.getByRole("button", { name: /渲染.*视频/ }).click();
+      await modal.getByRole("button", { name: /导出.*视频/ }).click();
     };
     await openExport();
     const cancel = page.getByRole("button", { name: "取消导出", exact: true });
