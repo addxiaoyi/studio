@@ -51,6 +51,14 @@ describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("local snapshot restoration
       expect((await send({ snapshot: interrupted })).statusCode).toBe(500);
       expect((await db.query("select count(*)::int as count from projects")).rows[0].count).toBe(2);
       expect((await db.query("select count(*)::int as count from canvases")).rows[0].count).toBe(2);
+      await db.query("drop trigger fail_restore on chat_messages");
+      const replacement = randomUUID();
+      await db.query("insert into asset_objects(id,workspace_id,created_by,bucket,object_path,mime_type) values($1,$2,$3,'private-video','restored-again.webm','video/webm')", [replacement, workspaceId, userId]);
+      const repaired = await send({ snapshot: missing, replacements: { [original]: replacement } });
+      expect(repaired.statusCode).toBe(200);
+      expect(repaired.json().data.canvasId).not.toBe(replaced.json().data.canvasId);
+      expect(JSON.stringify((await db.query("select content from canvases where id=$1", [repaired.json().data.canvasId])).rows[0].content)).toContain(replacement);
+      expect((await send({ snapshot: missing, replacements: { [original]: replacement } })).json().data.canvasId).toBe(repaired.json().data.canvasId);
     } finally { await app.close(); await db.end(); await admin.query(`drop schema ${schema} cascade`); await admin.end(); }
   });
 });

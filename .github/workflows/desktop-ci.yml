@@ -170,5 +170,7 @@ jobs:
             Loomic/apps/desktop/release/*.exe
             Loomic/apps/desktop/release/*.dmg
             Loomic/apps/desktop/release/*.AppImage
+            Loomic/apps/desktop/release/*.yml
+            Loomic/apps/desktop/release/*.blockmap
           if-no-files-found: error
           retention-days: 7

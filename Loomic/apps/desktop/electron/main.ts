@@ -52,6 +52,7 @@ import {
   globalShortcut,
   ipcMain,
   nativeImage,
+  protocol,
   safeStorage,
   screen,
   shell,
@@ -74,6 +75,7 @@ import { DesktopActionReceipts } from "./desktop-action-receipts.js";
 import { assistantReconnectDelay, interruptedApprovalRequiresReview, nativeResumeIsReadOnly, readCurrentEvidence, shouldReconnectAssistant, verifyNativeResumeAction } from "./assistant-reconnect.js";
 import { checkDesktopUpdate, installDesktopUpdate } from "./update-actions.js";
 import { getDesktopUpdatePolicy } from "./update-policy.js";
+import { checkManualUpdate } from "./manual-update.js";
 import { assertVideoTools, resolveFfmpegPath, runFfmpeg } from "./media-renderer.js";
 import { createVideoExportHandler } from "./video-export-handler.js";
 import { renderVideoCaptions } from "./video-caption-images.js";
@@ -87,6 +89,9 @@ import { DesktopSetup } from "./desktop-setup.js";
 import { CloudBackup } from "./cloud-backup.js";
 import { ProjectRestore } from "./project-restore.js";
 import { SnapshotCatalog } from "./snapshot-catalog.js";
+import { LocalMedia } from "./local-media.js";
+import { WorkspaceCleanup } from "./workspace-cleanup.js";
+import { CloudCopies } from "./cloud-copies.js";
 import {
   decideMainWindowNavigation,
   observeMainWindowLifecycle,
@@ -108,6 +113,24 @@ const projectRestore = new ProjectRestore({ setup: desktopSetup, origin: desktop
   return mainWindow.webContents.session.fetch(String(url), options);
 }, changed: state => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:restore-state", state); } });
 const snapshotCatalog = new SnapshotCatalog(desktopSetup);
+const localMedia = new LocalMedia(async () => (await desktopSetup.status()).root);
+const workspaceCleanup = new WorkspaceCleanup(desktopSetup);
+const cloudCopies = new CloudCopies({ setup: desktopSetup, identity: input => projectRestore.account(input), origin: desktopWebsiteUrl, request: (url, options) => {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error("主窗口已关闭。");
+  return mainWindow.webContents.session.fetch(String(url), options);
+} });
+protocol.registerSchemesAsPrivileged([{ scheme: "helstera-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }]);
+const storageMaintenanceBusy = () => workspaceCleanup.busy || cloudCopies.busy;
+function requireStorageIdle() {
+  if (cloudBackup.busy || projectRestore.busy || storageMaintenanceBusy()) throw new Error("请先完成或暂停当前保存、恢复或清理任务。");
+}
+function requireStorageWindow(event: Electron.IpcMainInvokeEvent) {
+  const window = requireMainWindow(event), frame = event.senderFrame;
+  if (!frame || frame !== window.webContents.mainFrame) throw new Error("请在主工作区操作。");
+  const url = new URL(frame.url);
+  if (url.protocol !== "file:" && url.origin !== new URL(desktopWebsiteUrl()).origin) throw new Error("当前页面不能管理本地文件。");
+  return window;
+}
 
 let mainWindow: BrowserWindow | null = null;
 let mainWindowReady = false;
@@ -185,7 +208,8 @@ type UpdateState = {
   version?: string;
   percent?: number;
   message?: string;
-  reason?: "portable build requires manual update";
+  reason?: "portable build requires manual update" | "manual install required";
+  downloadUrl?: string;
 };
 type UpdateStateInput = Omit<UpdateState, "currentVersion">;
 let updateState: UpdateState = {
@@ -483,6 +507,7 @@ function focusMainWindow() {
 
 function activeWorkReason(): string | undefined {
   if (projectRestore.busy) return "正在恢复本地工程";
+  if (storageMaintenanceBusy()) return "本地清理或云端副本释放仍在进行";
   if (cloudBackup.busy) return "正在保存云端数据到本地";
   if (workspaceRuns.size > 0) return "本地项目脚本正在运行";
   if (recorderLock.busy) return "正在录制屏幕或网站";
@@ -558,7 +583,8 @@ async function checkForDesktopUpdate() {
   updateCheckActive = true;
   publishUpdateState({ status: "checking" });
   try {
-    await checkDesktopUpdate(policy, updateState, () => autoUpdater.checkForUpdates(), false);
+    if (policy.reason === "manual install required") publishUpdateState(await checkManualUpdate(app.getVersion(), process.arch));
+    else await checkDesktopUpdate(policy, updateState, () => autoUpdater.checkForUpdates(), false);
   } catch (error) {
     publishUpdateState({
       status: "error",
@@ -575,6 +601,7 @@ function desktopUpdatePolicy() {
     isPackaged: app.isPackaged,
     isPortable: Boolean(process.env.PORTABLE_EXECUTABLE_FILE),
     platform: process.platform,
+    manualInstall: process.platform === "darwin",
   });
 }
 
@@ -592,6 +619,12 @@ function configureAutoUpdates() {
   }
   // electron-updater's default logger writes to a parent console pipe that can
   // close while the desktop app stays open; an EPIPE there must not crash main.
+  if (policy.reason === "manual install required") {
+    publishUpdateState({ status: "not-available", reason: policy.reason, message: "macOS 使用 DMG 手动更新，替换应用时保留工作区与设置。" });
+    setTimeout(() => void checkForDesktopUpdate(), 8_000);
+    updateTimer = setInterval(() => void checkForDesktopUpdate(), 6 * 60 * 60 * 1000);
+    return;
+  }
   autoUpdater.logger = {
     info: () => undefined,
     warn: () => undefined,
@@ -763,13 +796,14 @@ async function restoreConfiguredWorkspace() {
 ipcMain.handle("desktop.setup-state", (event) => { requireMainWindow(event); return desktopSetup.status(); });
 ipcMain.handle("desktop.setup-choose", async (event) => {
   const window = requireMainWindow(event);
-  if (cloudBackup.busy || projectRestore.busy) throw new Error("请先暂停本地保存或恢复任务。");
+  requireStorageIdle();
   const chosen = await dialog.showOpenDialog(window, { title: "选择 Helstera 本地工作区", properties: ["openDirectory", "createDirectory"] });
   return chosen.canceled || !chosen.filePaths[0] ? null : desktopSetup.choose(chosen.filePaths[0]);
 });
 ipcMain.handle("desktop.setup-complete", async (event, input: unknown) => {
   requireMainWindow(event);
-  if (cloudBackup.busy || projectRestore.busy) throw new Error("请先暂停本地保存或恢复任务。");
+  requireStorageIdle();
+  localMedia.revoke();
   const state = await desktopSetup.complete(input);
   for (const controller of desktopMcpCalls.values()) controller.abort();
   desktopMcpCalls.clear();
@@ -790,19 +824,19 @@ ipcMain.handle("desktop.setup-enter", async (event) => {
   await workspaceLoader?.open(new URL("/desktop-app/", desktopWebsiteUrl()).toString());
 });
 ipcMain.handle("desktop.backup-state", (event, accountId: unknown) => { requireMainWindow(event); return cloudBackup.restore(accountId); });
-ipcMain.handle("desktop.backup-run", (event, input: unknown) => { requireMainWindow(event); if (projectRestore.busy) throw new Error("工程恢复中，请稍后保存。"); return cloudBackup.run(input); });
-ipcMain.handle("desktop.backup-asset", (event, input: unknown, asset: unknown) => { requireMainWindow(event); if (projectRestore.busy) throw new Error("工程恢复中，请稍后保存。"); return cloudBackup.run(input, asset); });
+ipcMain.handle("desktop.backup-run", (event, input: unknown) => { requireMainWindow(event); if (projectRestore.busy || storageMaintenanceBusy()) throw new Error("请先完成恢复或清理任务。"); return cloudBackup.run(input); });
+ipcMain.handle("desktop.backup-asset", (event, input: unknown, asset: unknown) => { requireMainWindow(event); if (projectRestore.busy || storageMaintenanceBusy()) throw new Error("请先完成恢复或清理任务。"); return cloudBackup.run(input, asset); });
 ipcMain.handle("desktop.backup-cancel", (event) => { requireMainWindow(event); cloudBackup.cancel(); });
 ipcMain.handle("desktop.restore-inspect", async (event, credentials: unknown) => {
   const window = requireMainWindow(event);
-  if (cloudBackup.busy || projectRestore.busy) throw new Error("请先完成或暂停当前保存任务。");
+  requireStorageIdle();
   const setup = await desktopSetup.status();
   const chosen = await dialog.showOpenDialog(window, { title: "选择本地工程快照", defaultPath: setup.root ? join(setup.root, "Projects") : undefined, properties: ["openFile"], filters: [{ name: "Helstera 工程快照", extensions: ["json"] }] });
   return chosen.canceled || !chosen.filePaths[0] ? null : projectRestore.inspect(chosen.filePaths[0], credentials);
 });
 ipcMain.handle("desktop.restore-apply", async (event, id: unknown, credentials: unknown) => {
   requireMainWindow(event);
-  if (cloudBackup.busy) throw new Error("请先暂停本地保存任务。");
+  if (cloudBackup.busy || storageMaintenanceBusy()) throw new Error("请先完成保存或清理任务。");
   return projectRestore.apply(id, credentials);
 });
 ipcMain.handle("desktop.snapshot-list", async (event, credentials: unknown) => {
@@ -811,6 +845,17 @@ ipcMain.handle("desktop.snapshot-list", async (event, credentials: unknown) => {
   return snapshotCatalog.list((credentials as { accountId?: unknown } | null)?.accountId);
 });
 ipcMain.handle("desktop.snapshot-overview", (event, id: unknown, account: unknown, baseline: unknown) => { requireMainWindow(event); return snapshotCatalog.overview(id, account, baseline); });
+ipcMain.handle("desktop.snapshot-media", async (event, id: unknown, account: unknown, asset: unknown) => {
+  requireStorageWindow(event);
+  const media = await snapshotCatalog.media(id, account, asset);
+  return { name: media.name, mime: media.mime, bytes: media.bytes, url: await localMedia.grant(media.root, media.path, media.mime) };
+});
+ipcMain.handle("desktop.local-projects", (event, account: unknown) => { requireStorageWindow(event); requireStorageIdle(); return workspaceCleanup.projects(account); });
+ipcMain.handle("desktop.cleanup-preview", (event, account: unknown, project: unknown) => { requireStorageWindow(event); requireStorageIdle(); return workspaceCleanup.prepare(account, project); });
+ipcMain.handle("desktop.cleanup-apply", (event, id: unknown) => { requireStorageWindow(event); requireStorageIdle(); localMedia.revoke(); return workspaceCleanup.apply(id); });
+ipcMain.handle("desktop.cloud-copies", (event, credentials: unknown) => { requireStorageWindow(event); requireStorageIdle(); return cloudCopies.list(credentials); });
+ipcMain.handle("desktop.cloud-release-preview", (event, id: unknown, credentials: unknown) => { requireStorageWindow(event); requireStorageIdle(); return cloudCopies.prepare(id, credentials); });
+ipcMain.handle("desktop.cloud-release-apply", (event, id: unknown, credentials: unknown) => { requireStorageWindow(event); requireStorageIdle(); return cloudCopies.apply(id, credentials); });
 ipcMain.handle("desktop.snapshot-accounts", event => { requireMainWindow(event); return snapshotCatalog.accounts(); });
 ipcMain.handle("desktop.snapshot-queue", async (event, id: unknown, account: unknown) => {
   requireMainWindow(event);
@@ -819,12 +864,12 @@ ipcMain.handle("desktop.snapshot-queue", async (event, id: unknown, account: unk
   return projectRestore.journal.queue(String(account), path, overview.name, sha);
 });
 ipcMain.handle("desktop.restore-tasks", (event, credentials: unknown) => { requireMainWindow(event); return projectRestore.tasks(credentials); });
-ipcMain.handle("desktop.restore-task-preview", (event, id: unknown, credentials: unknown) => { requireMainWindow(event); if (cloudBackup.busy) throw new Error("请先暂停本地保存。"); return projectRestore.inspectTask(id, credentials); });
+ipcMain.handle("desktop.restore-task-preview", (event, id: unknown, credentials: unknown) => { requireMainWindow(event); requireStorageIdle(); return projectRestore.inspectTask(id, credentials); });
 ipcMain.handle("desktop.restore-task-clear", (event, id: unknown, credentials: unknown) => { requireMainWindow(event); return projectRestore.clearTask(id, credentials); });
-ipcMain.handle("desktop.offline-open", async event => { const window = requireMainWindow(event); if (cloudBackup.busy || projectRestore.busy) throw new Error("请先暂停保存或恢复任务。"); await window.loadFile(desktopResource("snapshots.html")); });
+ipcMain.handle("desktop.offline-open", async event => { const window = requireMainWindow(event); requireStorageIdle(); await window.loadFile(desktopResource("snapshots.html")); });
 ipcMain.handle("desktop.snapshot-preview", async (event, id: unknown, credentials: unknown) => {
   requireMainWindow(event);
-  if (cloudBackup.busy || projectRestore.busy) throw new Error("请先完成或暂停当前保存任务。");
+  requireStorageIdle();
   return projectRestore.inspect(await snapshotCatalog.resolve(id, await projectRestore.account(credentials)), credentials);
 });
 ipcMain.handle("desktop.restore-cancel", event => { requireMainWindow(event); projectRestore.cancel(); });
@@ -3817,6 +3862,7 @@ function createTray() {
 }
 
 app.whenReady().then(async () => {
+  protocol.handle("helstera-media", request => localMedia.respond(request));
   if (process.platform === "win32") app.setAppUserModelId("com.helstera.desktop");
   if (process.platform === "win32" && process.arch === "x64") {
     configureWindowsUia(join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources"), "native", "helstera-uia.exe"));

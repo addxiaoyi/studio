@@ -4,5 +4,5 @@ export function isPortableManualUpdate(state: {
   status: string;
   reason?: string;
 }): boolean {
-  return state.status === "not-available" && state.reason === "portable build requires manual update";
+  return state.status === "not-available" && state.reason === "portable build requires manual update" || state.reason === "manual install required";
 }

@@ -11,6 +11,7 @@ import { verifyProviderAssetSignature } from "../features/uploads/provider-asset
 import { parseByteRange } from "./media-byte-range.js";
 import { mediaFileVersion } from "./media-file-version.js";
 import { mediaCookie, mediaCookieOwner } from "./media-access.js";
+import { registerLocalCopyRelease } from "./local-copy-release.js";
 
 export const readableAssetSql = `select ao.bucket, ao.object_path, ao.mime_type, ao.byte_size,
   coalesce((select min(ga.retention_until) from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path), case when ao.bucket in ('private-video','private-try-on') then ao.created_at+interval '3 days' end) as expires_at
@@ -25,6 +26,7 @@ export const readableAssetSql = `select ao.bucket, ao.object_path, ao.mime_type,
 const execFileAsync = promisify(execFile);
 
 export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Pool; auth: RequestAuthenticator; root: string }) {
+  registerLocalCopyRelease(app, options);
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/thumbnail", async (request, reply) => {
     const user = await options.auth.authenticate(request);
     if (!user) return reply.code(401).send({ error: { code: "unauthorized", message: "Unauthorized" } });

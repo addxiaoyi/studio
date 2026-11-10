@@ -20,7 +20,7 @@ type DesktopUpdateState = {
   version?: string;
   percent?: number;
   message?: string;
-  reason?: "portable build requires manual update";
+  reason?: "portable build requires manual update" | "manual install required";
 };
 
 type DesktopApi = {

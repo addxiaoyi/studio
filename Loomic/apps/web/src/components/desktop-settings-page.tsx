@@ -25,6 +25,7 @@ type DesktopUpdateState = {
   version?: string;
   percent?: number;
   message?: string;
+  downloadUrl?: string;
 };
 
 type DesktopSettingsApi = {
@@ -313,6 +314,7 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
             : <button type="button" className="desktop-settings__command" onClick={() => void checkUpdates()} disabled={!api || isUpdateBusy}><RefreshCw aria-hidden="true" />{isUpdateBusy ? copy.settings.updateCheckingBusy : copy.settings.checkUpdates}</button>}
         </div>
         {update?.status === "downloading" && typeof update.percent === "number" ? <progress className="desktop-settings__progress" max={100} value={update.percent} aria-label={copy.settings.progressAria} /> : null}
+        {update?.downloadUrl?.startsWith("https://studio.0st.top/downloads/Helstera-") && <a className="desktop-settings__command mt-3 inline-flex" href={update.downloadUrl} target="_blank" rel="noreferrer">下载 macOS 安装包</a>}
       </section>
 
       <section className="desktop-settings__section" aria-labelledby="desktop-settings-advanced">

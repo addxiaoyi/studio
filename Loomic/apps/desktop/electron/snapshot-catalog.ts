@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile, stat, realpath } from "node:fs/promises";
-import { join } from "node:path";
-import { projectBackupSchema } from "@helstera/shared";
+import { basename, extname, join } from "node:path";
+import { backupAssetIds, projectBackupSchema } from "@helstera/shared";
 import { DesktopSetup } from "./desktop-setup.js";
 import { snapshotOverview, compareSnapshots } from "./snapshot-preview.js";
+import { readWorkspaceIndex } from "./workspace-index.js";
+import { resolveWorkspaceReceipt } from "./workspace-receipt.js";
 export type LocalSnapshot = { id: string; projectId: string; name: string; fileName: string; savedAt: string; bytes: number; elements: number; sessions: number; messages: number; thumbnail: string };
 export type SnapshotList = { snapshots: LocalSnapshot[]; unreadable: number; truncated: boolean };
 const MAX_SNAPSHOT = 16 * 1024 ** 2;
@@ -61,7 +63,19 @@ export class SnapshotCatalog {
     const baseline = typeof comparisonId === "string" ? candidates.find(item => item.id === comparisonId) : candidates.find(item => Date.parse(item.savedAt) <= Date.parse(entry.savedAt));
     if (comparisonId && !baseline) throw new Error("请选择同一工程的快照进行比较。");
     const previous = baseline ? projectBackupSchema.parse(JSON.parse(await readFile(await this.resolve(baseline.id, accountId), "utf8"))) : null;
-    return { ...snapshotOverview(snapshot), name: snapshot.project.name, projectId: snapshot.project.id, baseline: baseline ? { id: baseline.id, savedAt: baseline.savedAt, fileName: baseline.fileName } : null, difference: previous ? compareSnapshots(previous, snapshot) : null, versions: candidates.map(item => ({ id: item.id, savedAt: item.savedAt, fileName: item.fileName })) };
+    return { ...snapshotOverview(snapshot), media: backupAssetIds(snapshot).map((assetId, index) => ({ assetId, name: `本地素材 ${index + 1}` })), name: snapshot.project.name, projectId: snapshot.project.id, baseline: baseline ? { id: baseline.id, savedAt: baseline.savedAt, fileName: baseline.fileName } : null, difference: previous ? compareSnapshots(previous, snapshot) : null, versions: candidates.map(item => ({ id: item.id, savedAt: item.savedAt, fileName: item.fileName })) };
+  }
+  async media(id: unknown, accountId: unknown, assetId: unknown) {
+    const snapshotPath = await this.resolve(id, accountId);
+    const snapshot = projectBackupSchema.parse(JSON.parse(await readFile(snapshotPath, "utf8")));
+    if (typeof assetId !== "string" || !backupAssetIds(snapshot).includes(assetId)) throw new Error("素材不属于当前快照。");
+    const root = (await this.setup.status()).root!;
+    const index = await readWorkspaceIndex(root, String(accountId));
+    const receipt = await resolveWorkspaceReceipt(root, "Media", String(accountId), index.items.find(item => item.key === `asset:${assetId}`)?.receipt);
+    if (!receipt) throw new Error("本地原文件缺失或校验失败。请连接原磁盘，或联网重新保存素材。");
+    const mime = ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif", ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg" } as Record<string, string>)[extname(receipt.path).toLowerCase()];
+    if (!mime) throw new Error("此文件格式暂不能在离线预览中播放，请在工作区查看原文件。");
+    return { root, path: receipt.path, mime, name: basename(receipt.path), bytes: receipt.bytes };
   }
   async resolve(id: unknown, accountId: unknown): Promise<string> {
     const file = typeof id === "string" ? this.files.get(id) : undefined;

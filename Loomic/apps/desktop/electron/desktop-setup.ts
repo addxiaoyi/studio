@@ -2,9 +2,10 @@ import { mkdir, readFile, realpath, rename, writeFile, unlink } from "node:fs/pr
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { verifyAssetFolder } from "./asset-folder.js";
+import { diskWarning } from "./disk-space.js";
 
 export type SetupConfig = { version: 1; completed: boolean; root: string | null; autoBackup: boolean; agentAccess: boolean };
-export type SetupState = SetupConfig & { available: boolean; availableBytes?: number; error?: string };
+export type SetupState = SetupConfig & { available: boolean; availableBytes?: number; capacityBytes?: number; diskWarning?: "normal" | "low" | "critical"; error?: string };
 const defaults: SetupConfig = { version: 1, completed: false, root: null, autoBackup: false, agentAccess: false };
 
 export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
@@ -31,7 +32,7 @@ export class DesktopSetup {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ...defaults, available: false };
       return { ...defaults, available: false, error: "本地配置无法读取，请重新选择工作区。已有文件不会被删除。" };
     }
-    try { return { ...config, available: true, availableBytes: (await verifyAssetFolder(config.root!)).availableBytes }; }
+    try { const space = await verifyAssetFolder(config.root!); return { ...config, available: true, availableBytes: space.availableBytes, capacityBytes: space.capacityBytes, diskWarning: diskWarning(space.availableBytes, space.capacityBytes) }; }
     catch { return { ...config, available: false, error: "工作区已移动、磁盘未连接或没有写入权限，请重新选择。" }; }
   }
   async choose(path: string) {
@@ -39,7 +40,7 @@ export class DesktopSetup {
     const root = await realpath(path);
     const folder = await verifyAssetFolder(root);
     this.chosen = root;
-    return { root, availableBytes: folder.availableBytes };
+    return { root, availableBytes: folder.availableBytes, capacityBytes: folder.capacityBytes, diskWarning: diskWarning(folder.availableBytes, folder.capacityBytes) };
   }
   async complete(input: unknown): Promise<SetupState> {
     const value = input as Partial<SetupConfig> | null;

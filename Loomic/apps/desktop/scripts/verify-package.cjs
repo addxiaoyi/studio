@@ -45,7 +45,7 @@ function verifyPackage(directory, platform, productName = "Helstera") {
     const native = path.match(/node_modules\/@nut-tree\/libnut-(win32|linux|darwin)\//);
     if (native && native[1] !== platform) throw new Error(`Wrong-platform native resource: ${path}`);
   }
-  for (const path of ["icon.png", "startup.html", "startup.css", "startup.js", "setup.html", "setup.css", "setup.js", "licenses/react.txt", "licenses/react-dom.txt"]) {
+  for (const path of ["icon.png", "startup.html", "startup.css", "startup.js", "setup.html", "setup.css", "setup.js", "snapshots.html", "snapshots.css", "snapshots.js", "licenses/react.txt", "licenses/react-dom.txt"]) {
     if (!existsSync(join(resources, path)) || !statSync(join(resources, path)).size) throw new Error(`Desktop support resource missing: ${path}`);
   }
   return { files: files.size, asarBytes: statSync(join(resources, "app.asar")).size };

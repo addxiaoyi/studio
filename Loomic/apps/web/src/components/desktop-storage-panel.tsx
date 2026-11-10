@@ -5,6 +5,7 @@ import { FolderOpen, RefreshCw, Settings2, Square } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { desktopStorage, desktopStorageError, type CloudBackupState, type DesktopSetupState } from "@/lib/desktop-storage";
 import { DesktopProjectRestore } from "./desktop-project-restore";
+import { DesktopStorageManagement } from "./desktop-storage-management";
 
 function useLocalBackup() {
   const { session } = useAuth();
@@ -18,7 +19,7 @@ function useLocalBackup() {
     let mounted = true;
     void api.getDesktopSetup().then(value => { if (mounted) setSetup(value); }).catch(cause => { if (mounted) setError(desktopStorageError(cause)); });
     if (account) void api.getCloudBackup(account).then(value => { if (mounted) setBackup(value); }).catch(cause => { if (mounted) setError(desktopStorageError(cause)); });
-    const stop = api.onCloudBackup(value => { if (value.account === account) setBackup(value); });
+    const stop = api.onCloudBackup(value => { if (value.account === account) { setBackup(value); if (value.status !== "running") void api.getDesktopSetup().then(value => { if (mounted) setSetup(value); }).catch(cause => { if (mounted) setError(desktopStorageError(cause)); }); } });
     return () => { mounted = false; stop(); };
   }, [api, account]);
   return { api, session, setup, backup, error, setError };
@@ -55,6 +56,7 @@ export function DesktopStoragePanel() {
     {failures.length > 0 && <details className="mt-3 text-xs"><summary>查看 {failures.length} 项失败原因</summary><ul className="mt-2 space-y-2">{failures.slice(-20).map(item => <li key={item.key} className="break-words">{item.name}：{item.error}</li>)}</ul></details>}
     {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
     <DesktopProjectRestore api={api} accountId={session?.user?.id} accessToken={session?.access_token} disabled={busy || !setup?.available}/>
+    <DesktopStorageManagement api={api} accountId={session?.user?.id} accessToken={session?.access_token} setup={setup} disabled={busy || !setup?.available}/>
   </section>;
 }
 

@@ -5,14 +5,19 @@ import { backupAssetIds, replaceBackupAssets, type ProjectBackup, type BackupRes
 export class BackupRestoreError extends Error {
   constructor(message: string, readonly statusCode = 400) { super(message); }
 }
-function restoreId(account: string, snapshot: ProjectBackup) {
-  const hash = createHash("sha256").update(account).update(JSON.stringify(snapshot)).digest("hex");
+function restoreId(account: string, snapshot: ProjectBackup, replacements: Record<string, string>) {
+  const digest = createHash("sha256").update(account).update(JSON.stringify(snapshot));
+  // A new upload after cloud release needs a new restored canvas; retries of that upload stay idempotent.
+  if (Object.keys(replacements).length) digest.update(JSON.stringify(Object.entries(replacements).sort(([a], [b]) => a.localeCompare(b))));
+  const hash = digest.digest("hex");
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 }
 
 export async function restoreProjectBackup(db: Pool, userId: string, workspaceId: string, snapshot: ProjectBackup, replacements: Record<string, string>): Promise<BackupRestoreResult> {
   if (snapshot.project.workspace?.ownerUserId && snapshot.project.workspace.ownerUserId !== userId) throw new BackupRestoreError("请登录创建此快照的账户后恢复。", 403);
-  const projectId = restoreId(userId, snapshot);
+  const originalIds = backupAssetIds(snapshot);
+  if (Object.keys(replacements).some(id => !originalIds.includes(id))) throw new BackupRestoreError("素材替换不属于所选快照。");
+  const projectId = restoreId(userId, snapshot, replacements);
   const client = await db.connect();
   try {
     await client.query("begin");
@@ -23,8 +28,6 @@ export async function restoreProjectBackup(db: Pool, userId: string, workspaceId
       await client.query("commit");
       return { projectId, canvasId: existing.rows[0].canvas_id, sessionId: existing.rows[0].session_id, restored: false };
     }
-    const originalIds = backupAssetIds(snapshot);
-    if (Object.keys(replacements).some(id => !originalIds.includes(id))) throw new BackupRestoreError("素材替换不属于所选快照。");
     const remapped = replaceBackupAssets(snapshot, replacements);
     const assetIds = backupAssetIds(remapped);
     if (assetIds.length) {

@@ -5,7 +5,7 @@ function errorText(error) { el("error").hidden = false; el("error").textContent 
 function folder(state) {
   ready = Boolean(state.root && state.available !== false);
   el("folder").textContent = state.root || "尚未选择文件夹";
-  el("space").textContent = state.availableBytes ? `可用空间 ${(state.availableBytes / 1024 ** 3).toFixed(1)} GiB · 已验证可写入` : "";
+  el("space").textContent = state.availableBytes ? `可用空间 ${(state.availableBytes / 1024 ** 3).toFixed(1)} GiB · 已验证可写入${state.diskWarning === "critical" ? " · 空间严重不足，请选择其他磁盘或先清理。" : state.diskWarning === "low" ? " · 空间偏低，建议整理后再保存大文件。" : ""}` : "";
   el("complete").disabled = !ready;
 }
 async function choose() {

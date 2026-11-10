@@ -12,7 +12,7 @@ export async function verifyAssetFolder(directory: string) {
     await file.sync();
     if (!(await readFile(probe)).equals(bytes)) throw new Error("Local folder write verification failed.");
     const space = await statfs(directory);
-    return { kind: "native" as const, path: directory, name: basename(directory), availableBytes: space.bavail * space.bsize };
+    return { kind: "native" as const, path: directory, name: basename(directory), availableBytes: space.bavail * space.bsize, capacityBytes: space.blocks * space.bsize };
   } finally {
     try { await file.close(); } finally { await unlink(probe); }
   }

@@ -6,12 +6,12 @@ import { backupAssetIds, projectBackupSchema, type ProjectBackup, type BackupRes
 import { DesktopSetup } from "./desktop-setup.js";
 import { receiptExists, type LocalReceipt } from "./local-download.js";
 import { uploadVideoInChunks, type UploadProgress } from "./resumable-upload.js";
-import { resolveWorkspaceReceipt } from "./workspace-receipt.js";
+import { resolveWorkspaceReceipt, type WorkspaceReceipt } from "./workspace-receipt.js";
 import { RestoreJournal, type RestoreTask } from "./restore-journal.js";
 
 export type RestorePreview = { id: string; name: string; elements: number; sessions: number; messages: number; localMedia: number; uploadBytes: number; missingMedia: number; fileName: string; reusedMedia: number };
 type Credentials = { accessToken: string; accountId: string };
-type LocalMedia = { assetId: string; receipt: LocalReceipt; mime: string };
+type LocalMedia = { assetId: string; receipt: WorkspaceReceipt; mime: string };
 type PendingRestore = { preview: RestorePreview; snapshot: ProjectBackup; sha256: string; path: string; accountId: string; media: LocalMedia[]; expires: number; result?: BackupRestoreResult };
 export type RestoreProgress = UploadProgress & { name: string; phase: "uploading" | "restoring" | "completed" | "paused" | "failed" };
 type RestoreOptions = { setup: DesktopSetup; origin: () => string; request: typeof fetch; changed?: (progress: RestoreProgress) => void };
@@ -129,7 +129,7 @@ export class ProjectRestore {
       for (const item of pending.media) {
         this.controller.signal.throwIfAborted();
         if (await realpath(item.receipt.path) !== item.receipt.path || !await receiptExists(item.receipt)) throw new Error("本地素材已改变，请重新预览。");
-        const hash = createHash("sha256").update(`${credentials.accountId}:${pending.sha256}:${item.assetId}`).digest("hex");
+        const hash = createHash("sha256").update(`${credentials.accountId}:${pending.sha256}:${item.assetId}${item.receipt.restoreEpoch ? `:${item.receipt.restoreEpoch}` : ""}`).digest("hex");
         const key = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
         if (task && item.mime.startsWith("video/")) {
           if (!task.uploads.some(upload => upload.uploadId === key)) task.uploads.push({ uploadId: key, assetId: item.assetId, bytes: item.receipt.bytes, filename: item.receipt.path.split(/[\\/]/).pop()! });

@@ -1,5 +1,6 @@
 export type DesktopUpdateReason =
   | "development build"
+  | "manual install required"
   | "portable build requires manual update";
 
 export type DesktopUpdatePolicy = {
@@ -17,6 +18,7 @@ export function getDesktopUpdatePolicy(input: {
   isPackaged: boolean;
   isPortable: boolean;
   platform?: NodeJS.Platform;
+  manualInstall?: boolean;
 }): DesktopUpdatePolicy {
   if (!input.isPackaged) {
     return { enabled: false, canInstall: false, reason: "development build" };
@@ -28,5 +30,6 @@ export function getDesktopUpdatePolicy(input: {
       reason: "portable build requires manual update",
     };
   }
+  if (input.manualInstall) return { enabled: true, canInstall: false, reason: "manual install required" };
   return { enabled: true, canInstall: true };
 }
