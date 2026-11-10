@@ -69,6 +69,9 @@ test("curved wires follow node drags, survive reload and preserve native undo an
     await page.goto(
       `http://localhost:3228/${desktop ? "desktop-app/" : ""}canvas/?id=${fixture.canvasId}&session=${fixture.sessionId}`,
     );
+    // The toolbar mounts before the lazy canvas and its workflow scene are ready.
+    const capture = page.locator('[data-workflow-node="capture"]');
+    await expect(capture).toBeVisible({ timeout: 15000 });
     await page.getByRole("button", { name: "打开可视化工作流" }).click();
     const dock = page.getByRole("region", {
       name: "可视化工作流",
@@ -80,7 +83,6 @@ test("curved wires follow node drags, survive reload and preserve native undo an
     await dock.getByRole("button",{name:"定位流程节点",exact:true}).click();
     await page.keyboard.press("Escape");
     await page.keyboard.press("v");
-    const capture = page.locator('[data-workflow-node="capture"]');
     let last = "";
     await expect
       .poll(async () => {
@@ -132,6 +134,7 @@ test("curved wires follow node drags, survive reload and preserve native undo an
       dock.getByRole("button", { name: "已保存", exact: true }),
     ).toBeDisabled();
     await page.reload();
+    await expect(capture).toBeVisible({ timeout: 15000 });
     await page.getByRole("button", { name: "打开可视化工作流" }).click();
     await expect(dock.getByRole("button",{name:/浏览与录制 读取网页与截图/})).toBeVisible();
     await dock.getByRole("button",{name:"定位流程节点",exact:true}).click();
