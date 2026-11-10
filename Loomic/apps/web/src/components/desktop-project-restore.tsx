@@ -24,7 +24,7 @@ export function DesktopProjectRestore({ api, accountId, accessToken, disabled }:
     finally { setBusy(false); }
   };
   const close = (open: boolean) => { if (!open && !busy) { setPreview(null); setError(""); } };
-  const canvasUrl = restored ? `/desktop-app/canvas/?id=${encodeURIComponent(restored.canvasId)}${restored.sessionId ? `&session=${encodeURIComponent(restored.sessionId)}` : ""}` : "";
+  const canvasUrl = restored ? `/desktop-app/canvas/?id=${encodeURIComponent(restored.canvasId)}${restored.sessionId ? `&session=${encodeURIComponent(restored.sessionId)}` : ""}&fitContent=1` : "";
   return <div className="mt-4">
     <button type="button" className="desktop-settings__command" onClick={choose} disabled={disabled || busy || !accountId}><FolderInput aria-hidden="true"/>{busy && !preview ? "正在读取快照…" : "从本地快照恢复工程"}</button>
     {!preview && error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}

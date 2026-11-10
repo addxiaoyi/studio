@@ -16,7 +16,7 @@ it("requires a preview and explicit confirmation before upload and opens the res
   expect(screen.getByRole("button", { name: "确认恢复" })).toBeDisabled();
   await userEvent.click(screen.getByRole("checkbox"));
   await userEvent.click(screen.getByRole("button", { name: "确认恢复" }));
-  expect(await screen.findByRole("link", { name: "打开恢复的画布" })).toHaveAttribute("href", "/desktop-app/canvas/?id=canvas&session=session");
+  expect(await screen.findByRole("link", { name: "打开恢复的画布" })).toHaveAttribute("href", "/desktop-app/canvas/?id=canvas&session=session&fitContent=1");
   expect(api.restoreLocalProject).toHaveBeenCalledOnce();
 });
 it("blocks restoration of missing media and cancellation makes no write request", async () => {

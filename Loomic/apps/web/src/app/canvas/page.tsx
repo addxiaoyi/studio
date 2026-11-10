@@ -1,4 +1,5 @@
 "use client";
+import { canvasFocusTargets } from "@/lib/canvas-focus";
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -290,9 +291,8 @@ function CanvasPageContent() {
   const assetImport = useCanvasAssetImport({ api: excalidrawApi, ready: canvasReady && canvasData?.id === canvasId,
     token: accessToken, canvasId, assetId });
   useEffect(() => {
-    if (!canvasReady || !excalidrawApi || !searchParams.has("focusElements")) return;
-    const ids = new Set((searchParams.get("focusElements") ?? "").split(",").slice(0,20));
-    const elements = excalidrawApi.getSceneElements().filter((item: { id: string; isDeleted?: boolean }) => !item.isDeleted && ids.has(item.id));
+    if (!canvasReady || !excalidrawApi) return;
+    const elements = canvasFocusTargets(excalidrawApi.getSceneElements(), searchParams);
     if (elements.length) excalidrawApi.scrollToContent(elements, { fitToContent: true });
   }, [canvasReady, excalidrawApi, searchParams]);
 
