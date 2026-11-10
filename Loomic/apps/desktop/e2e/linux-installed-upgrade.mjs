@@ -71,8 +71,8 @@ try {
   await app.evaluate(({ session }, origin) => {
     session.fromPartition("electron-updater", { cache: false }).webRequest.onBeforeRequest({ urls: ["https://studio.0st.top/downloads/updates/*"] }, (details, callback) => callback({ redirectURL: `${origin}/channel/${new URL(details.url).pathname.split("/").pop()}` }));
   }, origin);
-  await app.evaluate(async ({ app }, root) => {
-    const { createRequire } = await import("node:module"), { openSync } = await import("node:fs");
+  await app.evaluate(({ app }, root) => {
+    const { createRequire } = process.mainModule.require("node:module"), { openSync } = process.mainModule.require("node:fs");
     const { autoUpdater } = createRequire(`${app.getAppPath()}/package.json`)("electron-updater");
     const spawn = autoUpdater.spawnLog.bind(autoUpdater), descriptor = openSync(`${root}/updated-app.log`, "a");
     // Preserve the updater's command, arguments and environment; capture only child diagnostics.
