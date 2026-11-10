@@ -22,9 +22,9 @@ try {
     if (!name) throw new Error("Built AppImage is missing.");
     execFileSync(join(release, name), ["--appimage-extract"], { cwd: output, stdio: "ignore" });
     const installed = join(output, "squashfs-root");
-    const nameInPackage = readdirSync(installed).find(name => name.toLowerCase() === "helstera");
-    if (!nameInPackage) throw new Error("AppImage application executable is missing.");
-    executable = join(installed, nameInPackage);
+    // AppImage's entry point resolves the platform's packaged executable name.
+    executable = join(installed, "AppRun");
+    if (!existsSync(executable)) throw new Error("AppImage entry point is missing.");
     const sandbox = join(installed, "chrome-sandbox");
     if (!existsSync(sandbox) || realpathSync(sandbox) !== sandbox) throw new Error("Invalid packaged sandbox.");
     execFileSync("sudo", ["chown", "root:root", sandbox]); execFileSync("sudo", ["chmod", "4755", sandbox]);
