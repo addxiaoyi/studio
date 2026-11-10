@@ -73,6 +73,11 @@ async function writeDirectory(directory: StoredDirectory): Promise<void> {
 }
 
 export async function chooseLocalAssetFolder(): Promise<string> {
+  const storage = desktopStorage();
+  if (storage) {
+    await storage.openDesktopSetup();
+    throw new DOMException("请在初始化页面配置本地工作区。", "AbortError");
+  }
   const desktop = (window as DirectoryPickerWindow).electronAPI;
   if (desktop?.selectAssetFolder) {
     const directory = await desktop.selectAssetFolder();

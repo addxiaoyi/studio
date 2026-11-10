@@ -10,6 +10,7 @@ import { clearLocalAssetFolder, chooseLocalAssetFolder, getLocalAssetFolderState
 import { CreditUsageHistory } from "@/components/credits/credit-usage-history";
 import { DesktopExtensionPanel } from "@/components/desktop-extension-panel";
 import { DesktopStoragePanel } from "@/components/desktop-storage-panel";
+import { desktopStorage } from "@/lib/desktop-storage";
 import { useDesktopToast } from "@/components/desktop-toast";
 import {
   formatDesktopCopy,
@@ -263,7 +264,7 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
         </div>
       </section>
 
-      <section className="desktop-settings__section" aria-labelledby="desktop-settings-storage">
+      {desktopStorage() ? <DesktopStoragePanel /> : <section className="desktop-settings__section" aria-labelledby="desktop-settings-storage">
         <div className="desktop-settings__section-heading"><h2 id="desktop-settings-storage">{copy.settings.storage}</h2><p>{copy.settings.storageHint}</p></div>
         {folder.path ? <p className="break-all">{folder.path}</p> : null}
         {typeof folder.availableBytes === "number" ? <p>{formatDesktopCopy(copy.settings.folderAvailableSpace, { size: (folder.availableBytes / 1_000_000_000).toFixed(1) })}</p> : null}
@@ -279,6 +280,7 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
         </div>
       </section>
 
+      }
       <section className="desktop-settings__section" aria-labelledby="desktop-settings-account">
         <div className="desktop-settings__section-heading"><h2 id="desktop-settings-account">{copy.settings.account}</h2></div>
         <div className="desktop-settings__row">
@@ -300,7 +302,6 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
         <CreditUsageHistory />
       </section>
 
-      <DesktopStoragePanel />
       <DesktopExtensionPanel locale={locale} />
 
       <section className="desktop-settings__section" aria-labelledby="desktop-settings-updates">
