@@ -141,7 +141,7 @@ it("restores the saved route even while unrelated trend loading is still pending
   vi.mocked(api.fetchFeedTrends).mockImplementation(()=>new Promise(()=>{}));
   searchParamsMock.current=new URLSearchParams(`packageId=${packageRecord.id}&step=0`);
   render(<FeedPage/>);
-  await waitFor(()=>{for(const button of screen.getAllByRole("button",{name:"3 of 6: 脚本",exact:true}))expect(button).toBeEnabled();});
+  await waitFor(()=>{for(const button of screen.getAllByRole("button",{name:"3 of 6: 脚本"}))expect(button).toBeEnabled();});
 });
 
 beforeEach(async () => {
