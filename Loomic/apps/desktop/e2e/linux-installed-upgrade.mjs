@@ -72,7 +72,7 @@ assert.equal(cached.length, 1);
 const targetSandbox = join(runtime, cached[0], "chrome-sandbox");
 assert.equal(await realpath(targetSandbox), targetSandbox); assert.equal(await sha(targetSandbox), await sha(sandbox));
 execFileSync("sudo", ["chown", "root:root", targetSandbox]); execFileSync("sudo", ["chmod", "4755", targetSandbox]);
-let app;
+let app, exitCode = 1;
 try {
   app = await _electron.launch({ executablePath: join(extracted, binary), env });
   const page = await app.firstWindow(); await expect(page.getByRole("heading", { name: "Helstera Linux 升级验收" })).toBeVisible();
@@ -99,6 +99,7 @@ try {
   assert.equal(await sha(versions[0].path), versions[1].hash); assert.ok((await readFile(media)).equals(image)); assert.equal(await sha(snapshot), beforeSnapshot);
   const report = { ok: true, from: "0.2.27", to: "0.2.28", realAppImageReplacement: true, sandboxEnabled: true, isolatedFixedUpdateFeed: true, publicPackageSha256: versions[1].hash, directoryPreserved: true, mediaBytesPreserved: true, originalSnapshotPreserved: true, restoredThroughApiFixture: true, mediaDecodedAfterUpgrade: true };
   await writeFile(join(root, "report.json"), JSON.stringify(report, null, 2)); console.log("LINUX_INSTALLED_UPGRADE_PASSED", JSON.stringify(report));
+  exitCode = 0;
 } catch (error) {
   console.error("UPGRADE_FAILURE", error.message);
   console.error("INSTALLED_FILE_SHA256", await sha(versions[0].path).catch(() => "missing"));
@@ -118,5 +119,7 @@ try {
     try { const vars = await readFile(`/proc/${pid}/environ`, "utf8"); if (vars.split("\0").includes(`HELSTERA_TEST_USER_DATA=${profile}`)) process.kill(Number(pid), "SIGKILL"); }
     catch (error) { if (!["ENOENT", "EACCES", "ESRCH"].includes(error.code)) console.error("Test process cleanup:", error.message); }
   }
-  console.log("ISOLATED_UPGRADE_CLEANUP_COMPLETE");
+  // Playwright keeps a transport after the inspected process replaces itself. Every
+  // assertion and artifact write above must finish before closing this test runner.
+  process.stdout.write("ISOLATED_UPGRADE_CLEANUP_COMPLETE\n", () => process.exit(exitCode));
 }
