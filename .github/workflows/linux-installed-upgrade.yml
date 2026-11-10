@@ -1,0 +1,37 @@
+name: Linux Installed Upgrade Acceptance
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/**']
+    paths: ['Loomic/apps/desktop/e2e/linux-installed-upgrade.mjs', '.github/workflows/linux-installed-upgrade.yml']
+permissions:
+  contents: read
+jobs:
+  upgrade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install test tools and native runtime libraries
+        run: |
+          npm install --prefix "$RUNNER_TEMP/test-tools" @playwright/test@1.58.2
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0 libgbm1 libasound2t64 libfuse2 libxss1 libxtst6
+      - name: Upgrade the real 0.2.27 AppImage to 0.2.28 and restore local media
+        working-directory: Loomic
+        env:
+          HELT_TEST_TOOLS: ${{ runner.temp }}/test-tools/package.json
+          HELT_UPGRADE_TEST_DIR: ${{ runner.temp }}/linux-upgrade
+        run: xvfb-run -a node apps/desktop/e2e/linux-installed-upgrade.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-installed-upgrade-028
+          path: |
+            ${{ runner.temp }}/linux-upgrade/report.json
+            ${{ runner.temp }}/linux-upgrade/*.png
+          if-no-files-found: error
+          retention-days: 7
