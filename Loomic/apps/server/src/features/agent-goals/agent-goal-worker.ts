@@ -164,7 +164,8 @@ export function buildGoalTaskRequest(goal: GoalRow): DesktopAgentTaskRequest {
 
 export class AgentGoalWorker {
   private timer: ReturnType<typeof setInterval> | undefined;
-  private running = false;
+  private stopped = false;
+  private current: Promise<void> | undefined;
 
   constructor(
     private readonly db: Pool,
@@ -175,20 +176,26 @@ export class AgentGoalWorker {
 
   start() {
     if (this.timer) return;
+    this.stopped = false;
     void this.tick();
     this.timer = setInterval(() => void this.tick(), this.intervalMs);
     this.timer.unref?.();
   }
 
-  stop() {
-    if (!this.timer) return;
+  async stop() {
+    this.stopped = true;
     clearInterval(this.timer);
     this.timer = undefined;
+    await this.current;
   }
 
-  async tick() {
-    if (this.running) return;
-    this.running = true;
+  tick(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    this.current ??= this.scan().finally(() => { this.current = undefined; });
+    return this.current;
+  }
+
+  private async scan() {
     try {
       const { rows } = await this.db.query<GoalRow>(
         `select id,workspace_id,created_by,canvas_id,chat_session_id,goal,status,plan,execution_mode,output_kind,execution_policy,capabilities,next_attempt_at
@@ -204,6 +211,7 @@ export class AgentGoalWorker {
           limit 20`,
       );
       for (const goal of rows) {
+        if (this.stopped) break;
         const client = await this.db.connect();
         let locked = false;
         let releaseError: Error | undefined;
@@ -219,7 +227,7 @@ export class AgentGoalWorker {
             "select * from agent_goals where id=$1 and status in ('running','waiting_desktop','waiting_approval') and execution_policy='approval_required'",
             [goal.id],
           );
-          if (current.rows[0]) {
+          if (current.rows[0] && !this.stopped) {
             await new GoalExecution(client, this.dispatcher, this.backgroundExecutor).process(current.rows[0]);
           }
         } finally {
@@ -235,8 +243,6 @@ export class AgentGoalWorker {
       }
     } catch (error) {
       console.error("[agent-goal-worker] tick failed:", error);
-    } finally {
-      this.running = false;
     }
   }
 

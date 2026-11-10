@@ -52,7 +52,12 @@ jobs:
       - name: Approval, recovery and private asset database gates
         run: |
           psql "$HELT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;'
-          node scripts/test-local-postgres.mjs src/features/agent-goals/goal-steps.postgres.test.ts src/features/assets/private-lifecycle.postgres.test.ts src/local-db/private-upload-ownership.postgres.test.ts src/local-db/viewer-locks.postgres.test.ts src/features/onetake/onetake.postgres.test.ts src/features/video-editor/plan-store.postgres.test.ts
+          node scripts/test-local-postgres.mjs src/features/agent-goals/goal-steps.postgres.test.ts src/runtime/media-admission.postgres.test.ts src/features/assets/private-lifecycle.postgres.test.ts src/local-db/private-upload-ownership.postgres.test.ts src/local-db/viewer-locks.postgres.test.ts src/features/onetake/onetake.postgres.test.ts src/features/video-editor/plan-store.postgres.test.ts
+      - name: Readiness, graceful drain and release retention
+        run: |
+          pnpm --filter @helstera/server exec vitest run src/http/health.test.ts src/queue/local-job-queue.test.ts src/runtime/queue-runner.test.ts src/runtime/periodic-tasks.test.ts src/runtime/drain-gate.test.ts src/features/agent-goals/worker-drain.test.ts
+          python3 -m unittest scripts/test_switch_server_upstream.py
+          sudo python3 -m unittest scripts/test_storage_retention.py
       - name: Structured model planning deadlines
         run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/goal-planner.test.ts src/features/agent-goals/goal-plan-timeout.test.ts src/features/video-editor/planner.test.ts
       - name: Private Agent browser access and controls

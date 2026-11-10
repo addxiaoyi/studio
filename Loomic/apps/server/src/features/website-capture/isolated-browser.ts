@@ -1,7 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Agent, request as httpRequest } from "undici";
@@ -25,6 +24,7 @@ import { recordPageSegment } from "./page-recording.js";
 import { CAPTURE_FPS, joinCaptureSegments } from "./video-encoder.js";
 import { closeCaptureContext } from "./capture-teardown.js";
 import { assertConnectorEnabled } from "../agent-goals/connector-gate.js";
+import { withMediaBudget } from "../../runtime/media-admission.js";
 import type { Pool, PoolClient } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import type { WebsiteCaptureClaim, WebsiteCaptureEvidence, WebsiteCapturePage, WebsiteCaptureResult } from "@helstera/shared";
@@ -105,7 +105,7 @@ export class WebsiteCaptureError extends Error {
   }
 }
 
-export async function captureIsolatedWebsite(options: {
+type CaptureOptions = {
   db: Pool;
   storage: StorageProvider;
   storageRoot: string;
@@ -113,9 +113,20 @@ export async function captureIsolatedWebsite(options: {
   task: CaptureTask;
   onProgress: CaptureProgress;
   signal?: AbortSignal;
-}): Promise<WebsiteCaptureResult> {
+};
+
+export async function captureIsolatedWebsite(options: CaptureOptions): Promise<WebsiteCaptureResult> {
+  await validatePublicHttpUrl(options.task.start_url);
+  return withMediaBudget({
+    db: options.db, storageRoot: options.storageRoot, kind: "capture",
+    reserveBytes: (options.task.record_video ? 1024 : 256) * 1024 ** 2,
+    ...(options.signal ? { signal: options.signal } : {}),
+  }, budget => captureWithBudget({ ...options, signal: budget.signal }, budget.scratchRoot),
+  () => options.onProgress(2, "waiting_resources", "正在等待录制资源，原任务和审批仍保留。"));
+}
+
+async function captureWithBudget(options: CaptureOptions, scratchRoot: string): Promise<WebsiteCaptureResult> {
   const startUrl = await validatePublicHttpUrl(options.task.start_url);
-  const tempDir = await mkdtemp(join(tmpdir(), `helstera-capture-${options.task.id}-`));
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
   let videoPath: string | undefined;
   let view: Awaited<ReturnType<typeof observeAgentBrowser>> | undefined;
@@ -132,11 +143,12 @@ export async function captureIsolatedWebsite(options: {
   if(options.task.journey)validateWebsiteJourney(options.task.start_url,options.task.journey);
   const abort = () => { networkRequests.abort();void browser?.close().catch(error => console.error("[capture] cancellation close failed", error)); };
   options.signal?.throwIfAborted();
+  const tempDir = await mkdtemp(join(scratchRoot, `capture-${options.task.id}-`));
   options.signal?.addEventListener("abort", abort, { once: true });
 
   try {
     await options.onProgress(5, "browser_starting", "Starting a temporary browser");
-    const launched = await launchAgentBrowser();
+    const launched = await launchAgentBrowser(tempDir);
     browser = launched.browser;
     options.signal?.throwIfAborted();
     let context = await browser.newContext({
@@ -402,9 +414,9 @@ export async function captureIsolatedWebsite(options: {
     networkRequests.abort();
     await view?.close(capturedSuccessfully ? "completed" : "failed", capturedSuccessfully ? "浏览完成" : "浏览已停止，请查看任务结果").catch(error=>console.error("[agent-browser] failed to close preview",error));
     options.signal?.removeEventListener("abort", abort);
-    await browser?.close().catch(() => undefined);
-    if(options.task.login)await discardWebsiteLogin(options.db,options.task.id);
-    await rm(tempDir, { recursive: true, force: true });
+    await browser?.close().catch(error => console.error("[capture] browser cleanup failed", error));
+    try { if(options.task.login)await discardWebsiteLogin(options.db,options.task.id); }
+    finally { await rm(tempDir, { recursive: true, force: true }); }
   }
 }
 

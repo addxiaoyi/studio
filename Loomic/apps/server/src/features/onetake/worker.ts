@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Pool } from "pg";
 import { createTranscriptEdit, transcriptSchema } from "@helstera/shared";
 import { runOneTake } from "./runner.js";
+import { budgetedMediaRunner } from "./budgeted-runner.js";
 import type { ExportRow, TranscriptRow } from "./store.js";
 
 type Claimed = { kind: "transcript"; row: TranscriptRow; token: string } | { kind: "export"; row: ExportRow & { source_path: string }; token: string };
@@ -32,15 +33,15 @@ export async function performTranscriptWork(db: Pool, work: Claimed, runner: Run
   const stop = () => controller.abort();
   stopped?.addEventListener("abort", stop, { once: true });
   if (stopped?.aborted) stop();
-  let heartbeatBusy = false;
-  const heartbeat = setInterval(async () => {
-    if (heartbeatBusy) return;
-    heartbeatBusy = true;
+  let renewal: Promise<void> | undefined;
+  const renew = async () => {
     try {
       const kept = await db.query(`update ${table} set lease_until=now()+interval '90 seconds',updated_at=now() where id=$1 and lease_token=$2 and state='running' and lease_until>now() returning id`, [work.row.id, work.token]);
       if (!kept.rowCount) controller.abort();
     } catch (error) { console.error("[onetake] lease renewal failed", error); controller.abort(); }
-    finally { heartbeatBusy = false; }
+  };
+  const heartbeat = setInterval(() => {
+    renewal ??= renew().finally(() => { renewal = undefined; });
   }, 2000);
   let scratch: string | undefined;
   try {
@@ -65,6 +66,7 @@ export async function performTranscriptWork(db: Pool, work: Claimed, runner: Run
     await db.query(`update ${table} set state=$3,error=$4,lease_token=null,lease_until=null,updated_at=now() where id=$1 and lease_token=$2 and state='running'`, [work.row.id, work.token, controller.signal.aborted ? "queued" : "failed", controller.signal.aborted ? null : message]);
   } finally {
     clearInterval(heartbeat);
+    await renewal;
     stopped?.removeEventListener("abort", stop);
     if (scratch) await rm(scratch, { recursive: true, force: true }).catch(error => console.error("[onetake] scratch cleanup failed", error));
     await db.query(`update ${table} set lease_token=null,lease_until=null where id=$1 and lease_token=$2 and state='canceled'`, [work.row.id, work.token]);
@@ -92,6 +94,7 @@ export async function expireTranscripts(db: Pool, storageRoot: string) {
 }
 
 export function startOneTakeWorker(db: Pool, storageRoot: string) {
+  const runMedia = budgetedMediaRunner(db, storageRoot);
   const controller = new AbortController();
   let current: Promise<void> | undefined;
   let lastCleanup = 0;
@@ -100,7 +103,7 @@ export function startOneTakeWorker(db: Pool, storageRoot: string) {
     current = (async () => {
       if (Date.now() - lastCleanup > 60_000) { await expireTranscripts(db, storageRoot); lastCleanup = Date.now(); }
       const work = await claimTranscriptWork(db);
-      if (work) await performTranscriptWork(db, work, runOneTake, controller.signal);
+      if (work) await performTranscriptWork(db, work, runMedia, controller.signal);
     })();
     try { await current; }
     catch (error) { console.error("[onetake] worker cycle failed", error); }

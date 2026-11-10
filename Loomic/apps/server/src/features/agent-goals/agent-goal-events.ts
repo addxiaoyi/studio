@@ -22,7 +22,7 @@ export class AgentGoalEventPublisher {
   private bootstrapReady: Promise<void> | undefined;
   private started = false;
   private lastEventId = 0;
-  private polling = false;
+  private currentPoll: Promise<void> | undefined;
 
   constructor(
     private readonly db: Pool,
@@ -46,11 +46,12 @@ export class AgentGoalEventPublisher {
     this.timer.unref?.();
   }
 
-  stop() {
-    if (!this.timer) return;
+  async stop() {
     this.started = false;
     clearInterval(this.timer);
     this.timer = undefined;
+    await this.bootstrapReady;
+    await this.currentPoll;
     this.bootstrapReady = undefined;
   }
 
@@ -58,15 +59,19 @@ export class AgentGoalEventPublisher {
     try {
       const { rows } = await this.db.query<{ id: number }>("select coalesce(max(id),0)::bigint as id from agent_goal_events");
       this.lastEventId = Number(rows[0]?.id ?? 0);
-      await this.poll();
+      if (this.started) await this.poll();
     } catch (error) {
       console.error("[agent-goal-events] bootstrap failed:", error);
     }
   }
 
-  private async poll() {
-    if (this.polling) return;
-    this.polling = true;
+  private poll(): Promise<void> {
+    if (!this.started) return Promise.resolve();
+    this.currentPoll ??= this.readEvents().finally(() => { this.currentPoll = undefined; });
+    return this.currentPoll;
+  }
+
+  private async readEvents() {
     try {
       const { rows } = await this.db.query<GoalEventRow>(
         `select e.id,e.goal_id,e.task_id,g.canvas_id,g.created_by,g.status,e.event_type,e.detail,e.payload,e.created_at
@@ -99,8 +104,6 @@ export class AgentGoalEventPublisher {
       }
     } catch (error) {
       console.error("[agent-goal-events] poll failed:", error);
-    } finally {
-      this.polling = false;
     }
   }
 }

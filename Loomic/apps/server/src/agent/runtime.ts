@@ -1,3 +1,4 @@
+import { DrainGate, trackStream } from "../runtime/drain-gate.js";
 // @credits-system — Agent tool runtime with credit checks before image/video generation
 import { createHash, randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
@@ -451,6 +452,7 @@ type CreateAgentRuntimeOptions = {
 export type AgentRunService = ReturnType<typeof createAgentRunService>;
 
 export function createAgentRunService(options: CreateAgentRuntimeOptions) {
+  const streams = new DrainGate();
   const now = options.now ?? (() => new Date().toISOString());
   const runs = new Map<string, RuntimeRunRecord>();
   const runIdFactory = options.runIdFactory ?? (() => randomUUID());
@@ -500,6 +502,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
   }
 
   return {
+    drain: () => streams.drain(),
     cancelRun(runId: string): RunCancelResponse | null {
       const run = runs.get(runId);
       if (!run) {
@@ -530,6 +533,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
         userId?: string;
       },
     ): RunCreateResponse {
+      streams.assertOpen();
       const runId = runIdFactory();
       const { accessToken: _ignoredAccessToken, ...runInput } = input;
 
@@ -582,7 +586,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
       return { ...run.modelUsage };
     },
 
-    async *streamRun(runId: string): AsyncGenerator<StreamEvent> {
+    streamRun: trackStream(streams, async function* (runId: string): AsyncGenerator<StreamEvent> {
       const run = runs.get(runId);
       if (!run) {
         throw new Error(`Run not found: ${runId}`);
@@ -2677,7 +2681,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           );
         }
       }
-    },
+    }, async runId => { await runs.get(runId)?.modelUsageSettlement; }),
   };
 }
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { WebSocket } from "ws";
 import type { StreamEvent } from "@helstera/shared";
+import { closeSockets } from "../runtime/close-sockets.js";
 
 type PendingRPC = {
   resolve: (value: any) => void;
@@ -280,6 +281,11 @@ export class ConnectionManager {
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
+
+  async drain() {
+    await closeSockets([...this.connections.values()].map(connection => connection.ws));
+    this.dispose();
+  }
 
   dispose(): void {
     for (const pending of this.pendingRPCs.values()) {

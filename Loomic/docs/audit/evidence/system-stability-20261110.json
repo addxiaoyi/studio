@@ -1,0 +1,886 @@
+{
+  "retention": {
+    "before": "Filesystem       1B-blocks        Used  Available Use% Mounted on\n/dev/vda1      32144076800 29847482368 2296594432  93% /\n/dev/vdb1      83955572736 78361051136 1282785280  99% /www\n",
+    "after": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/vda1      32144076800 29847506944  2296569856  93% /\n/dev/vdb1      83955572736 64474718208 15169118208  81% /www\n",
+    "receipt": {
+      "removedFiles": 38,
+      "unlinkedBytes": 16269767720,
+      "exclusiveBytes": 13886262007,
+      "paths": [
+        "backups/web-static-20261106-142702-3647F79E9D/out.tar.gz",
+        "backups/web-static-20261105-234506-23C4F364A6/out.tar.gz",
+        "backups/web-static-20261105-160319-23C4F364A6/out.tar.gz",
+        "backups/web-static-20261105-155244-23C4F364A6/out.tar.gz",
+        "backups/web-static-20261105-150442-1E131B2D01/out.tar.gz",
+        "backups/web-static-20261105-135402-C62E0DF423/out.tar.gz",
+        "backups/web-static-20261105-115850-A53214C2C6/out.tar.gz",
+        "backups/web-static-20261105-104302-D9E8AFA6FE/out.tar.gz",
+        "backups/web-static-20261105-035453-E81D1713EF/out.tar.gz",
+        "backups/web-static-20261101-123058-27275D64AC/out.tar.gz",
+        "backups/web-static-20261028-024527-0943365910/out.tar.gz",
+        "backups/web-static-20261028-002913-3FECF5E1D6/out.tar.gz",
+        "apps/web/out/downloads/Helstera-0.2.23-Windows-x64-portable.exe",
+        "apps/web/out/downloads/Helstera-0.2.19-Windows-x64.exe",
+        "apps/web/out/downloads/Helstera-0.2.26-Windows-x64.exe",
+        "apps/web/out/downloads/Helstera-0.2.22-Windows-x64.exe",
+        "apps/web/out/downloads/Helstera-0.2.19-win-x64.zip",
+        "apps/web/out/downloads/Helstera-0.2.24-Windows-x64.exe",
+        "apps/web/out/downloads/Helstera-0.2.18-win-x64.zip",
+        "apps/web/out/downloads/Helstera-0.2.26-Windows-x64-portable.exe",
+        "apps/web/out/downloads/Helstera-0.2.13-win-x64.zip",
+        "apps/web/out/downloads/Helstera-0.2.18-Windows-x64.exe",
+        "apps/web/out/downloads/Helstera-0.2.25-Windows-x64.exe",
+        "apps/web/out/downloads/Helstera-0.2.19-Windows-x64-portable.exe",
+        "apps/web/out/downloads/Helstera-0.2.24-Windows-x64-portable.exe",
+        "apps/web/out/downloads/Helstera-0.2.23-Windows-x64.exe",
+        "apps/web/out/downloads/Helstera-0.2.25-Windows-x64-portable.exe",
+        "apps/web/out/downloads/Helstera-0.2.22-Windows-x64-portable.exe",
+        "apps/web/out/downloads/updates/windows-x64/Helstera-Setup-0.2.25-Windows-x64.exe",
+        "apps/web/out/downloads/updates/windows-x64/Helstera-Setup-0.2.19-Windows-x64.exe.blockmap",
+        "apps/web/out/downloads/updates/windows-x64/Helstera-Setup-0.2.19-Windows-x64.exe",
+        "apps/web/out/downloads/updates/windows-x64/Helstera-Setup-0.2.24-Windows-x64.exe",
+        "apps/web/out/downloads/updates/windows-x64/Helstera-Setup-0.2.22-Windows-x64.exe.blockmap",
+        "apps/web/out/downloads/updates/windows-x64/Helstera-Setup-0.2.26-Windows-x64.exe",
+        "apps/web/out/downloads/updates/windows-x64/Helstera-Setup-0.2.18-Windows-x64.exe",
+        "apps/web/out/downloads/updates/windows-x64/Helstera-Setup-0.2.23-Windows-x64.exe",
+        "apps/web/out/downloads/updates/windows-x64/Helstera-Setup-0.2.22-Windows-x64.exe",
+        "apps/web/out/downloads/updates/windows-x64/Helstera-Setup-0.2.18-Windows-x64.exe.blockmap"
+      ],
+      "errors": []
+    },
+    "protected": {
+      "retainedArchives": [
+        {
+          "path": "/www/helstera/backups/web-static-20261110-020052-065375454E/out.tar.gz",
+          "bytes": 1407964960,
+          "members": 4139
+        },
+        {
+          "path": "/www/helstera/backups/web-static-20261108-062705-7D98642251/out.tar.gz",
+          "bytes": 1066093528,
+          "members": 5056
+        }
+      ],
+      "currentInstallers": [
+        {
+          "path": "/www/helstera/apps/web/out/downloads/Helstera-0.2.30-Windows-x64-portable.exe",
+          "bytes": 95582219,
+          "sha256": "9b244140cdb999d3a51ee18d3607882edf4958f1bda64f595f3e82c71f1b81ac"
+        },
+        {
+          "path": "/www/helstera/apps/web/out/downloads/Helstera-0.2.30-Windows-x64.exe",
+          "bytes": 95718172,
+          "sha256": "de222be866ce6d75898a3de22716e94b77c792d60c163dda5a1e8f041218b7c4"
+        },
+        {
+          "path": "/www/helstera/apps/web/out/downloads/Helstera-0.2.30-macOS-arm64.dmg",
+          "bytes": 101483660,
+          "sha256": "2a6de1768317631d56c7907b37ae76a6915f3a581e55106832a4840022d119a5"
+        },
+        {
+          "path": "/www/helstera/apps/web/out/downloads/Helstera-0.2.30-macOS-x64.dmg",
+          "bytes": 104982691,
+          "sha256": "f4097a5313224fc7aaab0e0a7be9c94790043eb136ce594558c989328a8d96ef"
+        },
+        {
+          "path": "/www/helstera/apps/web/out/downloads/Helstera-0.2.30.AppImage",
+          "bytes": 86352652,
+          "sha256": "61c1576092889dbcda4e55cdf6f6de8738792e00c51b67711b0cfbcd610b1b4a"
+        }
+      ]
+    },
+    "health": "{\"ok\":true,\"service\":\"helstera-server\",\"version\":\"0.0.0\",\"timestamp\":\"2026-11-10T14:03:05.783Z\",\"checks\":{\"config\":{\"ok\":true}}}"
+  },
+  "cutover": {
+    "switch": {
+      "config": "/etc/nginx/sites-available/studio.0st.top.conf",
+      "fromPort": 3000,
+      "toPort": 3002,
+      "proxyLocations": 8,
+      "beforeSha256": "e5e208f953a4c7987c75a491e17286e0801014965e6341748233dbad27ce170e",
+      "afterSha256": "c97c8be8ab2178f2bc4a4e77397e5cabb7fe7dbf2f9e499255f9d0032d7f8086",
+      "health": {
+        "ok": true,
+        "service": "helstera-server",
+        "version": "0.0.0-stability-20261110",
+        "timestamp": "2026-11-10T14:27:33.057Z",
+        "checks": {
+          "config": {
+            "ok": true
+          },
+          "database": {
+            "ok": true,
+            "latencyMs": 3
+          },
+          "storage": {
+            "ok": true,
+            "latencyMs": 20
+          },
+          "accepting": {
+            "ok": true
+          }
+        }
+      },
+      "applied": true
+    },
+    "existingSocket": {
+      "pongs": 47,
+      "expectedClose": true,
+      "closeCode": 1005
+    },
+    "newSocket": {
+      "pongs": 7,
+      "expectedClose": true,
+      "closeCode": 1005
+    },
+    "httpSamples": [
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 484
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 350
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 2403
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 185
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 414
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 1474
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 166
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 170
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 261
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 174
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 230
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 418
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 1369
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 194
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 139
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 165
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 235
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 377
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 171
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 168
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 161
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 135
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 274
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 210
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 151
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 285
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 132
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 146
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 152
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 157
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 182
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 194
+      }
+    ],
+    "publicHealth": {
+      "ok": true,
+      "service": "helstera-server",
+      "version": "0.0.0-stability-20261110",
+      "timestamp": "2026-11-10T14:27:46.444Z",
+      "checks": {
+        "config": {
+          "ok": true
+        },
+        "database": {
+          "ok": true,
+          "latencyMs": 1
+        },
+        "storage": {
+          "ok": true,
+          "latencyMs": 8
+        },
+        "accepting": {
+          "ok": true
+        }
+      }
+    },
+    "disk": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/vda1      32144076800 29847633920  2296442880  93% /\n/dev/vdb1      83955572736 64483512320 15160324096  81% /www\n"
+  },
+  "agentApi": {
+    "anonymous": {
+      "/api/agent/goals": 401,
+      "/api/agent/suggestions": 401,
+      "/api/agent/memories": 401,
+      "/api/agent/connectors": 401,
+      "/api/agent/browser/sessions": 401
+    },
+    "authenticated": {
+      "/api/agent/goals": 200,
+      "/api/agent/suggestions": 200,
+      "/api/agent/memories": 200,
+      "/api/agent/connectors": 200,
+      "/api/agent/browser/sessions": 200
+    },
+    "health": {
+      "ok": true,
+      "service": "helstera-server",
+      "version": "0.0.0-stability-20261110",
+      "timestamp": "2026-11-10T14:25:23.973Z",
+      "checks": {
+        "config": {
+          "ok": true
+        },
+        "database": {
+          "ok": true,
+          "latencyMs": 3
+        },
+        "storage": {
+          "ok": true,
+          "latencyMs": 34
+        },
+        "accepting": {
+          "ok": true
+        }
+      }
+    }
+  },
+  "secondCutover": {
+    "switch": {
+      "config": "/etc/nginx/sites-available/studio.0st.top.conf",
+      "fromPort": 3002,
+      "toPort": 3003,
+      "proxyLocations": 8,
+      "beforeSha256": "c97c8be8ab2178f2bc4a4e77397e5cabb7fe7dbf2f9e499255f9d0032d7f8086",
+      "afterSha256": "aec2aae216dc4c5582a169bf38aec6251188354ba2f5039bbe043c0b078e22a1",
+      "health": {
+        "ok": true,
+        "service": "helstera-server",
+        "version": "0.0.0-stability-20261110-1",
+        "timestamp": "2026-11-10T14:35:20.289Z",
+        "checks": {
+          "config": {
+            "ok": true
+          },
+          "database": {
+            "ok": true,
+            "latencyMs": 2
+          },
+          "storage": {
+            "ok": true,
+            "latencyMs": 43
+          },
+          "accepting": {
+            "ok": true
+          }
+        }
+      },
+      "applied": true
+    },
+    "existingSocket": {
+      "pongs": 47,
+      "expectedClose": true,
+      "closeCode": 1005
+    },
+    "newSocket": {
+      "pongs": 7,
+      "expectedClose": true,
+      "closeCode": 1005
+    },
+    "httpSamples": [
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 204
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 119
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 126
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 190
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 149
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 370
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 168
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 159
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 136
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 170
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 178
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 168
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 358
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 165
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 137
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 121
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 158
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 169
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 158
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 135
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 149
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 149
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 166
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 169
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 132
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 186
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 122
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 161
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 175
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 132
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 111
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 128
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 156
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 191
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 143
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 168
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 166
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 204
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 170
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 131
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 240
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 207
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 186
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 161
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 139
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 176
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 123
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 117
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 200
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 212
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 172
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 157
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 145
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 201
+      },
+      {
+        "path": "/api/health/ready",
+        "status": 200,
+        "ms": 183
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 200,
+        "ms": 162
+      }
+    ],
+    "publicHealth": {
+      "ok": true,
+      "service": "helstera-server",
+      "version": "0.0.0-stability-20261110-1",
+      "timestamp": "2026-11-10T14:35:33.784Z",
+      "checks": {
+        "config": {
+          "ok": true
+        },
+        "database": {
+          "ok": true,
+          "latencyMs": 51
+        },
+        "storage": {
+          "ok": true,
+          "latencyMs": 8
+        },
+        "accepting": {
+          "ok": true
+        }
+      }
+    },
+    "disk": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/vda1      32144076800 29847982080  2296094720  93% /\n/dev/vdb1      83955572736 64492642304 15151194112  81% /www\n"
+  },
+  "workerRelease": {
+    "services": [
+      {
+        "name": "helstera-server",
+        "pid": 0,
+        "status": "stopped",
+        "restartCount": 133,
+        "cwd": "/www/helstera/apps/server"
+      },
+      {
+        "name": "helstera-worker",
+        "pid": 0,
+        "status": "stopped",
+        "restartCount": 119,
+        "cwd": "/www/helstera"
+      },
+      {
+        "name": "helstera-server-green",
+        "pid": 2083174,
+        "status": "online",
+        "restartCount": 12,
+        "cwd": "/www/helstera/.releases/stability-20261110/apps/server"
+      },
+      {
+        "name": "helstera-worker-green",
+        "pid": 2084295,
+        "status": "online",
+        "restartCount": 0,
+        "cwd": "/www/helstera/.releases/stability-20261110/apps/server"
+      }
+    ],
+    "health": {
+      "ok": true,
+      "service": "helstera-server",
+      "version": "0.0.0-stability-20261110",
+      "timestamp": "2026-11-10T14:30:06.925Z",
+      "checks": {
+        "config": {
+          "ok": true
+        },
+        "database": {
+          "ok": true,
+          "latencyMs": 3
+        },
+        "storage": {
+          "ok": true,
+          "latencyMs": 13
+        },
+        "accepting": {
+          "ok": true
+        }
+      }
+    },
+    "inventory": {
+      "journal": {
+        "code": 0,
+        "output": "Archived and active journals take up 970.9M in the file system.\n"
+      },
+      "docker": {
+        "code": 0,
+        "output": "TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE\nImages          13        11        4.727GB   905.9MB (19%)\nContainers      12        12        2.548MB   0B (0%)\nLocal Volumes   9         6         495.4MB   219.6MB (44%)\nBuild Cache     7         0         286.6MB   286.6MB\n"
+      },
+      "disk": {
+        "code": 0,
+        "output": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/vda1      32144076800 29851357184  2292719616  93% /\n/dev/vdb1      83955572736 64483639296 15160197120  81% /www\n"
+      }
+    },
+    "before": {
+      "jobs": 0,
+      "goals": 0,
+      "runs": 0,
+      "desktop": 0,
+      "captures": 0
+    },
+    "after": {
+      "jobs": 0,
+      "goals": 0,
+      "runs": 0,
+      "desktop": 0,
+      "captures": 0
+    }
+  },
+  "secondWorkerRelease": {
+    "services": [
+      {
+        "name": "helstera-server",
+        "pid": 0,
+        "status": "stopped",
+        "restartCount": 133,
+        "cwd": "/www/helstera/apps/server"
+      },
+      {
+        "name": "helstera-worker",
+        "pid": 0,
+        "status": "stopped",
+        "restartCount": 119,
+        "cwd": "/www/helstera"
+      },
+      {
+        "name": "helstera-server-green",
+        "pid": 0,
+        "status": "stopped",
+        "restartCount": 12,
+        "cwd": "/www/helstera/.releases/stability-20261110/apps/server"
+      },
+      {
+        "name": "helstera-worker-green",
+        "pid": 0,
+        "status": "stopped",
+        "restartCount": 0,
+        "cwd": "/www/helstera/.releases/stability-20261110/apps/server"
+      },
+      {
+        "name": "helstera-server-blue",
+        "pid": 2085189,
+        "status": "online",
+        "restartCount": 0,
+        "cwd": "/www/helstera/.releases/stability-20261110-1/apps/server"
+      },
+      {
+        "name": "helstera-worker-blue",
+        "pid": 2085973,
+        "status": "online",
+        "restartCount": 0,
+        "cwd": "/www/helstera/.releases/stability-20261110-1/apps/server"
+      }
+    ],
+    "health": {
+      "ok": true,
+      "service": "helstera-server",
+      "version": "0.0.0-stability-20261110-1",
+      "timestamp": "2026-11-10T14:36:42.002Z",
+      "checks": {
+        "config": {
+          "ok": true
+        },
+        "database": {
+          "ok": true,
+          "latencyMs": 2
+        },
+        "storage": {
+          "ok": true,
+          "latencyMs": 5
+        },
+        "accepting": {
+          "ok": true
+        }
+      }
+    },
+    "inventory": {
+      "journal": {
+        "code": 0,
+        "output": "Archived and active journals take up 970.9M in the file system.\n"
+      },
+      "docker": {
+        "code": 0,
+        "output": "TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE\nImages          13        11        4.727GB   905.9MB (19%)\nContainers      12        12        2.548MB   0B (0%)\nLocal Volumes   9         6         495.4MB   219.6MB (44%)\nBuild Cache     7         0         286.6MB   286.6MB\n"
+      },
+      "disk": {
+        "code": 0,
+        "output": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/vda1      32144076800 29848940544  2295136256  93% /\n/dev/vdb1      83955572736 64492748800 15151087616  81% /www\n"
+      }
+    },
+    "before": {
+      "jobs": 0,
+      "goals": 0,
+      "runs": 0,
+      "desktop": 0,
+      "captures": 0
+    },
+    "after": {
+      "jobs": 0,
+      "goals": 0,
+      "runs": 0,
+      "desktop": 0,
+      "captures": 0
+    }
+  }
+}

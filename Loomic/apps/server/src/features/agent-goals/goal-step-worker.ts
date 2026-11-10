@@ -13,27 +13,41 @@ export class StepWaiting extends Error { constructor(readonly output: Record<str
 export class GoalStepWorker {
   private timer: ReturnType<typeof setInterval> | undefined;
   private readonly active = new Map<string, AbortController>();
-  private scanning = false;
+  private stopped = false;
+  private scanning: Promise<Promise<void>[]> | undefined;
+  private readonly pending = new Set<Promise<void>>();
   constructor(private readonly db: Pool, private readonly execute: StepExecutor, private readonly concurrency = 4) {}
-  start() { if (this.timer) return; this.timer = setInterval(() => void this.tick(), 1000); this.timer.unref(); void this.tick(); }
-  stop() { clearInterval(this.timer); this.timer = undefined; for (const controller of this.active.values()) controller.abort(); }
-  async tick() {
-    if (this.scanning) return;
-    this.scanning = true;
+  start() { if (this.timer) return; this.stopped = false; this.timer = setInterval(() => void this.tick(), 1000); this.timer.unref(); void this.tick(); }
+  async stop() {
+    this.stopped = true;
+    clearInterval(this.timer);
+    this.timer = undefined;
+    for (const controller of this.active.values()) controller.abort();
+    await this.scanning;
+    await Promise.all([...this.pending]);
+  }
+  async tick(): Promise<void> {
+    if (this.stopped) return;
+    this.scanning ??= this.scan().finally(() => { this.scanning = undefined; });
+    await Promise.all(await this.scanning);
+  }
+  private async scan(): Promise<Promise<void>[]> {
     try {
       const goals = await this.db.query<ExecutingGoal>(`select * from agent_goals where plan->>'version'='2'
         and status in ('running','waiting_approval','waiting_desktop') and confirmed_at is not null and execution_policy='approval_required'
         order by updated_at limit 40`);
       const pending: Promise<void>[] = [];
       for (const goal of goals.rows) {
+        if (this.stopped) break;
         if (this.active.size >= this.concurrency) break;
         if (this.active.has(goal.id)) continue;
         const controller = new AbortController(); this.active.set(goal.id, controller);
-        pending.push(this.process(goal, controller).catch(error => console.error("[goal-steps] processing failed", { goalId: goal.id, error })).finally(() => { this.active.delete(goal.id); }));
+        const task = this.process(goal, controller).catch(error => console.error("[goal-steps] processing failed", { goalId: goal.id, error })).finally(() => { this.active.delete(goal.id); this.pending.delete(task); });
+        this.pending.add(task);
+        pending.push(task);
       }
-      this.scanning = false;
-      await Promise.all(pending);
-    } catch (error) { console.error("[goal-steps] queue scan failed", error); } finally { this.scanning = false; }
+      return pending;
+    } catch (error) { console.error("[goal-steps] queue scan failed", error); return []; }
   }
   private async claim(goal: ExecutingGoal): Promise<{ step: GoalStepRow; previous: GoalStepRow[] } | null> {
     const client = await this.db.connect();
@@ -124,8 +138,10 @@ export class GoalStepWorker {
         where s.id=$1 and s.lease_token=$2 and s.state='running' and s.lease_until>now() and g.id=s.goal_id and g.status='running' returning s.id`, [step.id, step.lease_token]);
       if (!kept.rows.length) { controller.abort(); throw new Error("目标已暂停、取消或执行租约失效。"); }
     };
-    let checking = false;
-    const heartbeat = setInterval(() => { if (checking) return; checking = true; void assertActive().catch(() => controller.abort()).finally(() => { checking = false; }); }, 2000);
+    let checking: Promise<void> | undefined;
+    const heartbeat = setInterval(() => {
+      checking ??= assertActive().catch(() => controller.abort()).finally(() => { checking = undefined; });
+    }, 2000);
     let evidence: Record<string, unknown> | undefined;
     try {
       await assertActive();
@@ -159,7 +175,7 @@ export class GoalStepWorker {
         if (!controller.signal.aborted || uncertain) await this.db.query("update agent_goals set status=$2,error_message=$3,updated_at=now() where id=$1 and status in ('running','paused')", [goal.id, uncertain ? "paused" : "failed", error instanceof Error ? error.message.slice(0,1000) : "步骤失败"]);
         await stepEvent(this.db, goal.id, "goal.step_interrupted", error instanceof Error ? error.message.slice(0,1000) : "步骤失败", { stepId: step.step_id, state });
       }
-    } finally { clearInterval(heartbeat); }
+    } finally { clearInterval(heartbeat); await checking; }
   }
   private async planState(db: Pick<PoolClient, "query">, goal: ExecutingGoal, stepId: string, status: "running" | "succeeded" | "skipped") {
     await db.query(`update agent_goals set plan=jsonb_set(plan,'{steps}',(select jsonb_agg(case when item->>'id'=$2 then jsonb_set(item,'{status}',to_jsonb($3::text)) else item end order by n) from jsonb_array_elements(plan->'steps') with ordinality as steps(item,n))),updated_at=now() where id=$1`, [goal.id, stepId, status]);

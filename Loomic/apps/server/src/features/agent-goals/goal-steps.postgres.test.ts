@@ -21,7 +21,7 @@ describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("goal execution journal", (
     const db = new Pool({ connectionString: url.href, options: `-c search_path=${schema}` });
     try {
       await db.query(await readFile(new URL("../../local-db/schema.sql", import.meta.url), "utf8"));
-      for (const migration of ["20261020000000_website_capture", "20261020000001_website_capture_job_link", "20261020000002_website_capture_assistant", "20261022000000_desktop_agent_tasks", "20261022000001_website_capture_asset_links", "20261030000000_agent_goals", "20261030000001_agent_goal_retry", "20261030000002_agent_goal_background", "20261031000000_agent_muse_workspace", "20261106000003_goal_execution_steps"]) {
+      for (const migration of ["20261020000000_website_capture", "20261020000001_website_capture_job_link", "20261020000002_website_capture_assistant", "20261022000000_desktop_agent_tasks", "20261022000001_website_capture_asset_links", "20261030000000_agent_goals", "20261030000001_agent_goal_retry", "20261030000002_agent_goal_background", "20261031000000_agent_muse_workspace", "20261106000003_goal_execution_steps", "20261110000000_media_resource_leases"]) {
         await db.query(await readFile(new URL(`../../local-db/migrations/${migration}.sql`, import.meta.url), "utf8"));
       }
       const userId = randomUUID(), workspaceId = randomUUID(), goalId = randomUUID();
@@ -74,12 +74,60 @@ describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("goal execution journal", (
       await decideGoalStep(db,userId,workspaceId,rejectedId,refused.id,refused.fingerprint,'reject');
       await first.tick();expect(execute).toHaveBeenCalledTimes(3);
       expect((await db.query('select status from agent_goals where id=$1',[rejectedId])).rows[0].status).toBe('canceled');
+      const interruptedId = randomUUID();
+      await db.query("insert into agent_goals(id,workspace_id,created_by,goal,plan,idempotency_key,status,confirmed_at) values($1,$2,$3,'退出恢复验收',$4::jsonb,$5,'running',now())", [interruptedId,workspaceId,userId,JSON.stringify(rejectedPlan),interruptedId]);
+      await initializeGoalSteps(db,interruptedId,rejectedPlan);
+      let entered!: () => void;
+      const started = new Promise<void>(resolve => { entered = resolve; });
+      const interrupted = new GoalStepWorker(db, async ({ signal }) => {
+        entered();
+        return new Promise<Record<string, unknown>>((_, reject) => signal.addEventListener("abort", () => reject(new Error("service draining")), { once: true }));
+      });
+      await interrupted.tick();
+      const approved = (await db.query("select * from agent_goal_steps where goal_id=$1 and step_id='record'", [interruptedId])).rows[0];
+      await decideGoalStep(db,userId,workspaceId,interruptedId,approved.id,approved.fingerprint,"approve");
+      const pendingStep = interrupted.tick();
+      await started;
+      await interrupted.stop();
+      await pendingStep;
+      expect((await db.query("select state,lease_token from agent_goal_steps where id=$1", [approved.id])).rows[0]).toMatchObject({ state: "review", lease_token: null });
+      expect((await db.query("select status from agent_goals where id=$1", [interruptedId])).rows[0].status).toBe("paused");
+      await first.tick();
+      expect(execute).toHaveBeenCalledTimes(3);
+
+      const slowId = randomUUID(), fastId = randomUUID();
+      const insertIndependent = async (id: string) => {
+        await db.query("insert into agent_goals(id,workspace_id,created_by,goal,plan,idempotency_key,status,confirmed_at) values($1,$2,$3,'并行调度验收',$4::jsonb,$5,'running',now())", [id,workspaceId,userId,JSON.stringify(plan),id]);
+        await initializeGoalSteps(db,id,plan);
+      };
+      await insertIndependent(slowId);
+      let finishSlow!: () => void;
+      const slow = new Promise<void>(resolve => { finishSlow = resolve; });
+      const calls: string[] = [];
+      const parallel = new GoalStepWorker(db, async ({ goal }) => {
+        calls.push(goal.id);
+        if (goal.id === slowId) await slow;
+        return { url: "https://example.com/" };
+      });
+      const slowTick = parallel.tick();
+      try {
+        await vi.waitFor(() => expect(calls).toContain(slowId));
+        await insertIndependent(fastId);
+        await parallel.tick();
+        expect(calls).toContain(fastId);
+      } finally {
+        finishSlow();
+        await slowTick;
+        await parallel.stop();
+        await db.query("update agent_goals set status='paused' where id=any($1::uuid[])", [[slowId,fastId]]);
+      }
+
       if (process.env.HELT_GOAL_LIVE_CAPTURE === "1") {
         const root = await mkdtemp(join(tmpdir(), "goal-live-"));
         try {
           const realId = randomUUID();
           const realPlan = executableGoalPlan({ summary: "录制并交付", steps: [
-            { id: "record", title: "录制网页", dependsOn: [], command: { executor: "web.capture", url: "https://example.com/", pageLimit: 1, record: true }, completion: "真实WebM" },
+            { id: "record", title: "录制网页", dependsOn: [], command: { executor: "web.capture", url: process.env.HELT_GOAL_CAPTURE_URL ?? "https://example.com/", pageLimit: 1, record: true }, completion: "真实WebM" },
             { id: "trim", title: "剪裁录制", dependsOn: ["record"], command: { executor: "media.trim", fromStep: "record", start: 0, end: 0.2, aspect: "original" }, completion: "真实MP4" },
             { id: "deliver", title: "交付", dependsOn: ["record","trim"], command: { executor: "result.deliver", sources: ["record","trim"] }, completion: "结果持久化" },
           ] }, { goal: "录制example.com并剪裁", idempotencyKey: realId, executionMode: "automatic" });
@@ -98,7 +146,9 @@ describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("goal execution journal", (
           await live.tick();
           const delivered=(await db.query("select status,result from agent_goals where id=$1",[realId])).rows[0];
           expect(delivered.status).toBe("completed");expect(delivered.result.assets.length).toBeGreaterThanOrEqual(3);
-          console.log("REAL_GOAL_CAPTURE_TRIM_PASSED",realId);
+          const captured=(await db.query("select result from website_capture_tasks where id=(select id from agent_goal_steps where goal_id=$1 and step_id='record')",[realId])).rows[0].result;
+          expect(captured.pages[0].title).not.toMatch(/error|blocked|unavailable/i);
+          console.log("REAL_GOAL_CAPTURE_TRIM_PASSED", JSON.stringify({ goalId:realId,title:captured.pages[0].title, pages:captured.pages.length, assets:delivered.result.assets.length, recording:captured.recordingAssetId }));
         } finally {await rm(root,{recursive:true,force:true});}
       }
     } finally { await db.end(); await admin.query(`drop schema ${schema} cascade`); await admin.end(); }

@@ -3,13 +3,14 @@ import { join } from "node:path";
 import type { Pool } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import type { StepExecution } from "../agent-goals/goal-step-worker.js";
-import { runOneTake } from "../onetake/runner.js";
+import { budgetedMediaRunner } from "../onetake/budgeted-runner.js";
 import { savePrivateImage, savePrivateVideo } from "../assets/private-video.js";
 
 export async function executeWorkflowMedia(
   options: { db: Pool; storage: StorageProvider; storageRoot: string },
   input: StepExecution,
 ) {
+  const runOneTake = budgetedMediaRunner(options.db, options.storageRoot);
   const command = input.step.command;
   if (
     command.executor !== "media.compose" &&

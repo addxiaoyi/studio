@@ -97,6 +97,9 @@ import { registerCanvasDecomposeRoutes } from "./http/canvas-decompose.js";
 import { registerChatRoutes } from "./http/chat.js";
 import { registerGenerateRoutes } from "./http/generate.js";
 import { registerHealthRoutes } from "./http/health.js";
+import { probeWritableStorage } from "./runtime/storage-probe.js";
+import { ServiceLifecycle } from "./runtime/lifecycle.js";
+import { PeriodicTasks } from "./runtime/periodic-tasks.js";
 import { registerMetricsRoutes } from "./http/metrics.js";
 import { registerErrorRoutes } from "./http/errors.js";
 import { registerLocalAuthRoutes } from "./http/local-auth.js";
@@ -170,6 +173,7 @@ import { purgeExpiredJobPayloads } from "./features/jobs/job-retention.js";
 import type { RequestAuthenticator } from "./auth/types.js";
 
 export type BuildAppOptions = {
+  lifecycle?: ServiceLifecycle;
   agentFactory?: HelsteraAgentFactory;
   agentModel?: BaseLanguageModel | string;
   agentPersistenceService?: AgentPersistenceService;
@@ -196,6 +200,7 @@ export type BuildAppOptions = {
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const env = loadServerEnv({ ...options.env, authProvider: "local", storageProvider: "local" });
+  const lifecycle = options.lifecycle ?? new ServiceLifecycle();
   if (!env.databaseUrl) throw new Error("DATABASE_URL is required; Supabase runtime support has been removed.");
 
   // Register generation providers (shared with worker.ts)
@@ -204,6 +209,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: { level: "info" },
     bodyLimit: 50 * 1024 * 1024,
+  });
+  app.addHook("onRequest", async (request, reply) => {
+    if (lifecycle.draining && !request.url.startsWith("/api/health")) return reply.header("Retry-After", "2").code(503).send({ ok: false, error: { code: "service_draining", message: "服务正在切换，请稍后重试。", retryable: true } });
   });
   app.removeContentTypeParser("application/json");
   app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
@@ -276,7 +284,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     webOrigin: env.webOrigin,
   });
   const eventBuffer = new CanvasEventBuffer();
-  setInterval(() => eventBuffer.cleanup(), 5 * 60 * 1000);
+  const maintenance = new PeriodicTasks((name, error) => app.log.error({ err: error, task: name }, "Maintenance task failed"));
+  maintenance.every("event-buffer", 5 * 60 * 1000, async () => eventBuffer.cleanup(), false);
   const agentGoalWorker = new AgentGoalWorker(
     localDb,
     websiteAssistantHub,
@@ -295,12 +304,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     agentGoalEvents.start();
     if (process.env.HELSTERA_GOAL_STEPS === "1") goalSteps.start();
   }
-  app.addHook("onClose", async () => {
-    agentGoalWorker.stop();
-    agentGoalEvents.stop();
-    goalSteps.stop();
-    eventBuffer.dispose();
-  });
   if (localDb) {
     let isAssetRetentionRunning = false;
     const runAssetRetention = async () => {
@@ -326,10 +329,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         isJobRetentionRunning = false;
       }
     };
-    void runJobRetention();
-    setInterval(() => void runJobRetention(), 6 * 60 * 60 * 1000);
-    void runAssetRetention();
-    setInterval(() => void runAssetRetention(), 60 * 60 * 1000);
+    maintenance.every("job-retention", 6 * 60 * 60 * 1000, runJobRetention);
+    maintenance.every("asset-retention", 60 * 60 * 1000, runAssetRetention);
   }
   const agentRuns = createAgentRunService({
     agentPersistenceService,
@@ -350,6 +351,15 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     storage: storageProvider,
     desktopAgentHub: websiteAssistantHub,
   });
+
+  lifecycle.onDrain(async () => {
+    await Promise.all([agentGoalWorker.stop(), goalSteps.stop(), agentRuns.drain(), maintenance.stop()]);
+    await websiteAssistantHub.drain();
+    await agentGoalEvents.stop();
+    await connectionManager.drain();
+    eventBuffer.dispose();
+  });
+  app.addHook("preClose", async () => lifecycle.drain());
 
   void app.register(async (instance) => {
     await instance.register(websocket);
@@ -414,7 +424,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     }
   });
 
-  void registerHealthRoutes(app, env);
+  void registerHealthRoutes(app, env, {
+    database: () => localDb.query("select 1 from media_resource_leases limit 0"),
+    storage: () => probeWritableStorage(env.storageRoot!),
+    draining: () => lifecycle.draining,
+  });
   void registerMetricsRoutes(app);
   void registerErrorRoutes(app);
   void registerLocalAuthRoutes(app, { db: localDb, env });
@@ -653,6 +667,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   // Supabase-backed payment routes are disabled in local-only mode.
 
 
+  app.addHook("onClose", async () => {
+    await agentPersistenceService.close?.();
+    await localDb.end();
+  });
   return app;
 }
 

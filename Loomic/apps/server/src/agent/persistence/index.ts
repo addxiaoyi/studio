@@ -11,6 +11,7 @@ export type AgentPersistence = {
 
 export type AgentPersistenceService = {
   getPersistence(): Promise<AgentPersistence | null>;
+  close?(): Promise<void>;
 };
 
 export function createAgentPersistenceService(
@@ -21,9 +22,18 @@ export function createAgentPersistenceService(
   },
 ): AgentPersistenceService {
   let pendingPersistence: Promise<AgentPersistence> | null = null;
+  let closeCheckpointer: (() => Promise<void>) | undefined;
+  let closeStore: (() => Promise<void>) | undefined;
+  let closed = false;
 
   return {
+    async close() {
+      closed = true;
+      await pendingPersistence?.catch(() => undefined);
+      await Promise.all([closeStore?.(), closeCheckpointer?.()]);
+    },
     async getPersistence() {
+      if (closed) throw new Error("Agent persistence has closed");
       const connectionString = env.databaseUrl;
       if (!connectionString) {
         return null;
@@ -36,9 +46,11 @@ export function createAgentPersistenceService(
           const checkpointer = await (
             overrides?.createCheckpointer ?? createPostgresCheckpointer
           )({ connectionString });
+          closeCheckpointer = () => checkpointer.end();
           const store = await (overrides?.createStore ?? createPostgresStore)({
             connectionString,
           });
+          closeStore = () => store.stop();
           return { checkpointer, store };
         })()
           .catch((error) => {

@@ -32,6 +32,8 @@ import { syncDueTrendSources } from "./features/feed/trend-sync.js";
 import { processDuePublishingPlans } from "./features/feed/publishing-scheduler.js";
 import { processDueSyncJobs } from "./features/jobs/sync-service.js";
 import { startOneTakeWorker } from "./features/onetake/worker.js";
+import { PeriodicTasks } from "./runtime/periodic-tasks.js";
+import { startQueueRunner } from "./runtime/queue-runner.js";
 
 // Import executors to trigger registration via side effects
 import "./features/jobs/executors/image-generation.js";
@@ -96,6 +98,7 @@ async function main() {
   const creditService = createLocalCreditService(localDb);
   const storage = createStorageProvider({ provider: "local", root: env.storageRoot ?? "/www/helstera/uploads", baseUrl: env.webOrigin });
   const maintenanceDb = localDb;
+  const maintenance = new PeriodicTasks((name, error) => console.error(`[worker:${name}] maintenance failed`, error));
   const stopOneTake = process.env.HELSTERA_ONETAKE_PYTHON ? startOneTakeWorker(localDb, env.storageRoot ?? "/www/helstera/uploads") : async () => {};
   const getAdminClient = () => {
     throw new Error("Supabase runtime support has been removed; use local PostgreSQL services.");
@@ -155,8 +158,7 @@ async function main() {
       console.error('[worker] stale-job reaper failed:', error);
     }
   };
-  void reapStaleJobs();
-  setInterval(() => void reapStaleJobs(), 60_000).unref();
+  maintenance.every("stale-jobs", 60_000, reapStaleJobs);
   let trendSyncRunning = false;
   let publishingScheduleRunning = false;
   const syncTrends = async () => {
@@ -170,8 +172,7 @@ async function main() {
       trendSyncRunning = false;
     }
   };
-  void syncTrends();
-  setInterval(() => void syncTrends(), 5 * 60 * 1000).unref();
+  maintenance.every("trend-sync", 5 * 60 * 1000, syncTrends);
   const processPublishingSchedule = async () => {
     if (publishingScheduleRunning) return;
     publishingScheduleRunning = true;
@@ -184,8 +185,7 @@ async function main() {
       publishingScheduleRunning = false;
     }
   };
-  void processPublishingSchedule();
-  setInterval(() => void processPublishingSchedule(), 30 * 1000).unref();
+  maintenance.every("publishing", 30_000, processPublishingSchedule);
   let syncRunning = false;
   const processSync = async () => {
     if (syncRunning) return;
@@ -199,8 +199,7 @@ async function main() {
       syncRunning = false;
     }
   };
-  void processSync();
-  setInterval(() => void processSync(), 30 * 1000).unref();
+  maintenance.every("generation-sync", 30_000, processSync);
 
   // Base context — per-message fields (queue, msgId, renewVt) are added in processMessage
   const baseCtx = {
@@ -219,100 +218,44 @@ async function main() {
     website_capture_jobs: 1,
   };
 
-  const inFlightByQueue = new Map<string, Set<Promise<void>>>(
-    QUEUES.map((q) => [q, new Set()]),
-  );
-
-  // Server-side long poll: wait up to N seconds inside Postgres for messages,
-  // checking every 500ms. This replaces the old client-side sleep(2000) + read()
-  // pattern that generated ~340K idle queries per monitoring period.
-  const pollTimeoutSeconds = Math.max(
-    1,
-    Math.floor((env.workerPollIntervalMs ?? 5000) / 1000),
-  );
+  const pollTimeoutSeconds = Math.max(1, Math.floor((env.workerPollIntervalMs ?? 5000) / 1000));
   const workerId = env.workerId ?? randomUUID().slice(0, 8);
   const tag = `[worker:${workerId}]`;
+  const runner = startQueueRunner<PgmqMessage>({
+    queues: QUEUES.map(name => ({ name, concurrency: CONCURRENCY_BY_QUEUE[name] ?? 1 })),
+    poll: (queue, available) => pgmq.readWithPoll(queue, VT_BY_QUEUE[queue] ?? 120, available, pollTimeoutSeconds, 500),
+    execute: async (queue, msg) => {
+      const ctx: ExecutorContext = {
+        ...baseCtx,
+        queue,
+        msgId: msg.msg_id,
+        renewVt: async (vtSeconds: number) => {
+          try { await pgmq.setVt(queue, msg.msg_id, vtSeconds); }
+          catch (error) { console.warn(`[renewVt] failed for msg ${msg.msg_id}:`, error); }
+        },
+        heartbeat: (progress, stage) => jobService.updateProgress(String(msg.message.job_id), progress, stage),
+      };
+      await processMessage(queue, msg, ctx, creditService, tag);
+    },
+    onError: (queue, error) => console.error(`${tag} ${queue} failed:`, error),
+  });
 
-  let running = true;
-
-  // Graceful shutdown — wait for in-flight jobs then exit
-  const shutdown = async () => {
-    const totalInFlight = [...inFlightByQueue.values()].reduce(
-      (n, s) => n + s.size,
-      0,
-    );
-    console.log(
-      `${tag} Shutting down, waiting for ${totalInFlight} in-flight jobs...`,
-    );
-    running = false;
-    const allTasks = [...inFlightByQueue.values()].flatMap((s) => [...s]);
-    if (allTasks.length > 0) {
-      await Promise.allSettled(allTasks);
-    }
-    await stopOneTake();
-    await maintenanceDb.end();
-    await pgmq.shutdown();
-    console.log(`${tag} Shutdown complete.`);
-    process.exit(0);
+  let stopping: Promise<void> | undefined;
+  const shutdown = () => {
+    stopping ??= (async () => {
+      console.log(`${tag} Shutting down, waiting for ${runner.activeCount} in-flight jobs...`);
+      // Stop intake before waiting: a pending query must never escape the drain.
+      const drained = runner.stop();
+      await pgmq.shutdown();
+      await Promise.all([drained, maintenance.stop(), stopOneTake()]);
+      await localDb.end();
+      console.log(`${tag} Shutdown complete.`);
+    })().catch(error => { console.error(`${tag} Shutdown failed:`, error); process.exitCode = 1; });
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  console.log(`${tag} Started. concurrency=${JSON.stringify(CONCURRENCY_BY_QUEUE)}, longPollTimeout=${pollTimeoutSeconds}s`);
 
-  const concurrencyDesc = QUEUES.map(
-    (q) => `${q}=${CONCURRENCY_BY_QUEUE[q] ?? 1}`,
-  ).join(", ");
-  console.log(
-    `${tag} Started. concurrency={${concurrencyDesc}}, longPollTimeout=${pollTimeoutSeconds}s`,
-  );
-
-  while (running) {
-    for (const queue of QUEUES) {
-      try {
-        const inFlight = inFlightByQueue.get(queue)!;
-        const cap = CONCURRENCY_BY_QUEUE[queue] ?? 1;
-        const available = cap - inFlight.size;
-        if (available <= 0) continue;
-
-        const vt = VT_BY_QUEUE[queue] ?? 120;
-        const messages = await pgmq.readWithPoll(
-          queue,
-          vt,
-          available,
-          pollTimeoutSeconds,
-          500,
-        );
-
-        for (const msg of messages) {
-          const ctx: ExecutorContext = {
-            ...baseCtx,
-            queue,
-            msgId: msg.msg_id,
-            renewVt: async (vtSeconds: number) => {
-              try {
-                await pgmq.setVt(queue, msg.msg_id, vtSeconds);
-              } catch (e) {
-                console.warn(`[renewVt] failed for msg ${msg.msg_id}:`, e);
-              }
-            },
-            heartbeat: async (progress: number, stage: string) => {
-              await jobService.updateProgress(String(msg.message.job_id), progress, stage);
-            },
-          };
-          const task = processMessage(
-            queue,
-            msg,
-            ctx,
-            creditService,
-            tag,
-          ).finally(() => inFlight.delete(task));
-          inFlight.add(task);
-        }
-      } catch (err) {
-        if (!running) break;
-        console.error(`${tag} Error polling ${queue}:`, err);
-      }
-    }
-  }
 }
 
 async function withAdvisoryLock(

@@ -11,12 +11,12 @@ export function oneTakeModels(): string[] {
   return [...new Set(models)];
 }
 
-export async function runOneTake(input: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+export async function runOneTake(input: Record<string, unknown>, signal?: AbortSignal, scratchRoot?: string): Promise<unknown> {
   const python = process.env.HELSTERA_ONETAKE_PYTHON;
   if (!python) throw new Error("未配置 OneTake 转写运行环境，请联系管理员。");
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
-    const child = spawn(python, ["-u", script], { windowsHide: true, detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
+    const child = spawn(python, ["-u", script], { windowsHide: true, detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PYTHONIOENCODING: "utf-8", ...(scratchRoot ? { TMPDIR: scratchRoot, TMP: scratchRoot, TEMP: scratchRoot } : {}) } });
     const chunks: Buffer[] = [];
     let size = 0;
     let diagnostic = "";

@@ -60,6 +60,7 @@ export function registerOfficialModelPriceRoutes(
   if (!options.autoSync) return;
 
   let timer: NodeJS.Timeout | undefined;
+  let pending: Promise<void> | undefined;
   const syncPrices = async () => {
     try {
       const summary = await syncOfficialModelPrices(options.db);
@@ -74,12 +75,14 @@ export function registerOfficialModelPriceRoutes(
   };
 
   app.addHook("onReady", async () => {
-    void syncPrices();
-    timer = setInterval(() => void syncPrices(), SYNC_INTERVAL_MS);
+    const cycle = () => { pending ??= syncPrices().finally(() => { pending = undefined; }); };
+    cycle();
+    timer = setInterval(cycle, SYNC_INTERVAL_MS);
     timer.unref();
   });
   app.addHook("onClose", async () => {
     if (timer) clearInterval(timer);
+    await pending;
   });
 }
 

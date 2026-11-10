@@ -18,12 +18,13 @@ export function browserEngine(env = process.env) {
   return { name, executablePath } as const;
 }
 
-export async function launchAgentBrowser() {
+export async function launchAgentBrowser(scratchRoot?: string) {
   const engine = browserEngine();
   if (engine.executablePath) await access(engine.executablePath);
   const browser = await chromium.launch({
     headless: true,
-    env: Object.fromEntries(
+    ...(scratchRoot ? { artifactsDir: scratchRoot, downloadsPath: scratchRoot } : {}),
+    env: { ...Object.fromEntries(
       [
         "PATH",
         "SystemRoot",
@@ -41,7 +42,7 @@ export async function launchAgentBrowser() {
       ].flatMap((key) =>
         process.env[key] === undefined ? [] : [[key, process.env[key]!]],
       ),
-    ),
+    ), ...(scratchRoot ? { TMPDIR: scratchRoot, TMP: scratchRoot, TEMP: scratchRoot } : {}) },
     // Chromix uses Chromium's sandbox; deployment must run it as an unprivileged user.
     ...(engine.name === "chromix" ? { chromiumSandbox: true } : {}),
     args: [

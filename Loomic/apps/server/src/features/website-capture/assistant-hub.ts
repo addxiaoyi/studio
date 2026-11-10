@@ -4,6 +4,9 @@ import { finishCaptureCanvasDelivery } from "./canvas-delivery.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import type { WebSocket } from "ws";
+import { setTimeout as delay } from "node:timers/promises";
+import { PeriodicTasks } from "../../runtime/periodic-tasks.js";
+import { closeSockets } from "../../runtime/close-sockets.js";
 
 import {
   type DesktopAgentAction,
@@ -238,6 +241,10 @@ function decodeDesktopScreenshot(value: string, mimeType: "image/jpeg" | "image/
 }
 
 export class WebsiteAssistantHub {
+  private closing = false;
+  private draining?: Promise<void>;
+  private readonly pendingWork = new Set<Promise<unknown>>();
+  private readonly maintenance = new PeriodicTasks((name, error) => console.error(`[website-assistant:${name}]`, error));
   private readonly connections = new Map<string, LiveConnection>();
   private readonly pages = new Map<string, WebsiteCapturePage[]>();
   private readonly taskTimers = new Map<
@@ -281,21 +288,51 @@ export class WebsiteAssistantHub {
   private visionAnalyzer?: HubOptions["analyzeDesktopScreenshot"];
 
   constructor(private readonly options: HubOptions) {
-    void this.options.db
-      .query(
-        "update website_capture_connections set disconnected_at=coalesce(disconnected_at, now()) where revoked_at is null and disconnected_at is null",
-      )
-      .catch(() => undefined);
-    setInterval(() => {
+    this.maintenance.every("upload-cache", 60_000, async () => {
       const cutoff = Date.now() - 5 * 60 * 1000;
       for (const [uploadId, upload] of this.pendingRecordingUploads) {
-        if (upload.createdAt < cutoff) this.pendingRecordingUploads.delete(uploadId);
+        if (upload.createdAt < cutoff && !upload.processing) this.pendingRecordingUploads.delete(uploadId);
       }
       for (const [uploadId, upload] of this.completedRecordingUploads) {
         if (upload.createdAt < cutoff) this.completedRecordingUploads.delete(uploadId);
       }
-    }, 60 * 1000).unref();
-    setInterval(() => void this.deliverDesktopChat(), 5_000).unref();
+    }, false);
+    this.maintenance.every("chat-delivery", 5_000, () => this.deliverDesktopChat(), false);
+  }
+
+  private track(work: Promise<unknown>) {
+    this.pendingWork.add(work);
+    void work.finally(() => this.pendingWork.delete(work)).catch(error => console.error("[website-assistant] background work failed", error));
+  }
+
+  drain() {
+    this.closing = true;
+    this.draining ??= this.finishConnections();
+    return this.draining;
+  }
+
+  private async finishConnections() {
+    await this.maintenance.stop();
+    // Keep replies flowing while the old instance finishes its desktop work.
+    while (this.connections.size) {
+      const ids = [...this.connections.keys()];
+      const { rows } = await this.options.db.query(`select id from desktop_agent_tasks where connection_id=any($1::uuid[]) and status in ('queued','running')
+        union all select id from website_capture_tasks where assistant_connection_id=any($1::uuid[]) and status in ('queued','running')`, [ids]);
+      if (!rows.length) break;
+      await delay(500);
+    }
+    await Promise.all([...this.pendingRecordingUploads.values()].flatMap(upload => upload.processingPromise ? [upload.processingPromise] : []));
+    await closeSockets([...this.connections.values()].map(connection => connection.ws));
+    while (this.pendingWork.size) await Promise.all([...this.pendingWork]);
+    for (const timers of [this.taskTimers, this.desktopTaskTimers, this.desktopReconnectTimers]) {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    }
+    for (const pending of this.pendingVisionRequests.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("服务正在切换，请重新连接。"));
+    }
+    this.pendingVisionRequests.clear();
   }
 
   private async deliverDesktopChat() {
@@ -1282,6 +1319,7 @@ export class WebsiteAssistantHub {
   }
 
   async accept(socket: WebSocket, request: FastifyRequest): Promise<void> {
+    if (this.closing) { socket.close(1012, "Service restarting"); return; }
     const url = new URL(request.url, `http://${request.headers.host}`);
     const code = url.searchParams.get("code");
     const sessionToken = url.searchParams.get("session_token");
@@ -1291,6 +1329,7 @@ export class WebsiteAssistantHub {
       : sessionToken
         ? await this.resumeSession(sessionToken, agent)
         : null;
+    if (this.closing) { socket.close(1012, "Service restarting"); return; }
     if (!authorized) {
       socket.close(4001, "Invalid or expired pairing");
       return;
@@ -1320,7 +1359,7 @@ export class WebsiteAssistantHub {
         socket.close(1009, "Message exceeds the assistant limit");
         return;
       }
-      void this.handleMessage(live, raw as Buffer).catch((error) => {
+      this.track(this.handleMessage(live, raw as Buffer).catch((error) => {
         let taskId = "";
         let messageType = "";
         try {
@@ -1345,10 +1384,10 @@ export class WebsiteAssistantHub {
           type: "assistant.error",
           message: error instanceof Error ? error.message : "助手消息处理失败",
         });
-      });
+      }));
     });
-    socket.on("close", () => void this.handleClose(live));
-    socket.on("error", () => void this.handleClose(live));
+    socket.on("close", () => this.track(this.handleClose(live)));
+    socket.on("error", () => this.track(this.handleClose(live)));
   }
 
   private async consumePairing(
@@ -2245,7 +2284,7 @@ export class WebsiteAssistantHub {
 
   private failDisconnectedDesktopTasks(connectionId: string) {
     this.desktopReconnectTimers.delete(connectionId);
-    void this.options.db.query<{ id: string; goal_id: string | null; chat_session_id: string | null; created_by: string; goal: string }>(
+    return this.options.db.query<{ id: string; goal_id: string | null; chat_session_id: string | null; created_by: string; goal: string }>(
       `update desktop_agent_tasks set status='waiting_desktop',wait_reason='Desktop connection was interrupted. Waiting for the desktop session to reconnect.',updated_at=now()
         where connection_id=$1 and status in ('queued','running','waiting_approval') returning id,goal_id,chat_session_id,created_by,goal`,
       [connectionId],
@@ -2550,6 +2589,7 @@ export class WebsiteAssistantHub {
   }
 
   private async handleClose(live: LiveConnection) {
+    if (this.connections.get(live.id) !== live) return;
     this.rejectPendingMcpCalls(
       live.id,
       "The authorized desktop MCP connection was disconnected.",
@@ -2561,9 +2601,11 @@ export class WebsiteAssistantHub {
     );
     const priorReconnectTimer = this.desktopReconnectTimers.get(live.id);
     if (priorReconnectTimer) clearTimeout(priorReconnectTimer);
-    const reconnectTimer = setTimeout(() => this.failDisconnectedDesktopTasks(live.id), DESKTOP_RECONNECT_GRACE_MS);
-    reconnectTimer.unref?.();
-    this.desktopReconnectTimers.set(live.id, reconnectTimer);
+    if (!this.closing) {
+      const reconnectTimer = setTimeout(() => this.track(this.failDisconnectedDesktopTasks(live.id)), DESKTOP_RECONNECT_GRACE_MS);
+      reconnectTimer.unref?.();
+      this.desktopReconnectTimers.set(live.id, reconnectTimer);
+    }
     const tasks = await this.options.db.query<{ id: string }>(
       "update website_capture_tasks set status='failed', stage='failed', error_message='本地浏览器助手已断开，任务已中止', updated_at=now() where assistant_connection_id=$1 and status in ('queued','running') returning id",
       [live.id],

@@ -8,7 +8,7 @@ import { buildWebsiteDocument } from "./agent-goal-document.js";
 import { writeCaptureToCanvas } from "./agent-goal-background.js";
 import { insertLocalImageElement, insertLocalVideoElement } from "../canvas/canvas-element-writer.js";
 import { assertConnectorEnabled } from "./connector-gate.js";
-import { runOneTake } from "../onetake/runner.js";
+import { budgetedMediaRunner } from "../onetake/budgeted-runner.js";
 import { savePrivateVideo } from "../assets/private-video.js";
 import { StepWaiting, type StepExecutor } from "./goal-step-worker.js";
 import { readWorkflowMaterial } from "../canvas-workflows/materials.js";
@@ -20,6 +20,7 @@ import { activeStepInputs } from "./step-routing.js";
 
 type Options = { db: Pool; storage: StorageProvider; storageRoot: string; webOrigin: string; desktop: WebsiteAssistantHub; author?: WorkflowAuthor };
 export function createGoalStepExecutor(options: Options): StepExecutor {
+  const runOneTake = budgetedMediaRunner(options.db, options.storageRoot);
   return async input => {
     const { step, goal, previous, signal, assertActive } = input;
     const command = step.command;
