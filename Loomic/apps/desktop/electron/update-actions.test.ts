@@ -28,4 +28,11 @@ describe("desktop update actions", () => {
     expect(installDesktopUpdate(installer, { status: "downloaded" }, quitAndInstall)).toEqual({ ok: true });
     expect(quitAndInstall).toHaveBeenCalledOnce();
   });
+
+  it("keeps the downloaded update and running task intact while busy", () => {
+    const install = vi.fn();
+    expect(() => installDesktopUpdate(installer, { status: "downloaded" }, install, "正在录屏"))
+      .toThrow("正在录屏");
+    expect(install).not.toHaveBeenCalled();
+  });
 });

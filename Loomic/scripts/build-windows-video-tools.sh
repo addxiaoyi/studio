@@ -9,7 +9,7 @@ ffmpeg_commit=946fcce07b6dcd0331c8cc609192aeff5e1924f8
 x264_commit=0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee
 jobs=${BUILD_JOBS:-2}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { echo 'BUILD_JOBS must be positive' >&2; exit 1; }
-for tool in git make nasm pkg-config x86_64-w64-mingw32-gcc x86_64-w64-mingw32-ar; do
+for tool in git make nasm pkg-config xz x86_64-w64-mingw32-gcc x86_64-w64-mingw32-ar; do
   command -v "$tool" >/dev/null || { echo "Missing build tool: $tool" >&2; exit 1; }
 done
 
@@ -46,8 +46,8 @@ cp "$work/ffmpeg/ffmpeg.exe" "$work/ffmpeg/ffprobe.exe" "$output/"
 cp "$work/ffmpeg/COPYING.GPLv2" "$output/LICENSE.txt"
 cp "$work/ffmpeg/ffbuild/config.mak" "$output/ffmpeg-config.mak"
 cp "$work/x264/config.mak" "$output/x264-config.mak"
-git -C "$work/ffmpeg" archive --format=tar --output="$output/ffmpeg-source.tar" HEAD
-git -C "$work/x264" archive --format=tar --output="$output/x264-source.tar" HEAD
+git -C "$work/ffmpeg" archive --format=tar HEAD | xz -9 -T1 > "$output/ffmpeg-source.tar.xz"
+git -C "$work/x264" archive --format=tar HEAD | xz -9 -T1 > "$output/x264-source.tar.xz"
 printf 'FFmpeg commit %s\nSource: https://github.com/FFmpeg/FFmpeg\nx264 commit %s\nSource: https://code.videolan.org/videolan/x264\n\nBuilt by scripts/build-windows-video-tools.sh using MinGW-w64.\nSource archives, license and exact configure output are included.\n' "$ffmpeg_commit" "$x264_commit" > "$output/SOURCE.txt"
-(cd "$output" && sha256sum ffmpeg.exe ffprobe.exe ffmpeg-source.tar x264-source.tar > SHA256SUMS)
+(cd "$output" && sha256sum ffmpeg.exe ffprobe.exe ffmpeg-source.tar.xz x264-source.tar.xz > SHA256SUMS)
 printf 'VIDEO_TOOLS_BUILT %s\nBUILD_DIRECTORY %s\n' "$output" "$work"

@@ -214,6 +214,20 @@ describe("desktop window controls", () => {
     expect(window.hide).toHaveBeenCalledOnce();
     expect(window.webContents.send).not.toHaveBeenCalled();
   });
+
+  it("allows macOS to quit and keeps listeners when an active task blocks closing", () => {
+    const mac = makeWindow();
+    observeMainWindowLifecycle(mac, "darwin", vi.fn(), { isQuitting: () => true });
+    mac.events.windowEvents.emit("close", mac.events.closeEvent);
+    expect(mac.events.closeEvent.preventDefault).not.toHaveBeenCalled();
+    expect(mac.hide).not.toHaveBeenCalled();
+    const busy = makeWindow();
+    observeMainWindowLifecycle(busy, "win32", vi.fn(), { canClose: () => false });
+    busy.events.windowEvents.emit("close", busy.events.closeEvent);
+    busy.events.windowEvents.emit("maximize");
+    expect(busy.events.closeEvent.preventDefault).toHaveBeenCalledOnce();
+    expect(busy.webContents.send).toHaveBeenCalled();
+  });
 });
 
 describe("decideMainWindowNavigation", () => {

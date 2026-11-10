@@ -17,8 +17,10 @@ export function installDesktopUpdate(
   policy: DesktopUpdatePolicy,
   state: UpdateStateLike,
   quitAndInstall: () => void,
+  busyReason?: string,
 ): { ok: boolean } {
   if (!policy.canInstall || state.status !== "downloaded") return { ok: false };
+  if (busyReason) throw new Error(`${busyReason}。请完成或取消任务后再重启安装，已下载的更新会保留。`);
   quitAndInstall();
   return { ok: true };
 }

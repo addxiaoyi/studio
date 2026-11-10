@@ -2,6 +2,9 @@ appId: com.helstera.desktop
 productName: Helstera
 copyright: Copyright © 2025 Helstera
 beforePack: scripts/check-video-before-pack.cjs
+afterPack: scripts/verify-package.cjs
+compression: maximum
+electronLanguages: [en-US, zh-CN, zh-TW]
 
 directories:
   output: release
@@ -9,11 +12,24 @@ directories:
 
 files:
   - dist
-  - dist-electron
+  - dist-electron/*.js
+  # Node OCR loads .js + .wasm; the embedded browser builds duplicate the core.
+  - "!node_modules/tesseract.js-core/*.wasm.js"
+  - "!node_modules/tesseract.js/dist/**"
+  - "!node_modules/jimp/browser/**"
+  - "!node_modules/**/*.map"
+  - "!node_modules/zlibjs/bin/{browser,gunzip,gzip,inflate,rawdeflate,rawinflate,unzip,zip,zlib}*"
 
 extraResources:
   - from: resources/icon.png
     to: icon.png
+  - from: resources
+    to: .
+    filter: [startup.html, startup.css, startup.js]
+  - from: node_modules/react/LICENSE
+    to: licenses/react.txt
+  - from: node_modules/react-dom/LICENSE
+    to: licenses/react-dom.txt
 
 asarUnpack:
   - node_modules/tesseract.js/**
@@ -25,6 +41,10 @@ electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
 
 win:
+  files:
+    - dist
+    - dist-electron/*.js
+    - "!node_modules/@nut-tree/libnut-{darwin,linux}/**"
   extraResources:
     - from: resources/native/helstera-uia.exe
       to: native/helstera-uia.exe
@@ -35,10 +55,11 @@ win:
         - ffprobe.exe
         - LICENSE.txt
         - SOURCE.txt
-        - ffmpeg-source.tar
-        - x264-source.tar
+        - ffmpeg-source.tar.xz
+        - x264-source.tar.xz
         - ffmpeg-config.mak
         - x264-config.mak
+        - SHA256SUMS
   icon: resources/icon.ico
   target:
     - target: nsis
@@ -51,6 +72,12 @@ win:
 nsis:
   artifactName: "${productName}-Setup-${version}-Windows-x64.${ext}"
   oneClick: false
+  perMachine: false
+  allowElevation: true
+  installerLanguages: [zh_CN, en_US]
+  language: "2052"
+  include: resources/installer.nsh
+  deleteAppDataOnUninstall: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
@@ -67,6 +94,10 @@ protocols:
       - helstera
 
 mac:
+  files:
+    - dist
+    - dist-electron/*.js
+    - "!node_modules/@nut-tree/libnut-{win32,linux}/**"
   icon: resources/icon.icns
   target:
     - target: dmg
@@ -76,6 +107,10 @@ mac:
   category: public.app-category.productivity
 
 linux:
+  files:
+    - dist
+    - dist-electron/*.js
+    - "!node_modules/@nut-tree/libnut-{win32,darwin}/**"
   target:
     - target: AppImage
       arch:

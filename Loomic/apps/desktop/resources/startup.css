@@ -1,0 +1,21 @@
+:root { color-scheme: light dark; font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif; color: #202124; background: #faf9f7; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; }
+header { height: 48px; display: flex; justify-content: space-between; align-items: center; padding-left: 20px; -webkit-app-region: drag; font-weight: 600; }
+nav { display: flex; height: 100%; -webkit-app-region: no-drag; }
+button { width: 48px; border: 0; background: transparent; color: inherit; font-size: 22px; cursor: pointer; }
+button:hover { background: #80808020; }
+main { max-width: 600px; margin: clamp(20px, 10vh, 100px) auto 24px; padding: 0 28px; }
+img { border-radius: 14px; }
+.eyebrow { margin-top: 28px; font-size: 13px; color: #70706e; }
+h1 { font-size: clamp(22px, 4vw, 32px); line-height: 1.3; margin: 12px 0; }
+p { line-height: 1.7; overflow-wrap: anywhere; }
+#description { color: #656563; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0 20px; }
+.actions a { min-height: 44px; padding: 12px 20px; border: 1px solid #d7d7d2; border-radius: 10px; text-align: center; text-decoration: none; color: inherit; font-size: 14px; }
+.actions .primary { background: #242724; color: #fff; border-color: #242724; }
+.browser { color: inherit; font-size: 13px; text-underline-offset: 4px; }
+.hint { color: #777773; font-size: 12px; margin-top: 32px; }
+:focus-visible { outline: 2px solid #6585c0; outline-offset: 4px; }
+@media (prefers-color-scheme: dark) { :root { background: #171918; color: #eeeeea; } #description, .eyebrow, .hint { color: #a5aaa5; } .actions a { border-color: #444844; } .actions .primary { color: #202420; background: #e0e9de; border-color: #e0e9de; } }
+@media (max-width: 480px) { main { padding: 0 20px; } .actions a { flex: 1 1 140px; } }

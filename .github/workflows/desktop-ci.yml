@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install cross compiler
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nasm pkg-config make
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nasm pkg-config make xz-utils
       - name: Build pinned FFmpeg and x264
         run: bash Loomic/scripts/build-windows-video-tools.sh "$RUNNER_TEMP/video-tools"
       - uses: actions/upload-artifact@v4
@@ -89,6 +89,7 @@ jobs:
       - name: Typecheck and test desktop
         run: |
           pnpm --filter @helstera/desktop typecheck
+          node --test apps/desktop/scripts/verify-video-resources.test.mjs
           pnpm --filter @helstera/desktop test
           pnpm --filter @helstera/desktop exec vitest run --config vitest.config.ts electron/extension-sync.test.ts
       - name: Build native helper
@@ -117,6 +118,23 @@ jobs:
             if [ "$attempt" = 3 ]; then exit 1; fi
             sleep 5
           done
+      - name: Packaged Windows startup, recovery and window lifecycle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:HELT_DESKTOP_EXE = Join-Path $PWD 'apps/desktop/release/win-unpacked/Helstera.exe'
+          $env:HELT_DESKTOP_LIFECYCLE_DIR = Join-Path $env:RUNNER_TEMP 'desktop-lifecycle'
+          node apps/desktop/e2e/lifecycle.mjs
+      - name: Upload Windows lifecycle evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-lifecycle-windows
+          path: |
+            ${{ runner.temp }}/desktop-lifecycle/report.json
+            ${{ runner.temp }}/desktop-lifecycle/offline.png
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-candidate-${{ matrix.platform }}

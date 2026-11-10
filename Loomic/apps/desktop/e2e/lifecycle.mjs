@@ -1,0 +1,83 @@
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { createServer } from "node:http";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+const webRequire = createRequire(new URL("../../web/package.json", import.meta.url));
+const { _electron, expect } = webRequire("@playwright/test");
+const version = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).version;
+const executable = process.env.HELT_DESKTOP_EXE;
+if (!executable) throw new Error("HELT_DESKTOP_EXE must point to the candidate executable.");
+const output = resolve(process.env.HELT_DESKTOP_LIFECYCLE_DIR || fileURLToPath(new URL("../test-results/lifecycle", import.meta.url)));
+const profile = join(output, "profile");
+await mkdir(profile, { recursive: true });
+await writeFile(join(profile, "window-placement.json"), JSON.stringify({ bounds: { x: 80000, y: 80000, width: 1000, height: 700 }, maximized: false }));
+const server = createServer((request, response) => {
+  if (request.url === "/slow") return;
+  response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  response.end("<!doctype html><html><body><h1>Helstera 本地验收</h1><a href='/slow'>连接超时测试</a></body></html>");
+});
+await new Promise((done) => server.listen(0, "127.0.0.1", done));
+const port = server.address().port;
+await new Promise((done) => server.close(done));
+const env = { ...process.env, HELSTERA_ISOLATED_TEST: "1", HELSTERA_TEST_USER_DATA: profile, HELSTERA_DESKTOP_LOCAL_URL: `http://127.0.0.1:${port}` };
+delete env.ELECTRON_RUN_AS_NODE;
+delete env.NODE_OPTIONS;
+let desktop;
+const checks = {};
+const passed = (name) => { checks[name] = true; console.log("PASS", name); };
+try {
+  desktop = await _electron.launch({ executablePath: executable, env, timeout: 30_000 });
+  let page = await desktop.firstWindow();
+  await expect(page.getByRole("heading", { name: "暂时无法连接工作区" })).toBeVisible();
+  passed("offlineRecoveryPage");
+  const bounds = await desktop.evaluate(({ BrowserWindow, screen }) => ({ bounds: BrowserWindow.getAllWindows()[0].getBounds(), areas: screen.getAllDisplays().map(d => d.workArea) }));
+  assert.ok(bounds.areas.some(area => bounds.bounds.x >= area.x && bounds.bounds.x < area.x + area.width));
+  passed("disconnectedMonitorRecovery");
+  await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 40, y: 40, width: 800, height: 600 }));
+  const before = await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds());
+  await page.screenshot({ path: join(output, "offline.png") });
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+  assert.equal(overflow, false);
+  await new Promise((done) => server.listen(port, "127.0.0.1", done));
+  await page.getByRole("link", { name: "重新连接", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Helstera 本地验收" })).toBeVisible();
+  assert.equal(await page.evaluate(() => window.electronAPI.getAppVersion()), version);
+  passed("retryAndPreload");
+  await page.getByRole("link", { name: "连接超时测试" }).click({ noWaitAfter: true });
+  await expect(page.getByRole("heading", { name: "工作区连接时间较长" })).toBeVisible({ timeout: 35_000 });
+  passed("loadTimeout");
+  await page.getByRole("link", { name: "返回工作台" }).click();
+  await expect(page.getByRole("heading", { name: "Helstera 本地验收" })).toBeVisible();
+  await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer());
+  page = await desktop.firstWindow();
+  await expect(page.getByRole("heading", { name: "工作区需要重新打开" })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("link", { name: "重新连接", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Helstera 本地验收" })).toBeVisible();
+  passed("rendererRecovery");
+  await page.evaluate(() => window.electronAPI.minimizeWindow());
+  const second = spawn(executable, [], { env, windowsHide: true, stdio: "ignore" });
+  await new Promise((done, fail) => { second.once("exit", done); second.once("error", fail); });
+  await expect.poll(() => desktop.evaluate(({ BrowserWindow }) => ({ visible: BrowserWindow.getAllWindows()[0].isVisible(), minimized: BrowserWindow.getAllWindows()[0].isMinimized() }))).toEqual({ visible: true, minimized: false });
+  passed("secondInstanceRestores");
+  await desktop.close(); desktop = null;
+  const saved = JSON.parse(await readFile(join(profile, "window-placement.json"), "utf8"));
+  assert.deepEqual(saved.bounds, before);
+  desktop = await _electron.launch({ executablePath: executable, env });
+  page = await desktop.firstWindow();
+  await expect(page.getByRole("heading", { name: "Helstera 本地验收" })).toBeVisible();
+  assert.deepEqual(await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getNormalBounds()), before);
+  passed("persistedPlacement");
+  const report = { ok: true, executable, checks };
+  await writeFile(join(output, "report.json"), JSON.stringify(report, null, 2));
+  console.log("DESKTOP_LIFECYCLE_PASSED", JSON.stringify(report));
+} finally {
+  if (desktop) {
+    const timer = setTimeout(() => desktop.process().kill(), 10_000);
+    try { await desktop.close(); } finally { clearTimeout(timer); }
+  }
+  server.closeAllConnections();
+  await new Promise((done) => server.close(done));
+}

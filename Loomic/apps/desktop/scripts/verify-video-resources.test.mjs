@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import { verifyWindowsVideoResources } from "./verify-video-resources.mjs";
 import beforePack from "./check-video-before-pack.cjs";
 
@@ -14,10 +15,15 @@ test("Windows video resources must include non-empty binaries and notices", (t) 
     writeFileSync(join(directory, name), "test");
   }
   assert.throws(() => verifyWindowsVideoResources(directory), /ffmpeg-source\.tar/);
-  for (const name of ["ffmpeg-source.tar", "x264-source.tar", "ffmpeg-config.mak", "x264-config.mak"]) {
+  for (const name of ["ffmpeg-source.tar.xz", "x264-source.tar.xz", "ffmpeg-config.mak", "x264-config.mak"]) {
     writeFileSync(join(directory, name), "test");
   }
+  writeFileSync(join(directory, "SHA256SUMS"), ["ffmpeg.exe", "ffprobe.exe", "ffmpeg-source.tar.xz", "x264-source.tar.xz"]
+    .map((name) => `${createHash("sha256").update("test").digest("hex")}  ${name}`).join("\n"));
   assert.doesNotThrow(() => verifyWindowsVideoResources(directory));
+  writeFileSync(join(directory, "ffmpeg.exe"), "corrupt");
+  assert.throws(() => verifyWindowsVideoResources(directory), /checksum mismatch: ffmpeg.exe/);
+  writeFileSync(join(directory, "ffmpeg.exe"), "test");
   writeFileSync(join(directory, "SOURCE.txt"), "");
   assert.throws(() => verifyWindowsVideoResources(directory), /non-empty.*SOURCE\.txt/);
 });

@@ -53,6 +53,7 @@ import {
   ipcMain,
   nativeImage,
   safeStorage,
+  screen,
   shell,
 } from "electron";
 import { autoUpdater } from "electron-updater";
@@ -80,6 +81,8 @@ import { probeVideo } from "./video-probe.js";
 import { VideoExportPreviews } from "./video-export-preview.js";
 import { videoExportConfirmation } from "./video-export-confirmation.js";
 import { isolatedTestDirectory } from "./isolated-test-mode.js";
+import { readWindowPlacement, rememberWindowPlacement } from "./window-placement.js";
+import { WorkspaceLoader } from "./workspace-loader.js";
 import {
   decideMainWindowNavigation,
   observeMainWindowLifecycle,
@@ -91,6 +94,10 @@ if (testUserData) app.setPath("userData", testUserData);
 
 let mainWindow: BrowserWindow | null = null;
 let mainWindowReady = false;
+let isQuitting = false;
+let quitNoticeOpen = false;
+let activeVideoExports = 0;
+let workspaceLoader: WorkspaceLoader | null = null;
 let tray: Tray | null = null;
 let embeddedBrowserWindow: BrowserWindow | null = null;
 let recorderWindow: BrowserWindow | null = null;
@@ -443,9 +450,39 @@ async function deliverPendingDesktopLoginCallbacks() {
 }
 
 function focusMainWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!app.isReady()) { void app.whenReady().then(focusMainWindow); return; }
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return; }
   if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
   mainWindow.focus();
+}
+
+function activeWorkReason(): string | undefined {
+  if (recorderLock.busy) return "正在录制屏幕或网站";
+  if (activeVideoExports > 0) return "正在导出视频";
+  if (pendingRecordingUploads.size > 0) return "正在上传录像";
+  if (desktopAgentTasks.size > 0) return "桌面 Agent 任务尚未结束";
+  return undefined;
+}
+
+function allowDesktopExit(): boolean {
+  const reason = activeWorkReason();
+  if (!reason) return true;
+  if (!quitNoticeOpen && mainWindow && !mainWindow.isDestroyed()) {
+    quitNoticeOpen = true;
+    focusMainWindow();
+    void dialog.showMessageBox(mainWindow, {
+      type: "info", title: "任务仍在进行", message: reason,
+      detail: "请先完成或取消任务，再退出 Helstera，以免丢失正在录制或导出的内容。",
+      buttons: ["返回任务"], defaultId: 0, cancelId: 0,
+    }).catch(() => console.warn("[desktop-exit] Cannot display the active task notice."))
+      .finally(() => { quitNoticeOpen = false; });
+  }
+  return false;
+}
+
+function desktopResource(name: string): string {
+  return join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources"), name);
 }
 
 /**
@@ -582,17 +619,19 @@ function configureAutoUpdates() {
   );
 }
 
-ipcMain.handle("desktop.update-state", () => updateState);
-ipcMain.handle("desktop.check-updates", () => checkForDesktopUpdate());
+ipcMain.handle("desktop.update-state", (event) => { requireMainWindow(event); return updateState; });
+ipcMain.handle("desktop.check-updates", (event) => { requireMainWindow(event); return checkForDesktopUpdate(); });
 ipcMain.handle("app-version", () => app.getVersion());
 ipcMain.handle("desktop.native-permissions", () => probeNativePermissions());
-ipcMain.handle("desktop.install-update", () =>
-  installDesktopUpdate(
+ipcMain.handle("desktop.install-update", (event) => {
+  requireMainWindow(event);
+  return installDesktopUpdate(
     desktopUpdatePolicy(),
     updateState,
-    () => autoUpdater.quitAndInstall(false, true),
-  ),
-);
+    () => { isQuitting = true; autoUpdater.quitAndInstall(false, true); },
+    activeWorkReason(),
+  );
+});
 
 ipcMain.handle("desktop.open-browser-pairing", async (event, input: unknown) => {
   requireMainWindow(event);
@@ -761,10 +800,13 @@ const runVideoExport = createVideoExportHandler({
 });
 ipcMain.handle("video.export", async (event, input: unknown) => {
   requireMainWindow(event);
-  const output = await runVideoExport(input);
-  if (!output) return null;
-  try { return { ...output, previewId: await videoExportPreviews.register(output.path) }; }
-  catch { return { ...output, previewWarning: true }; }
+  activeVideoExports++;
+  try {
+    const output = await runVideoExport(input);
+    if (!output) return null;
+    try { return { ...output, previewId: await videoExportPreviews.register(output.path) }; }
+    catch { return { ...output, previewWarning: true }; }
+  } finally { activeVideoExports--; }
 });
 ipcMain.handle("video.read-export-preview", async (event, id: unknown) => {
   requireMainWindow(event);
@@ -3471,11 +3513,14 @@ if (!gotTheLock) {
 
 function createWindow() {
   mainWindowReady = false;
+  const placementFile = join(app.getPath("userData"), "window-placement.json");
+  const primary = screen.getPrimaryDisplay();
+  const displays = [primary, ...screen.getAllDisplays().filter((display) => display.id !== primary.id)];
+  const placement = readWindowPlacement(placementFile, displays.map((display) => display.workArea));
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 720,
-    minHeight: 480,
+    ...placement.bounds,
+    minWidth: Math.min(720, placement.bounds.width),
+    minHeight: Math.min(480, placement.bounds.height),
     show: false,
     frame: false,
     autoHideMenuBar: true,
@@ -3486,9 +3531,16 @@ function createWindow() {
       webSecurity: true,
       preload: join(__dirname, "preload.js"),
     },
-    icon: join(__dirname, "../resources/icon.png"),
+    icon: desktopResource("icon.png"),
   });
   const window = mainWindow;
+  // Frameless Windows construction adds a DWM border; set outer bounds explicitly to avoid growth on each restart.
+  window.setBounds(placement.bounds);
+  if (placement.maximized) window.maximize();
+  rememberWindowPlacement(window, placementFile);
+  const desktopHome = new URL(pendingMarketplaceInstallSlug ? "/desktop-app/marketplace/" : "/desktop-app/", desktopWebsiteUrl()).toString();
+  const loader = new WorkspaceLoader(window, desktopResource("startup.html"), desktopHome, (url) => shell.openExternal(url));
+  workspaceLoader = loader;
   mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     let target: URL;
@@ -3499,7 +3551,7 @@ function createWindow() {
     }
     const origin = new URL(desktopWebsiteUrl()).origin;
     if (target.origin === origin) {
-      if (!window.isDestroyed()) void window.loadURL(target.toString());
+      if (!window.isDestroyed()) void loader.open(target.toString());
       return { action: "deny" };
     }
     if (target.protocol === "https:" || target.protocol === "http:")
@@ -3508,6 +3560,7 @@ function createWindow() {
   });
   // 站内锚点/整页跳转：外部网站一律交给系统浏览器，绝不在应用窗口内打开。
   mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (loader.navigate(url)) { event.preventDefault(); return; }
     const decision = decideMainWindowNavigation(
       url,
       new URL(desktopWebsiteUrl()).origin,
@@ -3565,7 +3618,9 @@ function createWindow() {
     {
       label: "视图",
       submenu: [
-        { label: "重新加载", accelerator: "CmdOrCtrl+R", role: "reload" },
+        { label: "重新加载", accelerator: "CmdOrCtrl+R", click: () => {
+          if (!loader.navigate("helstera://desktop/retry")) window.webContents.reload();
+        } },
         {
           label: "强制重新加载",
           accelerator: "Shift+CmdOrCtrl+R",
@@ -3610,31 +3665,32 @@ function createWindow() {
   });
 
   observeMainWindowLifecycle(window, process.platform, () => {
+    loader.dispose();
     if (mainWindow === window) {
       mainWindow = null;
       mainWindowReady = false;
+      workspaceLoader = null;
     }
-  });
+  }, { isQuitting: () => isQuitting, canClose: allowDesktopExit });
 
-  const desktopHome = new URL(pendingMarketplaceInstallSlug ? "/desktop-app/marketplace/" : "/desktop-app/", desktopWebsiteUrl());
-  void window.loadURL(desktopHome.toString());
+  void loader.open(desktopHome);
   if (!app.isPackaged && process.env.HELSTERA_DESKTOP_URL)
     window.webContents.openDevTools();
 }
 
 function createTray() {
-  const iconPath = join(__dirname, "../resources/icon.png");
+  const iconPath = desktopResource("icon.png");
   const icon = nativeImage.createFromPath(iconPath);
   if (icon.isEmpty()) return;
   tray = new Tray(icon.resize({ width: 16, height: 16 }));
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: "显示 Helstera", click: () => mainWindow?.show() },
+    { label: "显示 Helstera", click: focusMainWindow },
     { type: "separator" },
     {
       label: "新建项目",
       click: () => {
-        mainWindow?.show();
+        focusMainWindow();
         mainWindow?.webContents.send("new-project");
       },
     },
@@ -3644,10 +3700,11 @@ function createTray() {
 
   tray.setToolTip("Helstera");
   tray.setContextMenu(contextMenu);
-  tray.on("click", () => mainWindow?.show());
+  tray.on("click", focusMainWindow);
 }
 
 app.whenReady().then(() => {
+  if (process.platform === "win32") app.setAppUserModelId("com.helstera.desktop");
   if (process.platform === "win32" && process.arch === "x64") {
     configureWindowsUia(join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources"), "native", "helstera-uia.exe"));
   }
@@ -3708,11 +3765,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
-  if (mainWindow === null) {
-    createWindow();
-  } else {
-    mainWindow.show();
-  }
+  focusMainWindow();
 });
 
 app.on("will-quit", () => {
@@ -3722,7 +3775,10 @@ app.on("will-quit", () => {
   });
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (!allowDesktopExit()) { event.preventDefault(); isQuitting = false; return; }
+  isQuitting = true;
+  workspaceLoader?.dispose();
   void mcpRegistry?.closeAll();
   if (updateTimer) clearInterval(updateTimer);
   for (const timer of desktopLoginTimers.values()) clearTimeout(timer);

@@ -184,12 +184,17 @@ export function observeMainWindowLifecycle(
   window: DesktopWindow,
   platform: NodeJS.Platform,
   onClosed: () => void,
+  options: { isQuitting?: () => boolean; canClose?: () => boolean } = {},
 ): void {
   const stopObserving = observeWindowState(window);
   window.on("close", (event) => {
-    if (platform === "darwin") {
+    if (platform === "darwin" && !options.isQuitting?.()) {
       event?.preventDefault();
       if (!window.isDestroyed()) window.hide();
+      return;
+    }
+    if (options.canClose && !options.canClose()) {
+      event?.preventDefault();
       return;
     }
     stopObserving();

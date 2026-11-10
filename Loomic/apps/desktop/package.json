@@ -1,6 +1,6 @@
 {
   "name": "@helstera/desktop",
-  "version": "0.2.21",
+  "version": "0.2.22",
   "private": true,
   "description": "Helstera Desktop — AI Design Studio",
   "author": "Helstera",
@@ -12,15 +12,13 @@
     "build": "tsc -p tsconfig.electron.json && vite build && electron-builder",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.electron.json --noEmit",
-    "test": "vitest run --config vitest.config.ts electron/asset-folder.test.ts electron/local-workspace.test.ts electron/mcp-registry.test.ts electron/mcp-real-integration.test.ts electron/desktop-extension-registry.test.ts electron/extension-sync.test.ts electron/desktop-action-receipts.test.ts electron/desktop-action-approval.test.ts electron/media-renderer.test.ts electron/video-export.test.ts electron/video-export-cleanup.test.ts electron/video-export-confirmation.test.ts electron/video-export-handler.test.ts electron/video-export-preview.test.ts electron/video-export-request.test.ts electron/video-export-assets.test.ts electron/video-export-plan.test.ts electron/video-export-integration.test.ts electron/video-project-store.test.ts electron/window-controls.test.ts electron/global-shortcut.test.ts electron/browser-pairing.test.ts electron/desktop-login.test.ts electron/isolated-test-mode.test.ts electron/desktop-marketplace-link.test.ts electron/native-automation.test.ts electron/windows-uia.test.ts electron/recorder-lock.test.ts electron/desktop-plan-review.test.ts electron/assistant-reconnect.test.ts electron/update-policy.test.ts electron/update-actions.test.ts src/update-download.test.ts src/AgentProgressCards.test.ts src/agent-history-store.test.ts",
+    "test": "vitest run --config vitest.config.ts electron/asset-folder.test.ts electron/local-workspace.test.ts electron/mcp-registry.test.ts electron/mcp-real-integration.test.ts electron/desktop-extension-registry.test.ts electron/extension-sync.test.ts electron/desktop-action-receipts.test.ts electron/desktop-action-approval.test.ts electron/media-renderer.test.ts electron/video-export.test.ts electron/video-export-cleanup.test.ts electron/video-export-confirmation.test.ts electron/video-export-handler.test.ts electron/video-export-preview.test.ts electron/video-export-request.test.ts electron/video-export-assets.test.ts electron/video-export-plan.test.ts electron/video-export-integration.test.ts electron/video-project-store.test.ts electron/window-controls.test.ts electron/global-shortcut.test.ts electron/browser-pairing.test.ts electron/desktop-login.test.ts electron/isolated-test-mode.test.ts electron/desktop-marketplace-link.test.ts electron/native-automation.test.ts electron/windows-uia.test.ts electron/recorder-lock.test.ts electron/desktop-plan-review.test.ts electron/assistant-reconnect.test.ts electron/update-policy.test.ts electron/update-actions.test.ts src/update-download.test.ts src/AgentProgressCards.test.ts src/agent-history-store.test.ts electron/window-placement.test.ts electron/workspace-loader.test.ts",
     "smoke": "node scripts/smoke-desktop-agent.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@nut-tree/nut-js": "^4.2.0",
     "electron-updater": "^6.3.9",
-    "react": "19.0.0",
-    "react-dom": "19.0.0",
     "ws": "^8.22.0",
     "tesseract.js": "^7.0.0"
   },
@@ -34,7 +32,9 @@
     "vite-plugin-electron": "^0.28.8",
     "vite-plugin-electron-renderer": "^0.14.6",
     "@types/ws": "^8.18.1",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
   },
   "build": {
     "extends": "./electron-builder.yml"

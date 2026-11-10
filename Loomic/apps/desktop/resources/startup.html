@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'">
+  <title>Helstera · 连接恢复</title>
+  <link rel="stylesheet" href="startup.css">
+</head>
+<body>
+  <header><span>Helstera</span><nav aria-label="窗口控制"><button id="minimize" aria-label="最小化">−</button><button id="close" aria-label="关闭窗口">×</button></nav></header>
+  <main>
+    <img src="icon.png" alt="" width="56" height="56">
+    <p class="eyebrow">你的创作空间</p>
+    <h1 id="title">暂时无法连接工作区</h1>
+    <p id="description">请检查网络连接。连接恢复后可以重试，本地已保存的素材和工程仍会保留。</p>
+    <div class="actions"><a class="primary" href="helstera://desktop/retry" autofocus>重新连接</a><a href="helstera://desktop/home">返回工作台</a></div>
+    <a class="browser" href="helstera://desktop/browser">在系统浏览器中打开</a>
+    <p class="hint">无需重新安装。若网站正在维护，请稍后重试。</p>
+  </main>
+  <script src="startup.js"></script>
+</body>
+</html>
