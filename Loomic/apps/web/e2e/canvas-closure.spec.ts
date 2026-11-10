@@ -224,7 +224,11 @@ test("imports library IDs once, recovers failures, previews a real timeline and 
     await page.goto(`http://localhost:3228/canvas/?id=${fixture.canvasId}`);
     await page.getByRole("button", { name: "媒体时间线", exact: true }).click();
     await expect(page.getByLabel("时间线合成预览")).toBeVisible();
-    await page.getByLabel("上传音频").setInputFiles(audioPath);
+    const fileChooser = page.waitForEvent("filechooser");
+    await page.locator("label").filter({ has: page.getByLabel("上传音频") }).click();
+    const audioUploaded = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/api/uploads?purpose=timeline-audio"));
+    await (await fileChooser).setFiles(audioPath);
+    expect((await audioUploaded).ok()).toBe(true);
     await expect(
       page.getByRole("slider", { name: "voice.wav音量" }),
     ).toBeVisible();

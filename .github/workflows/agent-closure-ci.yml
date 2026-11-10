@@ -1,5 +1,11 @@
 name: Agent Closure CI
 on:
+  workflow_dispatch:
+    inputs:
+      workflow_only:
+        description: "Run the real canvas/workflow browser regressions"
+        type: boolean
+        default: false
   push:
     branches: [main, master, 'codex/**']
     paths: ['Loomic/apps/**', 'Loomic/packages/**', 'Loomic/scripts/**', 'Loomic/pnpm-lock.yaml', '.github/workflows/agent-closure-ci.yml']
@@ -9,6 +15,7 @@ permissions:
   contents: read
 jobs:
   contracts-and-database:
+    if: ${{ !inputs.workflow_only }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -139,24 +146,30 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
           pnpm --filter @helstera/web exec playwright install --with-deps chromium
       - name: Confirm, compare, undo, reload and decode export (injected model plan)
+        if: ${{ !inputs.workflow_only }}
         run: pnpm --filter @helstera/web exec playwright test --config playwright.diff-undo.config.ts
       - name: Editor startup recovery, high DPI and long export cancellation
+        if: ${{ !inputs.workflow_only }}
         run: pnpm --filter @helstera/web exec playwright test --config playwright.studio-health.config.ts
       - name: Prepare pinned fashion runtime
         run: |
           node scripts/prepare-creative-sources.mjs fashion
           node scripts/build-fashion-runtime.mjs
       - name: Try-on quote, result recovery and responsive menus (injected API)
+        if: ${{ !inputs.workflow_only }}
         run: pnpm --filter @helstera/web exec playwright test --config playwright.fashion-billing.config.ts
       - name: Export dialog labels, narrow layout and keyboard operation
+        if: ${{ !inputs.workflow_only }}
         run: pnpm --filter @helstera/web exec playwright test --config playwright.export-dialog.config.ts
       - name: Install Agent browser engine dependencies
         run: pnpm --filter @helstera/server exec playwright install --with-deps chromium
       - name: Real Agent browser preview, pause and reconnect
+        if: ${{ !inputs.workflow_only }}
         run: |
           pnpm --filter @helstera/server exec vitest run src/features/agent-browser/observer.integration.test.ts
           pnpm --filter @helstera/web exec playwright test --config playwright.agent-browser.config.ts
       - name: Website presentation recording and playback
+        if: ${{ !inputs.workflow_only }}
         run: |
           pnpm --filter @helstera/server exec vitest run src/features/website-capture/presentation.integration.test.ts src/features/website-capture/recording-quality.integration.test.ts src/features/website-capture/frame-continuity.integration.test.ts src/features/website-capture/encoding-budget.integration.test.ts src/features/website-capture/sso.integration.test.ts src/features/website-capture/login-session.test.ts src/features/website-capture/login-session.integration.test.ts src/features/website-capture/login-handoff.integration.test.ts src/features/website-capture/journey-planner.test.ts src/features/website-capture/journey-navigation.integration.test.ts
           pnpm --filter @helstera/web exec playwright test --config playwright.presentation.config.ts
