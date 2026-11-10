@@ -882,5 +882,981 @@
       "desktop": 0,
       "captures": 0
     }
+  },
+  "systemJournalArchive": {
+    "before": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/vda1      32144076800 29848985600  2295091200  93% /\n/dev/vdb1      83955572736 64492748800 15151087616  81% /www\n",
+    "after": "Filesystem       1B-blocks        Used   Available Use% Mounted on\n/dev/vda1      32144076800 28839030784  3305046016  90% /\n/dev/vdb1      83955572736 65505579008 14138257408  83% /www\n",
+    "archivedFiles": [
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000049fc07-00065f20f8318524.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000049fc07-00065f20f8318524.journal",
+        "bytes": 8388600,
+        "sha256": "c358cdbdd7494b960e012f54dbc8a14ca98ba95e54692dc1b8110c5e7a390d37",
+        "identity": [
+          65025,
+          1359436,
+          8388600,
+          1793451518546755084
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a16a0-00065f2278a9f3a4.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a16a0-00065f2278a9f3a4.journal",
+        "bytes": 8388608,
+        "sha256": "39ac00c2d732f39f2b06c0bb3657f52c16469bbfc575d463d641bf1002dd8b7d",
+        "identity": [
+          65025,
+          1359437,
+          8388608,
+          1793457496235828777
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a3243-00065f23dcf9a8f0.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a3243-00065f23dcf9a8f0.journal",
+        "bytes": 8388472,
+        "sha256": "d645d0d25e8814ec161edade83c8caddc670d7aa13d56c64ccd0103f01231804",
+        "identity": [
+          65025,
+          1359438,
+          8388472,
+          1793461574077786078
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a4d5c-00065f24d005ca61.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a4d5c-00065f24d005ca61.journal",
+        "bytes": 8388480,
+        "sha256": "ddc93ae24a33bd191fe5173844130f0777c76d66737e335b7a05a7929a9921ad",
+        "identity": [
+          65025,
+          1359439,
+          8388480,
+          1793465170261201295
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a6846-00065f25a65f0ed8.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a6846-00065f25a65f0ed8.journal",
+        "bytes": 8388584,
+        "sha256": "34812569509e00c6e6373038c1dd956e1a4a6c29dbb3af534f478428b8fb405e",
+        "identity": [
+          65025,
+          1359443,
+          8388584,
+          1793470794655786452
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a83c0-00065f26f59c20b2.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a83c0-00065f26f59c20b2.journal",
+        "bytes": 8388536,
+        "sha256": "39d927a8aef81f054a227c250631caef493269cf71de5c80be85a0e2e2d45607",
+        "identity": [
+          65025,
+          1359427,
+          8388536,
+          1793475595951739663
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a9eee-00065f2813cab16c.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004a9eee-00065f2813cab16c.journal",
+        "bytes": 8388544,
+        "sha256": "2159de322a4e3b5ecaa4982fe9440ffaf250cc33159e306dbc8d265f503ef667",
+        "identity": [
+          65025,
+          755558,
+          8388544,
+          1793478528264069636
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004ab9d2-00065f28c290e930.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004ab9d2-00065f28c290e930.journal",
+        "bytes": 8388608,
+        "sha256": "986656878f0a53a478611c64c8978e0f783c5e4a88236914c19bd9f032515a6d",
+        "identity": [
+          65025,
+          99755,
+          8388608,
+          1793481896162391241
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004ad49b-00065f298b4ffb24.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004ad49b-00065f298b4ffb24.journal",
+        "bytes": 8388584,
+        "sha256": "f51d474eccd4e8d5d4b6ea1359157d70f5f0ba3416f962ad7ec21d53cb23cb62",
+        "identity": [
+          65025,
+          99767,
+          8388584,
+          1793485590946798661
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004aef49-00065f2a6788a97f.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004aef49-00065f2a6788a97f.journal",
+        "bytes": 8388568,
+        "sha256": "130e6dde483051831306ca6f254a2e739caedf0d79f3e05373c0a37b211135d6",
+        "identity": [
+          65025,
+          1359444,
+          8388568,
+          1793488669371312799
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b0a06-00065f2b1f075f80.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b0a06-00065f2b1f075f80.journal",
+        "bytes": 8388512,
+        "sha256": "743f535c4f931ba8ffd32e998e44132f0a27296d283f89bde7a89c7f338476eb",
+        "identity": [
+          65025,
+          1359445,
+          8388512,
+          1793491910072756262
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b24b7-00065f2be0304e1d.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b24b7-00065f2be0304e1d.journal",
+        "bytes": 8388496,
+        "sha256": "6ec7e792997582d569d7e88d25a50921e18167fe411ffcadaf0e881c366c8fcf",
+        "identity": [
+          65025,
+          755532,
+          8388496,
+          1793494778338112241
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b3f72-00065f2c8b26fd6c.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b3f72-00065f2c8b26fd6c.journal",
+        "bytes": 8388512,
+        "sha256": "37e13534f7ff5cd64b1c6a739647a07b48acb466b6d71d32a3f44396db1dc455",
+        "identity": [
+          65025,
+          99757,
+          8388512,
+          1793497765310328391
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b5a4e-00065f2d3d332728.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b5a4e-00065f2d3d332728.journal",
+        "bytes": 8388536,
+        "sha256": "fc6c1e5d6a656b820e7734b5296728d19de504991a73bfdffba4ad5b416e8190",
+        "identity": [
+          65025,
+          504136,
+          8388536,
+          1793501478150457218
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b7558-00065f2e1a7df973.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b7558-00065f2e1a7df973.journal",
+        "bytes": 8388496,
+        "sha256": "ce62168cb59b4feea796a12311a5216c8c86b64e664df8bba7dad3a07c89e5b8",
+        "identity": [
+          65025,
+          505603,
+          8388496,
+          1793505862158465032
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b9049-00065f2f1fcc2b57.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004b9049-00065f2f1fcc2b57.journal",
+        "bytes": 8388576,
+        "sha256": "edbb9143911e6303eca6711c3e8deeddfb8cc5016a6775bf4d834ebd7bc76cc7",
+        "identity": [
+          65025,
+          505606,
+          8388576,
+          1793510003342442262
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004bab3f-00065f3016a1defd.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004bab3f-00065f3016a1defd.journal",
+        "bytes": 8388552,
+        "sha256": "44a3d1db500193684db5ae773af859b2530219458d601acf7f8f69d903c340dc",
+        "identity": [
+          65025,
+          504135,
+          8388552,
+          1793514142922730464
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004bc64d-00065f310d5de906.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004bc64d-00065f310d5de906.journal",
+        "bytes": 8387696,
+        "sha256": "de27db45607803a1b1ca7479a9f1d9b37af3f3e2b01bf70d9cb6e52dddef8900",
+        "identity": [
+          65025,
+          504134,
+          8387696,
+          1793518777535373978
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004be19a-00065f3221a06199.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004be19a-00065f3221a06199.journal",
+        "bytes": 8364464,
+        "sha256": "6bcb17fea95edf389815aaeba8307658fbfa8fba1ad00aa8ca699394894096c5",
+        "identity": [
+          65025,
+          755538,
+          8364464,
+          1793523172655124522
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004bfc71-00065f3327945f02.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004bfc71-00065f3327945f02.journal",
+        "bytes": 8388576,
+        "sha256": "0c8f79a12782bca7be7814891e81ffe0c6fff6c9c423b7b2008e913fc6c0ce34",
+        "identity": [
+          65025,
+          755569,
+          8388576,
+          1793529835155890192
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c1727-00065f34b4b2ad04.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c1727-00065f34b4b2ad04.journal",
+        "bytes": 8388536,
+        "sha256": "bec8dd5cfe5922b63d74486fc66cc2fbf2cca1459fb765cda23c58c69047dc52",
+        "identity": [
+          65025,
+          755570,
+          8388536,
+          1793536383654229095
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c31b0-00065f363b02c584.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c31b0-00065f363b02c584.journal",
+        "bytes": 8388528,
+        "sha256": "4eba79b28808f2db33ea1faeb7c218ba82352ab1836d4307371c9ab83bc6e931",
+        "identity": [
+          65025,
+          755571,
+          8388528,
+          1793543098561472904
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c4cf1-00065f37cb404d9c.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c4cf1-00065f37cb404d9c.journal",
+        "bytes": 8388592,
+        "sha256": "c753d5b3adaba908efe19cb544fb753ee77e8d4af3f1ee4ec5844db38c56a983",
+        "identity": [
+          65025,
+          504133,
+          8388592,
+          1793547304547993068
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c6794-00065f38c5f3ddfe.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c6794-00065f38c5f3ddfe.journal",
+        "bytes": 8388600,
+        "sha256": "c833ba45fc3fd662a472ca72d6140d782d795ba2ecec42a02ac36390931e5548",
+        "identity": [
+          65025,
+          755573,
+          8388600,
+          1793550996350891730
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c82c2-00065f39a20139bf.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c82c2-00065f39a20139bf.journal",
+        "bytes": 8388608,
+        "sha256": "69255434715de84f890fe56e121a3d8bd5420e94b0c4c09cedcba6a84f9f7ff0",
+        "identity": [
+          65025,
+          755574,
+          8388608,
+          1793557284351746355
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c9d62-00065f3b18cccf2c.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004c9d62-00065f3b18cccf2c.journal",
+        "bytes": 8388544,
+        "sha256": "e990ace333395aea2d90ce8b58689fdf2709c3b8da92b92c82e1bcd6408f0715",
+        "identity": [
+          65025,
+          755557,
+          8388544,
+          1793562559449244265
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004cb8e5-00065f3c53383d73.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004cb8e5-00065f3c53383d73.journal",
+        "bytes": 8388528,
+        "sha256": "a37cb2f27cf9ebbe69e7582a9f925a69cb031476732eb9069d6cc824b21054e6",
+        "identity": [
+          65025,
+          755576,
+          8388528,
+          1793568240960400686
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004cd49a-00065f3da5dcf611.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004cd49a-00065f3da5dcf611.journal",
+        "bytes": 8383496,
+        "sha256": "f6fb74cc97ac758a2b161a7bc924bd201d8171deabe5605b6f89783168f56453",
+        "identity": [
+          65025,
+          755577,
+          8383496,
+          1793574137757595692
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004cefb5-00065f3f0555cfeb.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004cefb5-00065f3f0555cfeb.journal",
+        "bytes": 8369264,
+        "sha256": "c76285f2f58add913da15b49ac20640ffcd64d91b6f2caa7cd9ccd0bd584c6e9",
+        "identity": [
+          65025,
+          755578,
+          8369264,
+          1793580272259651205
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d0aa7-00065f4072fb8e56.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d0aa7-00065f4072fb8e56.journal",
+        "bytes": 8388552,
+        "sha256": "4cadb8105194bf508748f1dcdb596baa38e1e5ab6acbb33ff28b70eadcc52466",
+        "identity": [
+          65025,
+          755579,
+          8388552,
+          1793586525743834641
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d25d6-00065f41e7b8eb9a.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d25d6-00065f41e7b8eb9a.journal",
+        "bytes": 8388504,
+        "sha256": "69ede1c7336687ecce89c052b0da71955d9093e60ac3300d7fdd9d796166dbbc",
+        "identity": [
+          65025,
+          755580,
+          8388504,
+          1793589332143284551
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d40b4-00065f428efb5df6.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d40b4-00065f428efb5df6.journal",
+        "bytes": 8388600,
+        "sha256": "af735ded6ed673fe027376b22d5ef5603e35d6f66d7a14755a089ad7a414938e",
+        "identity": [
+          65025,
+          755581,
+          8388600,
+          1793591738453505012
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d5c05-00065f431e6bf3d9.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d5c05-00065f431e6bf3d9.journal",
+        "bytes": 8388520,
+        "sha256": "7f2bb15b3adaacf35405abfe865dbd5e94ac972d73e5c0c5c0de8e3c1e563909",
+        "identity": [
+          65025,
+          755582,
+          8388520,
+          1793596985944927113
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d77c5-00065f44572ea7f4.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d77c5-00065f44572ea7f4.journal",
+        "bytes": 8388528,
+        "sha256": "fc69addaef6ff565b131cfa04ad5824552ebfa60aa2665ce8d83dfcbe7ef353a",
+        "identity": [
+          65025,
+          755583,
+          8388528,
+          1793603697845404224
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d9292-00065f45e7413b16.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004d9292-00065f45e7413b16.journal",
+        "bytes": 8388568,
+        "sha256": "f63c0ab65117987f554d104f0ccb307ecd7ba581be91ce8440f4baebba69c25e",
+        "identity": [
+          65025,
+          898496,
+          8388568,
+          1793610174761890321
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004dad3a-00065f47694e29f3.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004dad3a-00065f47694e29f3.journal",
+        "bytes": 8388528,
+        "sha256": "75c28cb4b96e0973f0fdbcd2e0a478ada44795b271d0c8b9a95e4d5222044aef",
+        "identity": [
+          65025,
+          898497,
+          8388528,
+          1793616820765877564
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004dc80f-00065f48f570b22a.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004dc80f-00065f48f570b22a.journal",
+        "bytes": 8388528,
+        "sha256": "709d43cc0b77796f0a41fddd64868a2c373dfdc468e87250afbe076d0a7ad5cc",
+        "identity": [
+          65025,
+          898498,
+          8388528,
+          1793622814275885311
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004de326-00065f4a5ab0518b.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004de326-00065f4a5ab0518b.journal",
+        "bytes": 8388552,
+        "sha256": "515d22b8a4732507061e63caa19fc61d11c29e49243bb688b569369ec9ecb657",
+        "identity": [
+          65025,
+          898499,
+          8388552,
+          1793627975976035784
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004dfe64-00065f4b8e585ba8.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004dfe64-00065f4b8e585ba8.journal",
+        "bytes": 8388512,
+        "sha256": "97889c5947e1d243aa953d84390516ac98a199dbd9a19aefbecb16d85234d87a",
+        "identity": [
+          65025,
+          898500,
+          8388512,
+          1793634668242175533
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e1918-00065f4d1d3a5b63.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e1918-00065f4d1d3a5b63.journal",
+        "bytes": 8387584,
+        "sha256": "d773be80aa7a8403ec7b3ada5cfd93bf27225833c7a3da176cea38c5477067da",
+        "identity": [
+          65025,
+          755572,
+          8387584,
+          1793640932049694139
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e33eb-00065f4e92994e79.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e33eb-00065f4e92994e79.journal",
+        "bytes": 8387904,
+        "sha256": "c85070a030941545177b45616cb0c66d8dbd4b09f4fbcfe15a29549da5e6d4a5",
+        "identity": [
+          65025,
+          755575,
+          8387904,
+          1793645042547753917
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e4eb0-00065f4f87976970.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e4eb0-00065f4f87976970.journal",
+        "bytes": 8388512,
+        "sha256": "3dd32e604755c120daf5b375d8e476f4780b12e33b6205eceb9d52b9910bcf75",
+        "identity": [
+          65025,
+          898503,
+          8388512,
+          1793649142746734593
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e6976-00065f507bfd7613.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e6976-00065f507bfd7613.journal",
+        "bytes": 8388528,
+        "sha256": "17e89832ad12c52da36d53a63bc9a1fe228cc834d8cebb7dde86ed9202032f6d",
+        "identity": [
+          65025,
+          898504,
+          8388528,
+          1793653216752583870
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e8440-00065f516eceaa48.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e8440-00065f516eceaa48.journal",
+        "bytes": 8388480,
+        "sha256": "cece07971e5b99692e2dd12161c1eaa6c66908d02592a0913bcc39c89080fd05",
+        "identity": [
+          65025,
+          898505,
+          8388480,
+          1793657341940249714
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e9f12-00065f5264b172d0.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004e9f12-00065f5264b172d0.journal",
+        "bytes": 8388552,
+        "sha256": "d66cd3576aeff7ee71ca84b0a304c883e1b31950fbd684b5ebbc72c83f060942",
+        "identity": [
+          65025,
+          898506,
+          8388552,
+          1793660836169884366
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004eb988-00065f5334f9ea75.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004eb988-00065f5334f9ea75.journal",
+        "bytes": 8388584,
+        "sha256": "edc9b5767c111a729ef0b14883a1901285ba1e90ad971a3a40e327008b45281e",
+        "identity": [
+          65025,
+          898507,
+          8388584,
+          1793666284559447356
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004ed514-00065f5479b72035.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004ed514-00065f5479b72035.journal",
+        "bytes": 8388392,
+        "sha256": "ac45d8dc509db4af659db80111699d77f37fded5e459a39747a4f2944231328c",
+        "identity": [
+          65025,
+          898509,
+          8388392,
+          1793671936561125731
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004ef073-00065f55ca9938e7.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004ef073-00065f55ca9938e7.journal",
+        "bytes": 8388472,
+        "sha256": "22513108674b76f0ea99f1d27aa968354ac8cfc5245447f7faaa27301ded7ebf",
+        "identity": [
+          65025,
+          898510,
+          8388472,
+          1793677234356119058
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f0bbb-00065f57065e2274.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f0bbb-00065f57065e2274.journal",
+        "bytes": 8388608,
+        "sha256": "80d6559d1acce45c9bec275adaf7bda0dd01cfffe424eb41936c195466466210",
+        "identity": [
+          65025,
+          898511,
+          8388608,
+          1793681991067210908
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f26ec-00065f5821e8d99a.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f26ec-00065f5821e8d99a.journal",
+        "bytes": 8388560,
+        "sha256": "a5d6bb65e888317dce295bb52329bd054cf318dec35904ce3a6426d4d6637081",
+        "identity": [
+          65025,
+          898512,
+          8388560,
+          1793685337071076336
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f41cc-00065f58e955e07d.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f41cc-00065f58e955e07d.journal",
+        "bytes": 8388496,
+        "sha256": "d403b84c1e295bbc464ecc2a39c34ecd73ba8cc64f6253a6460153dfc50e64c2",
+        "identity": [
+          65025,
+          898513,
+          8388496,
+          1793691314661796728
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f5d58-00065f5a4d9c9898.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f5d58-00065f5a4d9c9898.journal",
+        "bytes": 8388536,
+        "sha256": "919dee9209536c3a0ae6c5e525728662e42c6e92a70950a12745baaba82a2e62",
+        "identity": [
+          65025,
+          898514,
+          8388536,
+          1793696909059972422
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f78d1-00065f5b9b13cf2a.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f78d1-00065f5b9b13cf2a.journal",
+        "bytes": 8388600,
+        "sha256": "8fe60cc7da572dba63d7ae76467cb4cc7c8211db6342353f4d5347ba1ee7fe52",
+        "identity": [
+          65025,
+          898515,
+          8388600,
+          1793699814354072286
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f93c3-00065f5c483e4608.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004f93c3-00065f5c483e4608.journal",
+        "bytes": 8388576,
+        "sha256": "3aa00729bbf91bc080052290639206095d926183a639d176b77af94418850656",
+        "identity": [
+          65025,
+          898516,
+          8388576,
+          1793704319266566954
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004faece-00065f5d54c582f0.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004faece-00065f5d54c582f0.journal",
+        "bytes": 8388520,
+        "sha256": "42ea016fc37f6c26fcebe4e42418a52af16a38aff2d673e13bb913ad092fd934",
+        "identity": [
+          65025,
+          898501,
+          8388520,
+          1793709513847199037
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004fca26-00065f5e8a61c0f9.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004fca26-00065f5e8a61c0f9.journal",
+        "bytes": 8388568,
+        "sha256": "29a1336ee2a8656db769da1b02ee906e8c285baf379c357995c313bb330c72b0",
+        "identity": [
+          65025,
+          898518,
+          8388568,
+          1793713160850110746
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004fe502-00065f5f63bff432.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000004fe502-00065f5f63bff432.journal",
+        "bytes": 8388568,
+        "sha256": "d7e4335e338ad58cf81e0d6121d24057b4623364cbfffe15cc86aed20b47ecc9",
+        "identity": [
+          65025,
+          898519,
+          8388568,
+          1793719547458300829
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000500039-00065f60e07024ec.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000500039-00065f60e07024ec.journal",
+        "bytes": 8388536,
+        "sha256": "3b861a9849486da0aa28f95772f0a1a096b968ad99da38455b92513f9f76e2bc",
+        "identity": [
+          65025,
+          898520,
+          8388536,
+          1793726180250928947
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000501af8-00065f626bca637a.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000501af8-00065f626bca637a.journal",
+        "bytes": 8388504,
+        "sha256": "1e79905ec7542603ace02b4ee6a41dd78dd0b3e9e9ec365f283e9e98527056ea",
+        "identity": [
+          65025,
+          898521,
+          8388504,
+          1793731205536441569
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000503665-00065f63974de019.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000503665-00065f63974de019.journal",
+        "bytes": 8388568,
+        "sha256": "d6e8da263f84528ff0079db86e0bbfbaeb6468996ca78856976c2219c8c65ee2",
+        "identity": [
+          65025,
+          898502,
+          8388568,
+          1793734549277311261
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000505132-00065f645e9a4754.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000505132-00065f645e9a4754.journal",
+        "bytes": 8388600,
+        "sha256": "bae26a3204c3fff6dfc558d0b0c249f6abe86e402aac0f569bb0c6851694bc59",
+        "identity": [
+          65025,
+          898523,
+          8388600,
+          1793740926046424160
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000506be7-00065f65dab1d97b.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000506be7-00065f65dab1d97b.journal",
+        "bytes": 8388448,
+        "sha256": "756038ff0a7de44aee73aee43936a5bfc5ce981013e417e4f347d47e25ba9bec",
+        "identity": [
+          65025,
+          898524,
+          8388448,
+          1793747345110144461
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000005086d3-00065f67595077a3.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000005086d3-00065f67595077a3.journal",
+        "bytes": 8388552,
+        "sha256": "10ba765e66d290c784ac806160c786c3d13967c225c9d10f85f487b29e0a347a",
+        "identity": [
+          65025,
+          1358489,
+          8388552,
+          1793753644766376092
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000050a204-00065f68d0c7e1fa.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000050a204-00065f68d0c7e1fa.journal",
+        "bytes": 8388608,
+        "sha256": "a9e9fe1fe0b69df1ac97ecd9d7e192cdef6b7d5f72ce789a85a8cc25e0526a79",
+        "identity": [
+          65025,
+          1358504,
+          8388608,
+          1793760302260521574
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000050bca3-00065f6a5d9c40f1.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000050bca3-00065f6a5d9c40f1.journal",
+        "bytes": 8388552,
+        "sha256": "7761f2b49ad9a69338c618605be27cf00219326dabd17dd8853bbeeafbd87d88",
+        "identity": [
+          65025,
+          1358507,
+          8388552,
+          1793769893173402596
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000050d810-00065f6c994427af.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000050d810-00065f6c994427af.journal",
+        "bytes": 8380112,
+        "sha256": "04c23a234c76fbce81fb633ee69d65f555e051cfc5a08b702b0308e52d0bda31",
+        "identity": [
+          65025,
+          1358508,
+          8380112,
+          1793777982764643287
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000050f293-00065f6e7b710b47.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000050f293-00065f6e7b710b47.journal",
+        "bytes": 8388592,
+        "sha256": "3eb76f2d408c26bfead79bddd77f3ad875476612161493b49fa0127ce5cdf417",
+        "identity": [
+          65025,
+          1358509,
+          8388592,
+          1793784575575390641
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000510d95-00065f700467c8fc.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000510d95-00065f700467c8fc.journal",
+        "bytes": 54324280,
+        "sha256": "7358a9c2be2b8d2206dd0d7609a4046f34b4b3f4d4dd7cf787b4b41dc071c264",
+        "identity": [
+          65025,
+          1358510,
+          54324280,
+          1793854553258043724
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000005233e5-00065f804f24db9b.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000005233e5-00065f804f24db9b.journal",
+        "bytes": 53394520,
+        "sha256": "96c6882af9457627c732bb1ec9cca5dff6bbd1141e0c2074037b65188a2311fd",
+        "identity": [
+          65025,
+          796453,
+          53394520,
+          1793915318071683006
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000005355c1-00065f8e750c1b7a.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000005355c1-00065f8e750c1b7a.journal",
+        "bytes": 55678048,
+        "sha256": "e0f517c2d6731a93a7057e7ef3325f8f807ce56821ddc08b3938411956f78a5c",
+        "identity": [
+          65025,
+          796451,
+          55678048,
+          1793983768578137787
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000548b80-00065f9e6529734e.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-0000000000548b80-00065f9e6529734e.journal",
+        "bytes": 55662104,
+        "sha256": "b704880116854987d3b75782e9d125dd874512a4e2b7487556a1acfd14c21c13",
+        "identity": [
+          65025,
+          353186,
+          55662104,
+          1794050931847065915
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000055c19e-00065fae086a54c8.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000055c19e-00065fae086a54c8.journal",
+        "bytes": 52981032,
+        "sha256": "d4c9a267a0d5bd45ead0f93e2a70fdf46fed653eaad48913ae6b17489ffbac4f",
+        "identity": [
+          65025,
+          796454,
+          52981032,
+          1794109516280150466
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000056df48-00065fbbac49efbd.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000056df48-00065fbbac49efbd.journal",
+        "bytes": 51531424,
+        "sha256": "1a92b87e77321ce6da12eabdda2813503467a952aecd5f440c59d4cf62272492",
+        "identity": [
+          65025,
+          898522,
+          51531424,
+          1794185071193509821
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000057f576-00065fcd43bad03e.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000057f576-00065fcd43bad03e.journal",
+        "bytes": 53863056,
+        "sha256": "ffd99fc0b5dcfcd956f86d42dd4cd21047fffc0aa1d7b736d67f2f01b83da79f",
+        "identity": [
+          65025,
+          898517,
+          53863056,
+          1794240685608056540
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000059189f-00065fda36a226f2.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-000000000059189f-00065fda36a226f2.journal",
+        "bytes": 53344200,
+        "sha256": "d67208fda00c52990b412fd5f095f69233ab1f5a22424eb6e8965dac42d03167",
+        "identity": [
+          65025,
+          902052,
+          53344200,
+          1794300595062385953
+        ]
+      },
+      {
+        "source": "/var/log/journal/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000005a40b5-00065fe8298a91eb.journal",
+        "archive": "/www/helstera/.ops-system-upgrade/journal-archive/404b003bfc651f6b2c8bcb90d5908de5/system@513ec720c7b34aa5a2f49979e290afcc-00000000005a40b5-00065fe8298a91eb.journal",
+        "bytes": 20021280,
+        "sha256": "27ff3663de554e9136ea01b8b0f9c4940cf5b7817639f0e602d2005fc2e4962d",
+        "identity": [
+          65025,
+          902051,
+          20021280,
+          1794321949773811827
+        ]
+      }
+    ],
+    "releasedSystemBytes": 1012773144,
+    "journalPolicy": "/etc/systemd/journald.conf.d/helstera-capacity.conf",
+    "previousPolicy": null,
+    "journalUsage": "Archived and active journals take up 8.0M in the file system.\n",
+    "health": {
+      "ok": true,
+      "service": "helstera-server",
+      "version": "0.0.0-stability-20261110-1",
+      "timestamp": "2026-11-10T14:48:16.020Z",
+      "checks": {
+        "config": {
+          "ok": true
+        },
+        "database": {
+          "ok": true,
+          "latencyMs": 3
+        },
+        "storage": {
+          "ok": true,
+          "latencyMs": 15
+        },
+        "accepting": {
+          "ok": true
+        }
+      }
+    },
+    "services": [
+      {
+        "name": "helstera-server-blue",
+        "status": "online",
+        "restartCount": 0
+      },
+      {
+        "name": "helstera-worker-blue",
+        "status": "online",
+        "restartCount": 0
+      }
+    ]
+  },
+  "ci": {
+    "commit": "92e71309924833b2f510e950722051e91843e7fa",
+    "runs": [
+      {
+        "id": 42836067402,
+        "workflow": "Agent Closure CI",
+        "conclusion": "success"
+      },
+      {
+        "id": 42836067313,
+        "workflow": "Website Capture CI",
+        "conclusion": "success"
+      },
+      {
+        "id": 42836067312,
+        "workflow": "Desktop Candidate CI",
+        "conclusion": "success"
+      }
+    ]
   }
 }

@@ -18,8 +18,19 @@
 - 随后补齐迟到取消不报告完成、长工作流不阻塞其他工程的调度回归，再切至 `127.0.0.1:3003`，当前版本为 `0.0.0-stability-20261110-1`。第二次切流 56 次 HTTP 全部 200，切换前后 WS 均保持心跳正常。
 - 首次 Worker 发布前后 jobs/goals/runs/desktop/captures 五类在途计数全部为 0；新版 Worker online，旧 API/Worker stopped，PM2 配置已保存。
 - 最终 API/Worker 为 `helstera-server-blue`、`helstera-worker-blue`，均 online、restartCount=0；原始与 green 实例均 stopped。第二次排空前后五类在途计数仍全部为 0，公开 readiness 持续正常。
+- 将 76 份已关闭的 systemd journal 归档迁到 `/www/helstera/.ops-system-upgrade/journal-archive`，每份比较 SHA-256 并通过 `journalctl --verify` 后才解除系统盘原文件。保留全部日志内容，释放系统盘 1,012,773,144 字节；系统盘可用 3,305,046,016 字节（90%），业务盘可用 14,138,257,408 字节（83%）。journald 现有 8 MB，后续限制 256 MB、保留 14 天、系统盘保留 2 GiB；未清理容器卷、数据库或浏览器。
 
 机器证据：`evidence/system-stability-20261110.json`。本地完整日志位于 `M:/loomic-builds/system-upgrade-*.log`。
+
+## CI 最终结果
+
+代码提交 `92e71309924833b2f510e950722051e91843e7fa` 已推送 `codex/agent-workspace-ci`，以下运行均为 success：
+
+- [Agent Closure CI 42836067402](https://github.com/addxiaoyi/studio/actions/runs/42836067402)：四包类型检查、数据库审批/恢复、资源租约、视频修改/撤销/导出、试穿界面、真实浏览器录制、工作流回归。
+- [Website Capture CI 42836067313](https://github.com/addxiaoyi/studio/actions/runs/42836067313)：Chromium 与系统依赖、录制定向回归。
+- [Desktop Candidate CI 42836067312](https://github.com/addxiaoyi/studio/actions/runs/42836067312)：Windows、Linux、macOS ARM 和 Intel 构建与安装后工作区/恢复验收全部通过。此次没有发布新的桌面版本，现有 0.2.30 通道保留。
+
+CI 中 AI 计划/试穿 API 注入的流程只证明审批、编辑与恢复逻辑，不代表实际模型质量或供应商结算验收；真实本站浏览录像另有本地 Chromium 与 FFmpeg 证据。
 
 ## 发布形态
 
@@ -31,7 +42,7 @@
 
 ## 验收边界及后续
 
-- 系统盘仍约 2.1 GiB 可用（93%），业务盘释放空间不等于系统盘扩容；日志、容器缓存和持久数据仍需按引用治理。
+- 系统盘目前约 3.1 GiB 可用，仍不足以任意并行复制大数据库；后续容量治理需把数据库恢复验证、录制 scratch 和用户原片分别预算。此次未扩容系统盘。
 - 当前切流证明短窗口 HTTP/WS 连续性；长时间在途供应商任务和真实桌面任务退出仍需专项验收，不能等同于全部故障恢复场景通过。
 - 新版进程已完成一次真实停止/启动并保留健康流量；长时运行与实际付费供应商任务仍属于后续专项，不以短时探针代替。
 - 后续继续统一工程、本地工程、长视频代理、统一 Agent、供应商结算、交互规范、创作场景与诊断质量评测。
