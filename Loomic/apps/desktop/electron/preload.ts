@@ -136,6 +136,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   runCloudBackup: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.backup-run", credentials),
   saveCloudAsset: (credentials: { accessToken: string; accountId: string }, asset: { assetId: string; name: string; mediaType: "image" | "video" }) => ipcRenderer.invoke("desktop.backup-asset", credentials, asset),
   cancelCloudBackup: () => ipcRenderer.invoke("desktop.backup-cancel"),
+  inspectLocalProject: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-inspect", credentials),
+  restoreLocalProject: (id: string, credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-apply", id, credentials),
   onCloudBackup: (callback: (state: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state);
     ipcRenderer.on("desktop:backup-state", listener);

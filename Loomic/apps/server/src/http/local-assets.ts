@@ -9,6 +9,7 @@ import sharp from "sharp";
 import type { RequestAuthenticator } from "../auth/types.js";
 import { verifyProviderAssetSignature } from "../features/uploads/provider-asset-url.js";
 import { parseByteRange } from "./media-byte-range.js";
+import { mediaFileVersion } from "./media-file-version.js";
 import { mediaCookie, mediaCookieOwner } from "./media-access.js";
 
 export const readableAssetSql = `select ao.bucket, ao.object_path, ao.mime_type, ao.byte_size,
@@ -156,16 +157,17 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
       }
       const fileInfo = await stat(filePath);
       reply.type(asset.mime_type ?? "application/octet-stream");
+      const etag = await mediaFileVersion(filePath);
+      reply.header("ETag", etag);
       reply.header("X-Content-Type-Options", "nosniff");
       if (request.query.download === "1") {
         const extensions: Record<string,string> = {"video/webm":"webm","video/mp4":"mp4","image/png":"png","image/jpeg":"jpg","image/webp":"webp","audio/mpeg":"mp3","audio/wav":"wav"};
         reply.header("Content-Disposition", `attachment; filename="${request.params.assetId.replace(/[^a-zA-Z0-9-]/g, "")}.${extensions[String(asset.mime_type)] ?? "bin"}"`);
       }
       reply.header("Cache-Control", asset.bucket === "private-video" || asset.bucket === "private-try-on" ? "private, no-store" : "private, max-age=300");
-      if (/^(video|audio)\//.test(String(asset.mime_type))) {
+      if (/^(video|audio|image)\//.test(String(asset.mime_type))) {
         reply.header("Accept-Ranges", "bytes");
-        // Without a validator we cannot satisfy If-Range safely; return the full file.
-        const range = request.headers["if-range"] ? undefined : request.headers.range;
+        const range = !request.headers["if-range"] || request.headers["if-range"] === etag ? request.headers.range : undefined;
         if (range) {
           const selected = parseByteRange(range, fileInfo.size);
           if (!selected) {

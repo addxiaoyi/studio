@@ -121,6 +121,7 @@ import { registerModelRoutes } from "./http/models.js";
 import { registerImageModelRoutes } from "./http/image-models.js";
 import { registerVideoModelRoutes } from "./http/video-models.js";
 import { registerProjectRoutes } from "./http/projects.js";
+import { registerProjectBackupRoutes } from "./http/project-backups.js";
 import { registerStoryboardRoutes } from "./http/storyboard.js";
 import { registerRunRoutes } from "./http/runs.js";
 import { registerVideoEditorRoutes } from "./http/video-editor.js";
@@ -513,6 +514,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     projectService,
   });
   if (localDb) {
+    registerProjectBackupRoutes(app, { db: localDb, auth, viewerService });
     void registerStoryboardRoutes(app, {
       auth,
       service: createLocalStoryboardService(localDb),

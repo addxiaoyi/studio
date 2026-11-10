@@ -99,6 +99,16 @@ describe("local project thumbnail route", () => {
     const stale = await app.inject({ method: "GET", url: "/api/uploads/object-1/file", headers: { range: "bytes=2-5", "if-range": '"stale"' } });
     expect(stale.statusCode).toBe(200);
     expect(stale.body).toBe("0123456789");
+    const original = await app.inject({ url: "/api/uploads/object-1/file" });
+    expect(original.headers.etag).toMatch(/^"[a-f0-9]{64}"$/);
+    const resumed = await app.inject({ url: "/api/uploads/object-1/file", headers: { range: "bytes=5-", "if-range": original.headers.etag! } });
+    expect(resumed.statusCode).toBe(206);
+    expect(resumed.body).toBe("56789");
+    await writeFile(join(root, "project-assets", objectPath), "abcdefghij");
+    const replaced = await app.inject({ url: "/api/uploads/object-1/file", headers: { range: "bytes=5-", "if-range": original.headers.etag! } });
+    expect(replaced.statusCode).toBe(200);
+    expect(replaced.body).toBe("abcdefghij");
+    expect(replaced.headers.etag).not.toBe(original.headers.etag);
 
     authenticate.mockResolvedValueOnce(null);
     const unauthenticated = await app.inject({ method: "GET", url: "/api/uploads/object-1/file", headers: { range: "bytes=0-1" } });

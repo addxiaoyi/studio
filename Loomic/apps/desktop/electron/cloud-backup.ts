@@ -3,9 +3,10 @@ import { mkdir, readFile, realpath } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { DesktopSetup, writeJsonAtomic } from "./desktop-setup.js";
 import { downloadLocalFile, receiptExists, type LocalReceipt } from "./local-download.js";
+import { resumeDownload, type DownloadProgress } from "./resumable-download.js";
 
 type BackupItem = { key: string; name: string; state: "saved" | "failed"; receipt?: LocalReceipt; error?: string };
-export type BackupState = { status: "idle" | "running" | "completed" | "partial" | "canceled" | "failed"; completed: number; skipped: number; failed: number; current: string; bytes: number; totalBytes: number | null; error?: string; account?: string; updatedAt?: string; items: BackupItem[] };
+export type BackupState = { status: "idle" | "running" | "completed" | "partial" | "canceled" | "failed"; completed: number; skipped: number; failed: number; current: string; bytes: number; totalBytes: number | null; bytesPerSecond?: number; remainingSeconds?: number | null; resumedBytes?: number; error?: string; account?: string; updatedAt?: string; items: BackupItem[] };
 type Credentials = { accessToken: string; accountId: string };
 type Asset = { id: string; asset_object_id: string | null; title: string | null; mime_type: string; retention_state?: string };
 type Project = { id: string; name: string; primaryCanvas?: { id: string } };
@@ -37,15 +38,17 @@ export class CloudBackup {
     if ((identity as { profile?: { id?: string } }).profile?.id !== credentials.accountId) throw new Error("登录身份已改变，请刷新后重新保存。");
     return { root: setup.root, account: credentials.accountId };
   }
-  private async request(path: string, credentials: Credentials) {
+  private async request(path: string, credentials: Credentials, extraHeaders: Record<string, string> = {}, media = false) {
     const url = new URL(path, this.options.origin());
     if (url.origin !== new URL(this.options.origin()).origin || !url.pathname.startsWith("/api/")) throw new Error("仅可保存当前站点的云端数据。");
-    const signal = AbortSignal.any([this.controller!.signal, AbortSignal.timeout(120_000)]);
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), media ? 30_000 : 120_000);
+    const signal = AbortSignal.any([this.controller!.signal, deadline.signal]);
     const response = await (this.options.request ?? fetch)(url, {
-      headers: { Authorization: `Bearer ${credentials.accessToken}`, "Accept-Encoding": "identity" },
+      headers: { Authorization: `Bearer ${credentials.accessToken}`, "Accept-Encoding": "identity", ...extraHeaders },
       credentials: "include", redirect: "error", signal,
-    });
-    if (!response.ok) throw new Error(response.status === 401 ? "登录已过期，请重新登录后重试。" : `云端文件不可用（${response.status}），请重试。`);
+    }).finally(() => clearTimeout(timer));
+    if (!response.ok && !(media && response.status === 416)) throw new Error(response.status === 401 ? "登录已过期，请重新登录后重试。" : `云端文件不可用（${response.status}），请重试。`);
     return response;
   }
   private async json(path: string, credentials: Credentials): Promise<Record<string, unknown>> {
@@ -64,6 +67,10 @@ export class CloudBackup {
   private progress = (bytes: number, totalBytes: number | null) => {
     if (Date.now() - this.lastProgress < 250) return;
     this.lastProgress = Date.now(); this.publish({ bytes, totalBytes });
+  };
+  private downloadProgress = (progress: DownloadProgress) => {
+    if (Date.now() - this.lastProgress < 250 && progress.bytes !== progress.totalBytes) return;
+    this.lastProgress = Date.now(); this.publish(progress);
   };
   async restore(accountId: unknown) {
     if (!validId(accountId)) throw new Error("账户标识无效。");
@@ -99,9 +106,10 @@ export class CloudBackup {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("本地保存索引损坏，请先检查工作区文件。"); }
       items = [...prior];
       const checkpoint = async () => { this.publish({ items: [...items] }); await writeJsonAtomic(indexPath!, this.state); };
-      const save = async (key: string, name: string, load: () => Promise<Response>, directory: string, mediaType: "image" | "video" | "json") => {
+      const save = async (key: string, name: string, load: (headers?: Record<string, string>) => Promise<Response>, directory: string, mediaType: "image" | "video" | "json") => {
         this.controller!.signal.throwIfAborted();
-        this.publish({ current: name, bytes: 0, totalBytes: null });
+        this.lastProgress = 0;
+        this.publish({ current: name, bytes: 0, totalBytes: null, bytesPerSecond: 0, remainingSeconds: null, resumedBytes: 0 });
         const previous = items.find(item => item.key === key);
         try {
           const receipt = previous?.receipt;
@@ -109,7 +117,9 @@ export class CloudBackup {
           if (receipt && dirname(receipt.path) === directory && await realpath(receipt.path).catch(() => "") === receipt.path && await receiptExists(receipt)) {
             this.publish({ skipped: this.state.skipped + 1 }); return;
           }
-          const saved = await downloadLocalFile({ response: await load(), directory, name, mediaType, signal: this.controller!.signal, onProgress: this.progress });
+          const saved = mediaType === "json"
+            ? await downloadLocalFile({ response: await load(), directory, name, mediaType, signal: this.controller!.signal, onProgress: this.progress })
+            : await resumeDownload({ request: headers => load(headers), directory, key, name, mediaType, signal: this.controller!.signal, onProgress: this.downloadProgress });
           items = items.filter(item => item.key !== key);
           items.push({ key, name, state: "saved", receipt: saved });
           this.publish({ completed: this.state.completed + 1 });
@@ -122,7 +132,7 @@ export class CloudBackup {
         await checkpoint();
       };
       if (single) {
-        await save(`asset:${single.assetId}`, String(single.name), () => this.request(`/api/uploads/${single.assetId}/file`, credentials), media, single.mediaType as "image" | "video");
+        await save(`asset:${single.assetId}`, String(single.name), headers => this.request(`/api/uploads/${single.assetId}/file`, credentials, headers, true), media, single.mediaType as "image" | "video");
       } else {
         for (let page = 1; page <= 1000; page++) {
           const list = await this.json(`/api/assets/history?page=${page}&pageSize=60`, credentials);
@@ -130,7 +140,7 @@ export class CloudBackup {
           for (const asset of list.data as Asset[]) {
             if (!validId(asset.asset_object_id) || asset.retention_state === "soft_deleted" || asset.retention_state === "purged") continue;
             const mediaType = asset.mime_type?.startsWith("video/") ? "video" : "image";
-            await save(`asset:${asset.asset_object_id}`, asset.title || `${mediaType}-${asset.asset_object_id.slice(0, 8)}`, () => this.request(`/api/uploads/${asset.asset_object_id}/file`, credentials), media, mediaType);
+            await save(`asset:${asset.asset_object_id}`, asset.title || `${mediaType}-${asset.asset_object_id.slice(0, 8)}`, headers => this.request(`/api/uploads/${asset.asset_object_id}/file`, credentials, headers, true), media, mediaType);
           }
           if (!(list.pagination as { hasMore?: boolean } | undefined)?.hasMore) break;
           if (page === 1000) throw new Error("单次保存已达到 60000 项上限，请分批保存剩余素材。");
@@ -166,7 +176,7 @@ export class CloudBackup {
       await checkpoint();
       return this.state;
     } catch (error) {
-      this.publish({ status: this.controller.signal.aborted ? "canceled" : "failed", items, error: this.controller.signal.aborted ? "已取消，已保存的文件仍保留。" : error instanceof Error ? error.message : "保存失败，请重试。" });
+      this.publish({ status: this.controller.signal.aborted ? "canceled" : "failed", items, error: this.controller.signal.aborted ? "已暂停，已保存文件和可续传片段仍保留。" : error instanceof Error ? error.message : "保存失败，请重试。" });
       if (indexPath) await writeJsonAtomic(indexPath, this.state);
       return this.state;
     } finally { this.controller = undefined; }

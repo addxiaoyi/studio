@@ -85,6 +85,7 @@ import { readWindowPlacement, rememberWindowPlacement } from "./window-placement
 import { WorkspaceLoader } from "./workspace-loader.js";
 import { DesktopSetup } from "./desktop-setup.js";
 import { CloudBackup } from "./cloud-backup.js";
+import { ProjectRestore } from "./project-restore.js";
 import {
   decideMainWindowNavigation,
   observeMainWindowLifecycle,
@@ -100,6 +101,10 @@ const cloudBackup = new CloudBackup({ setup: desktopSetup, origin: desktopWebsit
     return mainWindow.webContents.session.fetch(String(url), options);
   }, changed: (state) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:backup-state", state);
+} });
+const projectRestore = new ProjectRestore({ setup: desktopSetup, origin: desktopWebsiteUrl, request: (url, options) => {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error("主窗口已关闭。");
+  return mainWindow.webContents.session.fetch(String(url), options);
 } });
 
 let mainWindow: BrowserWindow | null = null;
@@ -475,6 +480,7 @@ function focusMainWindow() {
 }
 
 function activeWorkReason(): string | undefined {
+  if (projectRestore.busy) return "正在恢复本地工程";
   if (cloudBackup.busy) return "正在保存云端数据到本地";
   if (workspaceRuns.size > 0) return "本地项目脚本正在运行";
   if (recorderLock.busy) return "正在录制屏幕或网站";
@@ -782,9 +788,21 @@ ipcMain.handle("desktop.setup-enter", async (event) => {
   await workspaceLoader?.open(new URL("/desktop-app/", desktopWebsiteUrl()).toString());
 });
 ipcMain.handle("desktop.backup-state", (event, accountId: unknown) => { requireMainWindow(event); return cloudBackup.restore(accountId); });
-ipcMain.handle("desktop.backup-run", (event, input: unknown) => { requireMainWindow(event); return cloudBackup.run(input); });
+ipcMain.handle("desktop.backup-run", (event, input: unknown) => { requireMainWindow(event); if (projectRestore.busy) throw new Error("工程恢复中，请稍后保存。"); return cloudBackup.run(input); });
 ipcMain.handle("desktop.backup-asset", (event, input: unknown, asset: unknown) => { requireMainWindow(event); return cloudBackup.run(input, asset); });
 ipcMain.handle("desktop.backup-cancel", (event) => { requireMainWindow(event); cloudBackup.cancel(); });
+ipcMain.handle("desktop.restore-inspect", async (event, credentials: unknown) => {
+  const window = requireMainWindow(event);
+  if (cloudBackup.busy || projectRestore.busy) throw new Error("请先完成或暂停当前保存任务。");
+  const setup = await desktopSetup.status();
+  const chosen = await dialog.showOpenDialog(window, { title: "选择本地工程快照", defaultPath: setup.root ? join(setup.root, "Projects") : undefined, properties: ["openFile"], filters: [{ name: "Helstera 工程快照", extensions: ["json"] }] });
+  return chosen.canceled || !chosen.filePaths[0] ? null : projectRestore.inspect(chosen.filePaths[0], credentials);
+});
+ipcMain.handle("desktop.restore-apply", async (event, id: unknown, credentials: unknown) => {
+  requireMainWindow(event);
+  if (cloudBackup.busy) throw new Error("请先暂停本地保存任务。");
+  return projectRestore.apply(id, credentials);
+});
 ipcMain.handle("desktop.workspace-folder", async (event) => {
   requireMainWindow(event); const state = await desktopSetup.status();
   if (!state.root || !state.available) throw new Error("工作区不可用，请重新选择。");
