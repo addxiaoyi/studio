@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { chmod, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
@@ -61,8 +61,17 @@ const server = createServer((req, res) => { void (async () => {
 await new Promise(done => server.listen(0, "127.0.0.1", done));
 const origin = `http://127.0.0.1:${server.address().port}`;
 const runtimeEnv = Object.fromEntries(["PATH", "HOME", "DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "LANG"].filter(key => process.env[key]).map(key => [key, process.env[key]]));
-const env = { ...runtimeEnv, HELSTERA_ISOLATED_TEST: "1", HELSTERA_TEST_USER_DATA: profile, HELSTERA_DESKTOP_LOCAL_URL: origin, APPIMAGE: versions[0].path, APPIMAGE_EXTRACT_AND_RUN: "1", CHROME_DEVEL_SANDBOX: sandbox };
+const runtime = join(root, "runtime"); await mkdir(runtime);
+const env = { ...runtimeEnv, HELSTERA_ISOLATED_TEST: "1", HELSTERA_TEST_USER_DATA: profile, HELSTERA_DESKTOP_LOCAL_URL: origin, APPIMAGE: versions[0].path, APPIMAGE_EXTRACT_AND_RUN: "1", TMPDIR: runtime, NO_CLEANUP: "1" };
 delete env.ELECTRON_RUN_AS_NODE; delete env.NODE_OPTIONS;
+// CI has no FUSE mount. Prepare the real target runtime's cached sandbox with the same
+// permissions as an installed sandbox helper, while leaving the AppImage bytes untouched.
+execFileSync(versions[1].path, ["--version"], { env, stdio: "ignore", timeout: 30000 });
+const cached = (await readdir(runtime)).filter(name => /^appimage_extracted_[a-f0-9]+$/.test(name));
+assert.equal(cached.length, 1);
+const targetSandbox = join(runtime, cached[0], "chrome-sandbox");
+assert.equal(await realpath(targetSandbox), targetSandbox); assert.equal(await sha(targetSandbox), await sha(sandbox));
+execFileSync("sudo", ["chown", "root:root", targetSandbox]); execFileSync("sudo", ["chmod", "4755", targetSandbox]);
 let app;
 try {
   app = await _electron.launch({ executablePath: join(extracted, binary), env });
