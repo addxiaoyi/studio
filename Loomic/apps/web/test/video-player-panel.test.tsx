@@ -31,14 +31,14 @@ describe("VideoPlayerPanel", () => {
 
   it("loads private recordings through the authenticated media path", async () => {
     const asset = "a5639cd6-8284-44c3-af37-d194586465d9";
-    const fetchMedia = vi.fn(async () => new Response(new Uint8Array([1,2,3]), { headers: { "content-type": "video/webm" } }));
+    const fetchMedia = vi.fn(async () => Response.json({ok:true,data:{path:`/api/uploads/${asset}/file`,mimeType:"video/webm",byteSize:3,expiresAt:null,grantSeconds:300}}));
     const NativeURL = globalThis.URL;
     vi.stubGlobal("fetch", fetchMedia);
     vi.stubGlobal("URL", Object.assign(class extends NativeURL {}, { createObjectURL: () => "blob:private-preview", revokeObjectURL: vi.fn() }));
     render(<VideoPlayerPanel elementId="video" elementBounds={{ x: 0, y: 0, width: 320, height: 180 }} videoUrl={`/api/uploads/${asset}/file`} mimeType="video/webm" accessToken="private-token" canvasScrollZoom={{ scrollX: 0, scrollY: 0, zoom: 1 }} onClose={() => {}} />);
-    expect(await screen.findByLabelText("视频播放器")).toHaveAttribute("src", "blob:private-preview");
-    expect(fetchMedia).toHaveBeenCalledWith(expect.stringContaining(`/api/uploads/${asset}/file`), expect.objectContaining({ headers: { Authorization: "Bearer private-token" }, redirect: "error" }));
-    expect(screen.getByRole("link", { name: "下载 WebM 演示录像" })).toHaveAttribute("href", "blob:private-preview");
+    expect(await screen.findByLabelText("视频播放器")).toHaveAttribute("src", expect.stringContaining(`/api/uploads/${asset}/file`));
+    expect(fetchMedia).toHaveBeenCalledWith(expect.stringContaining(`/api/uploads/${asset}/playback`), expect.objectContaining({method:"POST",credentials:"include",headers:{Authorization:"Bearer private-token"},redirect:"error"}));
+    expect(screen.getByRole("link", { name: "下载原始录像" })).toHaveAttribute("href", expect.stringContaining(`/api/uploads/${asset}/file?download=1`));
   });
 
   it("restores focus to the trigger after closing", async () => {
