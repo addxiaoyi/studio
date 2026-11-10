@@ -12,6 +12,10 @@ on:
         description: "Verify macOS and Linux native packages without rebuilding Windows video tools"
         type: boolean
         default: false
+      verify_updates:
+        description: "Check the published update channel from the actual macOS and Linux package"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -145,11 +149,13 @@ jobs:
         if: runner.os == 'macOS'
         env:
           HELT_NATIVE_PACKAGE_TEST_DIR: ${{ runner.temp }}/desktop-native
+          HELT_VERIFY_PUBLIC_UPDATE: ${{ inputs.verify_updates && '1' || '0' }}
         run: node apps/desktop/e2e/package-storage.mjs
       - name: Extracted Linux AppImage workspace and restore
         if: runner.os == 'Linux'
         env:
           HELT_NATIVE_PACKAGE_TEST_DIR: ${{ runner.temp }}/desktop-native
+          HELT_VERIFY_PUBLIC_UPDATE: ${{ inputs.verify_updates && '1' || '0' }}
         run: xvfb-run -a node apps/desktop/e2e/package-storage.mjs
       - name: Upload native workspace evidence
         if: always() && runner.os != 'Windows'
@@ -161,6 +167,7 @@ jobs:
             ${{ runner.temp }}/desktop-native/storage/setup-200-percent.png
             ${{ runner.temp }}/desktop-native/offline/report.json
             ${{ runner.temp }}/desktop-native/offline/offline-preview.png
+            ${{ runner.temp }}/desktop-native/update/report.json
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
