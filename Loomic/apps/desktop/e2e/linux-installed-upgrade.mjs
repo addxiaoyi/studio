@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
 import { chmod, mkdir, readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -103,14 +103,20 @@ try {
   console.error("UPGRADE_FAILURE", error.message);
   console.error("INSTALLED_FILE_SHA256", await sha(versions[0].path).catch(() => "missing"));
   console.error("UPDATED_APP_LOG", await readFile(join(root, "updated-app.log"), "utf8").catch(() => "not started"));
-  const diagnosis = spawnSync(versions[0].path, [], { env, timeout: 15000, encoding: "utf8", maxBuffer: 256 * 1024 });
-  console.error("DIRECT_LAUNCH_DIAGNOSTICS", diagnosis.status, diagnosis.error?.code, diagnosis.stderr?.slice(-5000));
   throw error;
 } finally {
-  // Only stop processes launched with this exact isolated test profile.
+  server.closeAllConnections(); await new Promise(done => server.close(done));
+  if (app) {
+    let timeout;
+    try { await Promise.race([app.close(), new Promise(done => { timeout = setTimeout(done, 3000); })]); }
+    catch (error) { console.error("Old application already closed:", error.message); }
+    finally { clearTimeout(timeout); }
+  }
+  // The old inspector can remain alive after quitAndInstall; only terminate processes
+  // launched with this exact isolated profile after all assertions and writes finish.
   for (const pid of (await readdir("/proc")).filter(name => /^\d+$/.test(name))) {
-    try { const vars = await readFile(`/proc/${pid}/environ`, "utf8"); if (vars.split("\0").includes(`HELSTERA_TEST_USER_DATA=${profile}`)) process.kill(Number(pid), "SIGTERM"); }
+    try { const vars = await readFile(`/proc/${pid}/environ`, "utf8"); if (vars.split("\0").includes(`HELSTERA_TEST_USER_DATA=${profile}`)) process.kill(Number(pid), "SIGKILL"); }
     catch (error) { if (!["ENOENT", "EACCES", "ESRCH"].includes(error.code)) console.error("Test process cleanup:", error.message); }
   }
-  server.closeAllConnections(); await new Promise(done => server.close(done));
+  console.log("ISOLATED_UPGRADE_CLEANUP_COMPLETE");
 }
