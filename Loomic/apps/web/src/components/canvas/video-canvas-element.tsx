@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play } from "lucide-react";
-import { getServerBaseUrl } from "@/lib/env";
-import { boundedResponseBlob } from "@/lib/bounded-response-blob";
+import { preparePrivateMedia } from "@/lib/private-media";
 
 type VideoCanvasElementProps = {
   src: string;
@@ -50,28 +49,16 @@ export function VideoCanvasElement({
     const assetId = src.match(/\/api\/uploads\/([a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})\/file(?:[?#]|$)/i)?.[1];
     if (!assetId) { setError("视频素材标识无效。"); return; }
     const abort = new AbortController();
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    void fetch(`${getServerBaseUrl()}/api/uploads/${assetId}/file`, { headers: { Authorization: `Bearer ${accessToken}` }, signal: abort.signal, credentials: "include", redirect: "error" })
-      .then((response) => {
-        if (!response.ok) throw new Error(`视频加载失败（${response.status}）`);
-        return boundedResponseBlob(response, 250 * 1024 * 1024);
-      })
-      .then((blob) => {
-        if (cancelled) return;
-        if (!blob.size || !blob.type.startsWith("video/")) throw new Error("视频文件无效。");
-        objectUrl = URL.createObjectURL(blob);
-        setPlaybackSrc(objectUrl);
-      })
-      .catch((error) => {
-        if (!cancelled) setError(error instanceof Error ? error.message : "视频读取失败，请重试。");
-      });
-
-    return () => {
-      cancelled = true;
-      abort.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    const grant = async () => {
+      const media = await preparePrivateMedia(assetId, accessToken, AbortSignal.any([abort.signal, AbortSignal.timeout(30000)]));
+      if (abort.signal.aborted) return;
+      if (!media.mimeType.startsWith("video/")) throw new Error("素材不是视频文件。");
+      setPlaybackSrc(media.path);
     };
+    const renew = () => { void grant().catch(cause => { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : "视频读取失败，请重试。"); }); };
+    renew();
+    const timer = setInterval(() => { if (!document.hidden || videoRef.current?.paused === false) renew(); }, 240000);
+    return () => { abort.abort(); clearInterval(timer); };
   }, [accessToken, src, revision]);
 
   const play = useCallback(() => {
@@ -143,6 +130,8 @@ export function VideoCanvasElement({
       <video
         ref={videoRef}
         src={playbackSrc || undefined}
+        crossOrigin={src.includes("/api/uploads/") ? "use-credentials" : undefined}
+        onError={() => setError("视频暂时无法播放，请重试加载。原文件仍保留。")}
         muted
         loop
         playsInline
