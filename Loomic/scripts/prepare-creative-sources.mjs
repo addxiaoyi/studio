@@ -2,6 +2,7 @@ import { existsSync, readFileSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { installCreativeDeps } from "./install-creative-deps.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sources = JSON.parse(readFileSync(resolve(root, "scripts/creative-sources.json"), "utf8"));
@@ -19,4 +20,4 @@ for (const source of selected ? [sources[selected]] : Object.values(sources)) {
     throw new Error(`Pinned source is modified: ${source.directory}. Preserve it and restore a clean checkout separately.`);
   }
 }
-if (!selected || selected === "video") execFileSync("bun", ["install", "--frozen-lockfile", "--ignore-scripts"], { cwd: resolve(root, sources.video.directory), stdio: "inherit" });
+if (!selected || selected === "video") installCreativeDeps(resolve(root, sources.video.directory));
