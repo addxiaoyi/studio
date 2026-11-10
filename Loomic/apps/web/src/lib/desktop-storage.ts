@@ -8,6 +8,9 @@ export type CloudBackupState = {
 };
 export type LocalRestorePreview = { id: string; name: string; elements: number; sessions: number; messages: number; localMedia: number; uploadBytes: number; missingMedia: number; fileName: string };
 export type LocalRestoreResult = { projectId: string; canvasId: string; sessionId: string | null; restored: boolean };
+export type LocalSnapshot = { id: string; projectId: string; name: string; fileName: string; savedAt: string; bytes: number; elements: number; sessions: number; messages: number };
+export type SnapshotList = { snapshots: LocalSnapshot[]; unreadable: number; truncated: boolean };
+export type RestoreProgress = { phase: "uploading" | "restoring" | "completed" | "paused" | "failed"; name: string; bytes: number; totalBytes: number; resumedBytes: number; bytesPerSecond: number; remainingSeconds: number | null };
 export type DesktopStorageApi = {
   getDesktopSetup: () => Promise<DesktopSetupState>;
   openDesktopSetup: () => Promise<void>;
@@ -19,6 +22,10 @@ export type DesktopStorageApi = {
   onCloudBackup: (listener: (state: CloudBackupState) => void) => () => void;
   inspectLocalProject?: (credentials: { accessToken: string; accountId: string }) => Promise<LocalRestorePreview | null>;
   restoreLocalProject?: (id: string, credentials: { accessToken: string; accountId: string }) => Promise<LocalRestoreResult>;
+  listLocalSnapshots?: (credentials: { accessToken: string; accountId: string }) => Promise<SnapshotList>;
+  previewLocalSnapshot?: (id: string, credentials: { accessToken: string; accountId: string }) => Promise<LocalRestorePreview>;
+  cancelProjectRestore?: () => Promise<void>;
+  onProjectRestore?: (callback: (state: RestoreProgress) => void) => () => void;
 };
 export function desktopStorage(): DesktopStorageApi | null {
   if (typeof window === "undefined") return null;

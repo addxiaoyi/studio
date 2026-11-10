@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { existsSync } from "node:fs";
 import type { StorageProvider } from "./storage-provider.js";
+import { copyUpload } from "./copy-upload.js";
 
 /**
  * Local filesystem storage provider.
@@ -29,6 +30,10 @@ export function createLocalStorageProvider(options?: {
   }
 
   return {
+    async uploadFile(bucket, filePath, source) {
+      try { await copyUpload(rootDir, bucket, filePath, source); return { error: null }; }
+      catch (error) { return { error: error as Error }; }
+    },
     async upload(bucket, filePath, data, options) {
       try {
         const fullPath = getFullPath(bucket, filePath);

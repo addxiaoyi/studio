@@ -1,6 +1,7 @@
 import { mkdir, writeFile, readFile, unlink, copyFile, access } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type { StorageProvider } from "./storage-provider.js";
+import { copyUpload } from "./copy-upload.js";
 
 /**
  * Local filesystem implementation of StorageProvider
@@ -11,6 +12,11 @@ export class LocalStorageProvider implements StorageProvider {
     private readonly root: string,
     private readonly baseUrl: string = "http://localhost:3000/api/storage"
   ) {}
+
+  async uploadFile(bucket: string, path: string, source: string): Promise<{ error: Error | null }> {
+    try { await copyUpload(this.root, bucket, path, source); return { error: null }; }
+    catch (error) { return { error: error as Error }; }
+  }
 
   async upload(
     bucket: string,

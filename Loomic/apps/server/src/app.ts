@@ -135,6 +135,7 @@ import { registerAdminProviderRoutes } from "./http/admin-providers.js";
 import { createProviderConfigService } from "./local-db/provider-config-service.js";
 import { registerUploadRoutes } from "./http/uploads.js";
 import { registerPrivateVideoRoutes } from "./http/private-video.js";
+import { registerVideoUploadRoutes } from "./http/video-upload.js";
 import { registerSkillRoutes } from "./http/skills.js";
 import { registerLocalSkillRoutes } from "./http/local-skills.js";
 import { registerMarketplaceRoutes } from "./http/skills-marketplace.js";
@@ -553,6 +554,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     viewerService,
   });
   registerPrivateVideoRoutes(app, { auth, viewerService, db: localDb, storage: storageProvider });
+  void registerVideoUploadRoutes(app, { auth, viewerService, db: localDb, storage: storageProvider, root: env.storageRoot ?? "/www/helstera/uploads" });
   void registerGenerateRoutes(app, {
     auth,
     creditService,

@@ -139,6 +139,26 @@ jobs:
             ${{ runner.temp }}/desktop-local-storage/setup-200-percent.png
           if-no-files-found: ignore
           retention-days: 7
+      - name: Installed macOS package workspace and restore
+        if: runner.os == 'macOS'
+        env:
+          HELT_NATIVE_PACKAGE_TEST_DIR: ${{ runner.temp }}/desktop-native
+        run: node apps/desktop/e2e/package-storage.mjs
+      - name: Extracted Linux AppImage workspace and restore
+        if: runner.os == 'Linux'
+        env:
+          HELT_NATIVE_PACKAGE_TEST_DIR: ${{ runner.temp }}/desktop-native
+        run: xvfb-run -a node apps/desktop/e2e/package-storage.mjs
+      - name: Upload native workspace evidence
+        if: always() && runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-storage-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/desktop-native/storage/report.json
+            ${{ runner.temp }}/desktop-native/storage/setup-200-percent.png
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-candidate-${{ matrix.platform }}

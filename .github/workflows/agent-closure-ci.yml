@@ -90,8 +90,8 @@ jobs:
         run: pnpm --filter @helstera/web exec vitest run test/chat-copy.test.tsx test/chat-selection.test.tsx test/chat-input.test.tsx test/chat-sessions.test.tsx test/chat-sidebar.test.tsx test/chat-stream.test.ts
       - name: Local snapshot restore and download recovery
         run: |
-          pnpm --filter @helstera/server exec vitest run src/features/projects/restore-backup.postgres.test.ts src/http/local-assets.test.ts
-          pnpm --filter @helstera/web exec vitest run test/desktop-project-restore.test.tsx test/desktop-storage-panel.test.tsx test/canvas-focus.test.ts
+          pnpm --filter @helstera/server exec vitest run src/features/projects/restore-backup.postgres.test.ts src/http/local-assets.test.ts src/http/video-upload.postgres.test.ts
+          pnpm --filter @helstera/web exec vitest run test/desktop-project-restore.test.tsx test/desktop-storage-panel.test.tsx test/desktop-snapshot-browser.test.tsx test/canvas-focus.test.ts
           node --test scripts/install-creative-deps.test.mjs
       - name: Video workspace regressions
         run: pnpm --filter @helstera/web exec vitest run test/video-locale.test.tsx test/studio-ai-context.test.tsx test/studio-ai-workflow.test.tsx test/studio-creator-menu.test.ts test/studio-ai-edit.test.ts test/studio-ai-session.test.ts test/studio-timeline-diff.test.tsx test/generated-asset-identity.test.ts test/studio-asset-picker.test.tsx test/onetake-history.test.tsx test/onetake-export-options.test.tsx test/send-video-to-chat.test.tsx test/agent-workspace-panel.test.tsx test/agent-goal-timeout.test.ts

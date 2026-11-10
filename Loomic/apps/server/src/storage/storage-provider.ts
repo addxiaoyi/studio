@@ -6,6 +6,7 @@
  */
 
 export interface StorageProvider {
+  uploadFile?(bucket: string, path: string, source: string): Promise<{ error: Error | null }>;
   /**
    * Upload a file to the specified bucket and path.
    */

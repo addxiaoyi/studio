@@ -1,0 +1,27 @@
+import { randomUUID } from "node:crypto";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, expect, it } from "vitest";
+import { SnapshotCatalog } from "./snapshot-catalog.js";
+import { DesktopSetup } from "./desktop-setup.js";
+const roots: string[] = [];
+afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true }); });
+it("lists snapshots by their recorded save time, rejects changed files and never accepts another account", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "helstera-snapshots-"))); roots.push(root);
+  const setup = new DesktopSetup(join(root, "profile")); await setup.choose(root); await setup.complete({ autoBackup: false, agentAccess: false });
+  const account = randomUUID(), folder = join(root, "Projects", account); await mkdir(folder);
+  const snapshot = { format: "helstera-project-backup", formatVersion: 1, project: { id: randomUUID(), name: "旧工程", workspace: { ownerUserId: account } }, canvas: { id: randomUUID(), content: { elements: [{ id: "shape" }] } }, sessions: [] };
+  const old = join(folder, "old.json"), recent = join(folder, "recent.json");
+  await writeFile(old, JSON.stringify(snapshot)); await writeFile(recent, JSON.stringify({ ...snapshot, project: { ...snapshot.project, name: "新工程" } }));
+  await writeFile(join(folder, "bad.json"), "invalid");
+  await writeFile(join(folder, "backup-index.json"), JSON.stringify({ account, items: [{ receipt: { path: old, savedAt: "2026-01-01T00:00:00Z" } }, { receipt: { path: recent, savedAt: "2026-02-01T00:00:00Z" } }] }));
+  const catalog = new SnapshotCatalog(setup), list = await catalog.list(account);
+  expect(list.snapshots.map(item => item.name)).toEqual(["新工程", "旧工程"]);
+  expect(list.unreadable).toBe(1);
+  expect(await catalog.resolve(list.snapshots[0].id, account)).toBe(recent);
+  await expect(catalog.resolve(list.snapshots[0].id, randomUUID())).rejects.toThrow("失效");
+  await writeFile(recent, "changed");
+  await expect(catalog.resolve(list.snapshots[0].id, account)).rejects.toThrow("改变");
+  expect((await catalog.list(randomUUID())).snapshots).toEqual([]);
+});

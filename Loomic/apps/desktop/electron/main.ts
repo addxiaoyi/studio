@@ -86,6 +86,7 @@ import { WorkspaceLoader } from "./workspace-loader.js";
 import { DesktopSetup } from "./desktop-setup.js";
 import { CloudBackup } from "./cloud-backup.js";
 import { ProjectRestore } from "./project-restore.js";
+import { SnapshotCatalog } from "./snapshot-catalog.js";
 import {
   decideMainWindowNavigation,
   observeMainWindowLifecycle,
@@ -105,7 +106,8 @@ const cloudBackup = new CloudBackup({ setup: desktopSetup, origin: desktopWebsit
 const projectRestore = new ProjectRestore({ setup: desktopSetup, origin: desktopWebsiteUrl, request: (url, options) => {
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error("主窗口已关闭。");
   return mainWindow.webContents.session.fetch(String(url), options);
-} });
+}, changed: state => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:restore-state", state); } });
+const snapshotCatalog = new SnapshotCatalog(desktopSetup);
 
 let mainWindow: BrowserWindow | null = null;
 let mainWindowReady = false;
@@ -789,7 +791,7 @@ ipcMain.handle("desktop.setup-enter", async (event) => {
 });
 ipcMain.handle("desktop.backup-state", (event, accountId: unknown) => { requireMainWindow(event); return cloudBackup.restore(accountId); });
 ipcMain.handle("desktop.backup-run", (event, input: unknown) => { requireMainWindow(event); if (projectRestore.busy) throw new Error("工程恢复中，请稍后保存。"); return cloudBackup.run(input); });
-ipcMain.handle("desktop.backup-asset", (event, input: unknown, asset: unknown) => { requireMainWindow(event); return cloudBackup.run(input, asset); });
+ipcMain.handle("desktop.backup-asset", (event, input: unknown, asset: unknown) => { requireMainWindow(event); if (projectRestore.busy) throw new Error("工程恢复中，请稍后保存。"); return cloudBackup.run(input, asset); });
 ipcMain.handle("desktop.backup-cancel", (event) => { requireMainWindow(event); cloudBackup.cancel(); });
 ipcMain.handle("desktop.restore-inspect", async (event, credentials: unknown) => {
   const window = requireMainWindow(event);
@@ -803,6 +805,17 @@ ipcMain.handle("desktop.restore-apply", async (event, id: unknown, credentials: 
   if (cloudBackup.busy) throw new Error("请先暂停本地保存任务。");
   return projectRestore.apply(id, credentials);
 });
+ipcMain.handle("desktop.snapshot-list", async (event, credentials: unknown) => {
+  requireMainWindow(event);
+  if (projectRestore.busy) throw new Error("工程恢复中，请稍后刷新。");
+  return snapshotCatalog.list(await projectRestore.account(credentials));
+});
+ipcMain.handle("desktop.snapshot-preview", async (event, id: unknown, credentials: unknown) => {
+  requireMainWindow(event);
+  if (cloudBackup.busy || projectRestore.busy) throw new Error("请先完成或暂停当前保存任务。");
+  return projectRestore.inspect(await snapshotCatalog.resolve(id, await projectRestore.account(credentials)), credentials);
+});
+ipcMain.handle("desktop.restore-cancel", event => { requireMainWindow(event); projectRestore.cancel(); });
 ipcMain.handle("desktop.workspace-folder", async (event) => {
   requireMainWindow(event); const state = await desktopSetup.status();
   if (!state.root || !state.available) throw new Error("工作区不可用，请重新选择。");

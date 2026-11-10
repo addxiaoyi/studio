@@ -5,27 +5,32 @@ import { dirname, extname, join } from "node:path";
 import { backupAssetIds, projectBackupSchema, type ProjectBackup, type BackupRestoreResult } from "@helstera/shared";
 import { DesktopSetup } from "./desktop-setup.js";
 import { receiptExists, type LocalReceipt } from "./local-download.js";
+import { uploadVideoInChunks, type UploadProgress } from "./resumable-upload.js";
 
 export type RestorePreview = { id: string; name: string; elements: number; sessions: number; messages: number; localMedia: number; uploadBytes: number; missingMedia: number; fileName: string };
 type Credentials = { accessToken: string; accountId: string };
 type LocalMedia = { assetId: string; receipt: LocalReceipt; mime: string };
 type PendingRestore = { preview: RestorePreview; snapshot: ProjectBackup; sha256: string; path: string; accountId: string; media: LocalMedia[]; expires: number; result?: BackupRestoreResult };
-type RestoreOptions = { setup: DesktopSetup; origin: () => string; request: typeof fetch };
+export type RestoreProgress = UploadProgress & { name: string; phase: "uploading" | "restoring" | "completed" | "paused" | "failed" };
+type RestoreOptions = { setup: DesktopSetup; origin: () => string; request: typeof fetch; changed?: (progress: RestoreProgress) => void };
 const MAX_SNAPSHOT = 16 * 1024 * 1024;
 const mimeTypes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm" };
 
 export class ProjectRestore {
   private pending: PendingRestore | null = null;
   private running = false;
+  private controller?: AbortController;
   constructor(private readonly options: RestoreOptions) {}
   get busy() { return this.running; }
+  cancel() { this.controller?.abort(); }
+  async account(input: unknown) { const credentials = this.credentials(input); await this.identity(credentials); return credentials.accountId; }
   private credentials(input: unknown): Credentials {
     const value = input as Credentials | null;
     if (!value || !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(value.accountId) || typeof value.accessToken !== "string" || !value.accessToken || value.accessToken.length > 16384) throw new Error("请先登录恢复目标账户。");
     return value;
   }
   private async request(path: string, credentials: Credentials, options: RequestInit = {}) {
-    return this.options.request(new URL(path, this.options.origin()), { ...options, headers: { Authorization: `Bearer ${credentials.accessToken}`, ...options.headers }, credentials: "include", redirect: "error", signal: AbortSignal.timeout(180000) });
+    return this.options.request(new URL(path, this.options.origin()), { ...options, headers: { Authorization: `Bearer ${credentials.accessToken}`, ...options.headers }, credentials: "include", redirect: "error", signal: AbortSignal.any([AbortSignal.timeout(180000), ...(this.controller ? [this.controller.signal] : [])]) });
   }
   private async identity(credentials: Credentials) {
     const response = await this.request("/api/viewer", credentials);
@@ -55,7 +60,7 @@ export class ProjectRestore {
       const receipt = receipts.find(item => item.key === `asset:${assetId}`)?.receipt;
       const mime = receipt ? mimeTypes[extname(receipt.path).toLowerCase()] : undefined;
       if (receipt && mime && dirname(receipt.path) === mediaRoot && await realpath(receipt.path).catch(() => "") === receipt.path && await receiptExists(receipt)) {
-        if (receipt.bytes > (mime.startsWith("video/") ? 250 : 25) * 1024 ** 2) throw new Error("快照素材超过单次恢复上传上限（视频 250 MiB，图片 25 MiB）。");
+        if (receipt.bytes > (mime.startsWith("video/") ? 2048 : 25) * 1024 ** 2) throw new Error("快照素材超过恢复上传上限（视频 2 GiB，图片 25 MiB）。");
         media.push({ assetId, receipt, mime });
       } else {
         const live = await this.request(`/api/uploads/${assetId}/file`, credentials, { method: "HEAD" });
@@ -73,15 +78,24 @@ export class ProjectRestore {
     if (!pending || pending.preview.id !== id || pending.expires < Date.now() || pending.accountId !== credentials.accountId) throw new Error("快照预览已失效，请重新选择。");
     if (pending.preview.missingMedia) throw new Error("存在无法恢复的素材，请先补齐本地副本。");
     this.running = true;
+    this.controller = new AbortController();
+    let progress: RestoreProgress = { phase: "uploading", name: "准备素材", bytes: 0, totalBytes: pending.preview.uploadBytes, resumedBytes: 0, bytesPerSecond: 0, remainingSeconds: null };
+    const notify = (change: Partial<RestoreProgress>) => { progress = { ...progress, ...change }; this.options.changed?.(progress); };
     try {
       await this.identity(credentials);
       if (pending.result) return pending.result;
       if (await realpath(pending.path) !== pending.path || (await stat(pending.path)).size > MAX_SNAPSHOT || createHash("sha256").update(await readFile(pending.path)).digest("hex") !== pending.sha256) throw new Error("快照文件已改变，请重新预览。");
       const replacements: Record<string, string> = {};
       for (const item of pending.media) {
+        this.controller.signal.throwIfAborted();
         if (await realpath(item.receipt.path) !== item.receipt.path || !await receiptExists(item.receipt)) throw new Error("本地素材已改变，请重新预览。");
         const hash = createHash("sha256").update(`${credentials.accountId}:${pending.sha256}:${item.assetId}`).digest("hex");
         const key = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+        notify({ name: item.receipt.path.split(/[\\/]/).pop()!, bytes: 0, totalBytes: item.receipt.bytes, resumedBytes: 0 });
+        if (item.mime.startsWith("video/")) {
+          replacements[item.assetId] = await uploadVideoInChunks({ path: item.receipt.path, bytes: item.receipt.bytes, sha256: item.receipt.sha256, mimeType: item.mime as "video/mp4" | "video/webm", filename: progress.name, uploadId: key, signal: this.controller.signal, request: (path, options) => this.request(path, credentials, options), onProgress: value => notify(value) });
+          continue;
+        }
         const form = new FormData(); form.append("file", await openAsBlob(item.receipt.path, { type: item.mime }), `restore${extname(item.receipt.path)}`);
         const response = await this.request(`/api/assets/${item.mime.startsWith("video/") ? "private-video" : "private-try-on"}`, credentials, { method: "POST", headers: { "Idempotency-Key": key }, body: form });
         if (!response.ok) throw new Error(`素材恢复上传失败（${response.status}）。已上传素材可在重试时复用。`);
@@ -89,10 +103,16 @@ export class ProjectRestore {
         if (!body.assetId) throw new Error("素材上传回执缺少标识。");
         replacements[item.assetId] = body.assetId;
       }
+      this.controller.signal.throwIfAborted();
+      notify({ phase: "restoring", name: "正在恢复画布与对话" });
       const response = await this.request("/api/project-backups/restore", credentials, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ snapshot: pending.snapshot, replacements }) });
       const body = await response.json() as { ok: boolean; data?: BackupRestoreResult; error?: { message?: string } };
       if (!response.ok || !body.ok || !body.data) throw new Error(body.error?.message ?? "工程恢复失败，请重试。");
-      pending.result = body.data; return body.data;
-    } finally { this.running = false; }
+      pending.result = body.data; notify({ phase: "completed" }); return body.data;
+    } catch (error) {
+      notify({ phase: this.controller.signal.aborted ? "paused" : "failed" });
+      if (this.controller.signal.aborted) throw new Error("已暂停恢复，已上传的分片保留。重新确认后可继续。");
+      throw error;
+    } finally { this.running = false; this.controller = undefined; }
   }
 }

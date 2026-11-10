@@ -138,6 +138,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   cancelCloudBackup: () => ipcRenderer.invoke("desktop.backup-cancel"),
   inspectLocalProject: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-inspect", credentials),
   restoreLocalProject: (id: string, credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-apply", id, credentials),
+  listLocalSnapshots: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.snapshot-list", credentials),
+  previewLocalSnapshot: (id: string, credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.snapshot-preview", id, credentials),
+  cancelProjectRestore: () => ipcRenderer.invoke("desktop.restore-cancel"),
+  onProjectRestore: (callback: (state: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state);
+    ipcRenderer.on("desktop:restore-state", listener);
+    return () => ipcRenderer.removeListener("desktop:restore-state", listener);
+  },
   onCloudBackup: (callback: (state: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state);
     ipcRenderer.on("desktop:backup-state", listener);
