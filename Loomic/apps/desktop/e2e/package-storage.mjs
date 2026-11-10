@@ -37,4 +37,6 @@ try {
   const env = { ...process.env, DEBUG: "pw:browser", HELT_DESKTOP_EXE: executable, HELT_STORAGE_TEST_DIR: join(output, "storage") };
   const test = spawnSync(process.execPath, ["apps/desktop/e2e/local-storage.mjs"], { env, stdio: "inherit" });
   if (test.status !== 0) throw new Error(`Native package storage test failed (${test.status}).`);
+  const offline = spawnSync(process.execPath, ["apps/desktop/e2e/offline-migration.mjs"], { env: { ...env, HELT_OFFLINE_TEST_DIR: join(output, "offline") }, stdio: "inherit" });
+  if (offline.status !== 0) throw new Error(`Offline workspace migration test failed (${offline.status}).`);
 } finally { if (mount) execFileSync("hdiutil", ["detach", mount], { stdio: "inherit" }); }

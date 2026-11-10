@@ -10,9 +10,17 @@ import { VideoUploads, VideoUploadError, VIDEO_CHUNK_BYTES, videoUploadSchema } 
 export async function registerVideoUploadRoutes(app: FastifyInstance, options: { db: Pool; storage: StorageProvider; root: string; auth: RequestAuthenticator; viewerService: ViewerService }) {
   const uploads = new VideoUploads(options.db, options.storage, `${options.root}.video-uploads`);
   const cleanup = () => uploads.cleanup().catch(err => app.log.error({ err }, "video upload cleanup failed"));
-  const timer = setInterval(() => void cleanup(), 60 * 60_000); timer.unref();
+  const timer = setInterval(() => void cleanup(), 15 * 60_000); timer.unref();
   app.addHook("onClose", async () => { clearInterval(timer); });
   await app.register(async scope => {
+    scope.get("/api/assets/private-video/uploads", async (request, reply) => {
+      const user = await options.auth.authenticate(request);
+      if (!user) return reply.code(401).send({ ok: false, error: { code: "unauthorized", message: "请先登录。" } });
+      try {
+        const viewer = await options.viewerService.ensureViewer(user);
+        return { ok: true, data: await uploads.list({ userId: user.id, workspaceId: viewer.workspace.id }) };
+      } catch (error) { request.log.error({ err: error }, "upload task listing failed"); return reply.code(500).send({ ok: false, error: { code: "upload_list_failed", message: "暂时无法读取上传列表，请重试。" } }); }
+    });
     scope.addContentTypeParser("application/octet-stream", { parseAs: "buffer", bodyLimit: VIDEO_CHUNK_BYTES }, (_request, body, done) => done(null, body));
     scope.route<{ Params: { uploadId: string } }>({
       method: ["PUT", "PATCH", "POST", "DELETE"], url: "/api/assets/private-video/uploads/:uploadId", bodyLimit: VIDEO_CHUNK_BYTES,

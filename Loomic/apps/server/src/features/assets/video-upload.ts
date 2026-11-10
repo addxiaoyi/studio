@@ -11,18 +11,23 @@ export const videoUploadSchema = z.object({ bytes: z.number().int().min(12).max(
 type VideoUpload = z.infer<typeof videoUploadSchema>;
 type Owner = { userId: string; workspaceId: string };
 type UploadState = VideoUpload & Owner & { uploadId: string; offset: number; expiresAt: number; assetId?: string };
-const TTL = 24 * 60 * 60_000;
+const TTL = 6 * 60 * 60_000;
 const RESERVE = 64 * 1024 ** 2;
 export class VideoUploadError extends Error { constructor(message: string, readonly status = 400) { super(message); } }
 
 export class VideoUploads {
   constructor(private readonly db: Pool, private readonly storage: StorageProvider, private readonly directory: string) {}
   private key(owner: Owner, uploadId: string) { return createHash("sha256").update(`${owner.workspaceId}:${owner.userId}:${uploadId}`).digest("hex"); }
-  private async folder(key: string) {
+  private async folder(key: string, create = false) {
     await mkdir(this.directory, { recursive: true });
     const root = await realpath(this.directory), folder = join(root, key);
-    await mkdir(folder, { recursive: true });
-    if (await realpath(folder) !== folder) throw new VideoUploadError("上传目录无效。", 409);
+    if (create) await mkdir(folder, { recursive: true });
+    try {
+      if (await realpath(folder) !== folder) throw new VideoUploadError("上传目录无效。", 409);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new VideoUploadError("上传会话不存在，请重新开始。", 404);
+      throw error;
+    }
     return folder;
   }
   private async locked<T>(key: string, action: () => Promise<T>) {
@@ -64,13 +69,38 @@ export class VideoUploads {
     const space = await statfs(folder);
     if (space.bavail * space.bsize < bytes + RESERVE) throw new VideoUploadError("云端存储空间不足，本地文件保留，请稍后重试。", 507);
   }
+  async list(owner: Owner) {
+    await mkdir(this.directory, { recursive: true });
+    const root = await realpath(this.directory), tasks = [];
+    for (const entry of await readdir(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^[a-f0-9]{64}$/.test(entry.name)) continue;
+      const folder = join(root, entry.name);
+      if (await realpath(folder) !== folder) continue;
+      const state = await this.read(folder);
+      if (!state || state.userId !== owner.userId || state.workspaceId !== owner.workspaceId || state.assetId) continue;
+      const part = await stat(join(folder, "video.part")).catch(error => { if (error.code === "ENOENT") return null; throw error; });
+      tasks.push({ uploadId: state.uploadId, filename: state.filename, sha256: state.sha256, ...this.status(state), storedBytes: part?.size ?? 0, state: state.expiresAt <= Date.now() ? "expired" : "paused" });
+    }
+    return tasks.sort((a, b) => b.expiresAt.localeCompare(a.expiresAt));
+  }
   async begin(owner: Owner, uploadId: string, input: VideoUpload) {
     return this.locked(owner.userId, async () => {
-      const folder = await this.folder(this.key(owner, uploadId));
+      const folder = await this.folder(this.key(owner, uploadId), true);
       let state = await this.read(folder);
       if (state && state.expiresAt <= Date.now()) { await rm(folder, { recursive: true }); await mkdir(folder); state = null; }
       if (state) {
         if (state.bytes !== input.bytes || state.sha256 !== input.sha256 || state.mimeType !== input.mimeType) throw new VideoUploadError("该上传标识对应的文件已改变。", 409);
+        return this.status(state);
+      }
+      const reused = await this.db.query<{ id: string; object_path: string }>(`select ao.id, ao.object_path from generated_assets ga join asset_objects ao on ao.workspace_id=ga.workspace_id and ao.object_path=ga.object_path
+        where ga.workspace_id=$1 and ga.created_by=$2 and ao.created_by=$2 and ao.bucket='private-video'
+        and ga.metadata->>'sha256'=$3 and ga.mime_type=$4 and ao.byte_size=$5
+        and ga.deleted_at is null and ga.retention_state='active' and ga.retention_until>now() limit 1`, [owner.workspaceId, owner.userId, input.sha256, input.mimeType, input.bytes]);
+      const existing = reused.rows[0];
+      const stored = existing ? await this.storage.getPublicUrl("private-video", existing.object_path) : null;
+      if (existing && stored?.data && !stored.error) {
+        state = { ...input, ...owner, uploadId, offset: input.bytes, expiresAt: Date.now() + TTL, assetId: existing.id };
+        await this.checkpoint(folder, state);
         return this.status(state);
       }
       const root = await realpath(this.directory);
@@ -81,7 +111,7 @@ export class VideoUploads {
         if (pending?.userId === owner.userId && !pending.assetId && pending.expiresAt > Date.now()) { count++; reserved += pending.bytes; }
       }
       if (count >= 4 || reserved + input.bytes > 4 * 1024 ** 3) throw new VideoUploadError("最多保留四个未完成上传，合计不超过 4 GiB。请先完成或取消已有上传。", 429);
-      await this.room(folder, input.bytes * 2);
+      await this.room(folder, input.bytes);
       state = { ...input, ...owner, uploadId, offset: 0, expiresAt: Date.now() + TTL };
       await this.checkpoint(folder, state);
       return this.status(state);
@@ -126,7 +156,7 @@ export class VideoUploads {
       const header = Buffer.alloc(12);
       try { await file.read(header, 0, 12, 0); } finally { await file.close(); }
       if (state.mimeType === "video/mp4" ? header.toString("ascii", 4, 8) !== "ftyp" : header.readUInt32BE(0) !== 0x1a45dfa3) throw new VideoUploadError("文件与所选视频格式不符。");
-      await this.room(folder, state.bytes);
+      await this.room(folder, 0);
       const saved = await savePrivateVideoFile(this.db, this.storage, { ...state, path });
       state.assetId = saved.assetId; state.expiresAt = Date.now() + TTL;
       await this.checkpoint(folder, state);
@@ -136,7 +166,9 @@ export class VideoUploads {
   }
   async cancel(owner: Owner, uploadId: string) {
     return this.locked(owner.userId, async () => {
-      const folder = await this.folder(this.key(owner, uploadId));
+      let folder: string;
+      try { folder = await this.folder(this.key(owner, uploadId)); }
+      catch (error) { if (error instanceof VideoUploadError && error.status === 404) return; throw error; }
       await rm(folder, { recursive: true });
     });
   }

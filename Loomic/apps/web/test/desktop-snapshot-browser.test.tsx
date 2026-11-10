@@ -20,3 +20,15 @@ it("filters local snapshots and opens only a preview without restoring or upload
   expect(onPreview).toHaveBeenCalledWith("old");
   expect(api.restoreLocalProject).not.toHaveBeenCalled();
 });
+it("shows an offline overview and version differences without starting cloud restoration", async () => {
+  const api = { listLocalSnapshots: vi.fn().mockResolvedValue({ snapshots: [{ id: "local", projectId: "p", name: "离线工程", fileName: "one.json", savedAt: "2026-11-10T00:00:00Z", elements: 2, sessions: 1, messages: 2, bytes: 100 }], unreadable: 0, truncated: false }), previewLocalSnapshot: vi.fn(), getLocalSnapshotOverview: vi.fn().mockResolvedValue({ name: "离线工程", thumbnail: "data:image/svg+xml;base64,PHN2Zy8+", text: ["本机文字"], messages: [], versions: [], baseline: null, difference: { elements: { added: 1, changed: 1, removed: 0 }, messages: { added: 2, changed: 0, removed: 0 }, settingsChanged: false, mediaChanged: false } }), queueLocalSnapshot: vi.fn().mockResolvedValue({}) };
+  const preview = vi.fn();
+  render(<DesktopSnapshotBrowser api={api as unknown as DesktopStorageApi} accountId="owner" accessToken={undefined} disabled={false} onPreview={preview}/>);
+  await userEvent.click(screen.getByRole("button", { name: "浏览本地快照" }));
+  await userEvent.click(await screen.findByRole("button", { name: /预览 离线工程/ }));
+  expect(await screen.findByText("元素：新增 1 · 修改 1 · 移除 0")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "联网检查并恢复" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("button", { name: "加入待恢复列表" }));
+  expect(api.queueLocalSnapshot).toHaveBeenCalledWith("local", "owner");
+  expect(preview).not.toHaveBeenCalled();
+});

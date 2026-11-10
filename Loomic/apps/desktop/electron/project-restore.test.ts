@@ -19,6 +19,7 @@ it("previews without writes, restores local media on confirmation and deduplicat
   const path = join(root, "snapshot.json"); await writeFile(path, JSON.stringify(snapshot));
   const request = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
     if (String(url).endsWith("/api/viewer")) return Response.json({ profile: { id: account } });
+    if (options?.method === "HEAD") return new Response(null, { status: 404 });
     if (String(url).endsWith("private-try-on")) {
       expect(options?.body).toBeInstanceOf(FormData);
       const blob = (options!.body as FormData).get("file") as Blob; expect(await blob.text()).toBe("private-image");
@@ -38,4 +39,28 @@ it("previews without writes, restores local media on confirmation and deduplicat
   expect(await readFile(file, "utf8")).toBe("private-image");
   const fresh = await restore.inspect(path, credentials); await writeFile(path, JSON.stringify({ ...snapshot, project: { ...snapshot.project, name: "changed" } }));
   await expect(restore.apply(fresh.id, credentials)).rejects.toThrow("已改变");
+});
+
+it("reuses available private media without uploading and blocks uncertain availability", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "helstera-reuse-"))); roots.push(root);
+  const setup = new DesktopSetup(join(root, "profile")); await setup.choose(root); await setup.complete({ autoBackup: false, agentAccess: false });
+  const account = randomUUID(), asset = randomUUID();
+  const snapshot = { format: "helstera-project-backup", formatVersion: 1, project: { id: randomUUID(), name: "复用素材", workspace: { ownerUserId: account } }, canvas: { id: randomUUID(), content: { elements: [{ id: "image", link: `/api/uploads/${asset}/file` }] } }, sessions: [] };
+  const path = join(root, "snapshot.json"); await writeFile(path, JSON.stringify(snapshot));
+  let status = 200;
+  const request = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+    if (String(url).endsWith("/api/viewer")) return Response.json({ profile: { id: account } });
+    if (options?.method === "HEAD") return new Response(null, { status });
+    expect(String(url)).toMatch(/\/project-backups\/restore$/);
+    expect(JSON.parse(String(options?.body)).replacements).toEqual({});
+    return Response.json({ ok: true, data: { projectId: randomUUID(), canvasId: randomUUID(), sessionId: null, restored: true } });
+  });
+  const restore = new ProjectRestore({ setup, origin: () => "https://studio.test", request: request as typeof fetch });
+  const credentials = { accountId: account, accessToken: "test-token" };
+  const preview = await restore.inspect(path, credentials);
+  expect(preview).toMatchObject({ reusedMedia: 1, localMedia: 0, uploadBytes: 0, missingMedia: 0 });
+  await restore.apply(preview.id, credentials);
+  expect(request.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+  status = 502;
+  await expect(restore.inspect(path, credentials)).rejects.toThrow("素材状态检查失败（502）");
 });

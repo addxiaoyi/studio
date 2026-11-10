@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, realpath } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { DesktopSetup, writeJsonAtomic } from "./desktop-setup.js";
 import { downloadLocalFile, receiptExists, type LocalReceipt } from "./local-download.js";
 import { resumeDownload, type DownloadProgress } from "./resumable-download.js";
+import { recordWorkspaceReceipt, resolveWorkspaceReceipt } from "./workspace-receipt.js";
 
 type BackupItem = { key: string; name: string; state: "saved" | "failed"; receipt?: LocalReceipt; error?: string };
 export type BackupState = { status: "idle" | "running" | "completed" | "partial" | "canceled" | "failed"; completed: number; skipped: number; failed: number; current: string; bytes: number; totalBytes: number | null; bytesPerSecond?: number; remainingSeconds?: number | null; resumedBytes?: number; error?: string; account?: string; updatedAt?: string; items: BackupItem[] };
@@ -112,16 +113,17 @@ export class CloudBackup {
         this.publish({ current: name, bytes: 0, totalBytes: null, bytesPerSecond: 0, remainingSeconds: null, resumedBytes: 0 });
         const previous = items.find(item => item.key === key);
         try {
-          const receipt = previous?.receipt;
+          const receipt = await resolveWorkspaceReceipt(root, mediaType === "json" ? "Projects" : "Media", account, previous?.receipt);
           // A local index cannot grant access to a path outside this account's directory.
-          if (receipt && dirname(receipt.path) === directory && await realpath(receipt.path).catch(() => "") === receipt.path && await receiptExists(receipt)) {
+          if (receipt) {
+            if (previous) previous.receipt = receipt;
             this.publish({ skipped: this.state.skipped + 1 }); return;
           }
           const saved = mediaType === "json"
             ? await downloadLocalFile({ response: await load(), directory, name, mediaType, signal: this.controller!.signal, onProgress: this.progress })
             : await resumeDownload({ request: headers => load(headers), directory, key, name, mediaType, signal: this.controller!.signal, onProgress: this.downloadProgress });
           items = items.filter(item => item.key !== key);
-          items.push({ key, name, state: "saved", receipt: saved });
+          items.push({ key, name, state: "saved", receipt: recordWorkspaceReceipt(root, saved) });
           this.publish({ completed: this.state.completed + 1 });
         } catch (error) {
           if (this.controller!.signal.aborted) throw error;

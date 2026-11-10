@@ -139,6 +139,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   inspectLocalProject: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-inspect", credentials),
   restoreLocalProject: (id: string, credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-apply", id, credentials),
   listLocalSnapshots: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.snapshot-list", credentials),
+  getLocalSnapshotOverview: (id: string, accountId: string, baseline?: string) => ipcRenderer.invoke("desktop.snapshot-overview", id, accountId, baseline),
+  getLocalSnapshotAccounts: () => ipcRenderer.invoke("desktop.snapshot-accounts"),
+  queueLocalSnapshot: (id: string, accountId: string) => ipcRenderer.invoke("desktop.snapshot-queue", id, accountId),
+  openOfflineSnapshots: () => ipcRenderer.invoke("desktop.offline-open"),
+  getRestoreTasks: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-tasks", credentials),
+  previewRestoreTask: (id: string, credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-task-preview", id, credentials),
+  clearRestoreTask: (id: string, credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-task-clear", id, credentials),
   previewLocalSnapshot: (id: string, credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.snapshot-preview", id, credentials),
   cancelProjectRestore: () => ipcRenderer.invoke("desktop.restore-cancel"),
   onProjectRestore: (callback: (state: unknown) => void) => {

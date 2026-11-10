@@ -25,6 +25,7 @@ const server = createServer((req, res) => {
   if (url.pathname === "/api/viewer") return json({ profile: { id: account } });
   if (url.pathname === "/api/assets/history") return json({ data: [{ id: asset, asset_object_id: asset, title: "云端图片", mime_type: "image/png" }], pagination: { hasMore: false } });
   if (url.pathname === `/api/uploads/${asset}/file`) {
+    if (req.method === "HEAD") { res.writeHead(404); res.end(); return; }
     const offset = Number(req.headers.range?.match(/bytes=(\d+)-/)?.[1] ?? 0); resumeOffsets.push(offset);
     if (failDownload) { res.writeHead(200, { "content-type": "image/png", "content-length": png.length, etag: '"original"' }); res.write(png.subarray(0, 20)); setTimeout(() => res.destroy(), 30); return; }
     res.writeHead(offset ? 206 : 200, { "content-type": "image/png", "content-length": png.length - offset, etag: '"original"', ...(offset ? { "content-range": `bytes ${offset}-${png.length - 1}/${png.length}` } : {}) }); res.end(png.subarray(offset)); return;

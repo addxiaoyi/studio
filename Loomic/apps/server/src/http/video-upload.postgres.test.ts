@@ -21,11 +21,17 @@ it.skipIf(!databaseUrl)("resumes verified chunks across service restarts and com
     expect((await begin()).json().data.offset).toBe(0);
     expect((await append(0, chunk, "0".repeat(64))).statusCode).toBe(400);
     expect((await append(0)).json().data.offset).toBe(chunk.length);
+    const listed = await f.app.inject({ url: "/api/assets/private-video/uploads", headers });
+    expect(listed.json().data).toEqual([expect.objectContaining({ uploadId: id, offset: chunk.length, storedBytes: chunk.length })]);
+    expect((await f.app.inject({ url: "/api/assets/private-video/uploads", headers: { authorization: `Bearer ${f.colleagueToken}` } })).json().data).toEqual([]);
     expect((await append(0)).json().data.offset).toBe(chunk.length);
     expect((await append(0, Buffer.alloc(chunk.length))).statusCode).toBe(409);
     expect((await f.app.inject({ method: "POST", url, headers })).statusCode).toBe(409);
     const intruder = await f.app.inject({ method: "POST", url, headers: { authorization: `Bearer ${f.colleagueToken}` } });
     expect(intruder.statusCode).toBe(404);
+    expect(await readdir(`${f.root}.video-uploads`)).toHaveLength(1);
+    expect((await f.app.inject({ method: "DELETE", url: `/api/assets/private-video/uploads/${randomUUID()}`, headers })).statusCode).toBe(200);
+    expect(await readdir(`${f.root}.video-uploads`)).toHaveLength(1);
     const restarted = new VideoUploads(f.db, createLocalStorageProvider({ rootDir: f.root }), `${f.root}.video-uploads`);
     expect((await restarted.begin({ userId: f.userId, workspaceId: f.workspaceId }, id, metadata as never)).offset).toBe(chunk.length);
     expect((await append(chunk.length, bytes.subarray(chunk.length))).json().data.offset).toBe(bytes.length);
@@ -37,6 +43,15 @@ it.skipIf(!databaseUrl)("resumes verified chunks across service restarts and com
     expect((await f.app.inject({ url: `/api/uploads/${asset}/file`, headers })).rawPayload).toEqual(bytes);
     expect((await f.app.inject({ url: `/api/uploads/${asset}/file`, headers: { authorization: `Bearer ${f.colleagueToken}` } })).statusCode).toBe(404);
     expect(Number((await f.db.query("select count(*) from asset_objects")).rows[0].count)).toBe(1);
+    const sameContent = await f.app.inject({ method: "PUT", url: `/api/assets/private-video/uploads/${randomUUID()}`, headers, payload: metadata });
+    expect(sameContent.json().data).toMatchObject({ assetId: asset, offset: bytes.length });
+    expect((await f.app.inject({ url: "/api/assets/private-video/uploads", headers })).json().data).toEqual([]);
+    expect((await f.app.inject({ method: "DELETE", url, headers })).statusCode).toBe(200);
+    expect((await f.app.inject({ url: `/api/uploads/${asset}/file`, headers })).statusCode).toBe(200);
+    const path = (await f.db.query("select object_path from asset_objects where id=$1", [asset])).rows[0].object_path;
+    await createLocalStorageProvider({ rootDir: f.root }).remove("private-video", [path]);
+    const missingFile = await f.app.inject({ method: "PUT", url: `/api/assets/private-video/uploads/${randomUUID()}`, headers, payload: metadata });
+    expect(missingFile.json().data).toMatchObject({ assetId: null, offset: 0 });
   } finally { await f.close(); }
 }, 30000);
 

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
@@ -763,13 +763,13 @@ async function restoreConfiguredWorkspace() {
 ipcMain.handle("desktop.setup-state", (event) => { requireMainWindow(event); return desktopSetup.status(); });
 ipcMain.handle("desktop.setup-choose", async (event) => {
   const window = requireMainWindow(event);
-  if (cloudBackup.busy) throw new Error("请先完成或取消本地保存任务。");
+  if (cloudBackup.busy || projectRestore.busy) throw new Error("请先暂停本地保存或恢复任务。");
   const chosen = await dialog.showOpenDialog(window, { title: "选择 Helstera 本地工作区", properties: ["openDirectory", "createDirectory"] });
   return chosen.canceled || !chosen.filePaths[0] ? null : desktopSetup.choose(chosen.filePaths[0]);
 });
 ipcMain.handle("desktop.setup-complete", async (event, input: unknown) => {
   requireMainWindow(event);
-  if (cloudBackup.busy) throw new Error("请先完成或取消本地保存任务。");
+  if (cloudBackup.busy || projectRestore.busy) throw new Error("请先暂停本地保存或恢复任务。");
   const state = await desktopSetup.complete(input);
   for (const controller of desktopMcpCalls.values()) controller.abort();
   desktopMcpCalls.clear();
@@ -808,8 +808,20 @@ ipcMain.handle("desktop.restore-apply", async (event, id: unknown, credentials: 
 ipcMain.handle("desktop.snapshot-list", async (event, credentials: unknown) => {
   requireMainWindow(event);
   if (projectRestore.busy) throw new Error("工程恢复中，请稍后刷新。");
-  return snapshotCatalog.list(await projectRestore.account(credentials));
+  return snapshotCatalog.list((credentials as { accountId?: unknown } | null)?.accountId);
 });
+ipcMain.handle("desktop.snapshot-overview", (event, id: unknown, account: unknown, baseline: unknown) => { requireMainWindow(event); return snapshotCatalog.overview(id, account, baseline); });
+ipcMain.handle("desktop.snapshot-accounts", event => { requireMainWindow(event); return snapshotCatalog.accounts(); });
+ipcMain.handle("desktop.snapshot-queue", async (event, id: unknown, account: unknown) => {
+  requireMainWindow(event);
+  const path = await snapshotCatalog.resolve(id, account), overview = await snapshotCatalog.overview(id, account);
+  const sha = createHash("sha256").update(await readFile(path)).digest("hex");
+  return projectRestore.journal.queue(String(account), path, overview.name, sha);
+});
+ipcMain.handle("desktop.restore-tasks", (event, credentials: unknown) => { requireMainWindow(event); return projectRestore.tasks(credentials); });
+ipcMain.handle("desktop.restore-task-preview", (event, id: unknown, credentials: unknown) => { requireMainWindow(event); if (cloudBackup.busy) throw new Error("请先暂停本地保存。"); return projectRestore.inspectTask(id, credentials); });
+ipcMain.handle("desktop.restore-task-clear", (event, id: unknown, credentials: unknown) => { requireMainWindow(event); return projectRestore.clearTask(id, credentials); });
+ipcMain.handle("desktop.offline-open", async event => { const window = requireMainWindow(event); if (cloudBackup.busy || projectRestore.busy) throw new Error("请先暂停保存或恢复任务。"); await window.loadFile(desktopResource("snapshots.html")); });
 ipcMain.handle("desktop.snapshot-preview", async (event, id: unknown, credentials: unknown) => {
   requireMainWindow(event);
   if (cloudBackup.busy || projectRestore.busy) throw new Error("请先完成或暂停当前保存任务。");

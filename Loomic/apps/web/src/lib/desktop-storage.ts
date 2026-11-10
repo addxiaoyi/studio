@@ -6,9 +6,11 @@ export type CloudBackupState = {
   bytesPerSecond?: number; remainingSeconds?: number | null; resumedBytes?: number;
   items: { key: string; name: string; state: "saved" | "failed"; error?: string; receipt?: { path: string; bytes: number; sha256: string; savedAt: string } }[];
 };
-export type LocalRestorePreview = { id: string; name: string; elements: number; sessions: number; messages: number; localMedia: number; uploadBytes: number; missingMedia: number; fileName: string };
+export type LocalRestorePreview = { id: string; name: string; elements: number; sessions: number; messages: number; localMedia: number; uploadBytes: number; missingMedia: number; fileName: string; reusedMedia?: number };
 export type LocalRestoreResult = { projectId: string; canvasId: string; sessionId: string | null; restored: boolean };
-export type LocalSnapshot = { id: string; projectId: string; name: string; fileName: string; savedAt: string; bytes: number; elements: number; sessions: number; messages: number };
+export type LocalSnapshot = { id: string; projectId: string; name: string; fileName: string; savedAt: string; bytes: number; elements: number; sessions: number; messages: number; thumbnail?: string };
+export type SnapshotOverview = { thumbnail: string; text: string[]; messages: Array<{ role: string; content: string }>; truncated: boolean; name: string; projectId: string; baseline: { id: string; savedAt: string; fileName: string } | null; versions: Array<{ id: string; savedAt: string; fileName: string }>; difference: { elements: { added: number; removed: number; changed: number }; messages: { added: number; removed: number; changed: number }; settingsChanged: boolean; mediaChanged: boolean } | null };
+export type RestoreTaskList = { tasks: Array<{ id: string; name: string; status: string; updatedAt: string; uploads: Array<{ uploadId: string }> }>; uploads: Array<{ uploadId: string; filename: string; bytes: number; offset: number; storedBytes: number; expiresAt: string; state: string }> };
 export type SnapshotList = { snapshots: LocalSnapshot[]; unreadable: number; truncated: boolean };
 export type RestoreProgress = { phase: "uploading" | "restoring" | "completed" | "paused" | "failed"; name: string; bytes: number; totalBytes: number; resumedBytes: number; bytesPerSecond: number; remainingSeconds: number | null };
 export type DesktopStorageApi = {
@@ -23,6 +25,12 @@ export type DesktopStorageApi = {
   inspectLocalProject?: (credentials: { accessToken: string; accountId: string }) => Promise<LocalRestorePreview | null>;
   restoreLocalProject?: (id: string, credentials: { accessToken: string; accountId: string }) => Promise<LocalRestoreResult>;
   listLocalSnapshots?: (credentials: { accessToken: string; accountId: string }) => Promise<SnapshotList>;
+  getLocalSnapshotOverview?: (id: string, accountId: string, baseline?: string) => Promise<SnapshotOverview>;
+  queueLocalSnapshot?: (id: string, accountId: string) => Promise<unknown>;
+  openOfflineSnapshots?: () => Promise<void>;
+  getRestoreTasks?: (credentials: { accessToken: string; accountId: string }) => Promise<RestoreTaskList>;
+  previewRestoreTask?: (id: string, credentials: { accessToken: string; accountId: string }) => Promise<LocalRestorePreview>;
+  clearRestoreTask?: (id: string, credentials: { accessToken: string; accountId: string }) => Promise<unknown>;
   previewLocalSnapshot?: (id: string, credentials: { accessToken: string; accountId: string }) => Promise<LocalRestorePreview>;
   cancelProjectRestore?: () => Promise<void>;
   onProjectRestore?: (callback: (state: RestoreProgress) => void) => () => void;

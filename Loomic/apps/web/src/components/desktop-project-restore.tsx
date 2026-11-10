@@ -4,6 +4,7 @@ import { FolderInput } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { desktopStorageError, type DesktopStorageApi, type LocalRestorePreview, type LocalRestoreResult, type RestoreProgress } from "@/lib/desktop-storage";
 import { DesktopSnapshotBrowser } from "./desktop-snapshot-browser";
+import { DesktopRestoreTasks } from "./desktop-restore-tasks";
 
 export function DesktopProjectRestore({ api, accountId, accessToken, disabled }: { api: DesktopStorageApi; accountId: string | undefined; accessToken: string | undefined; disabled: boolean }) {
   const [preview, setPreview] = useState<LocalRestorePreview | null>(null);
@@ -29,10 +30,19 @@ export function DesktopProjectRestore({ api, accountId, accessToken, disabled }:
   const close = (open: boolean) => { if (!open && !busy) { setPreview(null); setError(""); } };
   const chooseFile = () => void choose();
   const chooseSnapshot = (id: string) => void choose(id);
+  const resumeTask = async (id: string) => {
+    if (!accountId || !accessToken || !api.previewRestoreTask) return;
+    setBusy(true); setError(""); setRestored(null); setAccepted(false); setProgress(null);
+    try { setPreview(await api.previewRestoreTask(id, { accountId, accessToken })); }
+    catch (cause) { setError(desktopStorageError(cause)); }
+    finally { setBusy(false); }
+  };
+  const openOffline = () => { void api.openOfflineSnapshots?.().catch(cause => setError(desktopStorageError(cause))); };
   const pause = () => { void api.cancelProjectRestore?.().catch(cause => setError(desktopStorageError(cause))); };
   const canvasUrl = restored ? `/desktop-app/canvas/?id=${encodeURIComponent(restored.canvasId)}${restored.sessionId ? `&session=${encodeURIComponent(restored.sessionId)}` : ""}&fitContent=1` : "";
   return <div className="mt-4">
     <div className="flex flex-wrap gap-2"><DesktopSnapshotBrowser api={api} accountId={accountId} accessToken={accessToken} disabled={disabled || busy} onPreview={chooseSnapshot}/><button type="button" className="desktop-settings__command" onClick={chooseFile} disabled={disabled || busy || !accountId}><FolderInput aria-hidden="true"/>{busy && !preview ? "正在读取快照…" : "从本地快照恢复工程"}</button></div>
+    <div className="mt-2 flex flex-wrap gap-2"><DesktopRestoreTasks api={api} accountId={accountId} accessToken={accessToken} disabled={disabled || busy} onResume={id => void resumeTask(id)}/>{api.openOfflineSnapshots && <button type="button" className="desktop-settings__command" onClick={openOffline} disabled={busy}>打开离线快照库</button>}</div>
     {!preview && error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
     <Dialog open={Boolean(preview)} onOpenChange={close}>
       <DialogContent className="sm:max-w-lg" showCloseButton={!busy}>
@@ -40,6 +50,7 @@ export function DesktopProjectRestore({ api, accountId, accessToken, disabled }:
         {preview && <div className="space-y-3 break-words"><strong className="block">{preview.name}</strong><p className="text-xs text-muted-foreground break-all">{preview.fileName}</p>
           <p>{preview.elements} 个画布元素 · {preview.sessions} 个对话 · {preview.messages} 条消息</p>
           <p className="text-sm text-muted-foreground">将上传 {preview.localMedia} 个本地素材副本（{(preview.uploadBytes / 1024 ** 2).toFixed(1)} MiB）到当前账户私有素材库。</p>
+          {(preview.reusedMedia ?? 0) > 0 && <p className="text-sm text-muted-foreground">{preview.reusedMedia} 个素材将直接复用现有云端文件，不重复上传。</p>}
           {preview.missingMedia > 0 && <p role="alert" className="text-destructive">{preview.missingMedia} 个素材在本地和云端均不可用。请补齐素材后重新选择快照。</p>}
           {!restored && <label className="flex items-start gap-3 text-sm leading-6"><input type="checkbox" className="mt-1 size-4 shrink-0" checked={accepted} onChange={event => setAccepted(event.target.checked)} disabled={busy}/><span>我确认将这份快照和所列素材恢复到当前登录账户。</span></label>}
           {error && <p role="alert" className="text-destructive">{error}</p>}

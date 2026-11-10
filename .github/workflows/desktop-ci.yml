@@ -125,6 +125,8 @@ jobs:
           node apps/desktop/e2e/lifecycle.mjs
           $env:HELT_STORAGE_TEST_DIR = Join-Path $env:RUNNER_TEMP 'desktop-local-storage'
           node apps/desktop/e2e/local-storage.mjs
+          $env:HELT_OFFLINE_TEST_DIR = Join-Path $env:RUNNER_TEMP 'desktop-offline'
+          node apps/desktop/e2e/offline-migration.mjs
       - name: Upload Windows lifecycle evidence
         if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -135,6 +137,8 @@ jobs:
             ${{ runner.temp }}/desktop-lifecycle/offline.png
             ${{ runner.temp }}/desktop-local-storage/report.json
             ${{ runner.temp }}/desktop-local-storage/setup-200-percent.png
+            ${{ runner.temp }}/desktop-offline/report.json
+            ${{ runner.temp }}/desktop-offline/offline-preview.png
           if-no-files-found: ignore
           retention-days: 7
       - name: Installed macOS package workspace and restore
@@ -155,6 +159,8 @@ jobs:
           path: |
             ${{ runner.temp }}/desktop-native/storage/report.json
             ${{ runner.temp }}/desktop-native/storage/setup-200-percent.png
+            ${{ runner.temp }}/desktop-native/offline/report.json
+            ${{ runner.temp }}/desktop-native/offline/offline-preview.png
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4

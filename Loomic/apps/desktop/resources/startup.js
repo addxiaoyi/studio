@@ -6,3 +6,4 @@ if (state === "crashed") {
 }
 document.getElementById("minimize").addEventListener("click", () => window.electronAPI?.minimizeWindow());
 document.getElementById("close").addEventListener("click", () => window.electronAPI?.closeWindow());
+document.getElementById("snapshots").addEventListener("click", () => { window.electronAPI.openOfflineSnapshots().catch(error => { document.getElementById("local-error").textContent = error.message; }); });
