@@ -5,6 +5,7 @@ import {
   type WorkflowGraph,
 } from "@helstera/shared";
 import { Button } from "@/components/ui/button";
+import { WorkflowBudgetField, validWorkflowBudget } from "./budget-field";
 import {
   Dialog,
   DialogContent,
@@ -26,6 +27,8 @@ type Props = {
   setConfirmRun(open: boolean): void;
   run(): void;
   targetTitle?:string|undefined;
+  budget: string;
+  setBudget(value:string):void;
 };
 export function WorkflowDialogs({
   proposal,
@@ -39,6 +42,8 @@ export function WorkflowDialogs({
   setConfirmRun,
   run,
   targetTitle,
+  budget,
+  setBudget,
 }: Props) {
   return (
     <>
@@ -103,11 +108,12 @@ export function WorkflowDialogs({
           <p className="text-xs text-muted-foreground">
             素材会重新验证权限。图片和视频生成会在执行到该节点时展示实际模型、参数和费用，确认后才扣费。
           </p>
+          <WorkflowBudgetField value={budget} onChange={setBudget} disabled={busy}/>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmRun(false)}>
               返回编辑
             </Button>
-            <Button disabled={busy} onClick={run}>
+            <Button disabled={busy || !validWorkflowBudget(budget)} onClick={run}>
               确认运行已保存版本
             </Button>
           </DialogFooter>

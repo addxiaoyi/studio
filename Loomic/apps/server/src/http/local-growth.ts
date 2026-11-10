@@ -130,9 +130,9 @@ export function registerLocalGrowthRoutes(
   app.get("/api/assets/:assetId/retention", async (request: any, reply: any) => {
     const session = await requireSession(request, reply); if (!session) return;
     const { rows } = await options.db.query(
-      `select ga.id as asset_id, ga.retention_state, ga.retention_until, ga.purge_after,
+       `select ga.id as asset_id, case when ga.retention_state='active' and ga.deleted_at is not null then 'soft_deleted' else ga.retention_state end as retention_state, ga.retention_until, ga.purge_after,
               exists(select 1 from asset_favorites af where af.asset_id=ga.id and af.user_id=$3) as favorited
-       from generated_assets ga where ga.id=$1 and ga.workspace_id=$2
+       from generated_assets ga where (ga.id=$1 or exists(select 1 from asset_objects source where source.id=$1 and source.workspace_id=ga.workspace_id and source.object_path=ga.object_path)) and ga.workspace_id=$2
          and (ga.created_by=$3 or not exists (select 1 from asset_objects ao
            where ao.workspace_id=ga.workspace_id and ao.object_path=ga.object_path and ao.bucket in ('private-video','private-try-on')))`,
       [request.params.assetId, session.viewer.workspace.id, session.user.id],

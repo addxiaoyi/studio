@@ -56,21 +56,27 @@ export async function createPresentationFixture(
     canvasId = randomUUID(),
     sessionId = randomUUID(),
     token = randomUUID();
-  const app = Fastify(),
+  // The static proxy keeps media connections alive after the isolated client exits.
+  const app = Fastify({forceCloseConnections:true}),
     work: Promise<void>[] = [];
   const priorKey=process.env.WEBSITE_LOGIN_ENCRYPTION_KEY;
   process.env.WEBSITE_LOGIN_ENCRYPTION_KEY=randomBytes(32).toString("base64");
   const { browser, engine } = await launchAgentBrowser();
   const storage = new LocalStorageProvider(root, "http://localhost:3315");
   async function close() {
+    console.info("[presentation-fixture] cancel outstanding capture work");
     await db.query("update website_capture_tasks set status='canceled' where status in ('queued','running')");
     await Promise.allSettled(work);
+    console.info("[presentation-fixture] close capture browser");
     await browser.close();
+    console.info("[presentation-fixture] close HTTP connections");
     await app.close();
+    console.info("[presentation-fixture] close database");
     await db.end();
     await admin.query(`drop schema ${schema} cascade`);
     await admin.end();
     await rm(root, { recursive: true, force: true });
+    console.info("[presentation-fixture] cleanup complete");
     if(priorKey===undefined)delete process.env.WEBSITE_LOGIN_ENCRYPTION_KEY;else process.env.WEBSITE_LOGIN_ENCRYPTION_KEY=priorKey;
   }
   try {

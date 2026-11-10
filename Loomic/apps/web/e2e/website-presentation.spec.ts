@@ -16,8 +16,17 @@ test.beforeAll(async () => {
   );
 });
 test.afterAll(async () => {
-  await desktop?.close();
-  await fixture?.close();
+  try {
+    if (desktop) {
+      console.info("[presentation-desktop] exiting isolated client");
+      const process=desktop.process();
+      const exited=process.exitCode===null?new Promise<void>(resolve=>process.once("exit",()=>resolve())):Promise.resolve();
+      // The isolated fixture has no user work; bypass the app's stay-open close policy.
+      if(process.exitCode===null)await desktop.evaluate(({app})=>{setImmediate(()=>app.exit(0));});
+      await exited;
+      console.info("[presentation-desktop] client exited");
+    }
+  } finally { await fixture?.close(); }
 });
 test("rejects then approves a real presentation, plays the recording and restores it after refresh", async ({
   page,
@@ -77,7 +86,7 @@ test("rejects then approves a real presentation, plays the recording and restore
       throw error;
     });
   const download = desktop?null:page.waitForEvent("download");
-  await card.getByRole("link", { name: "下载 WebM 演示录像" }).click();
+  await card.getByRole("link", { name: "下载原始录像" }).click();
   if(desktop)await expect.poll(async()=>{try{return(await stat(info.outputPath("website-introduction.webm"))).size;}catch{return 0;}},{timeout:30000}).toBeGreaterThan(1000);
   else await (await download!).saveAs(info.outputPath("website-introduction.webm"));
   const messages = (

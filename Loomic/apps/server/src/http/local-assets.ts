@@ -9,6 +9,17 @@ import sharp from "sharp";
 import type { RequestAuthenticator } from "../auth/types.js";
 import { verifyProviderAssetSignature } from "../features/uploads/provider-asset-url.js";
 import { parseByteRange } from "./media-byte-range.js";
+import { mediaCookie, mediaCookieOwner } from "./media-access.js";
+
+export const readableAssetSql = `select ao.bucket, ao.object_path, ao.mime_type, ao.byte_size,
+  coalesce((select min(ga.retention_until) from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path), case when ao.bucket in ('private-video','private-try-on') then ao.created_at+interval '3 days' end) as expires_at
+  from asset_objects ao where ao.id=$1
+  and exists(select 1 from workspace_members wm where wm.workspace_id=ao.workspace_id and wm.user_id=$2)
+  and not exists(select 1 from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path
+    and (ga.deleted_at is not null or ga.retention_state<>'active' or ga.retention_until<=now()))
+  and (ao.bucket not in ('private-video','private-try-on') or (ao.created_by=$2
+    and (exists(select 1 from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path and ga.retention_until>now())
+      or ao.created_at>now()-interval '3 days')))`;
 
 const execFileAsync = promisify(execFile);
 
@@ -88,16 +99,24 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
     }
   });
 
-  app.get<{ Params: { assetId: string }; Querystring: { preview?: string } }>("/api/uploads/:assetId/file", async (request, reply) => {
+  app.post<{ Params: { assetId: string } }>("/api/uploads/:assetId/playback", async (request, reply) => {
     const user = await options.auth.authenticate(request);
+    if (!user) return reply.code(401).send({ error: { code: "unauthorized", message: "请先登录。" } });
+    if (!/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(request.params.assetId)) return reply.code(400).send({ error: { code: "invalid_asset", message: "素材标识无效。" } });
+    const asset = (await options.db.query(readableAssetSql, [request.params.assetId, user.id])).rows[0];
+    if (!asset) return reply.code(404).send({ error: { code: "asset_not_found", message: "素材已到期、已删除或无权访问。" } });
+    const path = `/api/uploads/${request.params.assetId}/file`;
+    reply.header("Set-Cookie", mediaCookie(request.params.assetId, user.id, request.protocol === "https" || request.headers["x-forwarded-proto"] === "https"));
+    reply.header("Cache-Control", "private, no-store");
+    return { ok: true, data: { path, mimeType: asset.mime_type, byteSize: Number(asset.byte_size), expiresAt: asset.expires_at ?? null, grantSeconds: 300 } };
+  });
+
+  app.get<{ Params: { assetId: string }; Querystring: { preview?: string; download?: string } }>("/api/uploads/:assetId/file", async (request, reply) => {
+    const authenticated = await options.auth.authenticate(request);
+    const mediaOwner = authenticated ? null : mediaCookieOwner(request.headers.cookie, request.params.assetId);
+    const user = authenticated ?? (mediaOwner ? { id: mediaOwner } : null);
     if (!user) return reply.code(401).send({ error: { code: "unauthorized", message: "Unauthorized" } });
-    const { rows } = await options.db.query(`select ao.bucket, ao.object_path, ao.mime_type from asset_objects ao
-      where ao.id = $1 and exists (select 1 from workspace_members wm where wm.workspace_id = ao.workspace_id and wm.user_id = $2)
-      and (ao.bucket not in ('private-video','private-try-on') or (ao.created_by=$2
-        and not exists (select 1 from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path
-          and (ga.deleted_at is not null or ga.retention_state<>'active' or ga.retention_until<=now()))
-        and (exists (select 1 from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path and ga.retention_until>now())
-          or ao.created_at > now() - interval '3 days')))`, [request.params.assetId, user.id]);
+    const { rows } = await options.db.query(readableAssetSql, [request.params.assetId, user.id]);
     const asset = rows[0];
     if (!asset) return reply.code(404).send({ error: { code: "asset_not_found", message: "Asset not found." } });
     try {
@@ -111,7 +130,7 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
         filePath = rootPath;
       }
       const relativePath = relative(options.root, filePath);
-      const outsideRoot = isAbsolute(relativePath) || relativePath.startsWith(".." + sep);
+      const outsideRoot = isAbsolute(relativePath) || relativePath === ".." || relativePath.startsWith(".." + sep);
       if (outsideRoot) return reply.code(404).send({ error: { code: "asset_not_found", message: "Asset not found." } });
       const wantsPreview = request.query.preview === "1";
       if (wantsPreview && String(asset.mime_type).startsWith("image/")) {
@@ -138,8 +157,12 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
       const fileInfo = await stat(filePath);
       reply.type(asset.mime_type ?? "application/octet-stream");
       reply.header("X-Content-Type-Options", "nosniff");
+      if (request.query.download === "1") {
+        const extensions: Record<string,string> = {"video/webm":"webm","video/mp4":"mp4","image/png":"png","image/jpeg":"jpg","image/webp":"webp","audio/mpeg":"mp3","audio/wav":"wav"};
+        reply.header("Content-Disposition", `attachment; filename="${request.params.assetId.replace(/[^a-zA-Z0-9-]/g, "")}.${extensions[String(asset.mime_type)] ?? "bin"}"`);
+      }
       reply.header("Cache-Control", asset.bucket === "private-video" || asset.bucket === "private-try-on" ? "private, no-store" : "private, max-age=300");
-      if (String(asset.mime_type).startsWith("video/")) {
+      if (/^(video|audio)\//.test(String(asset.mime_type))) {
         reply.header("Accept-Ranges", "bytes");
         // Without a validator we cannot satisfy If-Range safely; return the full file.
         const range = request.headers["if-range"] ? undefined : request.headers.range;

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { AgentBrowserSession } from "@helstera/shared";
+import { pollBrowserSessions } from "@/lib/agent-browser-poll";
 import {
   AgentBrowserAccessError,
   controlAgentBrowser,
@@ -18,6 +19,7 @@ export function useAgentBrowsers(
   const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [retryAt, setRetryAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [frame, setFrame] = useState("");
@@ -43,42 +45,19 @@ export function useAgentBrowsers(
       setSessions([]);
       return;
     }
-    const abort = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    async function poll() {
-      try {
-        const response = await listAgentBrowsers(token!, abort.signal);
-        if (abort.signal.aborted) return;
+    return pollBrowserSessions({
+      interval: () => open ? 1000 : latestSelected.current && ["starting", "running", "paused"].includes(latestSelected.current.state) ? 5000 : 30000,
+      read: async signal => {
+        const response = await listAgentBrowsers(token, signal);
+        if (signal.aborted) return;
         setSessions(response.sessions);
         setEnabled(response.enabled);
-        setError("");
-      } catch (cause) {
-        if (!abort.signal.aborted) {
-          setError(
-            cause instanceof Error ? cause.message : "无法读取浏览器会话。",
-          );
-          setSessions((current) =>
-            cause instanceof AgentBrowserAccessError
-              ? []
-              : current.map((item) =>
-                  ["starting", "running", "paused"].includes(item.state)
-                    ? { ...item, state: "interrupted" }
-                    : item,
-                ),
-          );
-        }
-      } finally {
-        if (!abort.signal.aborted) {
-          setLoading(false);
-          timer = setTimeout(poll, open && !document.hidden ? 1000 : 5000);
-        }
-      }
-    }
-    void poll();
-    return () => {
-      abort.abort();
-      clearTimeout(timer);
-    };
+      },
+      report: (cause, next) => {
+        setLoading(false); setError(cause?.message ?? ""); setRetryAt(next);
+        if (cause instanceof AgentBrowserAccessError) setSessions([]);
+      },
+    });
   }, [token, open, refresh]);
 
   useEffect(() => {
@@ -97,23 +76,23 @@ export function useAgentBrowsers(
     const abort = new AbortController();
     const sessionId=selected.id;
     let timer:ReturnType<typeof setTimeout>|undefined;
-    let deliveredRevision=-1;
+    let deliveredRevision=-1, failures=0;
     async function nextFrame(){
       const current=latestSelected.current;
       try{
-        if(!current||current.id!==sessionId||!current.frameRevision||current.frameRevision===deliveredRevision||document.hidden)return;
+        if(!current||current.id!==sessionId||!current.frameRevision||current.frameRevision===deliveredRevision||document.hidden||navigator.onLine===false)return;
         // Metadata may advance faster than the network; never starve an in-flight frame.
-        const blob=await readAgentBrowserFrame(token!,current,abort.signal);
+        const blob=await readAgentBrowserFrame(token!,current,AbortSignal.any([abort.signal,AbortSignal.timeout(15000)]));
         if(abort.signal.aborted)return;
         const url=URL.createObjectURL(blob),previous=ownedUrl.current;
-        ownedUrl.current=url;deliveredRevision=current.frameRevision;
+        ownedUrl.current=url;deliveredRevision=current.frameRevision;failures=0;
         setFrame(url);setFrameInfo({revision:current.frameRevision,url:current.url});setFrameError("");if(previous)URL.revokeObjectURL(previous);
       }catch(cause){
         if(!abort.signal.aborted){
-          setFrameError(cause instanceof Error?cause.message:"画面读取失败。");
+          failures++;setFrameError(cause instanceof Error?cause.message:"画面读取失败。");
           if(cause instanceof AgentBrowserAccessError)setSessions([]);
         }
-      }finally{if(!abort.signal.aborted)timer=setTimeout(nextFrame,500);}
+      }finally{if(!abort.signal.aborted)timer=setTimeout(nextFrame,failures?Math.min(60000,2000*2**Math.min(failures-1,5)):500);}
     }
     void nextFrame();
     return()=>{abort.abort();clearTimeout(timer);};
@@ -142,6 +121,7 @@ export function useAgentBrowsers(
     enabled,
     loading,
     error,
+    retryAt,
     frameError,
     frame,
     frameInfo,

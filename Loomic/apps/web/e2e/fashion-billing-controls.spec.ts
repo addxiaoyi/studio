@@ -123,6 +123,9 @@ async function setup(page: Page) {
       if (downloads === 1) return json({ error: "network" }, 503);
       return route.fulfill({ body: image, contentType: "image/webp", headers });
     }
+    if (url.pathname === `/api/assets/${id(5)}/retention`) return json({ok:true,data:{assetId:id(5),state:"active",retentionUntil:"2099-01-01T00:00:00Z",purgeAfter:null,favorited:false}});
+    if (url.pathname === "/api/assets/history") return json({ok:true,data:[{id:id(70),asset_object_id:id(71),media_type:"image",title:"我的试穿参考",mime_type:"image/webp",retention_state:"active",retention_until:"2099-01-01T00:00:00Z"}],pagination:{page:1,pageSize:30,total:1,hasMore:false}});
+    if (url.pathname === `/api/uploads/${id(71)}/file`) return route.fulfill({body:image,contentType:"image/webp",headers});
     return json({}, 404);
   });
   return {
@@ -177,7 +180,7 @@ test("try-on quotes bind the chosen model and recover results without another ch
   ).toBeVisible();
   await page.getByRole("button", { name: "恢复试穿结果", exact: true }).click();
   await expect(page.getByLabel("试穿结果回流", { exact: true })).toContainText(
-    "私有素材库",
+    "私有素材保留至",
   );
   expect(state.counts()).toEqual({
     uploads: 4,
@@ -186,6 +189,27 @@ test("try-on quotes bind the chosen model and recover results without another ch
     downloads: 2,
   });
   await page.screenshot({ path: info.outputPath("recovered-tryon.png") });
+});
+test("selects private person and garment images through the native upload pipeline without charging", async ({page},info) => {
+  const state=await setup(page);
+  await page.goto("/fashion-gallery/");
+  await page.getByRole("button",{name:"开始试穿",exact:true}).click();
+  await page.getByRole("button",{name:"从素材库选择人物照片",exact:true}).click();
+  const person=page.getByRole("dialog",{name:"选择人物照片",exact:true});
+  await person.getByRole("combobox",{name:"试穿参考素材"}).click();
+  await page.getByRole("option",{name:/我的试穿参考/}).click();
+  await person.getByRole("button",{name:"使用这张图片"}).click();
+  await expect(person).not.toBeVisible();
+  await expect(page.locator("#fitPhotoPreview")).toBeVisible();
+  await page.getByRole("tab",{name:"上传服装",exact:true}).click();
+  await page.getByRole("button",{name:"从素材库选择服装",exact:true}).click();
+  const garment=page.getByRole("dialog",{name:"选择服装参考图",exact:true});
+  await garment.getByRole("combobox",{name:"试穿参考素材"}).focus();
+  await page.keyboard.press("ArrowDown");await page.keyboard.press("Enter");
+  await garment.getByRole("button",{name:"使用这张图片"}).click();
+  await expect(garment).not.toBeVisible();
+  expect(state.counts()).toMatchObject({quotes:0,confirmations:0,uploads:0});
+  await page.screenshot({path:info.outputPath("private-reference-inputs.png")});
 });
 for (const theme of ["light", "dark"]) {
   test(`model list and settings remain usable at 320px in ${theme}`, async ({

@@ -34,6 +34,7 @@ import {
 } from "@/lib/fashion-generation";
 import { fashionModels, type FashionModel } from "@/lib/fashion-models";
 import { FashionControls } from "./fashion-controls";
+import { FashionAssetPicker } from "./fashion-asset-picker";
 
 type ExternalApproval = { origin: string; model: string };
 type FashionRuntime = {
@@ -57,6 +58,7 @@ type FashionModule = {
       confirmExternal(approval: ExternalApproval): Promise<string>;
       nativeAvailable: boolean;
       checkNative(): Promise<{ ok: boolean; model?: string; error?: string }>;
+      chooseImage(target: "person" | "garment"): Promise<File | null>;
     },
   ): FashionRuntime;
 };
@@ -87,6 +89,11 @@ export function FashionWorkspace() {
   const catalog = useRef<FashionModel[]>([]);
   const [progress, setProgress] = useState<FashionProgress | null>(null);
   const [reload, setReload] = useState(0);
+  const [imageTarget, setImageTarget] = useState<"person" | "garment" | null>(null);
+  const imageChoice = useRef<((file: File | null) => void) | null>(null);
+  function finishImageChoice(file: File | null) {
+    imageChoice.current?.(file); imageChoice.current = null; setImageTarget(null);
+  }
   const token = session?.access_token;
   const userId = session?.user.id;
   const theme = useRef(resolvedTheme || "dark");
@@ -156,7 +163,7 @@ export function FashionWorkspace() {
     setError("");
     setApproval(null);
     setLatest(null);
-    const moduleUrl = "/creative/fashion.mjs?release=canvas-closure-20261109";
+    const moduleUrl = "/creative/fashion.mjs?release=private-workflow-20261110";
     const modelRequest = refreshModels().catch(() => {
       if (!abort.signal.aborted)
         setError(
@@ -207,6 +214,11 @@ export function FashionWorkspace() {
           confirmExternal: requestConfirmation,
           nativeAvailable: hasNativeFashion(),
           checkNative: checkNativeFashion,
+          chooseImage: target => {
+            if (inFlight.current || pending.current || imageChoice.current) return Promise.reject(new Error("请先完成当前试穿或关闭素材选择。"));
+            setImageTarget(target);
+            return new Promise(resolve => { imageChoice.current = resolve; });
+          },
         });
         setHasPending(Boolean(pendingFashion(userId)));
         setHasNativePending(pendingNativeFashion(userId));
@@ -220,6 +232,7 @@ export function FashionWorkspace() {
       });
     return () => {
       abort.abort();
+      imageChoice.current?.(null); imageChoice.current = null; setImageTarget(null);
       pending.current?.reject(new Error("已离开试穿工作区，任务可恢复。"));
       pending.current = null;
       runtime.current?.dispose();
@@ -441,6 +454,7 @@ export function FashionWorkspace() {
         />
       )}
       <div ref={container} className="min-h-full" />
+      {imageTarget && token && <FashionAssetPicker token={token} target={imageTarget} finish={finishImageChoice} />}
       {ready && (
         <FashionControls container={container.current} models={models} />
       )}

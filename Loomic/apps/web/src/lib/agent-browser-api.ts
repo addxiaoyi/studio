@@ -18,6 +18,12 @@ export class AgentBrowserAccessError extends Error {
     this.name = "AgentBrowserAccessError";
   }
 }
+export class AgentBrowserRequestError extends Error {
+  constructor(readonly status: number, readonly requestId: string, readonly retryAfterMs: number, message: string) {
+    super(`${message}（HTTP ${status}${requestId ? ` · 请求 ${requestId}` : ""}）`);
+    this.name = "AgentBrowserRequestError";
+  }
+}
 async function request(token: string, path: string, init: RequestInit = {}) {
   const response = await fetch(
     `${getServerBaseUrl()}/api/agent/browser/${path}`,
@@ -40,13 +46,12 @@ async function request(token: string, path: string, init: RequestInit = {}) {
         403,
         "隔离浏览器权限已关闭，请在 Agent 连接器设置中启用。",
       );
-    if (response.status === 404)
-      throw new Error("浏览器画面尚未生成或已过期。");
-    throw new Error(
-      response.status === 409
-        ? "会话已结束或断线，请查看任务记录。"
-        : "暂时无法连接浏览器预览，正在重试。",
-    );
+    const requestId = (response.headers.get("x-request-id") ?? "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+    const retry = response.headers.get("retry-after");
+    const retryAfterMs = retry && /^\d+$/.test(retry) ? Number(retry) * 1000 : retry ? Math.max(0, Date.parse(retry) - Date.now()) || 0 : 0;
+    throw new AgentBrowserRequestError(response.status, requestId, retryAfterMs,
+      response.status === 404 ? "浏览器会话或画面不存在，请查看任务记录。" : response.status === 409
+        ? "会话已结束或断线，请查看任务记录。" : "暂时无法连接浏览器预览，将逐步延长重试间隔。");
   }
   return response;
 }

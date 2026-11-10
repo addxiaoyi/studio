@@ -1,0 +1,41 @@
+dialog:has(.helstera-render-dialog) { padding: 16px !important; }
+dialog:has(.helstera-render-dialog) .helstera-modal-panel { border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+.helstera-render-dialog { display: flex; flex-direction: column; width: min(820px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); min-height: 0; color: var(--foreground); background: var(--background); }
+.helstera-render-dialog .helstera-modal-heading { flex-shrink: 0; min-height: 60px; padding: 16px 20px !important; gap: 12px; }
+.helstera-render-dialog .helstera-modal-title { font-size: 16px !important; font-weight: 600; }
+.helstera-render-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+.helstera-render-toolbar > :first-child { flex-shrink: 0; }
+.helstera-render-toolbar > button { margin-left: auto !important; min-height: 40px; border-radius: 9px !important; background: var(--primary) !important; color: var(--primary-foreground) !important; font: inherit; font-weight: 600; }
+.helstera-render-toolbar > button * { color: inherit !important; }
+.helstera-render-body { display: grid; grid-template-columns: 152px minmax(0,1fr); min-height: 0; overflow: hidden; }
+.helstera-render-nav { display: flex; flex-direction: column; gap: 4px; padding: 12px 8px; border-right: 1px solid var(--border); background: var(--muted); }
+.helstera-render-nav button { width: 100% !important; min-height: 40px; padding: 9px 10px !important; border-radius: 8px !important; white-space: nowrap; }
+.helstera-render-nav button[aria-pressed=true] { background: var(--background) !important; box-shadow: 0 1px 3px rgb(0 0 0 / .08) !important; color: var(--foreground) !important; font-weight: 600 !important; }
+.helstera-render-options { min-width: 0; min-height: 0; max-height: min(60dvh, 480px); overflow: auto; overscroll-behavior: contain; padding: 12px 16px 20px; }
+.helstera-render-options > div { min-width: 0; }
+.helstera-render-options .helstera-render-row { display: grid !important; grid-template-columns: minmax(116px, .7fr) minmax(0,1fr); align-items: center; gap: 12px; padding: 10px 0 !important; border-bottom: 1px solid var(--border); }
+.helstera-render-options .helstera-render-label { line-height: 1.5 !important; min-width: 0; color: var(--muted-foreground); }
+.helstera-render-options .helstera-render-field { width: 100%; min-width: 0; justify-content: flex-start !important; }
+.helstera-render-options .helstera-render-field > div { min-width: 0; max-width: 100% !important; }
+.helstera-render-options .helstera-render-field > button { width: 100%; min-height: 38px; border-radius: 8px !important; }
+.helstera-render-options input[type=text] { min-height: 38px; text-align: left !important; border-radius: 8px; }
+.helstera-render-dialog :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+@media (max-width: 640px) {
+  dialog:has(.helstera-render-dialog) { padding: 8px !important; }
+  .helstera-render-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .helstera-render-dialog .helstera-modal-heading { min-height: 52px; padding: 12px 14px !important; }
+  .helstera-render-toolbar { padding: 10px 14px; }
+  .helstera-render-body { grid-template-columns: minmax(0,1fr); grid-template-rows: auto minmax(0,1fr); }
+  .helstera-render-nav { flex-direction: row; overflow-x: auto; padding: 8px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .helstera-render-nav button { width: auto !important; flex-shrink: 0; }
+  .helstera-render-options { max-height: none; padding: 6px 14px 16px; }
+}
+@media (max-width: 420px) {
+  .helstera-render-toolbar > button { width: 100%; margin-left: 0 !important; }
+  .helstera-render-options .helstera-render-row { grid-template-columns: minmax(0,1fr); gap: 6px; padding: 12px 0 !important; }
+  .helstera-render-options .helstera-render-label { font-size: 12px !important; }
+}
+@media (max-height: 520px) {
+  .helstera-render-options { max-height: none; }
+  .helstera-render-dialog .helstera-modal-heading { min-height: 44px; padding-block: 8px !important; }
+}

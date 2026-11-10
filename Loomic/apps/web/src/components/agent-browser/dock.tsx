@@ -131,7 +131,7 @@ function BrowserSessionDock() {
   }, [open]);
   if (!session) return null;
   const displayState =
-    selected && (view.frameError ? "interrupted" : selected.state);
+    selected && (view.frameError || view.error ? "interrupted" : selected.state);
   const terminal =
     displayState &&
     ["completed", "failed", "interrupted"].includes(displayState);
@@ -169,6 +169,7 @@ function BrowserSessionDock() {
             {view.error && (
               <div role="alert" className="agent-browser-error">
                 <p>{view.error}</p>
+                {view.retryAt && <p className="text-xs">{english ? "Next retry: " : "下次重试："}{new Date(view.retryAt).toLocaleTimeString()}</p>}
                 <Button size="sm" variant="outline" onClick={view.retry}>
                   <RefreshCw />
                   {labels.retry}

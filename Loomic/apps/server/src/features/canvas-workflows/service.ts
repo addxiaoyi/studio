@@ -12,6 +12,7 @@ import { AgentGoalService } from "../agent-goals/agent-goal-service.js";
 import { executableGoalPlan } from "../agent-goals/goal-planner.js";
 import { assertWorkflowMaterials } from "./materials.js";
 import { assertWorkflowPins } from "./pins.js";
+import { workflowBudget } from "./budget.js";
 
 type Store = Pick<Pool, "query">;
 type WorkflowRow = {
@@ -168,7 +169,9 @@ export class CanvasWorkflowService {
     requestKey: string,
     sessionId?: string,
     targetNodeId?: string,
+    budgetCredits?: number,
   ) {
+    const budget = workflowBudget(budgetCredits);
     const client = await this.db.connect();
     try {
       await client.query("begin");
@@ -179,13 +182,13 @@ export class CanvasWorkflowService {
         id,
       );
       const prior = (
-        await client.query<{ goal_id: string; revision: number; target_node_id: string | null }>(
-          "select goal_id,revision,target_node_id from canvas_workflow_runs where workflow_id=$1 and request_key=$2",
+        await client.query<{ goal_id: string; revision: number; target_node_id: string | null; budget_credits: string }>(
+          "select goal_id,revision,target_node_id,budget_credits from canvas_workflow_runs where workflow_id=$1 and request_key=$2",
           [id, requestKey],
         )
       ).rows[0];
       if (prior) {
-        if (prior.revision !== revision || prior.target_node_id !== (targetNodeId ?? null))
+        if (prior.revision !== revision || prior.target_node_id !== (targetNodeId ?? null) || Number(prior.budget_credits) !== budget)
           throw new WorkflowError("这次运行请求与已确认版本不一致。", 409);
         await client.query("commit");
         return { goalId: prior.goal_id, reused: true };
@@ -221,8 +224,8 @@ export class CanvasWorkflowService {
       const goal = await service.create(userId, workspaceId, input);
       await service.confirm(userId, workspaceId, goal.id);
       await client.query(
-        "insert into canvas_workflow_runs(workflow_id,goal_id,revision,graph,request_key,target_node_id) values($1,$2,$3,$4::jsonb,$5,$6)",
-        [id, goal.id, revision, JSON.stringify(executionGraph), requestKey, targetNodeId ?? null],
+        "insert into canvas_workflow_runs(workflow_id,goal_id,revision,graph,request_key,target_node_id,budget_credits) values($1,$2,$3,$4::jsonb,$5,$6,$7)",
+        [id, goal.id, revision, JSON.stringify(executionGraph), requestKey, targetNodeId ?? null, budget],
       );
       await client.query(
         "update canvas_workflows set active_goal_id=$2,updated_at=now() where id=$1",
@@ -241,7 +244,8 @@ export class CanvasWorkflowService {
     await this.get(userId, canvasId, id);
     return (
       await this.db.query(
-        `select r.id,r.goal_id as "goalId",r.revision,r.graph,r.target_node_id as "targetNodeId",r.created_at as "createdAt",g.status
+        `select r.id,r.goal_id as "goalId",r.revision,r.graph,r.target_node_id as "targetNodeId",r.created_at as "createdAt",g.status,
+        r.budget_credits::float8 as "budgetCredits",coalesce((select sum(b.credits)::float8 from canvas_workflow_budget_reservations b where b.run_id=r.id),0) as "reservedCredits"
       from canvas_workflow_runs r join agent_goals g on g.id=r.goal_id where r.workflow_id=$1 order by r.created_at desc limit 20`,
         [id],
       )

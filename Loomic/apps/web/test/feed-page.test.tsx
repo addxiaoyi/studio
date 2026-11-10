@@ -136,6 +136,14 @@ vi.mock("../src/lib/server-api", () => ({
 
 import FeedPage from "../src/app/(workspace)/feed/page";
 
+it("restores the saved route even while unrelated trend loading is still pending",async()=>{
+  const api=await import("../src/lib/server-api");
+  vi.mocked(api.fetchFeedTrends).mockImplementation(()=>new Promise(()=>{}));
+  searchParamsMock.current=new URLSearchParams(`packageId=${packageRecord.id}&step=0`);
+  render(<FeedPage/>);
+  await waitFor(()=>{for(const button of screen.getAllByRole("button",{name:"3 of 6: 脚本",exact:true}))expect(button).toBeEnabled();});
+});
+
 beforeEach(async () => {
   searchParamsMock.current = new URLSearchParams();
   createFeedPackageMock.mockReset();
@@ -197,6 +205,27 @@ async function openCustomTopic(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("feed workflow closure", () => {
+  it("keeps saved package steps reachable after returning to topic selection", async () => {
+    searchParamsMock.current = new URLSearchParams({ packageId: packageRecord.id, step: "2" });
+    const user = userEvent.setup();
+    render(<FeedPage />);
+    await screen.findByTestId("feed-approve-structure");
+    await user.click(screen.getAllByRole("button", { name: "1 of 6: 选题" })[0]!);
+    const script = screen.getAllByRole("button", { name: "3 of 6: 脚本" })[0]!;
+    expect(script).toBeEnabled();
+    await user.click(script);
+    expect(await screen.findByTestId("feed-approve-structure")).toBeVisible();
+    expect(approveFeedStructureMock).not.toHaveBeenCalled();
+  });
+
+  it("restores completed package progress even when its URL points to the first step", async () => {
+    searchParamsMock.current = new URLSearchParams({ packageId: packageRecord.id, step: "0" });
+    fetchFeedPackageMock.mockResolvedValue({ ...packageRecord, status: "ready" });
+    render(<FeedPage />);
+    await screen.findByRole("region", { name: "内容包状态摘要" });
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "6 of 6: 发布与复盘" })[0]).toBeEnabled());
+    expect(renderFeedPackageMock).not.toHaveBeenCalled();
+  });
   it("keeps custom topics independent from hotspot ids", async () => {
     const user = userEvent.setup();
     await openCustomTopic(user);

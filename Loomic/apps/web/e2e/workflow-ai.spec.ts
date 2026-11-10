@@ -81,6 +81,7 @@ test("conversational AI previews edits, persists decisions, and controls the sam
         .rows[0].n,
     ).toBe(0);
     await ask("运行当前流程");
+    await dock.getByRole("spinbutton", {name:/本次流程预算上限/}).fill("2.5");
     await dock
       .getByRole("button", { name: "确认运行流程", exact: true })
       .click();
@@ -89,6 +90,7 @@ test("conversational AI previews edits, persists decisions, and controls the sam
     ).toContainText("等待动作确认");
     const run = (await fixture.db.query("select id from agent_goals")).rows[0]
       .id;
+    expect(Number((await fixture.db.query("select budget_credits from canvas_workflow_runs where goal_id=$1",[run])).rows[0].budget_credits)).toBe(2.5);
     await ask("暂停当前流程");
     await dock
       .getByRole("button", { name: "确认暂停运行", exact: true })

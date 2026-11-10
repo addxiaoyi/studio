@@ -1,6 +1,8 @@
 import { studioChinese } from "./studio-copy";
 import { patchStudioAiSource } from "./studio-ai-source";
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+const renderDialogCss = readFileSync(resolve(import.meta.dir, "render-dialog.css"), "utf8");
 const displayNameModule = JSON.stringify(resolve(import.meta.dir, "../../apps/web/src/lib/studio-display-name.ts").replaceAll("\\", "/"));
 
 const UI_FONT = 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -32,7 +34,8 @@ export function patchStudioEnvironment(source: string) {
   .visualforge-native-root {
     --remotion-studio-white-alpha-80: var(--remotion-studio-light-text);
     --remotion-studio-white-alpha-90: var(--remotion-studio-white);
-  }`);
+  }
+${renderDialogCss}`);
 }
 
 /** Keep upstream files pinned; adapt UI labels without changing project source or identifiers. */
@@ -56,6 +59,48 @@ export function patchStudioSource(file: string, source: string) {
     replace("\t\t<div\n\t\t\taria-label", "\t\t<dialog\n\t\t\tref={dialog}\n\t\t\tonCancel={event => { event.preventDefault(); onEscape(); }}\n\t\t\taria-label");
     replace("style={backgroundOverlay}", "style={{...backgroundOverlay, inset: 0, margin: 0, border: 0, maxWidth: 'none', maxHeight: 'none', width: '100vw', height: '100dvh'}}");
     replace("\t\t</div>\n\t);", "\t\t</dialog>\n\t);");
+    replace("<div style={{...panel, ...panelStyle}}>", '<div className="helstera-modal-panel" style={{...panel, ...panelStyle}}>');
+  }
+  if (file === "components/ModalHeader.tsx") {
+    replace("<div style={container}>", '<div className="helstera-modal-heading" style={container}>');
+    replace("<div style={titleStyle}>", '<div className="helstera-modal-title" style={titleStyle}>');
+  }
+  if (file === "components/Tabs/vertical.tsx") {
+    replace("readonly autoFocus?: boolean;", "readonly autoFocus?: boolean;\n\treadonly keepLabel?: boolean;");
+    replace("style, selected, autoFocus})", "style, selected, autoFocus, keepLabel})");
+    replace("const isCompact = useBreakpoint(compactTabBreakpoint);", "const compact = useBreakpoint(compactTabBreakpoint);\n\tconst isCompact = compact && !keepLabel;");
+    replace("aria-label={children}", "aria-label={children} aria-pressed={selected}");
+  }
+  if (file === "components/RenderModal/WebRenderModal.tsx") {
+    replace('<div style={outerModalStyle}>', '<div className="helstera-render-dialog">');
+    replace("title={`${t('Render')} ${resolvedComposition.id} ${t('in the browser')}`}", "title={`${t('Export')} · ${resolvedComposition.id}`}");
+    replace('<div style={containerStyle}>', '<div className="helstera-render-toolbar">');
+    replace('<div style={flexer} />', '');
+    replace('style={buttonStyle}', 'id="helstera-render-submit"');
+    replace('Render {renderMode}', "{t('Export')} {t(renderMode === 'still' ? 'Still' : renderMode === 'audio' ? 'Audio' : 'Video')}");
+    replace('<div style={horizontalLayout}>', '<div className="helstera-render-body">');
+    replace('<div style={leftSidebar}>', `<div className="helstera-render-nav" aria-label={t('Export settings')} onKeyDown={event => {
+      if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(event.key)) return;
+      const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button'));
+      const current=buttons.indexOf(event.target as HTMLButtonElement);if(current<0)return;
+      event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(current+(['ArrowLeft','ArrowUp'].includes(event.key)?-1:1)+buttons.length)%buttons.length;
+      buttons[next]?.focus();buttons[next]?.click();
+    }}>`);
+    replace('<VerticalTab', '<VerticalTab keepLabel');
+    replace('<div style={optionsPanel} className={VERTICAL_SCROLLBAR_CLASSNAME}>', '<div className={"helstera-render-options " + VERTICAL_SCROLLBAR_CLASSNAME}>');
+  }
+  if (file === "components/RenderModal/WebRenderModalBasic.tsx") {
+    for (const label of ["Image format", "Frame", "Container"]) {
+      const before="{t('')}";
+      if(!text.includes(before)) throw new Error(`Missing export field ${label}`);
+      text=text.replace(before,`{t('${label}')}`);
+    }
+  }
+  if (file.startsWith("components/RenderModal/")) {
+    text=text.replaceAll('style={optionRow}', 'className="helstera-render-row" style={optionRow}')
+      .replaceAll('style={outputNameRow}', 'className="helstera-render-row" style={outputNameRow}')
+      .replaceAll('style={rightRow}', 'className="helstera-render-field" style={rightRow}')
+      .replaceAll('style={label}', 'className="helstera-render-label" style={label}');
   }
   if (file === "i18n/index.tsx") {
     replace("useMemo, useState", "useMemo, useState, useEffect");

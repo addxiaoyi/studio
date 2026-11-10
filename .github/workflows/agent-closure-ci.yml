@@ -51,7 +51,12 @@ jobs:
       - name: Private Agent browser access and controls
         run: |
           node scripts/test-local-postgres.mjs src/features/agent-browser/browser-view.postgres.test.ts src/features/agent-browser/engine.test.ts src/features/agent-browser/observer.test.ts
-          pnpm --filter @helstera/web exec vitest run test/agent-browser-dock.test.tsx test/canvas-bottom-bar.test.tsx
+          pnpm --filter @helstera/web exec vitest run test/agent-browser-dock.test.tsx test/agent-browser-poll.test.ts test/canvas-bottom-bar.test.tsx
+      - name: Private playback and saved workspace recovery
+        run: |
+          pnpm --filter @helstera/server exec vitest run src/http/media-access.test.ts src/http/local-assets.test.ts
+          node scripts/test-local-postgres.mjs src/http/private-video.postgres.test.ts
+          pnpm --filter @helstera/web exec vitest run test/authenticated-recording.test.tsx test/fashion-retention.test.tsx test/feed-page.test.tsx
       - name: Website presentation parameters and recording approval
         run: |
           pnpm --filter @helstera/server exec playwright install --with-deps chromium
@@ -138,6 +143,8 @@ jobs:
           node scripts/build-fashion-runtime.mjs
       - name: Try-on quote, result recovery and responsive menus (injected API)
         run: pnpm --filter @helstera/web exec playwright test --config playwright.fashion-billing.config.ts
+      - name: Export dialog labels, narrow layout and keyboard operation
+        run: pnpm --filter @helstera/web exec playwright test --config playwright.export-dialog.config.ts
       - name: Install Agent browser engine dependencies
         run: pnpm --filter @helstera/server exec playwright install --with-deps chromium
       - name: Real Agent browser preview, pause and reconnect

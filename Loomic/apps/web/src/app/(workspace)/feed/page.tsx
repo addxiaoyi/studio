@@ -102,6 +102,12 @@ function parseFeedStep(value: string | null): FeedStep {
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 5 ? parsed as FeedStep : 0;
 }
 
+function packageResumeStep(record: FeedPackageRecord): FeedStep {
+  if (["ready", "scheduled", "exported", "published", "measured", "analyzed"].includes(record.status)) return 5;
+  if (["approved", "rendering", "failed"].includes(record.status)) return 3;
+  return record.structure ? 2 : 1;
+}
+
 const packageStatusLabels: Record<string, string> = {
   draft: "草稿",
   structured: "结构待审",
@@ -142,7 +148,10 @@ export default function FeedPage() {
   const token = session?.access_token;
   const requestedPackageId = searchParams.get("packageId");
   const requestedStep = parseFeedStep(searchParams.get("step"));
-  const [step, setStep] = useState<FeedStep>(requestedStep);
+  const [step, changeStep] = useState<FeedStep>(requestedStep);
+  const [visitedStep, setVisitedStep] = useState<FeedStep>(requestedStep);
+  const publishedRoute = useRef("");
+  const packageRead = useRef(0);
   const [title, setTitle] = useState("");
   const [brief, setBrief] = useState("");
   const [referenceImages, setReferenceImages] = useState<Array<{ assetId: string; url: string }>>([]);
@@ -166,6 +175,18 @@ export default function FeedPage() {
   const [trends, setTrends] = useState<FeedTrendItem[]>([]);
   const [packages, setPackages] = useState<FeedPackageRecord[]>([]);
   const [active, setActive] = useState<FeedPackageRecord | null>(null);
+  const unlockedStep = Math.max(step, visitedStep, active ? packageResumeStep(active) : 0);
+  function setStep(next: FeedStep, packageId = active?.id) {
+    packageRead.current++;
+    changeStep(next);
+    setVisitedStep(current => Math.max(current, next) as FeedStep);
+    const params = new URLSearchParams(window.location.search);
+    if (packageId) params.set("packageId", packageId); else params.delete("packageId");
+    params.set("step", String(next));
+    publishedRoute.current = `${packageId ?? ""}:${next}`;
+    restoredUrlRef.current = "";
+    router.replace(`/feed?${params.toString()}`, { scroll: false });
+  }
   const [busy, setBusy] = useState(false);
   const [scheduleAction, setScheduleAction] = useState<"save" | "confirm" | "publish" | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -461,25 +482,25 @@ export default function FeedPage() {
     setStep(target);
   }
 
-  async function hydratePackage(packageRecord: FeedPackageRecord) {
-    setActive(packageRecord);
-    setStructureDraft(packageRecord.structure);
-    setStructureDirty(false);
-    setSelectedTrendId(packageRecord.trend_item_id ?? null);
-    setTitle(packageRecord.title);
-    setBrief(packageRecord.brief);
-    setSelectedPlatforms(packageRecord.platforms);
-    if (packageRecord.platforms[0]) setPublishPlatform(packageRecord.platforms[0]);
-    if (!token) return;
+  async function hydratePackage(packageRecord: Pick<FeedPackageRecord,"id">, current = () => true) {
+    if (!token) return null;
+    const read = ++packageRead.current;
     try {
       const detail = await fetchFeedPackage(token, packageRecord.id);
+      if (read !== packageRead.current || !current()) return null;
       setActive(detail);
       setStructureDraft(detail.structure);
+      setStructureDirty(false);
       setSelectedTrendId(detail.trend_item_id ?? null);
       setTitle(detail.title);
       setBrief(detail.brief);
+      setSelectedPlatforms(detail.platforms);
+      if (detail.platforms[0]) setPublishPlatform(detail.platforms[0]);
+      setVisitedStep(current => active?.id === detail.id ? current : packageResumeStep(detail));
+      return detail;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "内容包详情加载失败，请重试");
+      if (read === packageRead.current && current()) setError(err instanceof Error ? err.message : "内容包详情加载失败，请重试");
+      return null;
     }
   }
 
@@ -490,7 +511,7 @@ export default function FeedPage() {
       const detail = await fetchFeedPackage(token, active.id);
       if (structureDirty) {
         setError("服务端内容包已刷新，但本地未保存结构仍保留；保存或放弃修改后再继续。");
-        setActive((current) => current ? { ...current, status: detail.status, ...(detail.variants ? { variants: detail.variants } : {}) } : current);
+        setActive((current) => current?.id === detail.id ? { ...current, status: detail.status, ...(detail.variants ? { variants: detail.variants } : {}) } : current);
       } else {
         await hydratePackage(detail);
       }
@@ -504,26 +525,23 @@ export default function FeedPage() {
 
   async function openPackage(packageRecord: FeedPackageRecord) {
     if (structureDirty && !window.confirm("结构有未保存修改，打开其他内容包会放弃这些修改，确定继续吗？")) return;
-    await hydratePackage(packageRecord);
-    setStep(2);
+    const loaded = await hydratePackage(packageRecord);
+    if (loaded) setStep(packageResumeStep(loaded), loaded.id);
   }
 
   useEffect(() => {
-    if (!token || !didLoadRef.current || !requestedPackageId) return;
+    if (!token || !requestedPackageId) return;
     const restoreKey = `${requestedPackageId}:${requestedStep}`;
-    if (restoredUrlRef.current === restoreKey) return;
-    const listed = packages.find((item) => item.id === requestedPackageId);
-    restoredUrlRef.current = restoreKey;
-    void (async () => {
-      try {
-        const packageRecord = listed ?? await fetchFeedPackage(token, requestedPackageId);
-        await hydratePackage(packageRecord);
-        setStep(requestedStep);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "无法恢复 URL 中的内容包。");
-      }
-    })();
-  }, [token, packages, requestedPackageId, requestedStep]);
+    if (restoredUrlRef.current === restoreKey || publishedRoute.current === restoreKey) return;
+    let canceled = false;
+    void hydratePackage({id:requestedPackageId},()=>!canceled).then(loaded => {
+      if (!loaded || canceled) return;
+      restoredUrlRef.current = restoreKey;
+      changeStep(requestedStep);
+      setVisitedStep(Math.max(requestedStep, packageResumeStep(loaded)) as FeedStep);
+    });
+    return () => {canceled=true;};
+  }, [token, requestedPackageId, requestedStep]);
 
   useEffect(() => {
     if (!token || !active?.id || active.status !== "rendering") return;
@@ -550,15 +568,6 @@ export default function FeedPage() {
       window.clearInterval(timer);
     };
   }, [token, active?.id, active?.status]);
-
-  useEffect(() => {
-    if (!didLoadRef.current || (requestedPackageId && active?.id !== requestedPackageId)) return;
-    const params = new URLSearchParams(window.location.search);
-    if (active?.id) params.set("packageId", active.id);
-    else params.delete("packageId");
-    params.set("step", String(step));
-    router.replace(`/feed?${params.toString()}`, { scroll: false });
-  }, [active?.id, requestedPackageId, router, step]);
 
   useEffect(() => {
     if (!structureDirty) return;
@@ -631,10 +640,10 @@ export default function FeedPage() {
         return;
       }
       const approved = await approveFeedStructure(token, active.id, reviewedStructure);
-      await hydratePackage(approved);
+      if (!await hydratePackage(approved)) return;
       setStructureDirty(false);
       setNotice("结构已保存并批准，下一步可以生成图片和视频。");
-      setStep(3);
+      setStep(3, approved.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "结构保存失败，请检查必填内容后重试");
     } finally {
@@ -676,9 +685,9 @@ export default function FeedPage() {
         referenceImageUrls: referenceImages.map((item) => item.url),
         referenceAssetIds: referenceImages.map((item) => item.assetId),
       });
-      await hydratePackage(created);
+      if (!await hydratePackage(created)) return;
       setPackages((current) => [created, ...current]);
-      setStep(mode === "automatic" ? 3 : 2);
+      setStep(mode === "automatic" ? 3 : 2, created.id);
       if (mode === "automatic") setNotice("已按预算启动媒体生成，完成后可进入平台适配和发布。");
     } catch (err) {
       setError(err instanceof Error ? err.message : "内容包创建失败");
@@ -696,7 +705,7 @@ export default function FeedPage() {
         workflowMode: "review", platforms: selectedPlatforms, topic: strategyPrompt.trim(), modelId: model === "auto" ? null : model,
         estimatedCostCny: estimatedCost, maxCostCny: null,
       });
-      await hydratePackage(created); setPackages((current) => [created, ...current]); setStep(1);
+      if (!await hydratePackage(created)) return; setPackages((current) => [created, ...current]); setStep(1, created.id);
       await generateFeedStructure(token, created.id); setNotice("AI 策略师已生成建议，请在策略步骤中确认和编辑。");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "AI 策略师暂时不可用"); }
     finally { setStrategyBusy(false); }
@@ -723,9 +732,9 @@ export default function FeedPage() {
       if (status.status === "failed") throw new Error(status.errorMessage || "Feed 自动化生成失败");
       if (status.status === "draft_ready") {
         const created = await fetchFeedPackage(token, status.packageId);
-        await hydratePackage(created);
+        if (!await hydratePackage(created)) return;
         setPackages((current) => [created, ...current.filter((item) => item.id !== created.id)]);
-        setStep(2);
+        setStep(2, created.id);
         setNotice("自动草稿已生成，可以编辑结构和平台版本。");
         return;
       }
@@ -1099,7 +1108,7 @@ export default function FeedPage() {
             <button
               key={`mobile-${label}-${index}`}
               type="button"
-              disabled={index > step}
+              disabled={index > unlockedStep}
               onClick={() => goToStep(index)}
               aria-current={step === index ? "step" : undefined}
               aria-label={`${index + 1} of ${steps.length}: ${label}`}
@@ -1114,7 +1123,7 @@ export default function FeedPage() {
             <button
               key={`${label}-${index}`}
               type="button"
-              disabled={index > step}
+              disabled={index > unlockedStep}
               onClick={() => goToStep(index)}
               aria-current={step === index ? "step" : undefined}
               aria-label={`${index + 1} of ${steps.length}: ${label}`}
@@ -1966,7 +1975,7 @@ export default function FeedPage() {
                       {item.title}
                     </span>
                     <span className="mt-1 block text-muted-foreground">
-                      {item.status} · {item.duration_seconds} 秒
+                      {packageStatusLabels[item.status] ?? "状态待确认"} · {item.duration_seconds} 秒
                     </span>
                   </button>
                 ))}

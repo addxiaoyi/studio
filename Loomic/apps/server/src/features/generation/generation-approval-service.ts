@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import { assertWorkflowGenerationActive } from "../canvas-workflows/approval-access.js";
+import { workflowBudgetError } from "../canvas-workflows/budget.js";
 
 export type GenerationApprovalState =
   | "confirmation_required"
@@ -188,7 +189,11 @@ export function createGenerationApprovalService(db: Pool) {
            and status = 'pending' and consumed_at is null and expires_at > now()
          returning id, job_type, model, payload, payload_fingerprint, estimated_credits, expires_at, context`,
         [input.approvalId, input.workspaceId, input.userId],
-      );
+      ).catch(cause => {
+        const message = workflowBudgetError(cause);
+        if (message) throw new GenerationApprovalError("generation_approval_invalid", message);
+        throw cause;
+      });
       if (row.rows[0]) {
         const approval = row.rows[0];
         return toRequestFromRow(approval);

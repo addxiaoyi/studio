@@ -47,6 +47,6 @@ export type StudioModule = {
 };
 
 export function loadVisualForge(attempt = 0): Promise<StudioModule> {
-  const entry = `/creative/visualforge/entry.mjs?release=studio-startup-20261109&attempt=${attempt}`;
+  const entry = `/creative/visualforge/entry.mjs?release=private-workflow-20261110&attempt=${attempt}`;
   return import(/* webpackIgnore: true */ entry) as Promise<StudioModule>;
 }

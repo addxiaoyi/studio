@@ -74,6 +74,7 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
       "20261108000005_creative_library",
       "20261108000006_workflow_assistant",
       "20261109000000_workflow_partial_runs",
+      "20261110000000_workflow_budget",
         "20261109000001_workflow_versions",
       "20261029000000_canvas_content_version",
       "20261017000000_automation_lifecycle",
@@ -140,6 +141,43 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
     await expect(
       service.run(user, canvas, draft.id, 1, randomUUID(), session),
     ).rejects.toThrow("网址");
+  });
+  it("enforces one shared budget for concurrent approvals, retries and changed prices", async () => {
+    const graph:WorkflowGraph={title:"预算并发验收",nodes:[
+      ...["first","second"].map(id=>({id,title:id,position:{x:0,y:0},config:{kind:"generate" as const,mediaType:"image" as const,model:"budget-model",prompt:id,aspectRatio:"16:9" as const,duration:5,resolution:"720p" as const}})),
+      {id:"deliver",title:"交付",position:{x:900,y:0},config:{kind:"deliver"}},
+    ],edges:[{id:"a",source:"first",target:"deliver"},{id:"b",source:"second",target:"deliver"}]};
+    const draft=await service.create(user,canvas,graph,randomUUID()),key=randomUUID();
+    const run=await service.run(user,canvas,draft.id,1,key,session,undefined,2);
+    expect(await service.run(user,canvas,draft.id,1,key,session,undefined,2)).toEqual({goalId:run.goalId,reused:true});
+    await expect(service.run(user,canvas,draft.id,1,key,session,undefined,3)).rejects.toThrow("不一致");
+    await db.query("update agent_goal_steps set state='waiting_desktop' where goal_id=$1",[run.goalId]);
+    const steps=(await db.query("select id from agent_goal_steps where goal_id=$1 and executor='media.generate' order by ordinal",[run.goalId])).rows;
+    const approvals=createGenerationApprovalService(db);
+    const requests=await Promise.all(steps.map(async step=>{
+      const quote=await approvals.gate({workspaceId:workspace,userId:user,jobType:"image_generation",model:"budget-model",payload:{prompt:"budget",workflow_step_id:step.id},estimatedCredits:1.2,forceConfirmation:true,context:{canvasId:canvas,workflowGoalId:run.goalId,workflowStepId:step.id}});
+      if(quote.state!=="confirmation_required")throw Error("Missing confirmation");
+      return {approvalId:quote.request.approvalId,workspaceId:workspace,userId:user};
+    }));
+    const confirmations=await Promise.allSettled(requests.map(request=>approvals.approve(request)));
+    expect(confirmations.filter(item=>item.status==="fulfilled")).toHaveLength(1);
+    expect(confirmations.filter(item=>item.status==="rejected").map(item=>(item as PromiseRejectedResult).reason.message)).toEqual([expect.stringContaining("预算上限")]);
+    const accepted=requests[confirmations.findIndex(item=>item.status==="fulfilled")]!;
+    await Promise.all([approvals.approve(accepted),approvals.approve(accepted)]);
+    const history=await service.runs(user,canvas,draft.id);
+    expect(history[0]).toMatchObject({budgetCredits:2,reservedCredits:1.2});
+    await expect(db.query("update generation_approvals set estimated_credits=1.9 where id=$1",[accepted.approvalId])).rejects.toThrow("workflow_budget_quote_changed");
+    await db.query("update agent_goals set status='canceled' where id=$1",[run.goalId]);
+    const zero=await service.run(user,canvas,draft.id,1,randomUUID(),session);
+    expect((await service.runs(user,canvas,draft.id))[0]).toMatchObject({budgetCredits:0,reservedCredits:0});
+    const zeroStep=(await db.query("select id from agent_goal_steps where goal_id=$1 and executor='media.generate' limit 1",[zero.goalId])).rows[0].id;
+    await db.query("update agent_goal_steps set state='waiting_desktop' where id=$1",[zeroStep]);
+    const quote=await approvals.gate({workspaceId:workspace,userId:user,jobType:"image_generation",model:"budget-model",payload:{prompt:"zero",workflow_step_id:zeroStep},estimatedCredits:0.01,forceConfirmation:true,context:{canvasId:canvas,workflowGoalId:zero.goalId,workflowStepId:zeroStep}});
+    if(quote.state!=="confirmation_required")throw Error("Missing zero-budget confirmation");
+    await expect(approvals.approve({approvalId:quote.request.approvalId,workspaceId:workspace,userId:user})).rejects.toThrow("预算上限");
+    await approvals.reject({approvalId:quote.request.approvalId,workspaceId:workspace,userId:user});
+    expect((await service.runs(user,canvas,draft.id))[0]).toMatchObject({reservedCredits:0});
+    await db.query("update agent_goals set status='canceled' where id=$1",[zero.goalId]);
   });
   it("stores private portable recipes idempotently and restores archived entries",async()=>{
     const library=new CreativeLibraryService(db),requestKey=randomUUID();
@@ -366,7 +404,7 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
       {id:"deliver",title:"交付",position:{x:800,y:0},config:{kind:"deliver"}},
     ],edges:[{id:"ref-gen",source:"reference",target:"generate"},{id:"gen-out",source:"generate",target:"deliver"}]};
     const draft = await service.create(user,canvas,graph,randomUUID());
-    const run = await service.run(user,canvas,draft.id,1,randomUUID(),session);
+    const run = await service.run(user,canvas,draft.id,1,randomUUID(),session,undefined,1);
     const step = (await db.query("select id from agent_goal_steps where goal_id=$1 and step_id='generate'",[run.goalId])).rows[0].id;
     await db.query("update agent_goal_steps set state='waiting_desktop' where id=$1",[step]);
     const approvals=createGenerationApprovalService(db);

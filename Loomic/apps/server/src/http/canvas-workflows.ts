@@ -150,6 +150,7 @@ export function registerCanvasWorkflowRoutes(
                 requestKey: z.string().uuid(),
                 sessionId: z.string().uuid().optional(),
                 targetNodeId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
+                budgetCredits: z.number().finite().min(0).max(100000).optional(),
               })
               .strict()
               .parse(request.body);
@@ -161,6 +162,7 @@ export function registerCanvasWorkflowRoutes(
               body.requestKey,
               body.sessionId,
               body.targetNodeId,
+              body.budgetCredits,
             );
           }
           if (operation === "runs")

@@ -13,12 +13,12 @@ export function privateStudioAssetUrl(assetId: string): string {
   return `${getServerBaseUrl()}/api/uploads/${assetId}/file`;
 }
 
-export async function readStudioAsset(token: string, assetId: string, signal?: AbortSignal): Promise<File> {
+export async function readStudioAsset(token: string, assetId: string, signal?: AbortSignal, maxBytes = MAX_STUDIO_MEDIA_BYTES): Promise<File> {
   const response = await fetch(privateStudioAssetUrl(assetId), {
-    headers: { Authorization: `Bearer ${token}` }, redirect: "error", credentials: "include", ...(signal ? { signal } : {}),
+    headers: token === "local-cookie" ? {} : { Authorization: `Bearer ${token}` }, redirect: "error", credentials: "include", ...(signal ? { signal } : {}),
   });
   if (!response.ok) throw new Error("素材下载失败或已过期。请重试取回，不要重复生成。");
-  const blob = await boundedResponseBlob(response, MAX_STUDIO_MEDIA_BYTES);
+  const blob = await boundedResponseBlob(response, maxBytes);
   const mime = (blob.type.split(";")[0] ?? "").trim();
   const ext = EXTENSIONS[mime];
   if (!ext || !blob.size) throw new Error("素材为空或格式不支持，请选择图片、视频或音频。");

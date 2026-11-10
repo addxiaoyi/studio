@@ -76,6 +76,7 @@ export function registerWorkflowAssistantRoutes(
               z.string().uuid().parse(id),
               operation,
               enabled(),
+              z.object({budgetCredits:z.number().finite().min(0).max(100000).optional()}).strict().parse(request.body ?? {}).budgetCredits,
             );
           if (operation === "ask") {
             const body = askSchema.parse(request.body),

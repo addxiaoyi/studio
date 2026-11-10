@@ -1,4 +1,5 @@
 export const studioChinese: Record<string, string> = {
+  "Export": "导出", "Export settings": "导出设置", "Image format": "图片格式", "Frame": "帧", "Container": "容器",
   "View render status": "查看导出状态",
   "Cancel render": "取消导出",
   done: "已完成", failed: "失败", running: "正在导出", saving: "正在保存", cancelled: "已取消",

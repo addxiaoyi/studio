@@ -234,7 +234,7 @@ export function useCanvasWorkflow(
       setProposal(null);
     });
   }
-  async function start(sessionId?: string, targetNodeId?: string) {
+  async function start(sessionId?: string, targetNodeId?: string, budgetCredits?: number) {
     return run(async () => {
       if (!selected || dirty) throw new Error("请先保存当前流程。");
       const receipt = await runCanvasWorkflow(
@@ -245,6 +245,7 @@ export function useCanvasWorkflow(
         key.current,
         sessionId,
         targetNodeId,
+        budgetCredits,
       );
       setGoalId(receipt.goalId);
       setSelected((current) =>

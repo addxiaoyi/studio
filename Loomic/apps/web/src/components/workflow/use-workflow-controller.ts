@@ -31,6 +31,7 @@ import { useSceneContext, type CanvasReference } from "./use-scene-context";
 import { useWorkflowMaterialDrop } from "./use-material-drop";
 import { embedWorkflowMaterials, removeWorkflowReference } from "./material-inputs";
 import { nextNodePosition } from "./graph-state";
+import { validWorkflowBudget } from "./budget-field";
 export type CanvasWorkflowProps = {
   token: string;
   canvasId: string;
@@ -92,6 +93,7 @@ export function useWorkflowController({
   const [addingAfter,setAddingAfter]=useState<string|null>(null);
   const [insertingEdge,setInsertingEdge]=useState<string|null>(null);
   const [runTarget,setRunTarget]=useState<string|null>(null);
+  const [budget, setBudget] = useState("0");
   const [materials, setMaterials] = useState<WorkflowNode[]>([]);
   const [history, setHistory] = useState<
     Awaited<ReturnType<typeof fetchWorkflowRuns>>
@@ -277,7 +279,7 @@ export function useWorkflowController({
     return () => {
       alive = false;
     };
-  }, [token, canvasId, flow.selected?.id, flow.goalId, run.goal?.status]);
+  }, [token, canvasId, flow.selected?.id, flow.goalId, run.goal?.status, run.goal?.updatedAt]);
   const refreshRun = useCallback(() => run.refresh(), [run.refresh]);
   const save = async () => {
     if (saving) return null;
@@ -433,10 +435,11 @@ export function useWorkflowController({
     /* Node issues remain visible before execution. */
   }
   async function startRun() {
+    if (!validWorkflowBudget(budget)) { flow.setError("请填写有效的流程预算上限。"); return; }
     setConfirmRun(false);
     try {
       await saveCanvas();
-      if(await flow.start(sessionId,runTarget??undefined))setTab("runs");
+      if(await flow.start(sessionId,runTarget??undefined,Number(budget)))setTab("runs");
     } catch (cause) {
       flow.setError(cause instanceof Error ? cause.message : "画布保存失败。");
     }
@@ -445,7 +448,7 @@ export function useWorkflowController({
     if(locked)return;
     try {compileWorkflow(workflowRunGraph(flow.graph,targetId));}catch(cause){flow.setError(cause instanceof Error?cause.message:"节点参数未完善。");return;}
     if(flow.dirty&&!(await save()))return;
-    setRunTarget(targetId??null);setConfirmRun(true);
+    setBudget("0");setRunTarget(targetId??null);setConfirmRun(true);
   }
   let confirmationPlan:ReturnType<typeof compileWorkflow>|null=null;
   try{confirmationPlan=compileWorkflow(workflowRunGraph(flow.graph,runTarget??undefined));}catch{/* Keep the draft editable until required inputs are present. */}
@@ -487,6 +490,6 @@ export function useWorkflowController({
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
     materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
     pendingSwitch,setPendingSwitch,requestSwitch,confirmSwitch,editNode,deselectNode,disconnect,prepareRun,addingAfter,setAddingAfter,
-    prepareAssistant,askNode,insertingEdge,setInsertingEdge,runTarget,confirmationPlan,viewedRun,
+    prepareAssistant,askNode,insertingEdge,setInsertingEdge,runTarget,confirmationPlan,viewedRun,budget,setBudget,
   };
 }

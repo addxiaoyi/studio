@@ -83,7 +83,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
     materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
     pendingSwitch,setPendingSwitch,requestSwitch,confirmSwitch,editNode,deselectNode,disconnect,prepareRun,addingAfter,setAddingAfter,
-    prepareAssistant,askNode,insertingEdge,setInsertingEdge,runTarget,confirmationPlan,viewedRun,
+    prepareAssistant,askNode,insertingEdge,setInsertingEdge,runTarget,confirmationPlan,viewedRun,budget,setBudget,
   } = useWorkflowController(props);
   const bodyRef=useRef<HTMLDivElement>(null),inspectorRef=useRef<HTMLDivElement>(null);
   const revealInspector=()=>{const body=bodyRef.current,editor=inspectorRef.current;if(body&&editor)body.scrollTop=editor.offsetTop;};
@@ -427,6 +427,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
               )}
               {run.goal ? (
                 <>
+                  {viewedRun && <p role="status" className="mx-3 rounded-lg border bg-muted/30 p-3 text-xs">流程预算上限 {viewedRun.budgetCredits ?? 0} 积分 · 已确认 {viewedRun.reservedCredits ?? 0} · 剩余可确认 {Math.max(0,(viewedRun.budgetCredits??0)-(viewedRun.reservedCredits??0)).toFixed(4).replace(/\.?0+$/, "") || "0"} 积分</p>}
                   <WorkflowRunPanel
                     token={token}
                     goal={run.goal}
@@ -483,6 +484,8 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
         title={productLabel(flow.graph.title)}
         revision={flow.selected?.revision}
         plan={confirmationPlan}
+        budget={budget}
+        setBudget={setBudget}
         targetTitle={runTarget?flow.graph.nodes.find(node=>node.id===runTarget)?.title:undefined}
         confirmRun={confirmRun}
         busy={locked}

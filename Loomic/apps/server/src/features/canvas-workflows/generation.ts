@@ -1,7 +1,6 @@
 import type { Pool } from "pg";
 import {
   CONFIGURED_PRICE_MULTIPLIER,
-  TOKEN_BILLING_RESERVE_CREDITS,
   type GoalCommand,
 } from "@helstera/shared";
 import { resolveConfiguredModel } from "../../http/model-availability.js";
@@ -152,13 +151,13 @@ export async function executeWorkflowGeneration(
   );
   if (!model)
     throw new Error("所选模型不可用或不支持当前参考素材，请更换模型。");
+  if (model.billing_unit === "per_million_tokens")
+    throw new Error("此模型按实际用量结算，无法保证本次流程预算上限。请为生成节点选择固定价格模型后重新确认。");
   const prompt = [command.prompt, text].filter(Boolean).join("\n\n").trim();
   if (!prompt || prompt.length > 16000)
     throw new Error("生成提示词为空或过长，请调整创作资料。");
   const cost =
-    model.billing_unit === "per_million_tokens"
-      ? TOKEN_BILLING_RESERVE_CREDITS
-      : model.billing_unit === "per_second"
+    model.billing_unit === "per_second"
         ? await createLocalCostGuard(db).calculateCreditCost(
             model.model_id,
             "video_generation",

@@ -1,5 +1,5 @@
 // Keep the pinned workflow's IDs while integrating its overlays into the host.
-export function connectFashionSurface(shell) {
+export function connectFashionSurface(shell, host) {
   const dialogs = [
     ["modal", "mclose", "class"],
     ["aiSettings", "settingsCancel", "hidden"],
@@ -71,6 +71,26 @@ export function connectFashionSurface(shell) {
       event.preventDefault();
       shell.querySelector(`#${inputId}`).click();
     });
+    const choose = window.document.createElement("button");
+    choose.type = "button"; choose.className = "fit-library-button";
+    choose.textContent = inputId === "fitFile" ? "从素材库选择人物照片" : "从素材库选择服装";
+    choose.addEventListener("click", async () => {
+      if (choose.disabled) return;
+      choose.disabled = true;
+      try {
+        const file = await host.chooseImage(inputId === "fitFile" ? "person" : "garment");
+        if (!file || !shell.isConnected) return;
+        const transfer = new DataTransfer(); transfer.items.add(file);
+        const input = shell.querySelector(`#${inputId}`);
+        input.files = transfer.files; input.dispatchEvent(new Event("change", {bubbles:true}));
+      } catch (cause) {
+        let notice = choose.nextElementSibling;
+        if (!notice?.classList.contains("fit-library-error")) {notice=window.document.createElement("p");notice.className="fit-library-error";notice.setAttribute("role","alert");choose.after(notice);}
+        notice.textContent = cause instanceof Error ? cause.message : "素材导入失败。";
+      }
+      finally { choose.disabled = false; }
+    });
+    upload.insertAdjacentElement("afterend", choose);
   }
   shell.querySelector("#fitSearch").setAttribute("aria-label", "搜索服装");
   shell.querySelector("#aiModel").setAttribute("aria-label", "换装模型");

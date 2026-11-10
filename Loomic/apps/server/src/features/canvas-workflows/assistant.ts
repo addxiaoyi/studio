@@ -213,6 +213,7 @@ export class WorkflowAssistantService {
     id: string,
     decision: "confirm" | "reject",
     executionEnabled: boolean,
+    budgetCredits?: number,
   ) {
     const client = await this.db.connect();
     try {
@@ -289,6 +290,7 @@ export class WorkflowAssistantService {
           row.id,
           row.session_id ?? undefined,
           row.target_node_id ?? undefined,
+          budgetCredits,
         );
         receipt = { workflowId: row.workflow_id, ...run };
       } else {

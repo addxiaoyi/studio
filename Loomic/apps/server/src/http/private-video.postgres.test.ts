@@ -73,6 +73,18 @@ it.skipIf(!databaseUrl)("persists a private try-on once and rejects cross-user, 
     expect(image.rawPayload).toEqual(bytes);
     expect(image.headers["cache-control"]).toBe("private, no-store");
     expect((await fixture.app.inject({ url: path, headers: colleague })).statusCode).toBe(404);
+    const grant=await fixture.app.inject({method:"POST",url:`/api/uploads/${assetId}/playback`,headers:owner});
+    expect(grant.statusCode).toBe(200);
+    expect(grant.json().data).toMatchObject({path,mimeType:"image/webp",byteSize:bytes.length});
+    expect(grant.json().data.expiresAt).toBeTruthy();
+    const cookie=String(grant.headers["set-cookie"]).split(";")[0]!;
+    expect(String(grant.headers["set-cookie"])).toContain(`Path=${path};`);
+    expect(String(grant.headers["set-cookie"])).toContain("HttpOnly");
+    expect((await fixture.app.inject({url:path,headers:{cookie}})).rawPayload).toEqual(bytes);
+    expect((await fixture.app.inject({url:path,headers:{...colleague,cookie}})).statusCode).toBe(404);
+    expect((await fixture.app.inject({method:"POST",url:`/api/uploads/${assetId}/playback`,headers:colleague})).statusCode).toBe(404);
+    const download=await fixture.app.inject({url:path+"?download=1",headers:{cookie}});
+    expect(download.headers["content-disposition"]).toContain('.webp"');
     const deliver = (auth = owner) => fixture.app.inject({ method: "POST", url: `/api/assets/private-try-on/${assetId}/send-to-chat`, headers: auth, payload: { sessionId: fixture.sessionId } });
     expect((await deliver(colleague)).statusCode).toBe(404);
     const messages = await Promise.all([deliver(), deliver()]);
@@ -82,6 +94,7 @@ it.skipIf(!databaseUrl)("persists a private try-on once and rejects cross-user, 
     expect(saved).toHaveLength(1);
     expect(saved[0].content_blocks[0].toolName).toBe("fashion_try_on");
     await fixture.db.query("update generated_assets set retention_until=now()-interval '1 second'");
+    expect((await fixture.app.inject({url:path,headers:{cookie}})).statusCode).toBe(404);
     expect((await fixture.app.inject({ url: path, headers: owner })).statusCode).toBe(404);
     expect((await deliver()).statusCode).toBe(404);
     expect((await upload()).statusCode).toBe(409);

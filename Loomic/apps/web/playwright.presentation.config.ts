@@ -14,7 +14,7 @@ export default defineConfig({
     ],
   ],
   webServer: {
-    command:
+    command: process.env.HELT_WORKFLOW_STATIC_ROOT ? "node ../../scripts/serve-workflow-candidate.mjs" :
       "node node_modules/next/dist/bin/next dev -p 3228 --hostname 127.0.0.1",
     url: "http://localhost:3228/login/",
     env: { NEXT_PUBLIC_SERVER_BASE_URL: "http://localhost:3315" },
@@ -26,5 +26,6 @@ export default defineConfig({
     browserName: "chromium",
     viewport: { width: 1280, height: 900 },
     actionTimeout: 15000,
+    screenshot:"only-on-failure",
   },
 });

@@ -103,7 +103,7 @@ export function mountFashion(container, host) {
   style.textContent = ${JSON.stringify(styles + "\n" + selectStyles)};
   shell.innerHTML = ${JSON.stringify(layout)};
   shadow.replaceChildren(style,shell);
-  const disposeSurface = connectFashionSurface(shell);
+  const disposeSurface = connectFashionSurface(shell,host);
   const document = new Proxy(window.document, {get(target,key) {
     if (key === 'body' || key === 'documentElement') return shell;
     if (key === 'activeElement') return shadow.activeElement;

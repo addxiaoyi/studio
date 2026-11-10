@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import "./assistant.css";
 import {workflowFieldNames,formatWorkflowValue} from "./config-values";
 import { WorkflowProposalRun } from "./proposal-run";
+import { WorkflowBudgetField, validWorkflowBudget } from "./budget-field";
 export function WorkflowProposalCard({
   canvasId,
   id,
@@ -39,6 +40,8 @@ export function WorkflowProposalCard({
     [error, setError] = useState("");
   const [now, setNow] = useState(Date.now()),
     [retry, setRetry] = useState(0);
+  const [budget,setBudget] = useState("0");
+  useEffect(()=>setBudget("0"),[id]);
   useEffect(() => {
     if (initial) setProposal(initial);
   }, [initial]);
@@ -61,6 +64,7 @@ export function WorkflowProposalCard({
   }, [canvasId, id, session?.access_token, retry]);
   const decide = async (decision: "confirm" | "reject") => {
     if (!session?.access_token || busy) return;
+    if (decision === "confirm" && proposal?.action === "run" && !validWorkflowBudget(budget)) {setError("请填写有效的流程预算上限。");return;}
     setBusy(true);
     setError("");
     try {
@@ -69,6 +73,7 @@ export function WorkflowProposalCard({
         canvasId,
         id,
         decision,
+        decision === "confirm" && proposal?.action === "run" ? Number(budget) : undefined,
       );
       setProposal(next);
       if (next.status === "applied") {
@@ -206,6 +211,7 @@ export function WorkflowProposalCard({
         </p>
       )}
       </details>
+      {proposal.action === "run" && proposal.status === "pending" && <WorkflowBudgetField value={budget} onChange={setBudget} disabled={busy}/>}
       {error && (
         <p role="alert" className="text-xs text-destructive">
           {error}

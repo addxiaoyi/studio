@@ -367,6 +367,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   app.addHook("onRequest", async (request, reply) => {
+    reply.header("x-request-id", request.id);
+    reply.header("access-control-expose-headers", "x-request-id,retry-after,content-range");
     reply.header("x-content-type-options", "nosniff");
     reply.header("x-frame-options", "DENY");
     reply.header("referrer-policy", "strict-origin-when-cross-origin");
