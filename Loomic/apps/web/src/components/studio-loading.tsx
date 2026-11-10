@@ -14,7 +14,7 @@ export function StudioLoading({ state, error, onRetry }: { state: StudioStartup;
       <p role="status" className="text-sm font-medium">{error ? (en ? "The editor could not start" : "编辑器暂时无法打开") : state.timedOut ? (en ? "Editor startup took too long" : "编辑器启动超时") : label}</p>
       <p className="text-sm text-muted-foreground">{en ? `Elapsed ${state.elapsedSeconds}s` : `已等待 ${state.elapsedSeconds} 秒`}{progress !== undefined && ` · ${progress}%`}</p>
       {progress !== undefined && !state.timedOut && !error && <progress className="h-2 w-full accent-primary" value={progress} max={100} aria-label={label} />}
-      <p className="text-sm leading-relaxed text-muted-foreground">{en ? "Your saved project and media remain on this device. Reopen the editor to resume, or visit another workspace while waiting." : "已保存的工程和素材仍保留在本机。可以重新打开继续，也可以先切换到其他工作区。"}</p>
+      <p className="text-sm leading-relaxed text-muted-foreground">{en ? "Retrying does not delete saved files. You can reopen the editor or visit another project view." : "重试不会删除已保存的文件。可以重新打开编辑器，也可以先查看工程的其他视图。"}</p>
       {(error || state.timedOut || state.elapsedSeconds >= 10) && <Button variant="outline" onClick={onRetry}>{en ? "Reopen saved project" : "重新打开已保存工程"}</Button>}
       <details className="text-xs text-muted-foreground"><summary className="cursor-pointer py-2">{en ? "Startup details" : "查看启动详情"}</summary><p className="break-words py-2">{label} · {state.phaseSeconds}s{state.loadedBytes !== undefined && ` · ${(state.loadedBytes / 1048576).toFixed(1)} MB`}</p></details>
     </div>

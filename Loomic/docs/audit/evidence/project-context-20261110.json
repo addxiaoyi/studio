@@ -1,0 +1,13 @@
+{
+  "stats": {
+    "startTime": "2026-11-10T15:19:37.155Z",
+    "duration": 42422.393,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "suite": "project-context.spec.ts",
+  "testTitle": "keeps the same project between canvas and video, retains old drafts and identifies missing copies on a second device",
+  "boundary": "Real Chromium and isolated PostgreSQL; fixture authentication; video source remains local; CSS zoom=2 at 638px viewport; no paid model calls"
+}

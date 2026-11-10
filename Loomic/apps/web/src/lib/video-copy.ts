@@ -1,6 +1,14 @@
 import { useLocale, type Locale } from "./i18n";
 
 const english: Record<string, string> = {
+  "正在恢复工程位置…":"Restoring project context…", "本机独立草稿":"Standalone local draft", "选择工程":"Choose project", "重试":"Retry",
+  "请先完成当前修改，再切换工程视图。":"Finish the current edit before switching project views.",
+  "请等待视频工程就绪后再切换。":"Wait for the video project to be ready before switching views.",
+  "请刷新视频工作区后再切换。":"Reload the video workspace before switching views.",
+  "当前设备尚未保存这个视频，请恢复工程后继续。":"This video is not saved on this device. Restore the project to continue.",
+  "当前设备没有这个视频工程的本机副本，请回原设备继续。画布和对话仍可打开。":"This device has no local copy of this video project. Continue on the original device. Canvas and chat remain available.",
+  "请先恢复视频工程，再继续对话编辑。":"Restore the video project before continuing the conversation.",
+  "返回当前画布":"Return to this canvas",
   "本次修改已全部撤销": "All edits in this plan were undone", "已撤销": "Undone", "撤销动作": "Undo action", "撤销此字幕": "Undo caption", "撤销此配乐": "Undo music", "撤销剪辑": "Undo cut", "导出当前版本": "Export current version",
   "该动作已撤销，其他动作保留。已导出的文件不受影响。": "Action undone. Other actions and existing exports are preserved.",
   "撤销记录不可用或视频已有后续编辑，请先使用时间线撤销。": "Undo history is unavailable or there are later edits. Undo later changes in the timeline first.",

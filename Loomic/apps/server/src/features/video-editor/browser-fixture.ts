@@ -9,6 +9,7 @@ import { createLocalRequestAuthenticator, hashPassword } from "../../local-db/au
 import { createLocalSettingsService } from "../../local-db/settings-service.js";
 import { createLocalViewerService } from "../../local-db/viewer-service.js";
 import { createEditorPlanStore } from "./plan-store.js";
+import { registerProjectContextRoutes } from "../../http/project-context.js";
 
 export async function createEditorBrowserFixture(databaseUrl: string, webOrigin: string, modelText?: string | ((input: Record<string, unknown>)=>unknown)) {
   if (!["127.0.0.1", "localhost", "[::1]"].includes(new URL(databaseUrl).hostname)) throw new Error("Video acceptance requires a local database.");
@@ -36,6 +37,7 @@ export async function createEditorBrowserFixture(databaseUrl: string, webOrigin:
   try {
     const base = await readFile(new URL("../../local-db/schema.sql", import.meta.url), "utf8");
     await db.query(base.replace("create extension if not exists pgcrypto;", ""));
+    await db.query(await readFile(new URL("../../local-db/migrations/20261110000001_project_context.sql", import.meta.url),"utf8"));
     await db.query(await readFile(new URL("../../local-db/migrations/20261106000000_video_editor_plans.sql", import.meta.url), "utf8"));
     await db.query(await readFile(new URL("../../local-db/migrations/20261106000001_video_editor_receipts.sql", import.meta.url), "utf8"));
     const userId = randomUUID();
@@ -43,10 +45,11 @@ export async function createEditorBrowserFixture(databaseUrl: string, webOrigin:
     const env = loadServerEnv({ webOrigin });
     app.addHook("onRequest", async (request, reply) => {
       if (request.headers.origin && request.headers.origin !== webOrigin) return reply.code(403).send({ error: "Unexpected test origin" });
-      reply.header("Access-Control-Allow-Origin", webOrigin).header("Access-Control-Allow-Credentials", "true").header("Access-Control-Allow-Headers", "authorization,content-type").header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+      reply.header("Access-Control-Allow-Origin", webOrigin).header("Access-Control-Allow-Credentials", "true").header("Access-Control-Allow-Headers", "authorization,content-type").header("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
       if (request.method === "OPTIONS") return reply.code(204).send();
     });
     registerLocalAuthRoutes(app, { db, env });
+    registerProjectContextRoutes(app,{db,auth:createLocalRequestAuthenticator(db)});
     registerVideoEditorRoutes(app, { env, auth: createLocalRequestAuthenticator(db), settingsService: createLocalSettingsService(db), viewerService: createLocalViewerService(db), planStore: createEditorPlanStore(db),
       ...(modelText === undefined ? {} : { createPlanModel: () => ({ invoke: async (messages: {content:string}[]) => ({ content: typeof modelText==="string"?modelText:JSON.stringify(modelText(JSON.parse(messages[1]!.content))) }) }) as never }) });
     await app.listen({ host: "127.0.0.1", port: 3311 });

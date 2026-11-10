@@ -88,7 +88,7 @@ export default function WorkspaceLayout({
         className="workspace-main relative min-w-0 flex-1 overflow-auto pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
       >
         {/* Top-right header credits button */}
-        <div className="absolute right-4 top-3 z-10">
+        <div className="relative z-10 flex justify-end px-4 pt-3 md:absolute md:right-4 md:top-3 md:p-0">
           <CreditHeaderButton />
         </div>
         <WorkspaceBreadcrumbs />

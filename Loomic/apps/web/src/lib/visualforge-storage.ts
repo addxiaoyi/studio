@@ -28,6 +28,30 @@ async function transaction<T>(store: string, mode: IDBTransactionMode, execute: 
 
 export const readStudioProject = <T>(userId: string) => transaction<T | undefined>("projects", "readonly", store => store.get(userId));
 export const saveStudioProject = (userId: string, project: unknown) => transaction("projects", "readwrite", store => store.put(project, userId));
+
+export async function adoptCanvasStudioProject(userId: string, projectId: string, canvasId: string): Promise<void> {
+  const target = `${userId}:project:${projectId}`, legacy = `${userId}:canvas:${canvasId}`;
+  const db = await openDatabase();
+  await new Promise<void>((resolve,reject) => {
+    const stores = ["projects","editorPlans","editorChats"];
+    const tx = db.transaction(stores,"readwrite"), projects = tx.objectStore("projects");
+    const existing = projects.get(target);
+    existing.onsuccess = () => {
+      if (existing.result !== undefined) return;
+      const oldProject = projects.get(legacy);
+      oldProject.onsuccess = () => {
+        if (oldProject.result === undefined) return;
+        projects.put(oldProject.result,target);
+        for (const name of stores.slice(1)) {
+          const store = tx.objectStore(name), request = store.get(legacy);
+          request.onsuccess = () => { if (request.result !== undefined) store.put(request.result,target); };
+        }
+      };
+    };
+    tx.oncomplete = () => { db.close();resolve(); };
+    tx.onerror = tx.onabort = () => { db.close();reject(tx.error ?? new Error("旧画布视频工程迁移失败，原草稿仍保留。")); };
+  });
+}
 export const saveStudioExport = (userId: string, output: StudioExport) => transaction("exports", "readwrite", store => store.put(output, [userId, output.id]));
 export const listStudioExports = (userId: string) => transaction<StudioExport[]>("exports", "readonly", store => store.getAll(IDBKeyRange.bound([userId], [userId, []])));
 

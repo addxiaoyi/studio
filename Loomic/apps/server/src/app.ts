@@ -99,6 +99,7 @@ import { registerGenerateRoutes } from "./http/generate.js";
 import { registerHealthRoutes } from "./http/health.js";
 import { probeWritableStorage } from "./runtime/storage-probe.js";
 import { ServiceLifecycle } from "./runtime/lifecycle.js";
+import { registerProjectContextRoutes } from "./http/project-context.js";
 import { PeriodicTasks } from "./runtime/periodic-tasks.js";
 import { registerMetricsRoutes } from "./http/metrics.js";
 import { registerErrorRoutes } from "./http/errors.js";
@@ -530,6 +531,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
   if (localDb) {
     registerProjectBackupRoutes(app, { db: localDb, auth, viewerService });
+    registerProjectContextRoutes(app, { db: localDb, auth });
     void registerStoryboardRoutes(app, {
       auth,
       service: createLocalStoryboardService(localDb),

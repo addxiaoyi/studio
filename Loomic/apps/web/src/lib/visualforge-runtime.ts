@@ -12,6 +12,7 @@ export type StudioEdit = { id: string; compositionId: string; revision: string; 
 
 export type StudioRuntime = {
   dispose(): void;
+  flush?(): Promise<void>;
   setTheme(theme: string): void;
   importAsset(file: File, assetId?: string): Promise<void>;
   listMedia(): StudioMedia[];
@@ -33,6 +34,7 @@ export type StudioRuntime = {
 export type StudioHost = {
   userId: string;
   projectKey?: string | undefined;
+  projectContext?: { projectId: string; canvasId: string; hasSavedComposition: boolean } | undefined;
   theme: string;
   signal: AbortSignal;
   status(message: string): void;
@@ -47,6 +49,6 @@ export type StudioModule = {
 };
 
 export function loadVisualForge(attempt = 0): Promise<StudioModule> {
-  const entry = `/creative/visualforge/entry.mjs?release=private-workflow-20261110&attempt=${attempt}`;
+  const entry = `/creative/visualforge/entry.mjs?release=project-context-20261110&attempt=${attempt}`;
   return import(/* webpackIgnore: true */ entry) as Promise<StudioModule>;
 }

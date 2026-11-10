@@ -1,4 +1,7 @@
 "use client";
+import { ProjectViewNav } from "@/components/project-view-nav";
+import { useProjectContext } from "@/hooks/use-project-context";
+import { projectViewSchema, type ProjectView } from "@helstera/shared";
 import { canvasFocusTargets } from "@/lib/canvas-focus";
 
 import Link from "next/link";
@@ -117,6 +120,9 @@ function CanvasPageContent() {
   const { user, session, loading: authLoading, signOut } = useAuth();
   const router = useRouter();
   const userId = user?.id;
+  const requestedView = projectViewSchema.safeParse(searchParams.get("view"));
+  const projectView = requestedView.success && requestedView.data!=="video" ? requestedView.data : "canvas";
+  const contextAddress = `https://helstera.invalid${pathname}?${searchParams.toString()}`;
 
   const [canvasData, setCanvasData] = useState<{
     id: string;
@@ -156,6 +162,8 @@ function CanvasPageContent() {
   const excalidrawApiRef = useRef<any>(null);
   const [excalidrawApi, setExcalidrawApi] = useState<any>(null);
   const [canvasReady, setCanvasReady] = useState(false);
+  const activeProjectView: ProjectView = canvasReady ? workflowOpen ? "workflow" : timelineOpen ? "timeline" : projectView==="conversation" && chatOpen ? "conversation" : "canvas" : projectView;
+  const projectContext = useProjectContext({ userId, token:session?.access_token,address:contextAddress,view:activeProjectView,enabled:Boolean(canvasId) });
 
   const signOutRef = useRef(signOut);
   signOutRef.current = signOut;
@@ -377,6 +385,16 @@ function CanvasPageContent() {
   const closeWorkflow = useCallback(()=>setWorkflowOpen(false),[]);
   useEffect(()=>{const media=window.matchMedia("(max-width:1023px)");const resize=()=>{if(media.matches&&workflowOpen)setChatOpen(false);};resize();media.addEventListener("change",resize);return()=>media.removeEventListener("change",resize);},[workflowOpen]);
   const saveWorkflowCanvas = useCallback(async () => { if (!saveBeforeVideo.current) throw new Error("画布尚未就绪，请稍后再试。"); await saveBeforeVideo.current(); },[]);
+  const beforeProjectView = async (view: ProjectView) => {
+    await saveWorkflowCanvas();
+    await projectContext.saveLocation(view);
+  };
+  useEffect(() => {
+    if (!canvasReady) return;
+    if (projectView === "workflow") openWorkflow();
+    else if (projectView === "timeline") { setWorkflowOpen(false);setTimelineOpen(true); }
+    else if (projectView === "conversation") setChatOpen(true);
+  }, [canvasReady,projectView,openWorkflow]);
   useEffect(()=>{const open=(event:Event)=>openWorkflow((event as CustomEvent<{id?:string}>).detail?.id);window.addEventListener("loomic:workflow-open",open);return()=>window.removeEventListener("loomic:workflow-open",open);},[openWorkflow]);
 
   // Fallback polling for timed-out generation jobs.
@@ -555,6 +573,8 @@ function CanvasPageContent() {
           currentBrandKitId={brandKitId}
           onBrandKitChange={(kitId) => setBrandKitId(kitId)}
         />
+        {projectContext.context && <ProjectViewNav context={projectContext.context} current={activeProjectView} desktop={desktopMode} compact beforeNavigate={beforeProjectView}/>}
+        {projectContext.error && <button type="button" onClick={projectContext.retry} className="min-h-9 rounded-md border bg-background px-2 text-xs text-destructive" title={projectContext.error}>工程位置未同步，重试</button>}
       </div>
       {/* Canvas always takes full width; on mobile/tablet, ChatSidebar overlays instead of side-by-side */}
       <div className="flex-1 relative min-w-0 overflow-hidden">

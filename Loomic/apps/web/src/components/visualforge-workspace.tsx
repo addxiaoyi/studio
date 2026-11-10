@@ -19,12 +19,15 @@ import {
 } from "@/lib/visualforge-storage";
 import { Film, RefreshCw } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import styles from "./visualforge-workspace.module.css";
 import { useVideoText } from "@/lib/video-copy";
 import type { StudioAiContext } from "@/lib/studio-ai-context";
 import { watchStudioStartup, studioPhaseLabels, type StudioStartup } from "@/lib/studio-startup";
 import { StudioLoading } from "./studio-loading";
+import { useProjectContext } from "@/hooks/use-project-context";
+import { ProjectViewNav } from "./project-view-nav";
+import { projectViewHref, type ProjectView } from "@helstera/shared";
 
 export function VisualForgeWorkspace() {
   useEffect(keepStudioBrandTitle,[]);
@@ -67,8 +70,62 @@ export function VisualForgeWorkspace() {
   theme.current = resolvedTheme || "dark";
   const userId = session?.user.id;
   const [projectAddress] = useState(() => typeof location === "undefined" ? "https://helstera.invalid/video/" : location.href);
-  const projectKey = userId ? rememberStudioProject(userId, projectAddress) : undefined;
   const token = session?.access_token;
+  const project = useProjectContext({ userId,token,address:projectAddress,view:"video",enabled:new URL(projectAddress).searchParams.get("draft")!=="1" });
+  const projectKey = userId ? project.context ? `${userId}:project:${project.context.project.id}` : rememberStudioProject(userId,projectAddress) : undefined;
+  const missingLocalProject = error.startsWith("当前设备没有这个视频工程的本机副本");
+  const contextRef = useRef(project.context); contextRef.current=project.context;
+  useEffect(() => {
+    if (!project.context) return;
+    const url = new URL(location.href);
+    const fragment = new URLSearchParams(url.hash.slice(1));
+    fragment.set("projectId",project.context.project.id);fragment.set("canvasId",project.context.canvas.id);
+    url.hash=fragment.toString();history.replaceState(history.state,"",url);
+  }, [project.context?.project.id,project.context?.canvas.id]);
+  const beforeProjectView = async (view: ProjectView) => {
+    if (aiBusy.current || transcriptDirty) throw new Error(copy("请先完成当前修改，再切换工程视图。"));
+    if (runtime.current) {
+      if (!runtime.current.flush) throw new Error(copy("请等待视频工程就绪后再切换。"));
+      await runtime.current.flush();
+    }
+    await project.saveLocation(view,runtime.current?.projectId());
+  };
+  const leaveProject = async (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    const href=event.currentTarget.href;
+    try {
+      if (aiBusy.current || transcriptDirty) throw new Error(copy("请先完成当前修改，再切换工程视图。"));
+      if (runtime.current) {
+        if (!runtime.current.flush) throw new Error(copy("请刷新视频工作区后再切换。"));
+        await runtime.current.flush();
+        await project.saveLocation("video",runtime.current.projectId());
+      }
+      window.location.assign(href);
+    } catch(cause) { setError(cause instanceof Error?cause.message:copy("保存失败，请重试。")); }
+  };
+  useEffect(() => {
+    if (!ready || !mountedRuntime) return;
+    const composition=new URL(projectAddress).searchParams.get("composition") ?? contextRef.current?.compositionId;
+    if (!composition) return;
+    try { mountedRuntime.selectComposition(composition); }
+    catch(cause) { setError(cause instanceof Error?cause.message:copy("当前设备尚未保存这个视频，请恢复工程后继续。")); }
+  }, [ready,mountedRuntime,projectAddress]);
+  useEffect(() => {
+    if (!ready || !mountedRuntime) return;
+    let timer: ReturnType<typeof setTimeout>;
+    let alive=true;
+    const changed = () => {
+      clearTimeout(timer);
+      timer=setTimeout(() => {
+        const id=mountedRuntime.projectId();
+        if (!contextRef.current || id===contextRef.current.compositionId || id==="current-project") return;
+        void project.saveLocation("video",id).catch(cause => { if(alive) setError(cause instanceof Error?cause.message:copy("保存失败，请重试。")); });
+      },500);
+    };
+    changed();window.addEventListener("remotion-pending-composition-selection",changed);
+    return () => { alive=false;clearTimeout(timer);window.removeEventListener("remotion-pending-composition-selection",changed); };
+  }, [ready,mountedRuntime,project.saveLocation]);
 
   useEffect(() => {
     if (outputs[0] && outputs[0].createdAt >= exportStartedAt.current) exportsRef.current?.scrollIntoView({ block: "start" });
@@ -85,7 +142,7 @@ export function VisualForgeWorkspace() {
     setMountedRuntime(null);
     setAiContext(null);
     setStatus("正在加载视频工程…");
-    if (!userId || !container.current) return;
+    if (!userId || !container.current || project.loading || project.error) return;
     const abort = new AbortController();
     let mounted: StudioRuntime | null = null;
     const watchdog = watchStudioStartup(setStartup, state => {
@@ -100,7 +157,7 @@ export function VisualForgeWorkspace() {
     void listStudioExports(userId)
       .then((saved) => {
         if (!abort.signal.aborted)
-          setOutputs(saved.sort((a, b) => b.createdAt - a.createdAt));
+          setOutputs(saved.filter(output => !contextRef.current || output.canvasId===contextRef.current.canvas.id).sort((a, b) => b.createdAt - a.createdAt));
       })
       .catch((cause) => {
         if (!abort.signal.aborted)
@@ -112,6 +169,7 @@ export function VisualForgeWorkspace() {
         mounted = await module.mountVisualForge(container.current, {
           userId,
           projectKey,
+          projectContext: contextRef.current ? { projectId:contextRef.current.project.id,canvasId:contextRef.current.canvas.id,hasSavedComposition:Boolean(contextRef.current.compositionId) } : undefined,
           theme: theme.current,
           signal: abort.signal,
           status: (message) => {
@@ -157,7 +215,7 @@ export function VisualForgeWorkspace() {
       setMountedRuntime(null);
       if (runtime.current === mounted) runtime.current = null;
     };
-  }, [userId, projectKey, retry]);
+  }, [userId, projectKey, retry, project.loading, project.error]);
 
   const importAsset = useCallback(async (file: File, assetId?: string) => {
     if (!runtime.current) throw new Error("请等待编辑器就绪后导入素材。");
@@ -192,6 +250,14 @@ export function VisualForgeWorkspace() {
             </p>
           </div>
         </header>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2 sm:px-5">
+          {project.loading ? <p role="status" className="text-sm text-muted-foreground">{copy("正在恢复工程位置…")}</p> : project.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive"><span>{project.error}</span><Button size="sm" variant="outline" onClick={project.retry}>{copy("重试")}</Button></div> : project.context ? <>
+            <span className="max-w-52 truncate text-sm font-medium" title={project.context.project.name}>{project.context.project.name}</span>
+            <ProjectViewNav context={project.context} current="video" beforeNavigate={beforeProjectView}/>
+          </> : <span className="text-sm text-muted-foreground">{copy("本机独立草稿")}</span>}
+          <a href="/projects/" onClick={leaveProject} className="min-h-9 py-2 text-xs underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring">{copy("选择工程")}</a>
+          {project.context && <a href="/video/?draft=1" onClick={leaveProject} className="min-h-9 py-2 text-xs text-muted-foreground underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring">{copy("本机独立草稿")}</a>}
+        </div>
         <div className="flex min-h-10 flex-wrap items-center justify-between gap-2 border-b bg-muted/20 px-4 py-2 sm:px-5">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
             {token && (
@@ -212,24 +278,24 @@ export function VisualForgeWorkspace() {
         {error && (
           <div
             role="alert"
-            className="flex flex-wrap items-center justify-between gap-3 border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+            className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive"
           >
-            <span className="min-w-0 flex-1 break-words">{error}</span>
-            <Button variant="outline" size="sm" onClick={reopen}>
+            <span className="min-w-0 flex-1 break-words">{copy(error)}</span>
+            {missingLocalProject && project.context ? <a href={projectViewHref(project.context,"canvas")} className="inline-flex min-h-9 items-center rounded-md border border-border bg-background px-3 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring">{copy("返回当前画布")}</a> : <Button variant="outline" size="sm" onClick={reopen}>
               <RefreshCw className="size-3" aria-hidden="true" />
               {copy("重新打开编辑器")}
-            </Button>
+            </Button>}
           </div>
         )}
         {userId&&token&&<CaptureRecordingImport userId={userId} token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
         {token&&<CanvasVideoImport token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
         {token&&<CanvasTimelineImport token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
-        <div className={styles.body} hidden={transcriptOpen}>
+        <div className={styles.body} hidden={transcriptOpen || missingLocalProject}>
           <div className={styles.studio}>
             <div ref={container} data-testid="video-studio" className="h-full" />
             {startup.phase !== "ready" && <StudioLoading state={startup} error={error} onRetry={reopen} />}
           </div>
-          <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && <StudioConversationPanel key={projectKey} runtime={ready ? mountedRuntime : null} mediaRevision={mediaRevision} userId={userId} projectKey={projectKey} token={token} exported={exported} contextRequest={aiContext} active={aiOpen} onBusyChange={updateAiBusy} onViewTimeline={viewTimeline} onOpenPanel={openPanel} />}</div>
+          <div id="video-ai-panel" className={styles.ai} hidden={!aiOpen}>{userId && token && ready && mountedRuntime ? <StudioConversationPanel key={projectKey} runtime={mountedRuntime} mediaRevision={mediaRevision} userId={userId} projectKey={projectKey} token={token} exported={exported} contextRequest={aiContext} active={aiOpen} onBusyChange={updateAiBusy} onViewTimeline={viewTimeline} onOpenPanel={openPanel} /> : <p role="status" className="p-4 text-sm text-muted-foreground">{copy(error || project.error ? "请先恢复视频工程，再继续对话编辑。" : "正在恢复工程位置…")}</p>}</div>
         </div>
         {transcriptOpen && token && userId && <div className={styles.transcript}><OneTakeWorkspace token={token} userId={userId} runtime={ready ? mountedRuntime : null} onExport={exported} onDirty={setTranscriptDirty} /></div>}
       </div>

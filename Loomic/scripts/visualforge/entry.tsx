@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserStudio } from "../../vendor/visualforge/packages/browser-studio/src/BrowserStudio";
 import { createBlankTemplateProject } from "../../vendor/visualforge/packages/browser-studio/src/templates/blank";
 import type { VirtualProject } from "../../vendor/visualforge/packages/browser-studio/src/types";
-import { readStudioProject, saveStudioProject, saveStudioExport, type StudioExport } from "../../apps/web/src/lib/visualforge-storage";
+import { readStudioProject, saveStudioProject, saveStudioExport, adoptCanvasStudioProject, type StudioExport } from "../../apps/web/src/lib/visualforge-storage";
 import { lockStudio, studioImportName } from "../../apps/web/src/lib/visualforge-session";
 import type { StudioHost, StudioSnapshot, StudioEdit, StudioUndo } from "../../apps/web/src/lib/visualforge-runtime";
 import type { StudioCut } from "../../apps/web/src/lib/studio-cut";
@@ -28,7 +28,14 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
   const release = await lockStudio(projectKey);
   let project: VirtualProject & { loomicCut?: StudioCut };
   try {
-    project = await readStudioProject<VirtualProject & { loomicCut?: StudioCut }>(projectKey) ?? createBlankTemplateProject();
+    if (host.projectContext) {
+      const releaseLegacy = await lockStudio(`${host.userId}:canvas:${host.projectContext.canvasId}`);
+      try { await adoptCanvasStudioProject(host.userId,host.projectContext.projectId,host.projectContext.canvasId); }
+      finally { releaseLegacy(); }
+    }
+    const saved = await readStudioProject<VirtualProject & { loomicCut?: StudioCut }>(projectKey);
+    if (!saved && host.projectContext?.hasSavedComposition) throw new Error("当前设备没有这个视频工程的本机副本，请回原设备继续。画布和对话仍可打开。");
+    project = saved ?? createBlankTemplateProject();
     host.signal.throwIfAborted();
   } catch (cause) { release(); throw cause; }
   let currentProject = project;
@@ -45,6 +52,7 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
   window.loomicSaveStudioExport = async output => {
     const origin = canvasImports[output.compositionId ?? currentCompositionId() ?? ""];
     if (origin) output = { ...output, canvasId: origin.canvasId };
+    else if (host.projectContext) output = { ...output,canvasId:host.projectContext.canvasId };
     try {
       await saveStudioExport(host.userId, output);
       host.exported(output);
@@ -76,6 +84,7 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
     }}
   />);
   return {
+    async flush() { await queue; if (saveFailure) throw saveFailure; await saveStudioProject(projectKey,currentProject); },
     dispose() { if (disposed) return; disposed = true; disposeAi(); disposeTranslations(); window.removeEventListener(STUDIO_STAGE_EVENT, progress); window.removeEventListener("remotion-browser-studio-operations-ready", notifyReady); root.unmount(); window.loomicSaveStudioExport = undefined; void queue.finally(release); },
     setTheme(theme: string) {
       localStorage.setItem("remotion.studio.theme", theme);

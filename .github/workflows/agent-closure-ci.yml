@@ -52,7 +52,8 @@ jobs:
       - name: Approval, recovery and private asset database gates
         run: |
           psql "$HELT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;'
-          node scripts/test-local-postgres.mjs src/features/agent-goals/goal-steps.postgres.test.ts src/runtime/media-admission.postgres.test.ts src/features/assets/private-lifecycle.postgres.test.ts src/local-db/private-upload-ownership.postgres.test.ts src/local-db/viewer-locks.postgres.test.ts src/features/onetake/onetake.postgres.test.ts src/features/video-editor/plan-store.postgres.test.ts
+          node scripts/test-local-postgres.mjs src/features/agent-goals/goal-steps.postgres.test.ts src/runtime/media-admission.postgres.test.ts src/features/projects/project-context.postgres.test.ts src/features/assets/private-lifecycle.postgres.test.ts src/local-db/private-upload-ownership.postgres.test.ts src/local-db/viewer-locks.postgres.test.ts src/features/onetake/onetake.postgres.test.ts src/features/video-editor/plan-store.postgres.test.ts
+          pnpm --filter @helstera/web exec vitest run test/project-context.test.tsx test/studio-project-key.test.ts
       - name: Readiness, graceful drain and release retention
         run: |
           pnpm --filter @helstera/server exec vitest run src/http/health.test.ts src/queue/local-job-queue.test.ts src/runtime/queue-runner.test.ts src/runtime/periodic-tasks.test.ts src/runtime/drain-gate.test.ts src/features/agent-goals/worker-drain.test.ts
@@ -173,6 +174,9 @@ jobs:
         run: |
           pnpm --filter @helstera/server exec vitest run src/features/agent-browser/observer.integration.test.ts
           pnpm --filter @helstera/web exec playwright test --config playwright.agent-browser.config.ts
+      - name: Project view navigation, legacy drafts and second device recovery
+        if: ${{ !inputs.workflow_only }}
+        run: pnpm --filter @helstera/web exec playwright test --config playwright.project-context.config.ts
       - name: Website presentation recording and playback
         if: ${{ !inputs.workflow_only }}
         run: |
@@ -200,5 +204,7 @@ jobs:
             Loomic/.creative-test-results/presentation-flow/
             Loomic/.creative-test-results/workflow/
             Loomic/.creative-test-results/workflow.json
+            Loomic/.creative-test-results/project-context/
+            Loomic/.creative-test-results/project-context.json
           if-no-files-found: error
           retention-days: 7
