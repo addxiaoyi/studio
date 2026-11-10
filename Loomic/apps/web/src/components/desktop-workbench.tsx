@@ -31,6 +31,7 @@ const DiffEditor = dynamic(() => import("@monaco-editor/react").then((module) =>
 type WorkspaceEntry = { name: string; path: string; kind: "directory" | "file"; size?: number };
 type WorkspaceScript = { name: string; manager: "pnpm" | "npm" | "yarn" };
 type WorkspaceApi = {
+  getCurrentWorkspace?: () => Promise<{ root: string } | null>;
   selectWorkspace: () => Promise<{ root: string; entries: WorkspaceEntry[] } | null>;
   getWorkspaceTree: () => Promise<WorkspaceEntry[]>;
   readWorkspaceFile: (path: string) => Promise<{ path: string; content: string; size: number }>;
@@ -95,6 +96,17 @@ export function DesktopWorkbench() {
   const fileRequest=useRef(0);
   const visible = useMemo(() => visibleEntries(entries, expanded), [entries, expanded]);
   const dirty = Boolean(file && file.content !== file.savedContent);
+
+  useEffect(() => {
+    let mounted = true;
+    void api?.getCurrentWorkspace?.().then(async current => {
+      if (!current || !mounted) return;
+      setRoot(current.root);
+      const tree = await api.getWorkspaceTree();
+      if (mounted) setEntries(tree);
+    }).catch(cause => { if (mounted) setError(cause instanceof Error ? cause.message : "工作区恢复失败，请重新选择。"); });
+    return () => { mounted = false; };
+  }, [api]);
 
   const refreshProject = useCallback(async () => {
     if (!api) return;
@@ -245,7 +257,7 @@ export function DesktopWorkbench() {
         {panel === "mcp" ? <DesktopMcpPanel /> : <pre className="local-workbench__output">{panel === "git" ? gitDiff || gitStatus || "选择项目后读取 Git 状态。" : output || "项目脚本输出会显示在这里。"}</pre>}
       </section>
 
-      <div className="local-workbench__feedback" aria-live="polite">{error ? <span className="is-error"><CircleAlert aria-hidden="true" />{error}</span> : notice ? <span><Check aria-hidden="true" />{notice}</span> : <span>{root ? "项目目录授权仅在此桌面会话有效。" : "未选择本地目录；Agent 当前不能读取或修改本机项目。"}</span>}</div>
+      <div className="local-workbench__feedback" aria-live="polite">{error ? <span className="is-error"><CircleAlert aria-hidden="true" />{error}</span> : notice ? <span><Check aria-hidden="true" />{notice}</span> : <span>{root ? "工作区访问遵循本机配置，操作仍需任务审批。" : "未选择本地目录；Agent 当前不能读取或修改本机项目。"}</span>}</div>
     </main>
   );
 }

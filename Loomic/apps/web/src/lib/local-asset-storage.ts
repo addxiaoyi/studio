@@ -1,3 +1,5 @@
+import { desktopStorage, desktopStorageError } from "./desktop-storage";
+
 type LocalDirectory = {
   kind?: "browser";
   name: string;
@@ -140,7 +142,19 @@ export async function saveAssetToLocalFolder(input: {
   accessToken: string;
   fileName: string;
   mediaType: "image" | "video";
+  accountId?: string;
 }): Promise<void> {
+  const storage = desktopStorage();
+  if (storage && input.accountId) {
+    const url = new URL(input.url, window.location.origin);
+    const match = url.pathname.match(/^\/api\/uploads\/([a-f\d-]{36})\/file$/i);
+    if (!match?.[1]) throw new Error("素材缺少有效文件标识，请刷新素材库后重试。");
+    try {
+      const status = await storage.saveCloudAsset({ accessToken: input.accessToken, accountId: input.accountId }, { assetId: match[1], name: input.fileName, mediaType: input.mediaType });
+      if (status.status !== "completed") throw new Error(status.error || status.items.find(item => item.key === `asset:${match[1]}`)?.error || "素材未能完整保存，请重试。");
+      return;
+    } catch (error) { throw new Error(desktopStorageError(error)); }
+  }
   const directory = await readDirectory();
   if (!directory) throw new Error("Choose a local asset folder first.");
   const desktop = (window as DirectoryPickerWindow).electronAPI;

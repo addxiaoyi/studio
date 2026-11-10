@@ -1,5 +1,6 @@
 const { app, BrowserWindow, globalShortcut, nativeImage, shell } = require("electron");
 const { isAbsolute, join } = require("node:path");
+const { mkdirSync, writeFileSync } = require("node:fs");
 
 const profile = process.env.HELSTERA_UI_SMOKE_PROFILE;
 if (!profile || !isAbsolute(profile)) throw new Error("An isolated absolute profile is required.");
@@ -11,6 +12,8 @@ if (app.isPackaged) throw new Error("This harness must use the unpackaged Electr
 
 app.setPath("userData", profile);
 app.setPath("sessionData", profile);
+mkdirSync(profile, { recursive: true });
+writeFileSync(join(profile, "desktop-setup.json"), JSON.stringify({ version: 1, completed: true, root: profile, autoBackup: false, agentAccess: false }));
 app.requestSingleInstanceLock = () => true;
 app.setAsDefaultProtocolClient = () => true;
 globalShortcut.register = () => false;

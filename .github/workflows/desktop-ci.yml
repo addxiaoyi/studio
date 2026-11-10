@@ -125,6 +125,8 @@ jobs:
           $env:HELT_DESKTOP_EXE = Join-Path $PWD 'apps/desktop/release/win-unpacked/Helstera.exe'
           $env:HELT_DESKTOP_LIFECYCLE_DIR = Join-Path $env:RUNNER_TEMP 'desktop-lifecycle'
           node apps/desktop/e2e/lifecycle.mjs
+          $env:HELT_STORAGE_TEST_DIR = Join-Path $env:RUNNER_TEMP 'desktop-local-storage'
+          node apps/desktop/e2e/local-storage.mjs
       - name: Upload Windows lifecycle evidence
         if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -133,6 +135,8 @@ jobs:
           path: |
             ${{ runner.temp }}/desktop-lifecycle/report.json
             ${{ runner.temp }}/desktop-lifecycle/offline.png
+            ${{ runner.temp }}/desktop-local-storage/report.json
+            ${{ runner.temp }}/desktop-local-storage/setup-200-percent.png
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@v4

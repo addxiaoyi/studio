@@ -83,6 +83,8 @@ import { videoExportConfirmation } from "./video-export-confirmation.js";
 import { isolatedTestDirectory } from "./isolated-test-mode.js";
 import { readWindowPlacement, rememberWindowPlacement } from "./window-placement.js";
 import { WorkspaceLoader } from "./workspace-loader.js";
+import { DesktopSetup } from "./desktop-setup.js";
+import { CloudBackup } from "./cloud-backup.js";
 import {
   decideMainWindowNavigation,
   observeMainWindowLifecycle,
@@ -91,6 +93,14 @@ import {
 
 const testUserData = isolatedTestDirectory(process.env);
 if (testUserData) app.setPath("userData", testUserData);
+const desktopSetup = new DesktopSetup(app.getPath("userData"));
+const cloudBackup = new CloudBackup({ setup: desktopSetup, origin: desktopWebsiteUrl,
+  request: (url, options) => {
+    if (!mainWindow || mainWindow.isDestroyed()) throw new Error("主窗口已关闭，请重新打开工作区。");
+    return mainWindow.webContents.session.fetch(String(url), options);
+  }, changed: (state) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:backup-state", state);
+} });
 
 let mainWindow: BrowserWindow | null = null;
 let mainWindowReady = false;
@@ -101,11 +111,18 @@ let workspaceLoader: WorkspaceLoader | null = null;
 let tray: Tray | null = null;
 let embeddedBrowserWindow: BrowserWindow | null = null;
 let recorderWindow: BrowserWindow | null = null;
-const videoExportPreviews = new VideoExportPreviews(join(app.getPath("userData"), "video-export-history"), async () => {
+async function exportDirectory() {
+  const setup = await desktopSetup.status();
+  if (setup.completed && setup.available && setup.root) {
+    const path = join(setup.root, "Exports");
+    await verifyAssetFolder(path);
+    return path;
+  }
   const folder = await readAssetFolderStatus(join(app.getPath("userData"), "asset-storage.json"));
   if (folder.permission !== "granted" || !folder.path) throw new Error("Choose an available local asset folder first.");
   return folder.path;
-});
+}
+const videoExportPreviews = new VideoExportPreviews(join(app.getPath("userData"), "video-export-history"), exportDirectory);
 const recorderLock = new RecorderLock();
 let assistantSocket: WebSocket | null = null;
 let assistantSessionToken = "";
@@ -458,6 +475,8 @@ function focusMainWindow() {
 }
 
 function activeWorkReason(): string | undefined {
+  if (cloudBackup.busy) return "正在保存云端数据到本地";
+  if (workspaceRuns.size > 0) return "本地项目脚本正在运行";
   if (recorderLock.busy) return "正在录制屏幕或网站";
   if (activeVideoExports > 0) return "正在导出视频";
   if (pendingRecordingUploads.size > 0) return "正在上传录像";
@@ -574,6 +593,7 @@ function configureAutoUpdates() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowDowngrade = false;
+  autoUpdater.disableDifferentialDownload = true;
   autoUpdater.setFeedURL({ provider: "generic", url: updateFeedUrl() });
   autoUpdater.on("checking-for-update", () =>
     publishUpdateState({ status: "checking" }),
@@ -721,6 +741,55 @@ ipcMain.handle("workspace.select", async (event) => {
   publishDesktopMcpTools();
   return { root: localWorkspace.root, entries: await localWorkspace.tree() };
 });
+ipcMain.handle("workspace.current", (event) => {
+  requireMainWindow(event);
+  return localWorkspace ? { root: localWorkspace.root } : null;
+});
+async function restoreConfiguredWorkspace() {
+  const state = await desktopSetup.status();
+  if (!state.completed || !state.available || !state.root || !state.agentAccess) return;
+  localWorkspace = await LocalWorkspace.open(state.root, join(app.getPath("userData"), "workspace-snapshots"));
+  localWorkspaceSessionId = randomUUID();
+  publishDesktopMcpTools();
+}
+ipcMain.handle("desktop.setup-state", (event) => { requireMainWindow(event); return desktopSetup.status(); });
+ipcMain.handle("desktop.setup-choose", async (event) => {
+  const window = requireMainWindow(event);
+  if (cloudBackup.busy) throw new Error("请先完成或取消本地保存任务。");
+  const chosen = await dialog.showOpenDialog(window, { title: "选择 Helstera 本地工作区", properties: ["openDirectory", "createDirectory"] });
+  return chosen.canceled || !chosen.filePaths[0] ? null : desktopSetup.choose(chosen.filePaths[0]);
+});
+ipcMain.handle("desktop.setup-complete", async (event, input: unknown) => {
+  requireMainWindow(event);
+  if (cloudBackup.busy) throw new Error("请先完成或取消本地保存任务。");
+  const state = await desktopSetup.complete(input);
+  for (const controller of desktopMcpCalls.values()) controller.abort();
+  desktopMcpCalls.clear();
+  localWorkspace = null; localWorkspaceSessionId = "";
+  await restoreConfiguredWorkspace();
+  publishDesktopMcpTools();
+  return state;
+});
+ipcMain.handle("desktop.setup-open", async (event) => {
+  const window = requireMainWindow(event);
+  if (activeWorkReason()) throw new Error("请先完成当前任务，再调整工作区。");
+  await window.loadFile(desktopResource("setup.html"));
+});
+ipcMain.handle("desktop.setup-enter", async (event) => {
+  requireMainWindow(event);
+  const state = await desktopSetup.status();
+  if (!state.completed || !state.available) throw new Error("请先完成工作区配置。");
+  await workspaceLoader?.open(new URL("/desktop-app/", desktopWebsiteUrl()).toString());
+});
+ipcMain.handle("desktop.backup-state", (event, accountId: unknown) => { requireMainWindow(event); return cloudBackup.restore(accountId); });
+ipcMain.handle("desktop.backup-run", (event, input: unknown) => { requireMainWindow(event); return cloudBackup.run(input); });
+ipcMain.handle("desktop.backup-asset", (event, input: unknown, asset: unknown) => { requireMainWindow(event); return cloudBackup.run(input, asset); });
+ipcMain.handle("desktop.backup-cancel", (event) => { requireMainWindow(event); cloudBackup.cancel(); });
+ipcMain.handle("desktop.workspace-folder", async (event) => {
+  requireMainWindow(event); const state = await desktopSetup.status();
+  if (!state.root || !state.available) throw new Error("工作区不可用，请重新选择。");
+  const error = await shell.openPath(state.root); if (error) throw new Error("无法打开工作区文件夹。");
+});
 ipcMain.handle("dialog.select-directory", async (event, title: unknown) => {
   requireMainWindow(event);
   const result = await dialog.showOpenDialog(mainWindow!, {
@@ -782,9 +851,7 @@ ipcMain.handle("assets.write-local", async (event, input: unknown) => {
 const runVideoExport = createVideoExportHandler({
   renderCaptions: renderVideoCaptions,
   assetDirectory: async () => {
-    const folder = await readAssetFolderStatus(join(app.getPath("userData"), "asset-storage.json"));
-    if (folder.permission !== "granted" || !folder.path) throw new Error("Choose an available local asset folder first.");
-    return folder.path;
+    return exportDirectory();
   },
   checkTools: async () => {
     const ffmpeg = resolveFfmpegPath(process.resourcesPath);
@@ -3673,7 +3740,10 @@ function createWindow() {
     }
   }, { isQuitting: () => isQuitting, canClose: allowDesktopExit });
 
-  void loader.open(desktopHome);
+  void desktopSetup.status().then(async (state) => {
+    if (!state.completed || !state.available) await window.loadFile(desktopResource("setup.html"));
+    else await loader.open(desktopHome);
+  }).catch(() => console.error("[desktop-setup] Cannot open the initialization screen."));
   if (!app.isPackaged && process.env.HELSTERA_DESKTOP_URL)
     window.webContents.openDevTools();
 }
@@ -3703,7 +3773,7 @@ function createTray() {
   tray.on("click", focusMainWindow);
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (process.platform === "win32") app.setAppUserModelId("com.helstera.desktop");
   if (process.platform === "win32" && process.arch === "x64") {
     configureWindowsUia(join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources"), "native", "helstera-uia.exe"));
@@ -3724,6 +3794,7 @@ app.whenReady().then(() => {
   );
   if (!testUserData) app.setAsDefaultProtocolClient("helstera");
   configureAutoUpdates();
+  await restoreConfiguredWorkspace().catch(() => console.warn("[desktop-setup] Workspace restoration failed; choose the directory again."));
   const startupMarketplaceUrl = process.argv.find((argument) => parseMarketplaceInstallSlug(argument));
   if (startupMarketplaceUrl) pendingMarketplaceInstallSlug = parseMarketplaceInstallSlug(startupMarketplaceUrl);
   createWindow();

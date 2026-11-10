@@ -16,6 +16,9 @@ files:
   # Node OCR loads .js + .wasm; the embedded browser builds duplicate the core.
   - "!node_modules/tesseract.js-core/*.wasm.js"
   - "!node_modules/tesseract.js/dist/**"
+  - "!node_modules/tesseract.js/docs/**"
+  - "!node_modules/**/pngjs/browser.js"
+  - "!node_modules/zlibjs/bin/*.dev*"
   - "!node_modules/jimp/browser/**"
   - "!node_modules/**/*.map"
   - "!node_modules/zlibjs/bin/{browser,gunzip,gzip,inflate,rawdeflate,rawinflate,unzip,zip,zlib}*"
@@ -25,7 +28,7 @@ extraResources:
     to: icon.png
   - from: resources
     to: .
-    filter: [startup.html, startup.css, startup.js]
+    filter: [startup.html, startup.css, startup.js, setup.html, setup.css, setup.js]
   - from: node_modules/react/LICENSE
     to: licenses/react.txt
   - from: node_modules/react-dom/LICENSE
@@ -72,6 +75,8 @@ win:
 nsis:
   artifactName: "${productName}-Setup-${version}-Windows-x64.${ext}"
   oneClick: false
+  # Solid compression cuts the full installer; updates verify and download the full package.
+  differentialPackage: false
   perMachine: false
   allowElevation: true
   installerLanguages: [zh_CN, en_US]

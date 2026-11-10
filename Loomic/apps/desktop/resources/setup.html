@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'">
+<title>Helstera · 初始化工作区</title><link rel="stylesheet" href="startup.css"><link rel="stylesheet" href="setup.css"></head>
+<body><header><span>Helstera</span><nav aria-label="窗口控制"><button id="minimize" aria-label="最小化">−</button><button id="close" aria-label="关闭窗口">×</button></nav></header>
+<main class="setup"><div><p class="eyebrow">首次使用 · 本地工作区</p><h1>给你的创作一个本地存放位置</h1><p id="description">选择文件夹后，素材、画布快照和导出文件都有明确去处。完成配置后再登录云端账户。</p></div>
+<section aria-labelledby="folder-heading"><h2 id="folder-heading">1. 选择工作区</h2><p id="folder" class="folder">尚未选择文件夹</p><p id="space" class="hint"></p><button class="choose" id="choose">选择本地工作区</button><dl><div><dt>Media</dt><dd>云端图片与录像原文件</dd></div><div><dt>Projects</dt><dd>画布、对话快照与保存记录</dd></div><div><dt>Exports</dt><dd>本机导出的视频成片</dd></div></dl></section>
+<section aria-labelledby="options-heading"><h2 id="options-heading">2. 保存与访问设置</h2><label><input type="checkbox" id="backup"><span><strong>登录后自动保留云端副本</strong><small>保存当前账户可访问的素材、画布与对话快照。仅下载到此设备，云端删除不会删除本地副本。可随时暂停。</small></span></label><label><input type="checkbox" id="agent"><span><strong>允许 Agent 使用此本地工作区</strong><small>重启后恢复此目录授权。运行脚本、修改文件仍遵循任务审批；可在设置中撤销。</small></span></label></section>
+<p id="status" role="status" aria-live="polite"></p><p id="error" role="alert" hidden></p>
+<div class="actions"><button id="complete" class="primary" disabled>保存配置并进入工作台</button></div><p class="hint">配置保存在本机。卸载应用不会删除你选择的工作区。</p></main><script src="setup.js"></script></body></html>

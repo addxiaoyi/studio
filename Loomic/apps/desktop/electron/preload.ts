@@ -125,6 +125,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("assistant.disconnect-embedded"),
   closeEmbeddedBrowser: () => ipcRenderer.invoke("assistant.close-embedded"),
   selectWorkspace: () => ipcRenderer.invoke("workspace.select"),
+  getCurrentWorkspace: () => ipcRenderer.invoke("workspace.current"),
+  getDesktopSetup: () => ipcRenderer.invoke("desktop.setup-state"),
+  chooseDesktopWorkspace: () => ipcRenderer.invoke("desktop.setup-choose"),
+  completeDesktopSetup: (options: { autoBackup: boolean; agentAccess: boolean }) => ipcRenderer.invoke("desktop.setup-complete", options),
+  openDesktopSetup: () => ipcRenderer.invoke("desktop.setup-open"),
+  enterDesktopWorkspace: () => ipcRenderer.invoke("desktop.setup-enter"),
+  openDesktopWorkspaceFolder: () => ipcRenderer.invoke("desktop.workspace-folder"),
+  getCloudBackup: (accountId: string) => ipcRenderer.invoke("desktop.backup-state", accountId),
+  runCloudBackup: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.backup-run", credentials),
+  saveCloudAsset: (credentials: { accessToken: string; accountId: string }, asset: { assetId: string; name: string; mediaType: "image" | "video" }) => ipcRenderer.invoke("desktop.backup-asset", credentials, asset),
+  cancelCloudBackup: () => ipcRenderer.invoke("desktop.backup-cancel"),
+  onCloudBackup: (callback: (state: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state);
+    ipcRenderer.on("desktop:backup-state", listener);
+    return () => ipcRenderer.removeListener("desktop:backup-state", listener);
+  },
   selectDirectory: (title?: string) => ipcRenderer.invoke("dialog.select-directory", title),
   selectAssetFolder: () => ipcRenderer.invoke("assets.select-folder"),
   getAssetFolderStatus: () => ipcRenderer.invoke("assets.folder-status"),

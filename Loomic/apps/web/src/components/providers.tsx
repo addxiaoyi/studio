@@ -11,6 +11,7 @@ import { TierLimitToastProvider } from "./credits/tier-limit-toast";
 import { installErrorReporter } from "../lib/error-reporter";
 import { installWebVitals } from "../lib/web-vitals";
 import { AgentBrowserDock } from "./agent-browser/dock";
+import { DesktopBackupBridge } from "./desktop-storage-panel";
 
 function ClientInstrumentation() {
   useEffect(() => {
@@ -27,7 +28,7 @@ export function Providers({ children }: { children: ReactNode }) {
         <ClientInstrumentation />
         <AuthProvider>
           <ToastProvider>
-            <TierLimitToastProvider>{children}<AgentBrowserDock /></TierLimitToastProvider>
+            <TierLimitToastProvider>{children}<AgentBrowserDock /><DesktopBackupBridge /></TierLimitToastProvider>
           </ToastProvider>
         </AuthProvider>
       </MotionConfig>

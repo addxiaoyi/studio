@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth-context";
 import { clearLocalAssetFolder, chooseLocalAssetFolder, getLocalAssetFolderState } from "@/lib/local-asset-storage";
 import { CreditUsageHistory } from "@/components/credits/credit-usage-history";
 import { DesktopExtensionPanel } from "@/components/desktop-extension-panel";
+import { DesktopStoragePanel } from "@/components/desktop-storage-panel";
 import { useDesktopToast } from "@/components/desktop-toast";
 import {
   formatDesktopCopy,
@@ -299,6 +300,7 @@ export function DesktopSettingsPage({ locale }: { locale?: DesktopLocale | null 
         <CreditUsageHistory />
       </section>
 
+      <DesktopStoragePanel />
       <DesktopExtensionPanel locale={locale} />
 
       <section className="desktop-settings__section" aria-labelledby="desktop-settings-updates">

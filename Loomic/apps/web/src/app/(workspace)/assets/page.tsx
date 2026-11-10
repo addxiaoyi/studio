@@ -141,13 +141,13 @@ export default function AssetsPage() {
     try {
       for (const asset of selectedAssets) {
         if (!asset.url || asset.retentionState === "soft_deleted") continue;
-        await saveAssetToLocalFolder({ url: asset.url, accessToken: token, fileName: assetDisplayName(asset), mediaType: asset.mediaType });
+        await saveAssetToLocalFolder({ url: asset.url, accessToken: token, accountId: session.user.id, fileName: assetDisplayName(asset), mediaType: asset.mediaType });
         savedCount += 1;
       }
-      setPublishNotice(`Saved ${savedCount} asset${savedCount === 1 ? "" : "s"} to this computer${localFolder ? ` (${localFolder})` : ""}.`);
+      setPublishNotice(`已保存 ${savedCount} 项到本地文件夹${localFolder ? `（${localFolder}）` : ""}。`);
     } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : "Could not save assets locally. Try again.";
-      setLocalSaveError(savedCount ? `Saved ${savedCount} item${savedCount === 1 ? "" : "s"}; the next save failed: ${detail}` : detail);
+      const detail = cause instanceof Error ? cause.message : "保存失败，请重试。";
+      setLocalSaveError(savedCount ? `已保存 ${savedCount} 项；后续保存失败：${detail}` : detail);
     } finally {
       setLocalSaveBusy(false);
     }

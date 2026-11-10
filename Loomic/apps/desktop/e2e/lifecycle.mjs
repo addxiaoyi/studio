@@ -13,6 +13,9 @@ if (!executable) throw new Error("HELT_DESKTOP_EXE must point to the candidate e
 const output = resolve(process.env.HELT_DESKTOP_LIFECYCLE_DIR || fileURLToPath(new URL("../test-results/lifecycle", import.meta.url)));
 const profile = join(output, "profile");
 await mkdir(profile, { recursive: true });
+const workspace = join(output, "workspace");
+await mkdir(workspace, { recursive: true });
+await writeFile(join(profile, "desktop-setup.json"), JSON.stringify({ version: 1, completed: true, root: workspace, autoBackup: false, agentAccess: false }));
 await writeFile(join(profile, "window-placement.json"), JSON.stringify({ bounds: { x: 80000, y: 80000, width: 1000, height: 700 }, maximized: false }));
 const server = createServer((request, response) => {
   if (request.url === "/slow") return;
