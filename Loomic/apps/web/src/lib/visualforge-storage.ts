@@ -28,6 +28,20 @@ async function transaction<T>(store: string, mode: IDBTransactionMode, execute: 
 
 export const readStudioProject = <T>(userId: string) => transaction<T | undefined>("projects", "readonly", store => store.get(userId));
 export const saveStudioProject = (userId: string, project: unknown) => transaction("projects", "readwrite", store => store.put(project, userId));
+export const readStudioSync = <T>(key:string) => transaction<T | undefined>("projects","readonly",store=>store.get(`${key}:sync-receipt`));
+export const saveStudioSync = (key:string, receipt:unknown) => transaction("projects","readwrite",store=>store.put(receipt,`${key}:sync-receipt`));
+
+export async function replaceStudioProject(key:string,project:unknown) {
+  const db=await openDatabase(),backupKey=`${key}:recovery:${Date.now()}:${crypto.randomUUID()}`;
+  await new Promise<void>((resolve,reject)=>{
+    const tx=db.transaction("projects","readwrite"),store=tx.objectStore("projects"),prior=store.get(key);
+    prior.onsuccess=()=>{if(prior.result!==undefined)store.put(prior.result,backupKey);store.put(project,key);};
+    tx.oncomplete=()=>{db.close();resolve();};tx.onerror=tx.onabort=()=>{db.close();reject(tx.error??new Error("工程恢复未写入，原工程仍保留。"));};
+  });
+  return backupKey;
+}
+
+export const listStudioRecoveryKeys=(key:string)=>transaction<IDBValidKey[]>("projects","readonly",store=>store.getAllKeys(IDBKeyRange.bound(`${key}:recovery:`,`${key}:recovery:\uffff`)));
 
 export async function adoptCanvasStudioProject(userId: string, projectId: string, canvasId: string): Promise<void> {
   const target = `${userId}:project:${projectId}`, legacy = `${userId}:canvas:${canvasId}`;

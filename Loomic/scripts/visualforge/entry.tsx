@@ -1,4 +1,6 @@
 import React from "react";
+import { portableStudioProject } from "./project-document";
+export { restoreStudioDocument,restoreStudioRecovery } from "./project-document";
 import { createRoot } from "react-dom/client";
 import { BrowserStudio } from "../../vendor/visualforge/packages/browser-studio/src/BrowserStudio";
 import { createBlankTemplateProject } from "../../vendor/visualforge/packages/browser-studio/src/templates/blank";
@@ -85,6 +87,7 @@ export async function mountVisualForge(container: HTMLElement, host: StudioHost)
   />);
   return {
     async flush() { await queue; if (saveFailure) throw saveFailure; await saveStudioProject(projectKey,currentProject); },
+    async portableProject() { await queue;if(saveFailure)throw saveFailure;return portableStudioProject(currentProject,host.signal); },
     dispose() { if (disposed) return; disposed = true; disposeAi(); disposeTranslations(); window.removeEventListener(STUDIO_STAGE_EVENT, progress); window.removeEventListener("remotion-browser-studio-operations-ready", notifyReady); root.unmount(); window.loomicSaveStudioExport = undefined; void queue.finally(release); },
     setTheme(theme: string) {
       localStorage.setItem("remotion.studio.theme", theme);

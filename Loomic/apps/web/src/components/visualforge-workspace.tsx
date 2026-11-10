@@ -27,7 +27,9 @@ import { watchStudioStartup, studioPhaseLabels, type StudioStartup } from "@/lib
 import { StudioLoading } from "./studio-loading";
 import { useProjectContext } from "@/hooks/use-project-context";
 import { ProjectViewNav } from "./project-view-nav";
-import { projectViewHref, type ProjectView } from "@helstera/shared";
+import { projectViewHref, type ProjectView, type ProjectVideoRevision } from "@helstera/shared";
+import { ProjectVideoSync } from "./project-video-sync";
+import { rememberVideoRevision } from "@/lib/project-video-sync";
 
 export function VisualForgeWorkspace() {
   useEffect(keepStudioBrandTitle,[]);
@@ -40,6 +42,7 @@ export function VisualForgeWorkspace() {
   const [error, setError] = useState("");
   const [outputs, setOutputs] = useState<StudioExport[]>([]);
   const [ready, setReady] = useState(false);
+  const [syncBusy,setSyncBusy]=useState(false);
   const [startup, setStartup] = useState<StudioStartup>({ phase: "runtime", elapsedSeconds: 0, phaseSeconds: 0, timedOut: false });
   const [mountedRuntime, setMountedRuntime] = useState<StudioRuntime | null>(null);
   const [mediaRevision, setMediaRevision] = useState(0);
@@ -83,7 +86,7 @@ export function VisualForgeWorkspace() {
     url.hash=fragment.toString();history.replaceState(history.state,"",url);
   }, [project.context?.project.id,project.context?.canvas.id]);
   const beforeProjectView = async (view: ProjectView) => {
-    if (aiBusy.current || transcriptDirty) throw new Error(copy("请先完成当前修改，再切换工程视图。"));
+    if (syncBusy || aiBusy.current || transcriptDirty) throw new Error(copy("请先完成当前修改，再切换工程视图。"));
     if (runtime.current) {
       if (!runtime.current.flush) throw new Error(copy("请等待视频工程就绪后再切换。"));
       await runtime.current.flush();
@@ -95,7 +98,7 @@ export function VisualForgeWorkspace() {
     event.preventDefault();
     const href=event.currentTarget.href;
     try {
-      if (aiBusy.current || transcriptDirty) throw new Error(copy("请先完成当前修改，再切换工程视图。"));
+      if (syncBusy || aiBusy.current || transcriptDirty) throw new Error(copy("请先完成当前修改，再切换工程视图。"));
       if (runtime.current) {
         if (!runtime.current.flush) throw new Error(copy("请刷新视频工作区后再切换。"));
         await runtime.current.flush();
@@ -103,6 +106,31 @@ export function VisualForgeWorkspace() {
       }
       window.location.assign(href);
     } catch(cause) { setError(cause instanceof Error?cause.message:copy("保存失败，请重试。")); }
+  };
+  const restoreProjectVersion=async(revision:ProjectVideoRevision,files:Record<string,File>,expectedLocalHash:string|null)=>{
+    if(syncBusy||aiBusy.current||transcriptDirty||!projectKey)throw new Error(copy("请先完成当前修改，再切换工程视图。"));
+    setSyncBusy(true);
+    try{
+      if(runtime.current){await runtime.current.flush?.();runtime.current.dispose();runtime.current=null;setReady(false);setMountedRuntime(null);}
+      const module=await loadVisualForge(retry);
+      if(!module.restoreStudioDocument)throw new Error("请刷新工作区后恢复工程。");
+      await module.restoreStudioDocument({projectKey,document:revision.document,files,expectedLocalHash});
+      await rememberVideoRevision(projectKey,revision);
+      await project.saveLocation("video",null);
+      const url=new URL(location.href);url.searchParams.delete("composition");history.replaceState(history.state,"",url);
+      setError("");
+    }finally{setSyncBusy(false);setRetry(value=>value+1);}
+  };
+  const recoverLocalVersion=async(backupKey:string,expectedLocalHash:string|null)=>{
+    if(syncBusy||aiBusy.current||transcriptDirty||!projectKey)throw new Error(copy("请先完成当前修改，再切换工程视图。"));
+    setSyncBusy(true);
+    try{
+      if(runtime.current){await runtime.current.flush?.();runtime.current.dispose();runtime.current=null;setReady(false);setMountedRuntime(null);}
+      const module=await loadVisualForge(retry);
+      if(!module.restoreStudioRecovery)throw new Error("请刷新工作区后恢复工程。");
+      await module.restoreStudioRecovery({projectKey,backupKey,expectedLocalHash});
+      setError("");
+    }finally{setSyncBusy(false);setRetry(value=>value+1);}
   };
   useEffect(() => {
     if (!ready || !mountedRuntime) return;
@@ -258,6 +286,7 @@ export function VisualForgeWorkspace() {
           <a href="/projects/" onClick={leaveProject} className="min-h-9 py-2 text-xs underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring">{copy("选择工程")}</a>
           {project.context && <a href="/video/?draft=1" onClick={leaveProject} className="min-h-9 py-2 text-xs text-muted-foreground underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring">{copy("本机独立草稿")}</a>}
         </div>
+        {project.context&&projectKey&&token&&<ProjectVideoSync key={projectKey} projectKey={projectKey} projectId={project.context.project.id} token={token} runtime={ready?mountedRuntime:null} disabled={syncBusy||aiBusy.current||transcriptDirty} restore={restoreProjectVersion} recoverLocal={recoverLocalVersion}/>}
         <div className="flex min-h-10 flex-wrap items-center justify-between gap-2 border-b bg-muted/20 px-4 py-2 sm:px-5">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
             {token && (
@@ -288,7 +317,7 @@ export function VisualForgeWorkspace() {
           </div>
         )}
         {userId&&token&&<CaptureRecordingImport userId={userId} token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
-        {token&&<CanvasVideoImport token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
+        {token&&<CanvasVideoImport token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported} blockedReason={project.error||error}/>}
         {token&&<CanvasTimelineImport token={token} runtime={ready?mountedRuntime:null} onImported={recordingImported}/>}
         <div className={styles.body} hidden={transcriptOpen || missingLocalProject}>
           <div className={styles.studio}>

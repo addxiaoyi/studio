@@ -30,6 +30,7 @@ import { registerCanvasRoutes } from "../../http/canvases.js";
 import { registerChatRoutes } from "../../http/chat.js";
 import { registerProjectRoutes } from "../../http/projects.js";
 import { registerProjectContextRoutes } from "../../http/project-context.js";
+import { registerProjectVideoRoutes } from "../../http/project-video-document.js";
 import { createLocalCanvasService } from "../../local-db/canvas-service.js";
 import { createLocalChatService } from "../../local-db/chat-service.js";
 import { createLocalProjectService } from "../../local-db/project-service.js";
@@ -103,6 +104,7 @@ export async function createPresentationFixture(
       "20261108000002_website_journeys",
       "20261108000003_website_session_revocation",
       "20261110000001_project_context",
+      "20261110000002_project_video_documents",
     ]) {
       await db.query(
         await readFile(
@@ -337,6 +339,7 @@ export async function createPresentationFixture(
     await registerChatRoutes(app, { auth, chatService: createLocalChatService(db) });
     await registerProjectRoutes(app, { auth, projectService: createLocalProjectService(db, root) });
     registerProjectContextRoutes(app,{db,auth});
+    registerProjectVideoRoutes(app,{db,auth});
     await configure?.({app,db,auth,viewerService,browser,storage,root,userId,workspaceId,canvasId,sessionId});
     await app.listen({ port: 3315, host: "127.0.0.1" });
     return { app, db, root, storage, sessionId, canvasId, userId, workspaceId, token, close };

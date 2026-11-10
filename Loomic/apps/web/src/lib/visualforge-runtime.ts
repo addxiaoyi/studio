@@ -4,6 +4,7 @@ import type { StudioAiContext } from "./studio-ai-context";
 import type { VideoEditorAction, VideoEditorLayer, VideoStudioState, VideoStudioControl } from "@helstera/shared";
 import type { CanvasTimeline } from "./canvas-timeline";
 import type { StudioStage } from "./studio-startup";
+import type { ProjectVideoDocument } from "@helstera/shared";
 
 export type StudioEditReceipt = { id: string; revision: string; originalRevision: string; undone: number[]; complete: boolean; canUndo: boolean };
 export type StudioUndo = { id: string; compositionId: string; revision: string; actionIndex?: number };
@@ -13,6 +14,7 @@ export type StudioEdit = { id: string; compositionId: string; revision: string; 
 export type StudioRuntime = {
   dispose(): void;
   flush?(): Promise<void>;
+  portableProject?(): Promise<ProjectVideoDocument>;
   setTheme(theme: string): void;
   importAsset(file: File, assetId?: string): Promise<void>;
   listMedia(): StudioMedia[];
@@ -46,9 +48,11 @@ export type StudioHost = {
 };
 export type StudioModule = {
   mountVisualForge(container: HTMLElement, host: StudioHost): Promise<StudioRuntime>;
+  restoreStudioDocument?(input: {projectKey:string;document:ProjectVideoDocument;files:Record<string,File>;expectedLocalHash?:string|null}): Promise<string|null>;
+  restoreStudioRecovery?(input:{projectKey:string;backupKey:string;expectedLocalHash:string|null}):Promise<void>;
 };
 
 export function loadVisualForge(attempt = 0): Promise<StudioModule> {
-  const entry = `/creative/visualforge/entry.mjs?release=project-context-20261110&attempt=${attempt}`;
+  const entry = `/creative/visualforge/entry.mjs?release=project-video-sync-20261111&attempt=${attempt}`;
   return import(/* webpackIgnore: true */ entry) as Promise<StudioModule>;
 }

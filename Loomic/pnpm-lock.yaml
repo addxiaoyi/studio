@@ -248,6 +248,9 @@ importers:
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.57.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@noble/hashes':
+        specifier: 1.8.0
+        version: 1.8.0
       '@remotion/player':
         specifier: 4.0.538
         version: 4.0.538(react-dom@19.2.4(react@19.2.4))(react@19.2.4)

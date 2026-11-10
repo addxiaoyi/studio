@@ -9,13 +9,15 @@ if (existsSync(resolve("../../.env.local")))
   loadEnvFile(resolve("../../.env.local"));
 let fixture: Awaited<ReturnType<typeof createPresentationFixture>>;
 let desktop:ElectronApplication|undefined;
-test.beforeAll(async () => {
+// Each browser profile needs its own project; another device's saved composition
+// must trigger recovery, never an empty replacement during an unrelated test.
+test.beforeEach(async () => {
   fixture = await createPresentationFixture(
     process.env.DATABASE_URL!,
     "http://localhost:3228",
   );
 });
-test.afterAll(async () => {
+test.afterEach(async () => {
   try {
     if (desktop) {
       console.info("[presentation-desktop] exiting isolated client");
@@ -24,6 +26,7 @@ test.afterAll(async () => {
       // The isolated fixture has no user work; bypass the app's stay-open close policy.
       if(process.exitCode===null)await desktop.evaluate(({app})=>{setImmediate(()=>app.exit(0));});
       await exited;
+      desktop = undefined;
       console.info("[presentation-desktop] client exited");
     }
   } finally { await fixture?.close(); }

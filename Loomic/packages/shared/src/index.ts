@@ -45,3 +45,4 @@ export * from "./workflow-batch.js";
 export * from "./workflow-versions.js";
 export * from "./project-backup.js";
 export * from "./project-context.js";
+export * from "./project-video-document.js";

@@ -29,7 +29,7 @@ export async function importCanvasVideo(runtime: StudioRuntime, token: string, a
   return restored;
 }
 
-export function CanvasVideoImport({ runtime, token, onImported }: { runtime: StudioRuntime | null; token: string; onImported(): void }) {
+export function CanvasVideoImport({ runtime, token, onImported, blockedReason }: { runtime: StudioRuntime | null; token: string; onImported(): void; blockedReason?: string }) {
   const [source, setSource] = useState<{ id: string; start: number; end?: number; returnCanvas: string; title: string } | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false), [inTimeline, setInTimeline] = useState(false);
@@ -75,9 +75,10 @@ export function CanvasVideoImport({ runtime, token, onImported }: { runtime: Stu
     window.dispatchEvent(new CustomEvent("loomic:video-draft", { detail: `请剪辑当前时间线中的画布录像，先给出可预览的剪辑方案，字幕、配音和转场逐项确认后再执行。\n素材标题（仅供参考）：${JSON.stringify(source?.title ?? "画布视频")}` }));
   }
   if (!source) return null;
+  const failure = error || (!runtime ? blockedReason : "");
   const canvasHref = /^[a-f\d-]{36}$/i.test(source.returnCanvas) ? `/canvas/?id=${source.returnCanvas}` : null;
   return <section className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-4 py-3 text-sm" aria-label="画布视频剪辑">
-    <p className="min-w-0 flex-1" role={error ? "alert" : "status"}>{error || (inTimeline ? "画布视频已加入剪辑时间线，可以继续对话编辑。" : file ? `已导入 ${source.title}，保留画布中的裁剪范围。` : "正在导入画布视频…")}</p>
+    <p className="min-w-0 flex-1" role={failure ? "alert" : "status"}>{failure || (inTimeline ? "画布视频已加入剪辑时间线，可以继续对话编辑。" : file ? `已导入 ${source.title}，保留画布中的裁剪范围。` : runtime ? "正在导入画布视频…" : "等待编辑器就绪后导入画布视频…")}</p>
     {error && <Button size="sm" variant="outline" disabled={busy} onClick={() => setRevision(value => value + 1)}>重试导入</Button>}
     {file && !inTimeline && <Button size="sm" disabled={busy} onClick={addClip}>{busy ? "正在添加…" : "加入剪辑时间线"}</Button>}
     {inTimeline && <Button size="sm" onClick={draftEdit}>让 AI 剪辑</Button>}

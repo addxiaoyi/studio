@@ -1,0 +1,90 @@
+{
+  "date": "2026-11-11",
+  "scope": "Project document metadata sync, local media relinking and preserved local recovery copies",
+  "checks": {
+    "project-document-browser.log": {
+      "sha256": "d05777f8f19d0735a98688bf2bbc8dbca21505f4a7b88e9546138aa0ff09090a",
+      "bytes": 1461,
+      "exitCode": 0
+    },
+    "project-document-db.log": {
+      "sha256": "2c70e2f17f2b5764053eab5620702e87b1a24dc5b3deab3bc0b42f738d4d17ed",
+      "bytes": 938,
+      "exitCode": 0
+    },
+    "project-video-web-tests.log": {
+      "sha256": "dea95f35b27f0134e999d5a97a0334b32d62add35007b5ce33f909a3bea6a9d9",
+      "bytes": 616,
+      "exitCode": 0
+    },
+    "project-document-codec-tests.log": {
+      "sha256": "0ed6184f34d7e8fc39276a9e1d9eb7ac64abf39fbe6907c813789146445e52bf",
+      "bytes": 353,
+      "exitCode": 0
+    },
+    "project-context-editor-tests.log": {
+      "sha256": "a994a70cbd80921e456e09915a4531f42dba87c38f7d50f0b03f70b4a6474ddb",
+      "bytes": 2956,
+      "exitCode": 0
+    },
+    "project-document-web-build.log": {
+      "sha256": "0857381d04df20f4d555da2cee274c22cefb54a2ef84d876721978a24d87ed7d",
+      "bytes": 6171,
+      "exitCode": 0
+    },
+    "project-document-web-types.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "exitCode": 0
+    },
+    "project-document-server-types.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "exitCode": 0
+    },
+    "project-document-desktop-types.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "exitCode": 0
+    },
+    "project-document-presentation.log": {
+      "sha256": "b1e17e38cc11792987e9c08b35e18bffd34be2aff21e4d68e9983c2b75681ede",
+      "bytes": 3375,
+      "exitCode": 0
+    }
+  },
+  "browser": {
+    "startTime": "2026-11-10T16:19:25.842Z",
+    "duration": 54157.429,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "presentation": {
+    "startTime": "2026-11-10T16:25:42.504Z",
+    "duration": 157018.381,
+    "expected": 3,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "baselineCI": {
+    "desktop": {
+      "run": 42852104340,
+      "status": "success"
+    },
+    "agent": {
+      "run": 42852104361,
+      "status": "failure",
+      "cause": "Fresh browser reused prior test project context; now isolated per test, protected restoration remains enforced"
+    }
+  },
+  "boundary": [
+    "Fixture authentication in real Chromium and PostgreSQL, not a paid model test",
+    "Original media not uploaded by metadata sync",
+    "Media remains in OPFS, desktop folder project is not yet delivered",
+    "Cloud retrieval currently capped at 250 MiB per file",
+    "Candidate CI and production release recorded separately"
+  ]
+}
