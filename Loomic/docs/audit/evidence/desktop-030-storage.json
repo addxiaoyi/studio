@@ -1,0 +1,208 @@
+{
+  "version": "0.2.30",
+  "implementationCommit": "51e0148b36d1d8b306629ed2cb95a69c77102cee",
+  "nativeCI": 42821637498,
+  "storage": {
+    "windows": {
+      "ok": true,
+      "platform": "win32",
+      "arch": "x64",
+      "previewRecoveredAfterRestart": true,
+      "selectionRecovered": true,
+      "noApplyBeforeConfirmation": true,
+      "scanLimitMiB": 8,
+      "pacedBytes": 16798997,
+      "pacedMillis": 2145,
+      "projectReferences": 2,
+      "sharedContentConfirmed": true,
+      "originalPathsAndIdsPreserved": true,
+      "playbackAfterMerge": true,
+      "cloudRequests": 0
+    },
+    "linux": {
+      "ok": true,
+      "platform": "linux",
+      "arch": "x64",
+      "previewRecoveredAfterRestart": true,
+      "selectionRecovered": true,
+      "noApplyBeforeConfirmation": true,
+      "scanLimitMiB": 8,
+      "pacedBytes": 16798997,
+      "pacedMillis": 2041,
+      "projectReferences": 2,
+      "sharedContentConfirmed": true,
+      "originalPathsAndIdsPreserved": true,
+      "playbackAfterMerge": true,
+      "cloudRequests": 0
+    },
+    "macos-arm64": {
+      "ok": true,
+      "platform": "darwin",
+      "arch": "arm64",
+      "previewRecoveredAfterRestart": true,
+      "selectionRecovered": true,
+      "noApplyBeforeConfirmation": true,
+      "scanLimitMiB": 8,
+      "pacedBytes": 16798997,
+      "pacedMillis": 2187,
+      "projectReferences": 2,
+      "sharedContentConfirmed": true,
+      "originalPathsAndIdsPreserved": true,
+      "playbackAfterMerge": true,
+      "cloudRequests": 0
+    },
+    "macos-x64": {
+      "ok": true,
+      "platform": "darwin",
+      "arch": "x64",
+      "previewRecoveredAfterRestart": true,
+      "selectionRecovered": true,
+      "noApplyBeforeConfirmation": true,
+      "scanLimitMiB": 8,
+      "pacedBytes": 16798997,
+      "pacedMillis": 2548,
+      "projectReferences": 2,
+      "sharedContentConfirmed": true,
+      "originalPathsAndIdsPreserved": true,
+      "playbackAfterMerge": true,
+      "cloudRequests": 0
+    }
+  },
+  "disconnect": {
+    "ok": true,
+    "actualFilesystemUnmount": true,
+    "virtualBlockDevice": true,
+    "physicalCableTest": false,
+    "pauseOnDisconnect": true,
+    "profileCheckpointSurvived": true,
+    "processRestart": true,
+    "resumedBytes": 4194304,
+    "hashedBytes": 167772160,
+    "originalPreserved": true
+  },
+  "liveWeb": {
+    "ok": true,
+    "version": "0.2.30",
+    "liveWeb": true,
+    "scanRateSaved": true,
+    "persistedPreviewAndChoices": true,
+    "noMutationBeforeApproval": true,
+    "projectReferencesVerified": 2,
+    "mergeConfirmed": true,
+    "filePathsAndIdsPreserved": true,
+    "darkAndLight": true,
+    "keyboardAt200Percent": true,
+    "narrowNoOverflow": true,
+    "cloudWrites": 0
+  },
+  "installedUpgrade": {
+    "ok": true,
+    "from": "0.2.29",
+    "to": "0.2.30",
+    "installedPayloadEqual": true,
+    "asarSha256": "f8cdba0a7728684fc584e6817980e63634dde4088d85f7ba4bee9c45835b5bee",
+    "settingsPreserved": true,
+    "workspacePreserved": true,
+    "restartRestored": true
+  },
+  "productionHealth": {
+    "checkedAt": "2026-11-10T13:25:36.357206+00:00",
+    "sourcesVerified": 3,
+    "disk": "Filesystem      Size  Used Avail Use% Mounted on\n/dev/vda1        30G   28G  2.2G  93% /\n/dev/vdb1        79G   73G  1.2G  99% /www",
+    "checks": [
+      {
+        "path": "/api/health",
+        "status": 200
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 401
+      },
+      {
+        "path": "/api/assets/private-video/uploads",
+        "status": 401
+      },
+      {
+        "path": "/downloads/desktop-release-windows-x64.json",
+        "status": 200,
+        "version": "0.2.30"
+      }
+    ],
+    "uploadStaging": {
+      "parts": 0,
+      "bytes": 0
+    },
+    "ok": true
+  },
+  "publicDownloadUI": {
+    "ok": true,
+    "platforms": [
+      "windows-x64",
+      "macos-arm64",
+      "macos-x64",
+      "linux-x64"
+    ],
+    "version": "0.2.30",
+    "visibleLinks": true,
+    "narrowNoOverflow": true
+  },
+  "publicFiles": {
+    "windows": {
+      "Helstera-0.2.30-Windows-x64-portable.exe": {
+        "bytes": 95582219,
+        "sha256": "9b244140cdb999d3a51ee18d3607882edf4958f1bda64f595f3e82c71f1b81ac"
+      },
+      "Helstera-0.2.30-Windows-x64.exe": {
+        "bytes": 95718172,
+        "sha256": "de222be866ce6d75898a3de22716e94b77c792d60c163dda5a1e8f041218b7c4"
+      },
+      "updates/windows-x64/Helstera-Setup-0.2.30-Windows-x64.exe": {
+        "bytes": 95718172,
+        "sha256": "de222be866ce6d75898a3de22716e94b77c792d60c163dda5a1e8f041218b7c4"
+      },
+      "version": "0.2.30"
+    },
+    "macos-arm64": {
+      "version": "0.2.30",
+      "files": {
+        "Helstera-0.2.30-macOS-arm64.dmg": {
+          "bytes": 101483660,
+          "sha256": "2a6de1768317631d56c7907b37ae76a6915f3a581e55106832a4840022d119a5"
+        },
+        "updates/macos-arm64/Helstera-0.2.30-mac-arm64.dmg": {
+          "bytes": 101483660,
+          "sha256": "2a6de1768317631d56c7907b37ae76a6915f3a581e55106832a4840022d119a5"
+        }
+      }
+    },
+    "macos-x64": {
+      "version": "0.2.30",
+      "files": {
+        "Helstera-0.2.30-macOS-x64.dmg": {
+          "bytes": 104982691,
+          "sha256": "f4097a5313224fc7aaab0e0a7be9c94790043eb136ce594558c989328a8d96ef"
+        },
+        "updates/macos-x64/Helstera-0.2.30-mac-x64.dmg": {
+          "bytes": 104982691,
+          "sha256": "f4097a5313224fc7aaab0e0a7be9c94790043eb136ce594558c989328a8d96ef"
+        }
+      }
+    },
+    "linux-x64": {
+      "version": "0.2.30",
+      "files": {
+        "Helstera-0.2.30.AppImage": {
+          "bytes": 86352652,
+          "sha256": "61c1576092889dbcda4e55cdf6f6de8738792e00c51b67711b0cfbcd610b1b4a"
+        },
+        "updates/linux-x64/Helstera-0.2.30-linux-x86_64.AppImage": {
+          "bytes": 86352652,
+          "sha256": "61c1576092889dbcda4e55cdf6f6de8738792e00c51b67711b0cfbcd610b1b4a"
+        }
+      }
+    }
+  },
+  "agentCI": 42821635089,
+  "desktopCI": 42823534727,
+  "ciConclusion": "success"
+}

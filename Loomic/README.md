@@ -37,7 +37,7 @@
 
 ## Current implementation status
 
-2026-11-10：桌面 0.2.30 候选加入扫描限速、断盘进度保留、目录预览重启恢复和确认后的重复内容合并；进度见 [本地扫描与合并验收](docs/audit/desktop-030-storage-controls.md)。
+2026-11-10：桌面 0.2.30 已发布，加入扫描限速、断盘进度保留、目录预览重启恢复和确认后的重复内容合并；进度见 [本地扫描与合并验收](docs/audit/desktop-030-storage-controls.md)。
 
 2026-11-10：桌面 0.2.29 已发布，加入重复素材暂停/重启续扫、目录逐项关联预览和封面缓存设置；真实大文件与发布状态见 [本地存储续扫验收](docs/audit/desktop-029-storage-resume.md)。
 
