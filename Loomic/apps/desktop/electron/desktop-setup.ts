@@ -22,6 +22,8 @@ export async function writeJsonAtomic(path: string, value: unknown): Promise<voi
 export class DesktopSetup {
   private chosen: string | null = null;
   constructor(private readonly profile: string) {}
+  get stateDirectory() { return join(this.profile, "storage-state"); }
+  get videoProjectsDirectory() { return join(this.profile, "video-projects"); }
   async status(): Promise<SetupState> {
     let config: SetupConfig;
     try {

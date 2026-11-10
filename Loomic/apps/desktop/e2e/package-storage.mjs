@@ -43,6 +43,12 @@ try {
   if (insights.status !== 0) throw new Error(`Storage insights test failed (${insights.status}).`);
   const resumed = spawnSync(process.execPath, ["apps/desktop/e2e/storage-resume.mjs"], { env: { ...env, HELT_RESUME_TEST_DIR: join(output, "resume") }, stdio: "inherit" });
   if (resumed.status !== 0) throw new Error(`Storage resume and directory relink test failed (${resumed.status}).`);
+  const controls = spawnSync(process.execPath, ["apps/desktop/e2e/storage-controls.mjs"], { env: { ...env, HELT_CONTROLS_TEST_DIR: join(output, "controls") }, stdio: "inherit" });
+  if (controls.status !== 0) throw new Error(`Storage controls test failed (${controls.status}).`);
+  if (process.platform === "linux") {
+    const disconnected = spawnSync(process.execPath, ["apps/desktop/e2e/storage-disconnect.mjs"], { env: { ...env, HELT_DISCONNECT_TEST_DIR: join(output, "disconnect") }, stdio: "inherit" });
+    if (disconnected.status !== 0) throw new Error(`Workspace disconnect test failed (${disconnected.status}).`);
+  }
   if (process.env.HELT_VERIFY_PUBLIC_UPDATE === "1") {
     const appImage = process.platform === "linux" ? join(release, readdirSync(release).find(name => name.endsWith(".AppImage"))) : undefined;
     const update = spawnSync(process.execPath, ["apps/desktop/e2e/update-channel.mjs"], { env: { ...env, HELT_UPDATE_TEST_DIR: join(output, "update"), ...(appImage ? { APPIMAGE: appImage } : {}) }, stdio: "inherit" });

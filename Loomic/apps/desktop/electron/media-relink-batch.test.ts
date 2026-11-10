@@ -19,6 +19,12 @@ it("previews ambiguous and missing matches without writes, confirms selected fil
     const batch = new MediaRelinkBatch(setup), plan = await batch.prepare(account, folder);
     expect(plan.items.map(item => item.status)).toEqual(["ambiguous", "matched", "missing"]);
     expect(JSON.parse(await readFile(indexPath, "utf8"))).toEqual(original);
+    await batch.saveSelection(plan.id, [{ assetId: ids[0], candidateId: plan.items[0]!.candidates[1]!.id }]);
+    const restarted = new MediaRelinkBatch(new DesktopSetup(join(root, "profile")));
+    const recovered = await restarted.resume(account);
+    expect(recovered?.id).toBe(plan.id);
+    expect(recovered?.selections).toEqual([{ assetId: ids[0], candidateId: plan.items[0]!.candidates[1]!.id }]);
+    expect(await restarted.resume(randomUUID())).toBeNull();
     await expect(batch.apply(plan.id, [{ assetId: ids[0], candidateId: "unknown" }])).rejects.toThrow("候选");
     const first = await batch.apply(plan.id, [{ assetId: ids[0], candidateId: plan.items[0]!.candidates[1]!.id }]);
     expect(first.items[0]?.ok).toBe(true);

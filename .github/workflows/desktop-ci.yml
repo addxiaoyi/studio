@@ -135,6 +135,8 @@ jobs:
           node apps/desktop/e2e/storage-insights.mjs
           $env:HELT_RESUME_TEST_DIR = Join-Path $env:RUNNER_TEMP 'desktop-resume'
           node apps/desktop/e2e/storage-resume.mjs
+          $env:HELT_CONTROLS_TEST_DIR = Join-Path $env:RUNNER_TEMP 'desktop-controls'
+          node apps/desktop/e2e/storage-controls.mjs
       - name: Upload Windows lifecycle evidence
         if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -150,6 +152,8 @@ jobs:
             ${{ runner.temp }}/desktop-insights/
             ${{ runner.temp }}/desktop-resume/report.json
             ${{ runner.temp }}/desktop-resume/*.png
+            ${{ runner.temp }}/desktop-controls/report.json
+            ${{ runner.temp }}/desktop-controls/*.png
           if-no-files-found: ignore
           retention-days: 7
       - name: Installed macOS package workspace and restore
@@ -178,6 +182,9 @@ jobs:
             ${{ runner.temp }}/desktop-native/insights/
             ${{ runner.temp }}/desktop-native/resume/report.json
             ${{ runner.temp }}/desktop-native/resume/*.png
+            ${{ runner.temp }}/desktop-native/controls/report.json
+            ${{ runner.temp }}/desktop-native/controls/*.png
+            ${{ runner.temp }}/desktop-native/disconnect/report.json
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4

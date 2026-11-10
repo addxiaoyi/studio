@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile, link } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile, link, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { DesktopSetup } from "./desktop-setup.js";
 import { WorkspaceUsage } from "./workspace-usage.js";
+import { WorkspaceDevice, WorkspaceDisconnected } from "./workspace-device.js";
 
 it("classifies local bytes and verifies duplicate content without counting hardlinks as reclaimable copies", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "helstera-usage-")));
@@ -24,6 +25,33 @@ it("classifies local bytes and verifies duplicate content without counting hardl
     expect(report.hashedBytes).toBe(27);
     expect(await usage.reveal(report.duplicates[0]!.files[0]!.id)).toContain(media);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it("keeps checkpoints in the profile when a workspace disappears and resumes after reconnection", async () => {
+  const testRoot = await realpath(await mkdtemp(join(tmpdir(), "helstera-disk-loss-"))), root = join(testRoot, "disk"), profile = join(testRoot, "profile");
+  await mkdir(root);
+  try {
+    const setup = new DesktopSetup(profile); await setup.choose(root); await setup.complete({ autoBackup: false, agentAccess: false });
+    const account = randomUUID(), folder = join(root, "Media", account); await mkdir(folder);
+    const content = Buffer.alloc(16 * 1024 ** 2, 7);
+    await writeFile(join(folder, "a.mp4"), content); await writeFile(join(folder, "b.mp4"), content);
+    let detached = false;
+    const check = WorkspaceDevice.prototype.check;
+    const device = vi.spyOn(WorkspaceDevice.prototype, "check").mockImplementation(function (this: WorkspaceDevice) { if (detached) return Promise.reject(new WorkspaceDisconnected()); return check.call(this); });
+    const usage = new WorkspaceUsage(setup, async state => {
+      if (!detached && state.phase === "hashing" && state.fileBytes >= 4 * 1024 ** 2) detached = true;
+    });
+    await usage.configure({ rateMiB: 0 });
+    await expect(usage.scan(account, true)).rejects.toThrow("磁盘");
+    device.mockRestore(); await rename(root, root + "-detached");
+    const restarted = new WorkspaceUsage(setup);
+    expect((await restarted.savedState(account))?.phase).toBe("paused");
+    expect((await restarted.settings()).rateMiB).toBe(0);
+    await rename(root + "-detached", root);
+    const completed = await restarted.scan(account, true);
+    expect(completed.resumedBytes).toBeGreaterThanOrEqual(4 * 1024 ** 2);
+    expect(completed.duplicates).toHaveLength(1); expect(completed.readBytes).toBeLessThan(content.length * 2);
+  } finally { await rm(testRoot, { recursive: true, force: true }); }
 });
 
 it("resumes a paused file after restart and invalidates completed checkpoints when a file changes", async () => {

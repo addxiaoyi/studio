@@ -4,6 +4,9 @@ import { basename, join, relative } from "node:path";
 import { DesktopSetup } from "./desktop-setup.js";
 import { assertAccount } from "./workspace-index.js";
 import { ScanJournal, type ScanProgress } from "./workspace-scan-journal.js";
+import { StorageState } from "./storage-state.js";
+import { ScanRate, scanRate } from "./scan-rate.js";
+import { WorkspaceDisconnected, WorkspaceDevice } from "./workspace-device.js";
 
 type File = { id: string; path: string; relativePath: string; name: string; bytes: number; inode: string; mtime: number; ctime: number; candidate: boolean };
 const FILE_LIMIT = 25000;
@@ -16,15 +19,30 @@ export class WorkspaceUsage {
   private files = new Map<string, File>();
   private root: string | null = null;
   private current?: ScanProgress;
-  constructor(private readonly setup: DesktopSetup, private readonly changed?: (state: ScanProgress) => void) {}
+  private duplicateSets: Set<string>[] = [];
+  private rate = new ScanRate(32);
+  private rateMiB = 32;
+  constructor(private readonly setup: DesktopSetup, private readonly changed?: (state: ScanProgress) => void | Promise<void>) {}
+  async settings() {
+    const saved = await new StorageState(this.setup.stateDirectory).read("scan-settings") as { rateMiB?: unknown } | null;
+    return { rateMiB: saved ? scanRate(saved.rateMiB) : 32 };
+  }
+  async configure(input: unknown) {
+    const rateMiB = scanRate((input as { rateMiB?: unknown } | null)?.rateMiB);
+    await new StorageState(this.setup.stateDirectory).write("scan-settings", { rateMiB });
+    this.rateMiB = rateMiB; this.rate.setRate(rateMiB);
+    return { rateMiB };
+  }
   get busy() { return this.starting || Boolean(this.controller) || Boolean(this.clearing); }
   cancel() { this.controller?.abort(); }
   async savedState(account: unknown) {
     await this.clearing;
     assertAccount(account); const setup = await this.setup.status();
-    if (!setup.available || !setup.root) throw new Error("本地工作区不可用。");
+    if (!setup.root) throw new Error("本地工作区不可用。");
+    if (!setup.available) return ScanJournal.offline(setup.root, account, this.setup.stateDirectory);
     if (this.busy && this.current?.accountId === account) return this.current;
-    return (await ScanJournal.load(setup.root, account)).progress();
+    try { return (await ScanJournal.load(setup.root, account, this.setup.stateDirectory)).progress(); }
+    catch (error) { if (error instanceof WorkspaceDisconnected) return ScanJournal.offline(setup.root, account, this.setup.stateDirectory); throw error; }
   }
   async clearProgress(account: unknown) {
     assertAccount(account);
@@ -32,7 +50,7 @@ export class WorkspaceUsage {
     this.clearing = (async () => {
       const setup = await this.setup.status();
       if (!setup.available || !setup.root) throw new Error("本地工作区不可用。");
-      await ScanJournal.clear(setup.root, account);
+      await ScanJournal.clear(setup.root, account, this.setup.stateDirectory);
     })();
     try { await this.clearing; } finally { this.clearing = undefined; }
   }
@@ -44,9 +62,9 @@ export class WorkspaceUsage {
     let setup;
     try { setup = await this.setup.status(); }
     finally { this.starting = false; }
-    if (!setup.available || !setup.root) throw new Error("本地工作区不可用。");
+    if (!setup.available || !setup.root) throw new WorkspaceDisconnected();
     const root = setup.root, controller = new AbortController(); this.controller = controller;
-    this.root = root; this.files.clear();
+    this.root = root; this.files.clear(); this.duplicateSets = [];
     const categories = TYPES.map(id => ({ id, bytes: 0, files: 0 }));
     const found: File[] = [], warnings: string[] = [];
     let truncated = false, hashedBytes = 0, readBytes = 0, resumedBytes = 0;
@@ -56,10 +74,12 @@ export class WorkspaceUsage {
       progress = { ...progress, ...change, updatedAt: new Date().toISOString() };
       this.current = progress;
       if (journal) await journal.save(progress, progress.phase === "paused" || progress.phase === "completed");
-      this.changed?.(progress);
+      await this.changed?.(progress);
     };
     try {
-      if (duplicates) journal = await ScanJournal.load(root, account);
+      this.rateMiB = (await this.settings()).rateMiB; this.rate.setRate(this.rateMiB);
+      const device = await WorkspaceDevice.capture(root);
+      if (duplicates) journal = await ScanJournal.load(root, account, this.setup.stateDirectory);
       await publish({ phase: "discovering" });
       const visit = async (folder: string, depth: number): Promise<void> => {
         controller.signal.throwIfAborted();
@@ -91,7 +111,7 @@ export class WorkspaceUsage {
       if (duplicates && journal) {
         const activeJournal = journal;
         const sizes = new Map<number, File[]>();
-        for (const file of found.filter(file => file.candidate && file.bytes > 0)) sizes.set(file.bytes, [...(sizes.get(file.bytes) ?? []), file]);
+        for (const file of found.filter(file => file.candidate && file.bytes > 0)) { const peers = sizes.get(file.bytes) ?? []; peers.push(file); sizes.set(file.bytes, peers); }
         const candidates = [...sizes.values()].filter(files => files.length > 1).flat();
         journal.retain(candidates);
         const sources = new Map<string, File>();
@@ -109,22 +129,35 @@ export class WorkspaceUsage {
               const source = sources.get(file.inode)!, reused = journal.reuse(source), beforeRead = readBytes;
               try {
                 await publish({ fileName: file.name, fileBytes: reused, fileTotal: file.bytes });
-                const proof = await journal.hash(source, controller.signal, async (offset, consumed) => { readBytes = beforeRead + consumed; await publish({ fileBytes: offset, verifiedBytes: resumedBytes + readBytes }); });
+                const proof = await journal.hash(source, controller.signal, async (offset, consumed) => { readBytes = beforeRead + consumed; await publish({ fileBytes: offset, verifiedBytes: resumedBytes + readBytes, rateMiB: this.rateMiB }); }, this.rate);
                 sha = proof.digest; hashedBytes += file.bytes; hashes.set(file.inode, sha);
-              } catch (error) { if (controller.signal.aborted) throw error; warnings.push(`${file.relativePath} 内容校验失败，未归为重复素材。`); continue; }
+              } catch (error) { if (controller.signal.aborted || error instanceof WorkspaceDisconnected) throw error; await device.check(); warnings.push(`${file.relativePath} 内容校验失败，未归为重复素材。`); continue; }
             }
-            const key = `${file.bytes}:${sha}`; groups.set(key, [...(groups.get(key) ?? []), file]);
+            const key = `${file.bytes}:${sha}`, peers = groups.get(key) ?? []; peers.push(file); groups.set(key, peers);
           }
         }
       }
       const matches = [...groups.values()].filter(files => new Set(files.map(file => file.inode)).size > 1).map(files => ({ bytes: files[0]!.bytes, extraBytes: (new Set(files.map(file => file.inode)).size - 1) * files[0]!.bytes, files: files.map(({ id, name, relativePath, bytes }) => ({ id, name, relativePath, bytes })) })).sort((a, b) => b.extraBytes - a.extraBytes);
+      this.duplicateSets = matches.map(group => new Set(group.files.map(file => file.id)));
       await publish({ phase: "completed", fileName: "", fileBytes: 0, fileTotal: 0, verifiedBytes: hashedBytes });
       return { categories, totalBytes: categories.reduce((sum, row) => sum + row.bytes, 0), totalFiles: found.length, duplicates: matches.slice(0, 100), duplicateGroups: matches.length, duplicateBytes: matches.reduce((sum, row) => sum + row.extraBytes, 0), hashedBytes, readBytes, resumedBytes, truncated, warnings: warnings.slice(0, 30), scannedAt: new Date().toISOString() };
     } catch (error) {
-      await publish({ phase: "paused" });
+      progress = { ...progress, phase: "paused", updatedAt: new Date().toISOString(), disconnected: error instanceof WorkspaceDisconnected };
+      this.current = progress;
+      if (journal) await journal.saveProfile(progress);
+      await this.changed?.(progress);
       if (controller.signal.aborted) throw new Error("扫描已暂停，分块进度已保存在本地；重启后可继续。");
       throw error;
     } finally { this.controller = undefined; }
+  }
+  async mergeFiles(account: string, ids: string[]) {
+    assertAccount(account);
+    if (this.busy || ids.length < 2 || ids.length > 200 || new Set(ids).size !== ids.length || !this.duplicateSets.some(group => ids.every(id => group.has(id)))) throw new Error("重复素材记录已失效，请重新扫描并选择同组文件。");
+    const setup = await this.setup.status();
+    if (!setup.available || setup.root !== this.root) throw new Error("工作区已改变，请重新扫描。");
+    const files = ids.map(id => this.files.get(id)!);
+    if (files.some(file => !file.relativePath.startsWith(`Media/${account}/`))) throw new Error("合并仅支持当前账户的素材目录；导出成片请单独管理。");
+    return files;
   }
   async reveal(id: unknown) {
     const file = typeof id === "string" ? this.files.get(id) : undefined, setup = await this.setup.status();

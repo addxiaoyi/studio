@@ -29,6 +29,7 @@ try {
   app = await _electron.launch({ executablePath, env }); let page = await app.firstWindow(); await expect(page.getByRole("heading", { name: "Helstera storage resume" })).toBeVisible();
   await page.evaluate(() => { void window.electronAPI.openOfflineSnapshots(); }); await expect(page.getByRole("heading", { name: "快照与创作记录" })).toBeVisible();
   const networkBefore = requests;
+  await page.evaluate(() => window.electronAPI.configureWorkspaceScan({ rateMiB: 0 }));
   await page.evaluate(account => {
     let paused = false;
     window.electronAPI.onWorkspaceScan(state => { if (!paused && state.phase === "hashing" && state.verifiedBytes >= 64 * 1024 ** 2) { paused = true; void window.electronAPI.cancelWorkspaceScan(); } });

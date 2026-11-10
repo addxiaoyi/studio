@@ -3,6 +3,8 @@
   const size = bytes => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GiB` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MiB` : `${(bytes / 1024).toFixed(1)} KiB`;
   const labels = { media: "素材原文件", projects: "工程与对话快照", exports: "导出成片", cache: "预览缓存", other: "其他文件" };
   const status = text => { el("usage-status").textContent = text; };
+  const scanSettings = async () => { el("scan-rate").disabled = true; try { const settings = await api.getWorkspaceScanSettings(); el("scan-rate").value = String(settings.rateMiB); } finally { el("scan-rate").disabled = false; } };
+  el("scan-rate-save").addEventListener("click", async () => { el("scan-rate-save").disabled = true; try { await api.configureWorkspaceScan({ rateMiB: Number(el("scan-rate").value) }); status("扫描读取速度已保存，当前扫描也会使用新上限。"); } catch (error) { status(error.message); } finally { el("scan-rate-save").disabled = false; } });
   const cacheUsage = async () => {
     el("cache-capacity").disabled = true; el("cache-save").disabled = true;
     try {
@@ -20,6 +22,7 @@
     el("usage-scan").disabled = running; el("usage-duplicates").disabled = running; el("usage-cancel").hidden = !running; el("usage-reset").disabled = running;
     el("usage-duplicates").textContent = state.phase === "paused" ? "继续校验重复素材" : "校验重复素材";
     el("usage-progress").textContent = `${state.phase === "paused" ? "已暂停，可退出应用后继续。" : state.phase === "completed" ? "扫描完成，再次校验会复用未改变的内容。" : "正在校验"} ${size(state.verifiedBytes)} / ${size(state.totalBytes)} · 已复用 ${size(state.reusedBytes)} ${state.fileName}`;
+    if (state.disconnected) el("usage-progress").textContent += " 磁盘连接中断，进度保留在这台设备；连接原磁盘后可继续。";
   };
   api.onWorkspaceScan(progress);
   const scan = async duplicates => {
@@ -32,6 +35,7 @@
       for (const group of report.duplicates) {
         const details = document.createElement("details"), summary = document.createElement("summary"); summary.textContent = `${group.files.length} 个相同文件 · 额外 ${size(group.extraBytes)}`; details.append(summary);
         for (const file of group.files) { const p = document.createElement("p"), locate = document.createElement("button"); p.textContent = file.relativePath; locate.textContent = "定位文件"; locate.addEventListener("click", () => api.revealWorkspaceFile(file.id).catch(error => status(error.message))); p.append(locate); details.append(p); }
+        window.appendMediaMerge?.(details, group, el("account").value, () => { el("usage-result").replaceChildren(); });
         el("usage-result").append(details);
       }
       for (const warning of report.warnings) { const p = document.createElement("p"); p.textContent = warning; el("usage-result").append(p); }
@@ -44,5 +48,5 @@
   el("usage-reset").addEventListener("click", async () => { try { await api.clearWorkspaceScan(el("account").value); el("usage-progress").textContent = ""; el("usage-duplicates").textContent = "校验重复素材"; status("扫描进度已清除，素材原文件保留。"); } catch (error) { status(error.message); } });
   el("cache-save").addEventListener("click", async () => { el("cache-save").disabled = true; try { await api.configureThumbnailCache(el("account").value, { capacityMiB: Number(el("cache-capacity").value) }); await cacheUsage(); status("缓存容量已保存，超出上限的封面已清理，原文件保留。"); } catch (error) { status(error.message); } finally { el("cache-save").disabled = false; } });
   el("cache-clear").addEventListener("click", async () => { el("cache-clear").disabled = true; try { const cleared = await api.clearThumbnailCache(el("account").value); await cacheUsage(); el("usage-result").replaceChildren(); status(`已清理 ${size(cleared.bytes)} 封面缓存，原文件保留。`); } catch (error) { status(error.message); } finally { el("cache-clear").disabled = false; } });
-  el("manage").addEventListener("click", () => { el("usage-result").replaceChildren(); status(""); el("usage-progress").textContent = ""; void cacheUsage().catch(error => status(error.message)); void api.getWorkspaceScanState(el("account").value).then(progress).catch(error => status(error.message)); });
+  el("manage").addEventListener("click", () => { el("usage-result").replaceChildren(); status(""); el("usage-progress").textContent = ""; void scanSettings().catch(error => status(error.message)); void cacheUsage().catch(error => status(error.message)); void api.getWorkspaceScanState(el("account").value).then(progress).catch(error => status(error.message)); });
 })();

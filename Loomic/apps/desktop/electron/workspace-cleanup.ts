@@ -19,7 +19,7 @@ export class WorkspaceCleanup {
   private running = false;
   constructor(private readonly setup: DesktopSetup) {}
   get busy() { return this.running; }
-  private async scan(account: unknown) {
+  async references(account: unknown) {
     assertAccount(account);
     const setup = await this.setup.status();
     if (!setup.available || !setup.root) throw new Error("本地工作区不可用。");
@@ -43,7 +43,7 @@ export class WorkspaceCleanup {
     return { root, account, index, tasks, snapshots, fingerprint };
   }
   async projects(account: unknown) {
-    const scan = await this.scan(account);
+    const scan = await this.references(account);
     const groups = new Map<string, { id: string; name: string; snapshots: number; snapshotBytes: number; mediaBytes: number; assets: Set<string> }>();
     for (const snapshot of scan.snapshots) {
       const project = snapshot.document.project;
@@ -66,7 +66,7 @@ export class WorkspaceCleanup {
   }
   async prepare(account: unknown, projectId: unknown): Promise<CleanupPlan> {
     if (this.busy) throw new Error("清理正在进行。");
-    const scan = await this.scan(account);
+    const scan = await this.references(account);
     const selected = scan.snapshots.filter(item => item.document.project.id === projectId);
     if (!selected.length) throw new Error("工程记录已改变，请刷新列表。");
     const names = new Set(selected.map(item => basename(item.path)));
@@ -97,7 +97,7 @@ export class WorkspaceCleanup {
     if (!plan || plan.preview.id !== id || plan.expires < Date.now()) throw new Error("清理预览已失效，请重新检查。");
     this.running = true;
     try {
-      const scan = await this.scan(plan.account);
+      const scan = await this.references(plan.account);
       if (scan.root !== plan.root || scan.fingerprint !== plan.fingerprint) throw new Error("工程或工作区已改变，请重新预览清理范围。");
       for (const file of plan.files) {
         if (await realpath(file.path) !== file.path || (await stat(file.path)).size !== file.bytes || await fileSha256(file.path) !== file.sha256) throw new Error("本地文件已改变，请重新预览；尚未清理任何文件。");

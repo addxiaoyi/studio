@@ -7,8 +7,46 @@ import { DesktopDiskUsage } from "@/components/desktop-disk-usage";
 import { DesktopMediaCard } from "@/components/desktop-media-card";
 import { DesktopDirectoryRelink } from "@/components/desktop-directory-relink";
 import { DesktopThumbnailSettings } from "@/components/desktop-thumbnail-settings";
+import { DesktopMediaMerge } from "@/components/desktop-media-merge";
+import { DesktopScanRate } from "@/components/desktop-scan-rate";
 import type { DesktopStorageApi } from "@/lib/desktop-storage";
 afterEach(cleanup);
+
+it("restores directory choices without executing and saves changed selections", async () => {
+  const api = { chooseRelinkDirectory: vi.fn(), resumeRelinkDirectory: vi.fn().mockResolvedValue({ id: "draft", folder: "D:/moved", warnings: [], items: [{ assetId: "photo", name: "照片", status: "matched", candidates: [{ id: "a", relativePath: "a.png" }] }], selections: [{ assetId: "photo", candidateId: "a" }], savedAt: "2026-11-10T00:00:00Z" }), saveRelinkSelection: vi.fn().mockResolvedValue(undefined), applyRelinkDirectory: vi.fn() };
+  render(<DesktopDirectoryRelink api={api as unknown as DesktopStorageApi} accountId="owner" disabled={false}/>);
+  expect(await screen.findByRole("button", { name: "确认关联所选 1 项" })).toBeEnabled();
+  expect(api.applyRelinkDirectory).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("combobox", { name: "匹配位置：照片" }));
+  await userEvent.click(await screen.findByRole("option", { name: "跳过此素材" }));
+  expect(api.saveRelinkSelection).toHaveBeenCalledWith("draft", []);
+});
+
+it("requires a file selection, reference preview and explicit consent before merging", async () => {
+  const api = { previewMediaMerge: vi.fn().mockResolvedValue({ id: "merge", keep: "a.mp4", files: ["b.mp4"], assets: 2, projects: [{ id: "project", name: "我的短片", kind: "video" }], bytes: 100 }), applyMediaMerge: vi.fn().mockResolvedValue({ mergedFiles: 1, releasedBytes: 100, errors: [] }) };
+  const group = { bytes: 100, extraBytes: 100, files: [{ id: "a", name: "a.mp4", relativePath: "Media/owner/a.mp4", bytes: 100 }, { id: "b", name: "b.mp4", relativePath: "Media/owner/b.mp4", bytes: 100 }] };
+  render(<DesktopMediaMerge api={api as unknown as DesktopStorageApi} accountId="owner" group={group} disabled={false} onComplete={vi.fn()}/>);
+  expect(screen.getByRole("button", { name: "核对工程引用与合并范围" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("checkbox", { name: "Media/owner/b.mp4" }));
+  await userEvent.click(screen.getByRole("button", { name: "核对工程引用与合并范围" }));
+  expect(await screen.findByText(/我的短片/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "确认合并并释放重复内容" })).toBeDisabled();
+  expect(api.applyMediaMerge).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("checkbox", { name: /我已核对工程引用/ }));
+  await userEvent.click(screen.getByRole("button", { name: "确认合并并释放重复内容" }));
+  expect(api.applyMediaMerge).toHaveBeenCalledWith("merge", true);
+});
+
+it("loads saved scan speed and persists a lower limit explicitly", async () => {
+  const api = { getWorkspaceScanSettings: vi.fn().mockResolvedValue({ rateMiB: 32 }), configureWorkspaceScan: vi.fn().mockResolvedValue({ rateMiB: 8 }) };
+  render(<DesktopScanRate api={api as unknown as DesktopStorageApi}/>);
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "扫描读取速度上限" })).toBeEnabled());
+  await userEvent.click(screen.getByRole("combobox", { name: "扫描读取速度上限" }));
+  await userEvent.click(await screen.findByRole("option", { name: "8 MiB/s" }));
+  expect(api.configureWorkspaceScan).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "保存扫描速度" }));
+  expect(api.configureWorkspaceScan).toHaveBeenCalledWith({ rateMiB: 8 });
+});
 
 it("restores a paused scan and only starts hashing when the user continues", async () => {
   const api = { getWorkspaceScanState: vi.fn().mockResolvedValue({ accountId: "owner", phase: "paused", fileName: "movie.mp4", verifiedBytes: 64 * 1024 ** 2, totalBytes: 5 * 1024 ** 3, reusedBytes: 0 }), getWorkspaceUsage: vi.fn().mockRejectedValue(new Error("扫描已暂停")), clearWorkspaceScan: vi.fn().mockResolvedValue(undefined) };
