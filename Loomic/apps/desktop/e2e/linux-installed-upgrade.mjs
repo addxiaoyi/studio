@@ -66,7 +66,7 @@ const env = { ...runtimeEnv, HELSTERA_ISOLATED_TEST: "1", HELSTERA_TEST_USER_DAT
 delete env.ELECTRON_RUN_AS_NODE; delete env.NODE_OPTIONS;
 // CI has no FUSE mount. Prepare the real target runtime's cached sandbox with the same
 // permissions as an installed sandbox helper, while leaving the AppImage bytes untouched.
-execFileSync(versions[1].path, ["--version"], { env, stdio: "ignore", timeout: 30000 });
+execFileSync(versions[1].path, ["--version"], { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, stdio: "ignore", timeout: 30000 });
 const cached = (await readdir(runtime)).filter(name => /^appimage_extracted_[a-f0-9]+$/.test(name));
 assert.equal(cached.length, 1);
 const targetSandbox = join(runtime, cached[0], "chrome-sandbox");
