@@ -71,6 +71,13 @@ try {
   await app.evaluate(({ session }, origin) => {
     session.fromPartition("electron-updater", { cache: false }).webRequest.onBeforeRequest({ urls: ["https://studio.0st.top/downloads/updates/*"] }, (details, callback) => callback({ redirectURL: `${origin}/channel/${new URL(details.url).pathname.split("/").pop()}` }));
   }, origin);
+  await app.evaluate(async ({ app }, root) => {
+    const { createRequire } = await import("node:module"), { openSync } = await import("node:fs");
+    const { autoUpdater } = createRequire(`${app.getAppPath()}/package.json`)("electron-updater");
+    const spawn = autoUpdater.spawnLog.bind(autoUpdater), descriptor = openSync(`${root}/updated-app.log`, "a");
+    // Preserve the updater's command, arguments and environment; capture only child diagnostics.
+    autoUpdater.spawnLog = (command, args, env) => spawn(command, args, env, ["ignore", descriptor, descriptor]);
+  }, root);
   await page.evaluate(() => window.electronAPI.checkForUpdates());
   await expect.poll(() => page.evaluate(() => window.electronAPI.getUpdateState()).then(state => state.status), { timeout: 180000 }).toBe("downloaded");
   const downloaded = await page.evaluate(() => window.electronAPI.getUpdateState()); assert.equal(downloaded.version, "0.2.28");
@@ -84,6 +91,11 @@ try {
   assert.equal(await sha(versions[0].path), versions[1].hash); assert.ok((await readFile(media)).equals(image)); assert.equal(await sha(snapshot), beforeSnapshot);
   const report = { ok: true, from: "0.2.27", to: "0.2.28", realAppImageReplacement: true, sandboxEnabled: true, isolatedFixedUpdateFeed: true, publicPackageSha256: versions[1].hash, directoryPreserved: true, mediaBytesPreserved: true, originalSnapshotPreserved: true, restoredThroughApiFixture: true, mediaDecodedAfterUpgrade: true };
   await writeFile(join(root, "report.json"), JSON.stringify(report, null, 2)); console.log("LINUX_INSTALLED_UPGRADE_PASSED", JSON.stringify(report));
+} catch (error) {
+  console.error("UPGRADE_FAILURE", error.message);
+  console.error("INSTALLED_FILE_SHA256", await sha(versions[0].path).catch(() => "missing"));
+  console.error("UPDATED_APP_LOG", await readFile(join(root, "updated-app.log"), "utf8").catch(() => "not started"));
+  throw error;
 } finally {
   // Only stop processes launched with this exact isolated test profile.
   for (const pid of (await readdir("/proc")).filter(name => /^\d+$/.test(name))) {
