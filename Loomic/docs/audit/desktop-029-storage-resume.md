@@ -17,4 +17,19 @@
 
 ## 发布状态
 
-候选包与 Web 正在验收；当前文档尚不代表 0.2.29 已发布。Linux 实际升级的自动重启问题正在定位；成功证据和最终发布地址须验收后补入。
+0.2.29 的 Windows 安装版/便携版、macOS Intel/Apple Silicon、Linux AppImage 已发布；各平台下载地址和更新清单的文件均已完整读回，SHA-256 与候选一致、SHA-512 与更新清单一致。macOS 仍为未签名 DMG 手动替换，不声明已签名或公证。
+
+- [完整 Desktop CI 42809127489](https://github.com/addxiaoyi/studio/actions/runs/42809127489) 与 [Agent CI 42809127564](https://github.com/addxiaoyi/studio/actions/runs/42809127564) 全部通过。
+- [原生安装包验收 42809131136](https://github.com/addxiaoyi/studio/actions/runs/42809131136)：Linux、macOS ARM64、macOS x64 均完成 4,362,076,160 字节内容校验，暂停、退出、重启续扫，目录逐项关联，缓存关闭与设置。本地操作网络请求为 0。夹具为两个各 2 GiB + 32 MiB 的稀疏文件，报告中的耗时不能推断真实外置磁盘吞吐。
+- Windows 隔离安装器 0.2.28→0.2.29 退出码 0，已安装 payload 与发布候选一致；重启两次保持工作区、设置与既有文件。安装包 95,715,811 字节，便携包 95,579,862 字节。
+- 真实客户端访问生产 Web，验证目录逐项关联、缓存设置、封面生成、重新关联后视频播放、深浅主题与 200% 键盘操作；没有云端素材写入。静态 Web 原子发布 159 个变更文件，包体 930,361 字节，无服务重启或数据库迁移。
+- 下载页所有平台入口可见，360 px 无横向溢出；生产健康 200，匿名 Agent 会话与私有上传列表 401。
+- [发布后更新通道检查 42811968648](https://github.com/addxiaoyi/studio/actions/runs/42811968648) 最终全部成功。Linux、macOS Intel 和 Apple Silicon 从实际应用读取到 0.2.29。Intel 首次复验遇到运行环境及 GitHub artifact 服务超时，重跑后原生操作、更新检查和证据上传全部通过。
+
+## Linux 旧版实际升级
+
+[Linux 实际升级 CI 42816534461](https://github.com/addxiaoyi/studio/actions/runs/42816534461) 已成功完成。真实 0.2.27 更新器下载、替换并自动启动 0.2.28；最终 AppImage SHA-256 为 `38a11b6433ca9a1f3d266ad656c03907ee742dd2e5dde4e3dd0f9fd4df2be622`。同一工作区、素材字节、快照文件保留，使用隔离恢复 API 成功回流并解码图片。测试没有关闭 Chromium 沙箱；GitHub 无 FUSE 环境提前为目标临时解包目录配置沙箱助手权限，正式 AppImage 字节未修改。测试断言、报告写入和隔离进程清理全部完成后正常退出。
+
+生产系统盘剩余约 2.2 GiB，业务盘约 1.7 GiB；本轮安装文件通过硬链接复用下载与更新通道，避免重复文件块。测试产生的十个大文件夹具共 21,810,380,800 字节暂存本机隔离验收目录，自动审批拒绝删除；不属于用户素材，也未上传云端。
+
+机器可读验收摘要见 [desktop-029-storage.json](evidence/desktop-029-storage.json)。

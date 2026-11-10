@@ -1,0 +1,260 @@
+{
+  "version": "0.2.29",
+  "implementationCommit": "94d290d5ae32471de7b1ead0fca78d443baeaa96",
+  "desktopCI": 42809127489,
+  "agentCI": 42809127564,
+  "nativeCI": 42809131136,
+  "storage": {
+    "windows": {
+      "ok": true,
+      "platform": "win32",
+      "arch": "x64",
+      "hashedBytes": 4362076160,
+      "resumedBytes": 71303168,
+      "readBytes": 4290772992,
+      "resumeMillis": 3005,
+      "processRestart": true,
+      "previewNoWrites": true,
+      "explicitPerItemSelection": true,
+      "batchLinked": 2,
+      "externalSourcesPreserved": true,
+      "cacheDisabledAndCleared": true,
+      "cacheCapacityBytes": 33554432,
+      "networkRequestsExcludingRestart": 0
+    },
+    "linux": {
+      "ok": true,
+      "platform": "linux",
+      "arch": "x64",
+      "hashedBytes": 4362076160,
+      "resumedBytes": 71303168,
+      "readBytes": 4290772992,
+      "resumeMillis": 4848,
+      "processRestart": true,
+      "previewNoWrites": true,
+      "explicitPerItemSelection": true,
+      "batchLinked": 2,
+      "externalSourcesPreserved": true,
+      "cacheDisabledAndCleared": true,
+      "cacheCapacityBytes": 33554432,
+      "networkRequestsExcludingRestart": 0
+    },
+    "macos-arm64": {
+      "ok": true,
+      "platform": "darwin",
+      "arch": "arm64",
+      "hashedBytes": 4362076160,
+      "resumedBytes": 75497472,
+      "readBytes": 4286578688,
+      "resumeMillis": 5647,
+      "processRestart": true,
+      "previewNoWrites": true,
+      "explicitPerItemSelection": true,
+      "batchLinked": 2,
+      "externalSourcesPreserved": true,
+      "cacheDisabledAndCleared": true,
+      "cacheCapacityBytes": 33554432,
+      "networkRequestsExcludingRestart": 0
+    },
+    "macos-x64": {
+      "ok": true,
+      "platform": "darwin",
+      "arch": "x64",
+      "hashedBytes": 4362076160,
+      "resumedBytes": 71303168,
+      "readBytes": 4290772992,
+      "resumeMillis": 41920,
+      "processRestart": true,
+      "previewNoWrites": true,
+      "explicitPerItemSelection": true,
+      "batchLinked": 2,
+      "externalSourcesPreserved": true,
+      "cacheDisabledAndCleared": true,
+      "cacheCapacityBytes": 33554432,
+      "networkRequestsExcludingRestart": 0
+    }
+  },
+  "publicFiles": {
+    "linux-x64": {
+      "version": "0.2.29",
+      "files": {
+        "Helstera-0.2.29.AppImage": {
+          "bytes": 86340565,
+          "sha256": "a3dddaf8fd6172a615fa82b6f62a947e9e63f7755477210e430ed09ee275ea88"
+        },
+        "updates/linux-x64/Helstera-0.2.29-linux-x86_64.AppImage": {
+          "bytes": 86340565,
+          "sha256": "a3dddaf8fd6172a615fa82b6f62a947e9e63f7755477210e430ed09ee275ea88"
+        }
+      }
+    },
+    "macos-x64": {
+      "version": "0.2.29",
+      "files": {
+        "Helstera-0.2.29-macOS-x64.dmg": {
+          "bytes": 105014557,
+          "sha256": "828d817fb33f47f50539227fb4cdd8b610565818e40a0c36c3852780958f9715"
+        },
+        "updates/macos-x64/Helstera-0.2.29-mac-x64.dmg": {
+          "bytes": 105014557,
+          "sha256": "828d817fb33f47f50539227fb4cdd8b610565818e40a0c36c3852780958f9715"
+        }
+      }
+    },
+    "macos-arm64": {
+      "version": "0.2.29",
+      "files": {
+        "Helstera-0.2.29-macOS-arm64.dmg": {
+          "bytes": 101443622,
+          "sha256": "7f687b8b72274602711afd2d63c054ed07a8a81cecfd96aa902d00e7a152932b"
+        },
+        "updates/macos-arm64/Helstera-0.2.29-mac-arm64.dmg": {
+          "bytes": 101443622,
+          "sha256": "7f687b8b72274602711afd2d63c054ed07a8a81cecfd96aa902d00e7a152932b"
+        }
+      }
+    },
+    "windows": {
+      "Helstera-0.2.29-Windows-x64-portable.exe": {
+        "bytes": 95579862,
+        "sha256": "8a15af1755c79950fbcf4632ad49ec1d822f0dba214b65f11b20044f238c44d4"
+      },
+      "Helstera-0.2.29-Windows-x64.exe": {
+        "bytes": 95715811,
+        "sha256": "4774e47761a4a5b6bc96f0513b9b6566656bcebbd9d2c21c9a79be5e2ff448c6"
+      },
+      "updates/windows-x64/Helstera-Setup-0.2.29-Windows-x64.exe": {
+        "bytes": 95715811,
+        "sha256": "4774e47761a4a5b6bc96f0513b9b6566656bcebbd9d2c21c9a79be5e2ff448c6"
+      },
+      "version": "0.2.29"
+    }
+  },
+  "productionUI": {
+    "ok": true,
+    "realVideoCover": true,
+    "renameConfirmation": true,
+    "playbackAfterRelink": true,
+    "classifiedDisk": true,
+    "duplicatesByContent": true,
+    "cacheCleared": true,
+    "cacheCapacityConfigured": true,
+    "batchRelinkOnline": true,
+    "originalPreserved": true,
+    "darkAndLight": true,
+    "keyboardAt200Percent": true,
+    "cloudWrites": 0
+  },
+  "productionHealth": {
+    "checkedAt": "2026-11-10T12:00:43.889847+00:00",
+    "sourcesVerified": 3,
+    "disk": "Filesystem      Size  Used Avail Use% Mounted on\n/dev/vda1        30G   28G  2.2G  93% /\n/dev/vdb1        79G   73G  1.7G  98% /www",
+    "checks": [
+      {
+        "path": "/api/health",
+        "status": 200
+      },
+      {
+        "path": "/api/agent/browser/sessions",
+        "status": 401
+      },
+      {
+        "path": "/api/assets/private-video/uploads",
+        "status": 401
+      },
+      {
+        "path": "/downloads/desktop-release-windows-x64.json",
+        "status": 200,
+        "version": "0.2.29"
+      }
+    ],
+    "uploadStaging": {
+      "parts": 0,
+      "bytes": 0
+    },
+    "ok": true
+  },
+  "linuxInstalledUpgrade": {
+    "ok": true,
+    "from": "0.2.27",
+    "to": "0.2.28",
+    "realAppImageReplacement": true,
+    "sandboxEnabled": true,
+    "isolatedFixedUpdateFeed": true,
+    "publicPackageSha256": "38a11b6433ca9a1f3d266ad656c03907ee742dd2e5dde4e3dd0f9fd4df2be622",
+    "directoryPreserved": true,
+    "mediaBytesPreserved": true,
+    "originalSnapshotPreserved": true,
+    "restoredThroughApiFixture": true,
+    "mediaDecodedAfterUpgrade": true,
+    "evidenceRun": 42816534461,
+    "ciConclusion": "success"
+  },
+  "windowsInstalledUpgrade": {
+    "ok": true,
+    "from": "0.2.28",
+    "to": "0.2.29",
+    "installedPayloadEqual": true,
+    "asarSha256": "6a54e83e87a332a9b0abf962f69c632d2e42006d137a293442ae073398c14087",
+    "settingsPreserved": true,
+    "workspacePreserved": true,
+    "restartRestored": true
+  },
+  "publicDownloadUI": {
+    "ok": true,
+    "platforms": [
+      "windows-x64",
+      "macos-arm64",
+      "macos-x64",
+      "linux-x64"
+    ],
+    "version": "0.2.29",
+    "visibleLinks": true,
+    "narrowNoOverflow": true
+  },
+  "postReleaseCI": 42811968648,
+  "updateChannels": {
+    "linux-x64": {
+      "ok": true,
+      "platform": "linux-x64",
+      "version": "0.2.29",
+      "realPackagedUpdateCheck": true,
+      "state": {
+        "status": "not-available",
+        "message": "当前已是最新版本",
+        "currentVersion": "0.2.29"
+      },
+      "installationMode": "appimage"
+    },
+    "macos-arm64": {
+      "ok": true,
+      "platform": "macos-arm64",
+      "version": "0.2.29",
+      "realPackagedUpdateCheck": true,
+      "state": {
+        "status": "not-available",
+        "reason": "manual install required",
+        "version": "0.2.29",
+        "downloadUrl": "https://studio.0st.top/downloads/Helstera-0.2.29-macOS-arm64.dmg",
+        "message": "当前已是最新版本。macOS 使用 DMG 手动替换应用。",
+        "currentVersion": "0.2.29"
+      },
+      "installationMode": "manual-dmg"
+    },
+    "macos-x64": {
+      "ok": true,
+      "platform": "macos-x64",
+      "version": "0.2.29",
+      "realPackagedUpdateCheck": true,
+      "state": {
+        "status": "not-available",
+        "reason": "manual install required",
+        "version": "0.2.29",
+        "downloadUrl": "https://studio.0st.top/downloads/Helstera-0.2.29-macOS-x64.dmg",
+        "message": "当前已是最新版本。macOS 使用 DMG 手动替换应用。",
+        "currentVersion": "0.2.29"
+      },
+      "installationMode": "manual-dmg"
+    }
+  }
+}
