@@ -58,4 +58,14 @@ describe("desktop workspace recovery", () => {
     Object.defineProperty(window, "webContents", { get() { throw new Error("Object has been destroyed"); } });
     expect(() => loader.dispose()).not.toThrow();
   });
+  it("keeps a newer user navigation when the startup request is aborted", async () => {
+    const { loader, window, contents } = harness();
+    let rejectStartup!: (error: Error) => void;
+    window.loadURL.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectStartup = reject; }));
+    const startup = loader.open("https://studio.test/desktop-app/");
+    contents.emit("did-start-navigation", {}, "https://studio.test/desktop-app/settings/", false, true);
+    rejectStartup(new Error("ERR_ABORTED (-3)")); await startup;
+    expect(window.loadFile).not.toHaveBeenCalled();
+    loader.dispose();
+  });
 });

@@ -37,6 +37,7 @@ export class WorkspaceLoader {
   private crashed = () => { this.recovering = false; void this.recover("crashed"); };
   private started = (_event: unknown, url: string, inPlace: boolean, mainFrame: boolean) => {
     if (!mainFrame || inPlace || !this.isWorkspaceUrl(url)) return;
+    ++this.generation;
     this.target = url;
     this.recovering = false;
     this.armTimeout();
@@ -53,7 +54,8 @@ export class WorkspaceLoader {
     const generation = ++this.generation;
     this.armTimeout();
     try { await this.window.loadURL(url); }
-    catch {
+    catch (error) {
+      if (error instanceof Error && (error.message.includes("ERR_ABORTED") || (error as Error & { errno?: number }).errno === -3)) return;
       if (generation === this.generation && !this.window.isDestroyed()) await this.recover("offline");
     }
   }
