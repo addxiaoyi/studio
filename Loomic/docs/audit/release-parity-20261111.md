@@ -43,3 +43,23 @@
 ## 交付边界
 
 本报告记录源码、只读生产状态与本机回归，不表示本轮已切流。旧 `helstera-73d23ce-20261111.zip` 没有这些合并，不可作为当前发布包使用。应重新构建、核对线上差异、验证数据库备份恢复和两项工程增量迁移，再用就绪切流流程发布。九项总目标中的本地独立工程、长片压力、统一 Agent 和供应商最终结算等仍需继续。
+
+## 本轮最终检查点
+
+生产行为合并已推送 `25736c70b0cf31b1e41326934b2dce7d16442291`。以下均为该代码提交的最终 success：
+
+- [Agent Closure CI 42967469444](https://github.com/addxiaoyi/studio/actions/runs/42967469444)：数据库、四包类型与真实编辑器/录制/工作流浏览器任务全部通过。
+- [Desktop Candidate CI 42967469466](https://github.com/addxiaoyi/studio/actions/runs/42967469466)：Windows、Linux、macOS ARM/Intel 全部通过。
+- [Website Capture CI 42967469378](https://github.com/addxiaoyi/studio/actions/runs/42967469378)：通过。
+
+本机 Web 生产构建 exit 0，68 个页面导出。实际静态候选在 Chromium 验证注册页 1440/640/320 像素、表单无横向溢出、键盘返回邮箱、验证码载荷及成功导航。发送和注册接口注入测试响应，未发送真实邮件。截图已打开检查，位于 `M:/loomic-builds/registration-parity-20261111/`。
+
+候选文件 `release-candidates/helstera-25736c7-20261111.zip` 为 166,502,480 字节，SHA-256 `e7537d8414e832a7b207fa2c5d8be2784474fc188e3c1ab04e53689d168d557d`。已完整上传到 `/www/helstera/.ops-system-upgrade/project-25736c7.zip`，远端摘要一致。
+
+线上依赖清单缺少候选新增的 gsap 3.13.0，因此没有复用旧依赖。在独立目录 `/www/helstera/.releases/project-25736c7` 安装候选运行时，pnpm 完成文件安装后，整份锁文件的供应链检查因桌面专用 `@nut-tree/default-clipboard-provider` 在 npm 返回 404 而退出 1。`--filter @helstera/server...` 不足以限制整份锁文件的检查范围。不能将该目录视为已就绪；它尚无完整启动配置，也没有启动进程。下一步须生成仅含 Server 依赖闭包的锁文件，保留完整性与供应链检查，再完成独立运行时安装及加载验证。
+
+数据库实时预检为 2,287,377,767 字节、51 条已应用迁移、后台 queued/running 任务 0。实际待迁移有三项：`20261107000000_free_generation_confirmation`、`20261110000001_project_context`、`20261110000002_project_video_documents`。另有历史已应用 `20261027000000_agent_marketplace_installs` 摘要漂移；其线上文件与当前源码相同，但迁移记录摘要不同。本轮未改写该记录，也未重跑该迁移。
+
+本轮没有创建数据库备份、恢复数据库、应用生产迁移、启动候选、切换 Nginx 或发布安装器。14:01（Asia/Shanghai）再次读取生产 readiness：HTTP 200，仍为 `0.0.0-stability-20261110-1`，数据库、存储及接单检查全部正常。
+
+续作脚本均无明文凭据，位于 `M:/loomic-builds/`：`stage-project-candidate-20261111.py`、`inspect-project-database-20261111.py`、`rehearse-project-database-20261111.py`。上传进程和失败安装均已结束。继续时先检查独立目录及安装日志；不要直接重跑会拒绝既存目录的暂存脚本，不要覆盖当前活跃 release。数据库恢复脚本仍未执行，须在运行时就绪后使用。
