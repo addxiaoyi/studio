@@ -332,6 +332,7 @@ class DeployCandidateTests(unittest.TestCase):
         self.assertIn("Candidate runtime contains preinstalled dependencies", command)
         self.assertLess(command.index("-name node_modules"), command.index("pnpm install"))
         self.assertIn("cd deploy/server-runtime && CI=true pnpm install", command)
+        self.assertIn("--filter @helstera/server...", command)
 
     def test_runtime_gate_rejects_shared_without_workflow_exports(self):
         node = shutil.which("node")
@@ -397,7 +398,7 @@ class DeployCandidateTests(unittest.TestCase):
         self.assertIn("apps/server/src/agent/workspace-skills.ts", script)
         self.assertIn("deploy/server-runtime/pnpm-lock.yaml", script)
         self.assertNotIn("tsc -p {stage}/next/apps/server/tsconfig.json", script)
-        self.assertIn("cd deploy/server-runtime && CI=true pnpm install --frozen-lockfile --ignore-scripts --no-prod", script)
+        self.assertIn("cd deploy/server-runtime && CI=true pnpm install --frozen-lockfile --ignore-scripts --no-prod --filter @helstera/server...", script)
         self.assertIn("apps/server/node_modules", script)
 
     def test_runtime_switch_and_restore_keep_both_versions(self):

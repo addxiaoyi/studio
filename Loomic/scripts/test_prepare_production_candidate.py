@@ -15,6 +15,22 @@ SPEC.loader.exec_module(candidate)
 
 
 class ProductionCandidateTests(unittest.TestCase):
+    def test_tracked_onetake_snapshot_builds_without_a_vendor_checkout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            feature = root / "apps/server/src/features/onetake"
+            upstream = feature / "upstream/asr_demo.py"
+            upstream.parent.mkdir(parents=True)
+            (feature / "runner.py").write_text("adapter", encoding="utf-8")
+            upstream.write_text("reviewed source", encoding="utf-8")
+            upstream.with_name("README.md").write_text("Copyright (c) 2026 One Take Team", encoding="utf-8")
+            with patch.object(candidate, "ONETAKE_SHA", candidate.sha256(upstream)):
+                paths = candidate.one_take_sources(root)
+                self.assertEqual(paths["apps/server/src/features/onetake/upstream/asr_demo.py"], upstream)
+                upstream.write_text("changed source", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "reviewed revision"):
+                    candidate.one_take_sources(root)
+
     def test_onetake_source_and_copyright_are_verified_before_packaging(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -61,18 +77,26 @@ class ProductionCandidateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source, build = root / "source", root / "build"
-            for relative in ("apps/web/src", "apps/web/public", "packages/shared/src", "apps/server/src", "deploy/server-runtime"):
-                (source / relative).mkdir(parents=True)
+            for relative in ("apps/web/src", "apps/web/public", "packages/shared/src", "packages/shared/dist",
+                             "apps/server/src", "apps/server", "apps/web", "apps/desktop", "packages/config"):
+                (source / relative).mkdir(parents=True, exist_ok=True)
             for relative in ("apps/web/src", "apps/web/public", "packages/shared/src"):
                 (build / relative).mkdir(parents=True)
             for relative in ("apps/web/out", "packages/shared/dist"):
                 (build / relative).mkdir(parents=True)
-            for relative in ("apps/server/src/app.ts", "deploy/server-runtime/pnpm-lock.yaml"):
-                (source / relative).write_text("source", encoding="utf-8")
-            old_shared = source / "deploy/server-runtime/packages/shared/dist"
-            old_shared.mkdir(parents=True)
+            runtime_manifests = (
+                "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
+                "apps/server/package.json", "apps/web/package.json", "apps/desktop/package.json",
+                "packages/shared/package.json", "packages/config/package.json",
+            )
+            for relative in ("apps/server/src/app.ts", *runtime_manifests):
+                path = source / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("source", encoding="utf-8")
+            old_shared = source / "packages/shared/dist"
             (old_shared / "contracts.js").write_text("stale contracts", encoding="utf-8")
             (old_shared / "removed.js").write_text("obsolete contract", encoding="utf-8")
+            (source / ".env").write_text("must not ship", encoding="utf-8")
             for relative in ("apps/web/out/index.html", "apps/web/out/fashion-gallery/index.html",
                              "apps/web/out/video/index.html", "packages/shared/dist/contracts.js"):
                 path = build / relative
@@ -88,6 +112,9 @@ class ProductionCandidateTests(unittest.TestCase):
                 manifest = json.loads(bundle.read("RELEASE-MANIFEST.json"))
                 self.assertEqual(bundle.read("deploy/server-runtime/packages/shared/dist/contracts.js"), b"build")
                 self.assertNotIn("deploy/server-runtime/packages/shared/dist/removed.js", bundle.namelist())
+                for relative in runtime_manifests:
+                    self.assertEqual(bundle.read(f"deploy/server-runtime/{relative}"), b"source")
+                self.assertNotIn("deploy/server-runtime/.env", bundle.namelist())
                 self.assertEqual(set(manifest["files"]), set(bundle.namelist()) - {"RELEASE-MANIFEST.json"})
                 for name, item in manifest["files"].items():
                     self.assertEqual(item["sha256"], __import__("hashlib").sha256(bundle.read(name)).hexdigest())

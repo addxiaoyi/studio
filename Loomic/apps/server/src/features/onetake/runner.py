@@ -15,7 +15,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[5]
 PACKAGED_SOURCE = Path(__file__).resolve().parent / "upstream/asr_demo.py"
 SOURCE = Path(os.environ.get("HELSTERA_ONETAKE_SOURCE", PACKAGED_SOURCE if PACKAGED_SOURCE.is_file() else ROOT / "vendor/onetake/asr_demo.py"))
-SOURCE_SHA = "9b002bd9f3245cd89446dbcd094059e4899d59851316b71186d3dea93f0a9b29"
+SOURCE_SHA = "c461e5be04492cae7a19ee21c31270b25d9746be5222706ec2da0ed11f5ac706"
 FFMPEG = os.environ.get("HELSTERA_FFMPEG", "ffmpeg")
 FFPROBE = os.environ.get("HELSTERA_FFPROBE", "ffprobe")
 MAX_DURATION = 7200
@@ -38,9 +38,15 @@ def inspect_media(path: str) -> dict:
     return {"duration": duration, "audio": any(stream["codec_type"] == "audio" for stream in metadata["streams"]), "video": bool(video), "width": int(video.get("width", 0)), "height": int(video.get("height", 0))}
 
 
-def upstream():
-    if hashlib.sha256(SOURCE.read_bytes()).hexdigest() != SOURCE_SHA:
+def verify_source(path: Path) -> None:
+    # Git checkouts may use CRLF on Windows; only normalize line endings.
+    content = path.read_bytes().replace(b"\r\n", b"\n")
+    if hashlib.sha256(content).hexdigest() != SOURCE_SHA:
         raise RuntimeError("OneTake source differs from the reviewed pinned version.")
+
+
+def upstream():
+    verify_source(SOURCE)
     spec = importlib.util.spec_from_file_location("loomic_onetake_asr", SOURCE)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

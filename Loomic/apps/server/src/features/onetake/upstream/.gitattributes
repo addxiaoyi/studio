@@ -1,0 +1,3 @@
+* text eol=lf
+# Keep the reviewed upstream bytes, including their trailing spaces.
+asr_demo.py -whitespace

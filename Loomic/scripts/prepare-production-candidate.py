@@ -11,7 +11,7 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ONETAKE_SHA = "9b002bd9f3245cd89446dbcd094059e4899d59851316b71186d3dea93f0a9b29"
+ONETAKE_SHA = "c461e5be04492cae7a19ee21c31270b25d9746be5222706ec2da0ed11f5ac706"
 INPUT_TREES = ("apps/web/src", "packages/shared/src")
 INPUT_FILES = (
     "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.base.json",
@@ -20,7 +20,6 @@ INPUT_FILES = (
 )
 INCLUDE_TREES = (
     ("apps/server/src", "source"),
-    ("deploy/server-runtime", "source"),
     ("apps/web/out", "build"),
     ("packages/shared/dist", "build"),
 )
@@ -55,6 +54,27 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def server_runtime_manifests(source: Path) -> dict[str, Path]:
+    runtime = Path("deploy/server-runtime")
+    manifests = [source / name for name in ("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml")]
+    manifests.extend(source / app / "package.json" for app in ("apps/server", "apps/web", "apps/desktop"))
+    packages = source / "packages"
+    if not packages.is_dir() or packages.is_symlink():
+        raise FileNotFoundError(packages)
+    package_dirs = sorted(packages.iterdir())
+    if any(path.is_symlink() for path in package_dirs):
+        raise ValueError("Symbolic links are not allowed in server runtime workspaces.")
+    manifests.extend(path / "package.json" for path in package_dirs if path.is_dir())
+
+    runtime_files: dict[str, Path] = {}
+    for manifest in manifests:
+        if not manifest.is_file() or manifest.is_symlink():
+            raise FileNotFoundError(manifest)
+        relative = manifest.relative_to(source).as_posix()
+        runtime_files[(runtime / relative).as_posix()] = manifest
+    return runtime_files
+
+
 def verify_build_inputs(source: Path, build: Path) -> None:
     for relative in INPUT_TREES + ("apps/web/public",):
         source_files = files_under(source / relative, exclude_downloads=relative == "apps/web/public")
@@ -77,9 +97,8 @@ def create_candidate(source: Path, build: Path, destination: Path) -> str:
     for relative, origin in INCLUDE_TREES:
         root = (source if origin == "source" else build) / relative
         for name, path in files_under(root, exclude_downloads=relative == "apps/web/out").items():
-            if relative == "deploy/server-runtime" and name.startswith("packages/shared/dist/"):
-                continue
             paths[f"{relative}/{name}"] = path
+    paths.update(server_runtime_manifests(source))
     # The runtime must load the same contracts as the candidate source tree.
     for name, path in files_under(build / "packages/shared/dist").items():
         paths[f"deploy/server-runtime/packages/shared/dist/{name}"] = path
@@ -91,7 +110,8 @@ def create_candidate(source: Path, build: Path, destination: Path) -> str:
     paths.update(one_take_sources(source))
     required = ("apps/web/out/index.html", "apps/web/out/fashion-gallery/index.html",
                 "apps/web/out/video/index.html", "packages/shared/dist/contracts.js",
-                "deploy/server-runtime/pnpm-lock.yaml", "apps/server/src/app.ts")
+                "deploy/server-runtime/pnpm-lock.yaml", "deploy/server-runtime/apps/server/package.json",
+                "deploy/server-runtime/packages/shared/package.json", "apps/server/src/app.ts")
     for relative in required:
         if relative not in paths:
             raise FileNotFoundError(f"Candidate is missing {relative}")
@@ -108,9 +128,13 @@ def create_candidate(source: Path, build: Path, destination: Path) -> str:
 def one_take_sources(source: Path) -> dict[str, Path]:
     if not (source / "apps/server/src/features/onetake/runner.py").is_file():
         return {}
-    upstream = source / "vendor/onetake/asr_demo.py"
-    notice = source / "vendor/onetake/README.md"
-    if sha256(upstream) != ONETAKE_SHA:
+    packaged = source / "apps/server/src/features/onetake/upstream"
+    directory = packaged if packaged.exists() else source / "vendor/onetake"
+    upstream = directory / "asr_demo.py"
+    notice = directory / "README.md"
+    if directory.is_symlink() or any(path.is_symlink() for path in (upstream, notice)):
+        raise ValueError("Symbolic links are not allowed in OneTake source inputs.")
+    if hashlib.sha256(upstream.read_bytes().replace(b"\r\n", b"\n")).hexdigest() != ONETAKE_SHA:
         raise ValueError("OneTake source does not match the reviewed revision.")
     if "Copyright (c) 2026 One Take Team" not in notice.read_text(encoding="utf-8"):
         raise ValueError("OneTake copyright notice is missing.")

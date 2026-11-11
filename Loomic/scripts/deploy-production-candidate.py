@@ -357,7 +357,7 @@ def prepare_candidate_runtime_command(staging: str) -> str:
         "{ echo 'Candidate runtime contains preinstalled dependencies' >&2; exit 1; }; "
         "mkdir -p deploy/server-runtime/packages/shared/dist; "
         "cp -a packages/shared/dist/. deploy/server-runtime/packages/shared/dist/; "
-        "(cd deploy/server-runtime && CI=true pnpm install --frozen-lockfile --ignore-scripts --no-prod); "
+        "(cd deploy/server-runtime && CI=true pnpm install --frozen-lockfile --ignore-scripts --no-prod --filter @helstera/server...); "
         "ln -s deploy/server-runtime/node_modules node_modules; "
         "ln -s ../../deploy/server-runtime/apps/server/node_modules apps/server/node_modules; "
         "test -f deploy/server-runtime/packages/shared/dist/index.js; "
