@@ -158,6 +158,11 @@ export async function registerProjectRoutes(
         });
       }
 
+      if (requestKey && options.projectService.createProjectIdempotent) {
+        const project = await options.projectService.createProjectIdempotent(user, payload, requestKey);
+        return reply.code(201).send(projectCreateResponseSchema.parse({ project }));
+      }
+
       const cacheKey = requestKey ? `${user.id}:${requestKey}` : "";
       const cached = cacheKey ? createdProjects.get(cacheKey) : undefined;
       if (cached && cached.expiresAt > Date.now()) {

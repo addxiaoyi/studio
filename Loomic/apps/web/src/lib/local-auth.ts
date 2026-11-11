@@ -155,8 +155,8 @@ export async function resetLocalPassword(email: string, code: string, password: 
   return (await response.json()) as { access_token: string; user: { id: string; email: string } };
 }
 
-export async function registerLocal(email: string, password: string) {
-  const response = await localAuthFetch("/api/local-auth/register", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }) });
+export async function registerLocal(email: string, password: string, code: string) {
+  const response = await localAuthFetch("/api/local-auth/register", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password, code }) });
   if (!response.ok) { const body = await response.json().catch(() => null); throw new Error(body?.error?.message ?? "注册失败，请稍后重试"); }
   return (await response.json()) as { access_token: string; user: { id: string; email: string } };
 }

@@ -43,7 +43,9 @@ export function createLocalChatService(db: Pool): ChatService {
       return messages.filter((message, index) =>
         index === 0 ||
         message.role !== messages[index - 1]!.role ||
-        message.content !== messages[index - 1]!.content,
+        message.content !== messages[index - 1]!.content ||
+        Boolean(message.contentBlocks?.length || message.toolActivities?.length ||
+          messages[index - 1]!.contentBlocks?.length || messages[index - 1]!.toolActivities?.length),
       );
     },
     async createMessage(user, sessionId, input: ChatMessageCreateRequest) {

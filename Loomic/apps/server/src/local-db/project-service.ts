@@ -1,4 +1,5 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Pool } from "pg";
 import type { ProjectCreateRequest, ProjectSource, ProjectSummary, ProjectUpdateRequest } from "@helstera/shared";
@@ -9,6 +10,17 @@ const PROJECT_ASSETS_BUCKET = "project-assets";
 export function createLocalProjectService(db: Pool, uploadRoot = "/www/helstera/uploads"): ProjectService {
   const deadlockRetries = new Map<string, number>();
   const createLocks = new Map<string, Promise<ProjectSummary>>();
+  async function enqueueCreate(user: Parameters<ProjectService["createProject"]>[0], input: ProjectCreateRequest, requestKey?: string) {
+    const active = createLocks.get(user.id);
+    const run = () => createProjectOnce(db, uploadRoot, user, input, deadlockRetries, requestKey);
+    const creation = active ? active.catch(() => undefined).then(run) : run();
+    createLocks.set(user.id, creation);
+    try {
+      return await creation;
+    } finally {
+      if (createLocks.get(user.id) === creation) createLocks.delete(user.id);
+    }
+  }
   return {
     async listProjects(user) {
       const workspace = await personalWorkspace(db, user.id);
@@ -44,15 +56,10 @@ export function createLocalProjectService(db: Pool, uploadRoot = "/www/helstera/
       return project;
     },
     async createProject(user, input) {
-      const active = createLocks.get(user.id);
-      if (active) return active;
-      const creation = createProjectOnce(db, uploadRoot, user, input, deadlockRetries);
-      createLocks.set(user.id, creation);
-      try {
-        return await creation;
-      } finally {
-        if (createLocks.get(user.id) === creation) createLocks.delete(user.id);
-      }
+      return enqueueCreate(user, input);
+    },
+    async createProjectIdempotent(user, input, requestKey) {
+      return enqueueCreate(user, input, requestKey);
     },
     async updateProject(user, projectId, input: ProjectUpdateRequest) {
       const workspace = await personalWorkspace(db, user.id);
@@ -142,7 +149,7 @@ export function createLocalProjectService(db: Pool, uploadRoot = "/www/helstera/
   };
 }
 
-async function createProjectOnce(db: Pool, uploadRoot: string, user: any, input: ProjectCreateRequest, deadlockRetries: Map<string, number>): Promise<ProjectSummary> {
+async function createProjectOnce(db: Pool, uploadRoot: string, user: any, input: ProjectCreateRequest, deadlockRetries: Map<string, number>, requestKey?: string): Promise<ProjectSummary> {
       const workspace = await personalWorkspace(db, user.id);
       const name = input.name.trim();
       const slug = slugify(name);
@@ -150,6 +157,15 @@ async function createProjectOnce(db: Pool, uploadRoot: string, user: any, input:
       try {
         await client.query("begin");
         await client.query("select pg_advisory_xact_lock(hashtext($1))", [user.id]);
+        const fingerprint = createHash("sha256").update(JSON.stringify({ name, description: input.description?.trim() || null, source: resolveProjectSource(input.source) })).digest("hex");
+        if (requestKey) {
+          const previous = await client.query("select request_hash, response from project_creation_requests where user_id = $1 and request_key = $2", [user.id, requestKey]);
+          if (previous.rows[0]) {
+            if (previous.rows[0].request_hash !== fingerprint) throw new ProjectServiceError("project_idempotency_conflict", "Idempotency key was already used for a different project.", 409);
+            await client.query("commit");
+            return previous.rows[0].response as ProjectSummary;
+          }
+        }
         const project = await client.query(
           `insert into projects (workspace_id, created_by, name, slug, description, source, brand_kit_id)
            values ($1, $2, $3, $4, $5, $6, (select id from brand_kits where user_id = $2 and is_default limit 1))
@@ -161,10 +177,13 @@ async function createProjectOnce(db: Pool, uploadRoot: string, user: any, input:
            values ($1, $2, 'Main Canvas', true) returning id, name, is_primary`,
           [project.rows[0].id, user.id],
         );
+        const summary = mapSummary({ ...project.rows[0], canvas_id: canvas.rows[0].id, canvas_name: canvas.rows[0].name, is_primary: true }, workspace);
+        if (requestKey) await client.query("insert into project_creation_requests (user_id, request_key, request_hash, response) values ($1, $2, $3, $4::jsonb)", [user.id, requestKey, fingerprint, JSON.stringify(summary)]);
         await client.query("commit");
-        return mapSummary({ ...project.rows[0], canvas_id: canvas.rows[0].id, canvas_name: canvas.rows[0].name, is_primary: true }, workspace);
+        return summary;
       } catch (error) {
         await client.query("rollback");
+        if (error instanceof ProjectServiceError) throw error;
         console.error("[projects] local create failed", {
           code: (error as { code?: string }).code,
           message: error instanceof Error ? error.message : String(error),
@@ -176,7 +195,7 @@ async function createProjectOnce(db: Pool, uploadRoot: string, user: any, input:
           deadlockRetries.set(user.id, retryCount + 1);
           await new Promise((resolve) => setTimeout(resolve, 80));
           try {
-            return await createProjectOnce(db, uploadRoot, user, input, deadlockRetries);
+            return await createProjectOnce(db, uploadRoot, user, input, deadlockRetries, requestKey);
           } finally {
             if (retryCount === 0) deadlockRetries.delete(user.id);
             else deadlockRetries.set(user.id, retryCount);

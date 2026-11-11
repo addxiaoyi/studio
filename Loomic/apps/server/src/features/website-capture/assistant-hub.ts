@@ -36,6 +36,7 @@ import {
 } from "./action-policy.js";
 import { decodeJpegPayload } from "./capture-payload.js";
 import { softDeleteWebsiteCaptureAssets } from "./asset-cleanup.js";
+import { claimApprovedRecording, recordingActionFromTask } from "./recording-approval.js";
 import { deliverDesktopChatOutbox } from "./desktop-chat-outbox.js";
 import {
   type CaptureTask,
@@ -104,6 +105,7 @@ type HubOptions = {
 
 type LocalTask = CaptureTask & {
   mode: "local";
+  session_id: string | null;
   status: string;
   assistant_connection_id: string;
   follow_external: boolean;
@@ -754,7 +756,7 @@ export class WebsiteAssistantHub {
 
   async startLocalTask(taskId: string, userId: string): Promise<void> {
     const { rows } = await this.options.db.query<LocalTask>(
-      `select id,workspace_id,created_by,start_url,page_limit,record_video,status,assistant_connection_id,follow_external
+      `select id,workspace_id,created_by,mode,session_id,start_url,page_limit,record_video,status,assistant_connection_id,follow_external
          from website_capture_tasks where id=$1 and created_by=$2 and mode='local'`,
       [taskId, userId],
     );
@@ -763,6 +765,13 @@ export class WebsiteAssistantHub {
     const live = this.connections.get(task.assistant_connection_id);
     if (!live || live.ws.readyState !== 1 || live.paused)
       throw new Error("Local browser assistant is not connected.");
+    const claimed = task.record_video
+      ? await claimApprovedRecording(this.options.db, taskId, recordingActionFromTask(task))
+      : (await this.options.db.query<{ id: string }>(
+        "update website_capture_tasks set status='running', stage='connecting', progress=2, updated_at=now() where id=$1 and record_video=false and status='queued' returning id",
+        [taskId],
+      )).rows.length === 1;
+    if (!claimed) throw new Error("Website capture could not be claimed or recording approval is required.");
     await this.cleanupTaskAssets(taskId);
     this.pages.delete(taskId);
     this.lastProgressEventAt.delete(taskId);
@@ -770,11 +779,6 @@ export class WebsiteAssistantHub {
       "update website_capture_actions set status='expired' where task_id=$1 and status in ('pending','approved')",
       [taskId],
     );
-    const claimed = await this.options.db.query<{ id: string }>(
-      "update website_capture_tasks set status='running', stage='connecting', progress=2, updated_at=now() where id=$1 and status='queued' returning id",
-      [taskId],
-    );
-    if (!claimed.rows[0]) return;
     await this.event(taskId, "connecting", "正在连接已授权的本地浏览器标签页");
     this.clearTaskTimer(taskId);
     this.taskTimers.set(
@@ -2445,6 +2449,17 @@ export class WebsiteAssistantHub {
     const pages = this.pages.get(task.id) ?? [];
     if (!pages.length)
       return this.failTask(live, task.id, "本地浏览器没有返回页面证据。");
+    if (task.record_video && !message.recordingBase64)
+      return this.failTask(live, task.id, "Website recording was not produced. Please retry.");
+    if (!task.record_video && message.recordingBase64)
+      return this.failTask(live, task.id, "Unexpected website recording for a task without recording enabled.");
+    if (message.recordingBase64) {
+      try {
+        decodeDesktopRecording(String(message.recordingBase64));
+      } catch {
+        return this.failTask(live, task.id, "Website recording is invalid or exceeds the size limit.");
+      }
+    }
     let recordingAsset: { id: string; url: string } | undefined;
     if (message.recordingBase64) {
       const encoded = String(message.recordingBase64);

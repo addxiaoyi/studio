@@ -141,6 +141,8 @@ import { createProviderConfigService } from "./local-db/provider-config-service.
 import { registerUploadRoutes } from "./http/uploads.js";
 import { registerPrivateVideoRoutes } from "./http/private-video.js";
 import { registerVideoUploadRoutes } from "./http/video-upload.js";
+import { registerPublicMediaRoutes } from "./http/public-media.js";
+import { loadPublicMedia } from "./storage/public-media.js";
 import { registerSkillRoutes } from "./http/skills.js";
 import { registerLocalSkillRoutes } from "./http/local-skills.js";
 import { registerMarketplaceRoutes } from "./http/skills-marketplace.js";
@@ -267,7 +269,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const agentPersistenceService =
     options.agentPersistenceService ?? createAgentPersistenceService(env);
   const settingsService = options.settingsService ?? createLocalSettingsService(localDb);
-  const uploadService = options.uploadService ?? createLocalUploadService(localDb);
+  const uploadService = options.uploadService ?? createLocalUploadService(localDb, env.storageRoot ?? "/www/helstera/uploads");
   const feedDb = localDb;
   configureFeedRenderQueue("local");
   const jobService = options.jobService ?? createLocalJobService(localDb, createLocalJobQueue(localDb));
@@ -573,6 +575,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
   registerPrivateVideoRoutes(app, { auth, viewerService, db: localDb, storage: storageProvider });
   void registerVideoUploadRoutes(app, { auth, viewerService, db: localDb, storage: storageProvider, root: env.storageRoot ?? "/www/helstera/uploads" });
+  registerPublicMediaRoutes(app, loadPublicMedia());
   void registerGenerateRoutes(app, {
     auth,
     creditService,

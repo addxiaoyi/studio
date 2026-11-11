@@ -36,6 +36,11 @@ export type ProjectService = {
     user: AuthenticatedUser,
     input: ProjectCreateRequest,
   ): Promise<ProjectSummary>;
+  createProjectIdempotent?(
+    user: AuthenticatedUser,
+    input: ProjectCreateRequest,
+    requestKey: string,
+  ): Promise<ProjectSummary>;
   getProject(
     user: AuthenticatedUser,
     projectId: string,
@@ -68,6 +73,7 @@ export class ProjectServiceError extends Error {
   readonly statusCode: number;
   readonly code:
     | "project_create_failed"
+    | "project_idempotency_conflict"
     | "project_delete_failed"
     | "project_not_found"
     | "project_query_failed"
@@ -77,6 +83,7 @@ export class ProjectServiceError extends Error {
   constructor(
     code:
       | "project_create_failed"
+      | "project_idempotency_conflict"
       | "project_delete_failed"
       | "project_not_found"
       | "project_query_failed"

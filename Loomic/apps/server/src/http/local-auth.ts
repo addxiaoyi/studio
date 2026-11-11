@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { randomBytes } from "node:crypto";
 import type { Pool } from "pg";
 import nodemailer from "nodemailer";
-import { issueLoginToken, exchangeLoginToken, getLocalSession, revokeLocalSession, verifyPassword, hashToken, issueVerificationCode, verifyVerificationCode, hashPassword } from "../local-db/auth.js";
+import { issueLoginToken, exchangeLoginToken, getLocalSession, revokeLocalSession, verifyPassword, hashToken, issueVerificationCode, verifyVerificationCode, hashPassword, registerWithVerificationCode } from "../local-db/auth.js";
 import type { ServerEnv } from "../config/env.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -16,16 +16,18 @@ function sessionCookie(value: string, webOrigin: string) {
 }
 
 export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Pool; env: ServerEnv }) {
-  app.post<{ Body: { email?: string; password?: string } }>("/api/local-auth/register", async (request, reply) => {
-    const email = request.body?.email?.trim().toLowerCase();
-    const password = request.body?.password ?? "";
+  app.post<{ Body: { email?: string; password?: string; code?: string } }>("/api/local-auth/register", async (request, reply) => {
+    const email = typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
+    const password = typeof request.body?.password === "string" ? request.body.password : "";
+    const code = typeof request.body?.code === "string" ? request.body.code.trim() : "";
     if (!email || !emailPattern.test(email) || password.length < 8) return reply.code(400).send({ error: { code: "invalid_registration", message: "请输入有效邮箱和至少 8 位密码" } });
+    if (!/^\d{6}$/.test(code)) return reply.code(400).send({ error: { code: "invalid_code", message: "请输入 6 位邮箱验证码" } });
     const passwordHash = await hashPassword(password);
-    const { rows } = await options.db.query("insert into app_users (email, password_hash) values ($1, $2) on conflict (email) do update set password_hash=excluded.password_hash, updated_at=now() returning id,email", [email, passwordHash]);
-    const sessionToken = randomBytes(32).toString("base64url");
-    await options.db.query("insert into sessions (user_id, token_hash, expires_at) values ($1,$2,$3)", [rows[0].id, hashToken(sessionToken), new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)]);
-    reply.header("set-cookie", sessionCookie(sessionToken, options.env.webOrigin));
-    return reply.send({ ok: true, access_token: "local-session", user: rows[0] });
+    const result = await registerWithVerificationCode(options.db, email, code, passwordHash);
+    if (result.status === "invalid_code") return reply.code(400).send({ error: { code: "invalid_code", message: "验证码错误或已过期" } });
+    if (result.status === "account_exists") return reply.code(409).send({ error: { code: "account_exists", message: "该邮箱已注册，请登录或使用验证码找回账号。" } });
+    reply.header("set-cookie", sessionCookie(result.token, options.env.webOrigin));
+    return reply.send({ ok: true, access_token: "local-session", user: result.user });
   });
   // Legacy clients may still call the old path while their static bundle is cached.
   app.post("/api/auth/magic-link", async (request, reply) => {

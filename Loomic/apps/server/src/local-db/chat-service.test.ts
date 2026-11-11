@@ -32,6 +32,23 @@ function fakePool(handler: (sql: string, params: any[] | undefined) => QueryResu
 }
 
 describe("local chat message idempotency", () => {
+  it("keeps distinct tool results and attachments when their text is identical", async () => {
+    const rows = [
+      messageRow({ id: "text", role: "assistant", content: "" }),
+      messageRow({ id: "attachment", role: "assistant", content: "", content_blocks: [{ type: "text", text: "Screenshot saved" }] }),
+      messageRow({ id: "tool", role: "assistant", content: "", tool_activities: [{ id: "capture-1", toolName: "capture", status: "completed" }] }),
+    ];
+    const { pool } = fakePool((sql) => {
+      if (sql.startsWith("select 1 from chat_sessions")) return { rows: [{}], rowCount: 1 };
+      if (sql.includes("from chat_messages")) return { rows, rowCount: rows.length };
+      throw new Error(`unexpected query: ${sql}`);
+    });
+    const messages = await createLocalChatService(pool).listMessages(user, "session-1");
+    expect(messages.map(message => message.id)).toEqual(["text", "attachment", "tool"]);
+    expect(messages[1]?.contentBlocks).toHaveLength(1);
+    expect(messages[2]?.toolActivities).toHaveLength(1);
+  });
+
   it("returns the stored row and skips the insert when clientMessageId already exists", async () => {
     const { pool, calls } = fakePool((sql) => {
       if (sql.startsWith("select 1 from chat_sessions")) {

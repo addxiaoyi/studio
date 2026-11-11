@@ -3,13 +3,14 @@
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Separator } from "./ui/separator";
-import { registerLocal } from "../lib/local-auth";
+import { registerLocal, requestLocalCode } from "../lib/local-auth";
+import { useAuth } from "../lib/auth-context";
 import { t, useLocale } from "@/lib/i18n";
 
 const stagger = {
@@ -22,8 +23,13 @@ const fadeIn = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
 } as any;
 
+const CODE_RESEND_MS = 60_000;
+
 export function RegisterForm() {
-  const copy = t(useLocale()).registerForm;
+  const locale = t(useLocale());
+  const copy = locale.registerForm;
+  const authCopy = locale.authForm;
+  const { acceptSession } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -32,11 +38,54 @@ export function RegisterForm() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [consent, setConsent] = useState(false);
+  const [code, setCode] = useState("");
+  const [sendingCode, setSendingCode] = useState(false);
+  const [codeEmail, setCodeEmail] = useState("");
+  const [retryAt, setRetryAt] = useState(0);
+  const [now, setNow] = useState(Date.now);
+  const remaining = Math.max(0, Math.ceil((retryAt - now) / 1000));
+
+  useEffect(() => {
+    if (!retryAt) return;
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+      if (Date.now() >= retryAt) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [retryAt]);
+
+  function changeEmail(event: ChangeEvent<HTMLInputElement>) {
+    setEmail(event.target.value);
+    setCode("");
+    setError(null);
+  }
+
+  async function sendCode() {
+    const recipient = email.trim().toLowerCase();
+    if (sendingCode || loading || remaining > 0) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+      setError(copy.invalidEmail);
+      return;
+    }
+    setSendingCode(true);
+    setError(null);
+    try {
+      await requestLocalCode(recipient);
+      setCodeEmail(recipient);
+      const sentAt = Date.now();
+      setNow(sentAt);
+      setRetryAt(sentAt + CODE_RESEND_MS);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : authCopy.mailError);
+    } finally {
+      setSendingCode(false);
+    }
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const trimmed = email.trim();
-    if (!trimmed || !password) return;
+    const trimmed = email.trim().toLowerCase();
+    if (loading || sendingCode || !trimmed || !password) return;
     if (!consent) {
       setError(copy.consentError);
       return;
@@ -45,12 +94,16 @@ export function RegisterForm() {
       setError(copy.mismatch);
       return;
     }
+    if (!/^\d{6}$/.test(code)) {
+      setError(authCopy.codeError);
+      return;
+    }
 
     setLoading(true);
     setError(null);
 
     try {
-      await registerLocal(trimmed, password);
+      acceptSession(await registerLocal(trimmed, password, code));
       router.replace("/home");
     } catch (authError) {
       setError(
@@ -141,15 +194,43 @@ export function RegisterForm() {
                   type="email"
                   placeholder={copy.placeholder}
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={changeEmail}
+                  autoComplete="email"
+                  disabled={loading || sendingCode}
                   required
                 />
+              </div>
+              <div className="space-y-2.5">
+                <Label htmlFor="register-code">{authCopy.codeTitle}</Label>
+                <div className="flex flex-wrap gap-2">
+                  <Input
+                    id="register-code"
+                    className="min-w-0 flex-1 basis-28"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    pattern="[0-9]{6}"
+                    placeholder={authCopy.codePlaceholder}
+                    value={code}
+                    onChange={event => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                    disabled={loading}
+                    required
+                  />
+                  <Button type="button" variant="outline" onClick={sendCode} disabled={loading || sendingCode || remaining > 0}>
+                    {sendingCode ? authCopy.sending : remaining > 0 ? `${authCopy.resend} (${remaining}s)` : authCopy.sendCode}
+                  </Button>
+                </div>
+                {codeEmail === email.trim().toLowerCase() && codeEmail && (
+                  <p role="status" className="break-words text-xs text-muted-foreground">{authCopy.codeSent} {codeEmail}</p>
+                )}
               </div>
               <div className="space-y-2.5">
                 <Label htmlFor="register-password">{copy.password}</Label>
                 <Input
                   id="register-password"
                   type="password"
+                  autoComplete="new-password"
+                  minLength={8}
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -163,6 +244,8 @@ export function RegisterForm() {
                 <Input
                   id="register-confirm-password"
                   type="password"
+                  autoComplete="new-password"
+                  minLength={8}
                   placeholder="••••••••"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
@@ -172,7 +255,7 @@ export function RegisterForm() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={loading}
+                disabled={loading || sendingCode}
                 aria-label={loading ? copy.creating : copy.create}
               >
                 {loading ? copy.creating : copy.create}

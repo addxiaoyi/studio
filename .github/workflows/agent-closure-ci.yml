@@ -59,6 +59,11 @@ jobs:
           pnpm --filter @helstera/server exec vitest run src/http/health.test.ts src/queue/local-job-queue.test.ts src/runtime/queue-runner.test.ts src/runtime/periodic-tasks.test.ts src/runtime/drain-gate.test.ts src/features/agent-goals/worker-drain.test.ts
           python3 -m unittest scripts/test_switch_server_upstream.py
           sudo python3 -m unittest scripts/test_storage_retention.py
+      - name: Preserve production authentication, project identity and public media
+        run: |
+          node scripts/test-local-postgres.mjs src/http/local-auth-register.postgres.test.ts src/local-db/project-idempotency.postgres.test.ts
+          pnpm --filter @helstera/server exec vitest run src/http/public-media.test.ts src/local-db/chat-service.test.ts src/local-db/project-service.test.ts src/features/website-capture/assistant-recording-claim.test.ts
+          pnpm --filter @helstera/web exec vitest run test/register.test.tsx test/login.test.tsx test/local-auth-network-error.test.ts
       - name: Structured model planning deadlines
         run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/goal-planner.test.ts src/features/agent-goals/goal-plan-timeout.test.ts src/features/video-editor/planner.test.ts
       - name: Private Agent browser access and controls
