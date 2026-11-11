@@ -116,6 +116,7 @@ jobs:
       - name: Deployment recovery gates on Linux
         run: |
           node --test scripts/server-runtime-lock.test.mjs
+          python3 -m unittest scripts.test_deploy_web_static -q
           python3 -m unittest scripts.test_deploy_production_candidate scripts.test_prepare_production_candidate scripts.test_isolated_pg_rehearsal scripts.test_apply_studio_nginx scripts.test_validate_studio_nginx -q
           python3 -m unittest discover -s apps/server/src/features/onetake -p test_runner.py -v
   editor-browser:

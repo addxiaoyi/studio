@@ -145,6 +145,47 @@ def create_archive(source: pathlib.Path, destination: pathlib.Path) -> str:
     return hashlib.sha256(destination.read_bytes()).hexdigest().upper()
 
 
+def preserve_previous_static(live_out: pathlib.Path, candidate_out: pathlib.Path) -> int:
+    marker = ".helstera-retained-static.json"
+    source = live_out / "_next/static"
+    if not source.is_dir():
+        return 0
+    if source.is_symlink():
+        raise ValueError("Static assets must be a regular directory")
+
+    def retained_at(directory):
+        path = directory / marker
+        if path.is_symlink():
+            raise ValueError("Static retention marker must not be a symlink")
+        entries = json.loads(path.read_text()) if path.exists() else []
+        if not isinstance(entries, list) or any(not isinstance(name, str) for name in entries):
+            raise ValueError("Invalid static retention marker")
+        return set(entries)
+
+    older = retained_at(live_out)
+    retained = retained_at(candidate_out)
+    for path in source.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Symlinks are not allowed in static retention")
+        if not path.is_file():
+            continue
+        relative = path.relative_to(live_out).as_posix()
+        if relative in older:
+            continue
+        target = candidate_out / relative
+        if not target.resolve().is_relative_to(candidate_out.resolve()) or target.is_symlink():
+            raise ValueError("Static asset escapes candidate output")
+        if target.exists():
+            if not target.is_file() or hashlib.sha256(target.read_bytes()).digest() != hashlib.sha256(path.read_bytes()).digest():
+                raise ValueError("Changed content at an immutable static path: " + relative)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.link(path, target)
+        retained.add(relative)
+    (candidate_out / marker).write_text(json.dumps(sorted(retained)) + "\n")
+    return len(retained)
+
+
 def preserve_managed_downloads(live_out: pathlib.Path, candidate_out: pathlib.Path) -> int:
     source = live_out / "downloads"
     if not source.is_dir():
@@ -410,15 +451,16 @@ print(candidate)
                 if pathlib.PurePosixPath(extracted) != pathlib.PurePosixPath(stage_out):
                     raise RuntimeError("Remote extractor returned an unexpected staging path.")
 
-                preserve_source = inspect.getsource(preserve_managed_downloads)
+                preserve_source = inspect.getsource(preserve_previous_static) + "\n" + inspect.getsource(preserve_managed_downloads)
                 preserve = (
-                    "import json, os, pathlib\n"
+                    "import hashlib, json, os, pathlib\n"
                     + preserve_source
                     + "\nprint(json.dumps({'preservedFiles': preserve_managed_downloads("
                     + "pathlib.Path(" + repr(str(live_path)) + ")"
                     + ", "
                     + "pathlib.Path(" + repr(stage_out) + ")"
-                    + ")}))"
+                    + "), 'retainedStaticFiles': preserve_previous_static(pathlib.Path("
+                    + repr(str(live_path)) + "), pathlib.Path(" + repr(stage_out) + "))}))"
                 )
                 print("DOWNLOADS", remote_python(target, preserve), flush=True)
 

@@ -23,6 +23,33 @@ desktop_markers = DEPLOY.DESKTOP_MARKERS
 
 
 class WebStaticCandidateTests(unittest.TestCase):
+    def test_retains_one_previous_static_generation_without_copying_private_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            live, candidate, following = root / "live", root / "candidate", root / "following"
+            for directory, name in ((live, "old.js"), (candidate, "new.js"), (following, "next.js")):
+                (directory / "_next/static").mkdir(parents=True)
+                (directory / "_next/static" / name).write_text(name)
+            (live / ".env").write_text("do not publish")
+            self.assertEqual(DEPLOY.preserve_previous_static(live, candidate), 1)
+            self.assertEqual(DEPLOY.preserve_previous_static(live, candidate), 1)
+            self.assertEqual((candidate / "_next/static/old.js").read_text(), "old.js")
+            self.assertFalse((candidate / ".env").exists())
+            self.assertEqual(DEPLOY.preserve_previous_static(candidate, following), 1)
+            self.assertTrue((following / "_next/static/new.js").exists())
+            self.assertFalse((following / "_next/static/old.js").exists())
+
+    def test_static_retention_rejects_changed_content_at_an_immutable_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name, content in (("live", "old"), ("candidate", "new")):
+                path = root / name / "_next/static/shared.js"
+                path.parent.mkdir(parents=True)
+                path.write_text(content)
+            with self.assertRaisesRegex(ValueError, "immutable"):
+                DEPLOY.preserve_previous_static(root / "live", root / "candidate")
+            self.assertEqual((root / "candidate/_next/static/shared.js").read_text(), "new")
+
     def test_public_verification_checks_the_desktop_marketplace_bundle(self):
         class Response:
             status = 200
