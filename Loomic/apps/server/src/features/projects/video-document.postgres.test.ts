@@ -4,6 +4,7 @@ import Fastify from "fastify";
 import {Pool} from "pg";
 import {describe,expect,it} from "vitest";
 import {registerProjectVideoRoutes} from "../../http/project-video-document.js";
+import {createLocalProjectService} from "../../local-db/project-service.js";
 
 describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("private video project versions",()=>{
   it("saves metadata without media, deduplicates retries, retains conflicting edits and checks ownership",async()=>{
@@ -14,6 +15,7 @@ describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("private video project vers
     const db=new Pool({connectionString:url.href,options:`-c search_path=${schema},public`}),app=Fastify();
     try {
       await db.query(await readFile(new URL("../../local-db/schema.sql",import.meta.url),"utf8"));
+      await db.query(await readFile(new URL("../../local-db/migrations/20261110000001_project_context.sql",import.meta.url),"utf8"));
       await db.query(await readFile(new URL("../../local-db/migrations/20261110000002_project_video_documents.sql",import.meta.url),"utf8"));
       const user=randomUUID(),peer=randomUUID(),workspace=randomUUID(),project=randomUUID();
       await db.query("insert into app_users(id,email) values($1,'video-owner@test.invalid'),($2,'video-peer@test.invalid')",[user,peer]);
@@ -46,6 +48,16 @@ describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("private video project vers
       expect((await put({...input,document:{...document,publicFiles:{"private.mp4":[1,2,3]}}})).statusCode).toBe(400);
       expect((await put({...input,document:{...document,files:{"/project/../escape":"bad"}}})).statusCode).toBe(400);
       expect((await db.query("select count(*)::int as count from asset_objects")).rows[0].count).toBe(0);
+      const canvas=randomUUID();
+      await db.query("insert into canvases(id,project_id,created_by,name,is_primary) values($1,$2,$3,'Empty canvas',true)",[canvas,project,user]);
+      const service=createLocalProjectService(db),owner={id:user,accessToken:"test",email:"video-owner@test.invalid",userMetadata:{}};
+      expect(await service.archiveEmptyProject(owner,project)).toBe(false);
+      await db.query("delete from project_video_documents where project_id=$1",[project]);
+      await db.query("delete from project_video_versions where project_id=$1",[project]);
+      await db.query("insert into project_user_contexts(user_id,project_id,canvas_id,view,composition_id) values($1,$2,$3,'video','MyComp')",[user,project,canvas]);
+      expect(await service.archiveEmptyProject(owner,project)).toBe(false);
+      await db.query("delete from project_user_contexts where project_id=$1",[project]);
+      expect(await service.archiveEmptyProject(owner,project)).toBe(true);
     } finally {await app.close();await db.end();await admin.query(`drop schema ${schema} cascade`);await admin.end();}
   });
 });

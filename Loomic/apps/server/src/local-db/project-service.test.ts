@@ -28,6 +28,8 @@ describe("local project archive guard", () => {
     expect(sql).toContain("jsonb_array_length");
     expect(sql).toContain("asset_objects");
     expect(sql).toContain("generated_assets");
+    expect(sql).toContain("project_user_contexts");
+    expect(sql).toContain("project_video_documents");
     expect(sql).not.toContain("jsonb_object_length");
   });
 

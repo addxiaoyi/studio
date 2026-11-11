@@ -80,6 +80,30 @@
       "cause": "Fresh browser reused prior test project context; now isolated per test, protected restoration remains enforced"
     }
   },
+  "followupRegressions": {
+    "emptyProjectArchiveGuard": {
+      "exitCode": 0,
+      "testsPassed": 1,
+      "testsFailed": 0,
+      "log": "M:/loomic-builds/project-document-archive-fixed.log",
+      "sha256": "dc681095ee009ae0e313e9a41dbdde31306646a588d3d39f618a9956700cb0c8"
+    },
+    "canvasWorkflowReload": {
+      "exitCode": 0,
+      "testsPassed": 1,
+      "testsFailed": 0,
+      "log": "M:/loomic-builds/project-sync-workflow-e2e.log",
+      "sha256": "d72cdf4b5e55bc40308cc1c1bd14d6b7ebc718f8550c9ad075bfb994a988fd88"
+    },
+    "serverTypecheckExitCode": 0,
+    "webTypecheckExitCode": 0,
+    "agentCiBeforeReloadAssertionFix": {
+      "run": 42855002013,
+      "status": "failure",
+      "cause": "Reload retains projectId and canvasId in the URL fragment; assertion only expected the composition URL.",
+      "fixedLocally": true
+    }
+  },
   "boundary": [
     "Fixture authentication in real Chromium and PostgreSQL, not a paid model test",
     "Original media not uploaded by metadata sync",

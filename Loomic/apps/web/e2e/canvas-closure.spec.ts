@@ -255,10 +255,20 @@ test("imports library IDs once, recovers failures, previews a real timeline and 
     ).toBeEnabled();
     await page.screenshot({ path: info.outputPath("timeline-editor.png") });
     await expect(page).toHaveTitle("视频创作 | Helstera");
-    const compositionUrl = page.url();
+    const compositionUrl = new URL(page.url());
     await page.reload();
     await expect(page.getByRole("button", { name: "导出视频", exact: true })).toBeEnabled({ timeout: 60000 });
-    await expect(page).toHaveURL(compositionUrl);
+    await expect.poll(() => {
+      const current = new URL(page.url());
+      const context = new URLSearchParams(current.hash.slice(1));
+      return {
+        composition: `${current.origin}${current.pathname}${current.search}`,
+        canvasId: context.get("canvasId"),
+      };
+    }).toEqual({
+      composition: `${compositionUrl.origin}${compositionUrl.pathname}${compositionUrl.search}`,
+      canvasId: fixture.canvasId,
+    });
     await expect(page.getByLabel("修改对象")).toContainText("3.0s", { timeout: 45000 });
     await page.getByRole("button", { name: "导出视频", exact: true }).click();
     const exportDialog = page.locator("dialog[open]");

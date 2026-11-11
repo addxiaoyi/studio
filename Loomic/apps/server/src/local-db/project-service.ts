@@ -116,6 +116,8 @@ export function createLocalProjectService(db: Pool, uploadRoot = "/www/helstera/
            and not exists (select 1 from asset_objects ao where ao.project_id = p.id)
            and not exists (select 1 from generated_assets ga where ga.project_id = p.id and ga.deleted_at is null)
            and not exists (select 1 from background_jobs bj where bj.project_id = p.id)
+           and not exists (select 1 from project_user_contexts puc where puc.project_id = p.id)
+           and not exists (select 1 from project_video_documents pvd where pvd.project_id = p.id)
            and not exists (select 1 from project_story_assets psa where psa.project_id = p.id)
            and not exists (select 1 from project_storyboards ps where ps.project_id = p.id)`,
         [projectId, workspace.id],
