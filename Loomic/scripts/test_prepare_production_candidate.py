@@ -93,6 +93,18 @@ class ProductionCandidateTests(unittest.TestCase):
                 path = source / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("source", encoding="utf-8")
+            dependencies = {"@helstera/shared": {"specifier": "workspace:*", "version": "link:../../packages/shared"}}
+            config = {"@helstera/config": {"specifier": "workspace:*", "version": "link:../../packages/config"}}
+            manifests = {
+                "package.json": {"name": "fixture", "private": True},
+                "apps/server/package.json": {"name": "@helstera/server", "dependencies": {"@helstera/shared": "workspace:*"}, "devDependencies": {"@helstera/config": "workspace:*"}},
+                "packages/shared/package.json": {"name": "@helstera/shared"},
+                "packages/config/package.json": {"name": "@helstera/config"},
+                "pnpm-lock.yaml": {"lockfileVersion": "9.0", "importers": {".": {}, "apps/server": {"dependencies": dependencies, "devDependencies": config}, "packages/shared": {}, "packages/config": {}}, "packages": {}, "snapshots": {}},
+                "pnpm-workspace.yaml": {"packages": ["apps/*", "packages/*"]},
+            }
+            for relative, content in manifests.items():
+                (source / relative).write_text(json.dumps(content), encoding="utf-8")
             old_shared = source / "packages/shared/dist"
             (old_shared / "contracts.js").write_text("stale contracts", encoding="utf-8")
             (old_shared / "removed.js").write_text("obsolete contract", encoding="utf-8")
@@ -112,8 +124,10 @@ class ProductionCandidateTests(unittest.TestCase):
                 manifest = json.loads(bundle.read("RELEASE-MANIFEST.json"))
                 self.assertEqual(bundle.read("deploy/server-runtime/packages/shared/dist/contracts.js"), b"build")
                 self.assertNotIn("deploy/server-runtime/packages/shared/dist/removed.js", bundle.namelist())
-                for relative in runtime_manifests:
-                    self.assertEqual(bundle.read(f"deploy/server-runtime/{relative}"), b"source")
+                for relative in ("apps/server/package.json", "packages/shared/package.json", "packages/config/package.json"):
+                    self.assertEqual(json.loads(bundle.read(f"deploy/server-runtime/{relative}")), manifests[relative])
+                self.assertNotIn("deploy/server-runtime/apps/desktop/package.json", bundle.namelist())
+                self.assertNotIn("deploy/server-runtime/apps/web/package.json", bundle.namelist())
                 self.assertNotIn("deploy/server-runtime/.env", bundle.namelist())
                 self.assertEqual(set(manifest["files"]), set(bundle.namelist()) - {"RELEASE-MANIFEST.json"})
                 for name, item in manifest["files"].items():

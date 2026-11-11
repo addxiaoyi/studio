@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import zipfile
 
 
@@ -25,7 +26,7 @@ INCLUDE_TREES = (
 )
 INCLUDE_FILES = (
     "apps/server/package.json", "apps/server/tsconfig.json", "apps/desktop/package.json",
-    "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
+    "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.base.json",
 )
 
 
@@ -54,25 +55,18 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def server_runtime_manifests(source: Path) -> dict[str, Path]:
-    runtime = Path("deploy/server-runtime")
-    manifests = [source / name for name in ("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml")]
-    manifests.extend(source / app / "package.json" for app in ("apps/server", "apps/web", "apps/desktop"))
-    packages = source / "packages"
-    if not packages.is_dir() or packages.is_symlink():
-        raise FileNotFoundError(packages)
-    package_dirs = sorted(packages.iterdir())
-    if any(path.is_symlink() for path in package_dirs):
-        raise ValueError("Symbolic links are not allowed in server runtime workspaces.")
-    manifests.extend(path / "package.json" for path in package_dirs if path.is_dir())
+def server_runtime_manifests(source: Path) -> dict[str, bytes]:
+    helper = Path(__file__).with_name("server-runtime-lock.mjs")
+    generated = subprocess.run(
+        ["node", str(helper), str(source.resolve())], check=True,
+        stdout=subprocess.PIPE, encoding="utf-8",
+    )
+    manifests = json.loads(generated.stdout)
+    return {f"deploy/server-runtime/{name}": content.encode("utf-8") for name, content in manifests.items()}
 
-    runtime_files: dict[str, Path] = {}
-    for manifest in manifests:
-        if not manifest.is_file() or manifest.is_symlink():
-            raise FileNotFoundError(manifest)
-        relative = manifest.relative_to(source).as_posix()
-        runtime_files[(runtime / relative).as_posix()] = manifest
-    return runtime_files
+
+def entry_sha256(entry: Path | bytes) -> str:
+    return hashlib.sha256(entry).hexdigest() if isinstance(entry, bytes) else sha256(entry)
 
 
 def verify_build_inputs(source: Path, build: Path) -> None:
@@ -93,7 +87,7 @@ def create_candidate(source: Path, build: Path, destination: Path) -> str:
     if destination.exists():
         raise FileExistsError(destination)
     verify_build_inputs(source, build)
-    paths: dict[str, Path] = {}
+    paths: dict[str, Path | bytes] = {}
     for relative, origin in INCLUDE_TREES:
         root = (source if origin == "source" else build) / relative
         for name, path in files_under(root, exclude_downloads=relative == "apps/web/out").items():
@@ -116,11 +110,14 @@ def create_candidate(source: Path, build: Path, destination: Path) -> str:
         if relative not in paths:
             raise FileNotFoundError(f"Candidate is missing {relative}")
     manifest = {"candidate": "loomic-creative-workspace", "files":
-                {name: {"sha256": sha256(path)} for name, path in sorted(paths.items())}}
+                {name: {"sha256": entry_sha256(path)} for name, path in sorted(paths.items())}}
     destination.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(destination, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
         for name, path in sorted(paths.items()):
-            bundle.write(path, name)
+            if isinstance(path, bytes):
+                bundle.writestr(name, path)
+            else:
+                bundle.write(path, name)
         bundle.writestr("RELEASE-MANIFEST.json", json.dumps(manifest, indent=2) + "\n")
     return sha256(destination)
 
