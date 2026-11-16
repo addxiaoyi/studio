@@ -1,0 +1,235 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-16T15:43:08.615964+00:00",
+  "repository": "https://github.com/addxiaoyi/studio",
+  "branch": "codex/production-closure-20261115",
+  "baselineCommit": "749a256d49f41985c73359496919d47f22ffb43c",
+  "scope": "development checkpoint; complete production release remains unfinished",
+  "currentVerification": [
+    {
+      "gate": "release/bootstrap/maintenance/candidate Python regressions",
+      "command": "python -B -m unittest scripts.test_deploy_production_candidate scripts.test_prepared_candidate scripts.test_blue_green_release scripts.test_release_topology scripts.test_legacy_bootstrap scripts.test_legacy_bootstrap_host scripts.test_prepare_legacy_lifecycle scripts.test_legacy_maintenance scripts.test_route_public_media_recovery scripts.test_migration_release -q",
+      "cwd": "Loomic",
+      "exitCode": 0,
+      "run": 196,
+      "passed": 193,
+      "skipped": 3,
+      "seconds": 21.016
+    },
+    {
+      "gate": "downgrade/activity guards and Electron diagnostic unit tests",
+      "command": "node --test scripts/legacy-downgrade-guard.test.mjs scripts/legacy-release-activity.test.mjs apps/desktop/scripts/renderer-startup-diagnostics.test.mjs",
+      "cwd": "Loomic",
+      "exitCode": 0,
+      "passed": 34,
+      "skipped": 0
+    },
+    {
+      "gate": "website session account scope and original browser dock",
+      "command": "node ../../node_modules/vitest/vitest.mjs run test/website-session-account.test.tsx test/agent-browser-dock.test.tsx",
+      "cwd": "Loomic/apps/web",
+      "exitCode": 0,
+      "files": 2,
+      "passed": 13
+    },
+    {
+      "gate": "Web typecheck",
+      "command": "node node_modules/typescript/bin/tsc -p apps/web/tsconfig.json --noEmit",
+      "cwd": "Loomic",
+      "exitCode": 0
+    },
+    {
+      "gate": "unstaged whitespace",
+      "command": "git diff --check",
+      "cwd": "Loomic",
+      "exitCode": 0
+    },
+    {
+      "gate": "staged whitespace with byte-preserving generated bundle and CRLF license attributes",
+      "command": "git diff --cached --check",
+      "exitCode": 0
+    }
+  ],
+  "production": {
+    "baseline": {
+      "activePointerExists": false,
+      "configSha256": "2d9b8b026b5881ba93f6dbd87cccef08a847b4647f07bfa97539276cf662d876",
+      "hostSha256": "672d345b99eb533c349232510f863389a92b629566940c1585ac8f63c590d44b",
+      "processes": [
+        {
+          "cwd": "/www/helstera/.releases/stability-20261110-1/apps/server",
+          "name": "helstera-server-blue",
+          "pid": 1027,
+          "restarts": 0,
+          "status": "online"
+        },
+        {
+          "cwd": "/www/helstera/.releases/stability-20261110-1/apps/server",
+          "name": "helstera-worker-blue",
+          "pid": 1030,
+          "restarts": 0,
+          "status": "online"
+        },
+        {
+          "cwd": "/www/helstera/.public-media-recovery-20261116-r23/update-r2/runtime",
+          "name": "helstera-public-media-recovery-r2",
+          "pid": 687859,
+          "restarts": 0,
+          "status": "online"
+        }
+      ],
+      "stageExists": true,
+      "stageHasContext": false,
+      "stageHasJournal": false
+    },
+    "bootstrapJournal": {
+      "attempted": [
+        "preflight",
+        "block_ingress"
+      ],
+      "completed": [
+        "preflight"
+      ],
+      "error": {
+        "action": "block_ingress",
+        "kind": "RuntimeError"
+      },
+      "phase": "rolled_back",
+      "rollbackAttempted": [
+        "block_ingress",
+        "verify_legacy",
+        "restore_routes",
+        "persist_rollback"
+      ],
+      "rollbackCompleted": [
+        "block_ingress",
+        "verify_legacy",
+        "restore_routes",
+        "persist_rollback"
+      ]
+    },
+    "runnerResult": {
+      "exitCode": 1,
+      "startedAt": 1794840571.6623077,
+      "finishedAt": 1794840619.5301383
+    },
+    "terminalVerification": {
+      "phase": "rolled_back",
+      "terminalVerified": true,
+      "legacyStopped": false,
+      "bridgeStarted": false,
+      "databaseMigrated": false
+    },
+    "preparedCandidate": {
+      "target": "23.251.32.222",
+      "root": "/www/helstera",
+      "staging": "/www/helstera/.helstera-candidate.Tn9zZb",
+      "backup": "/www/helstera/.helstera-backup.118nPF",
+      "databaseBackup": "/www/helstera/.helstera-backup.118nPF/database.dump",
+      "sha256": "99327E13ACE30927197ADA958A021EE245D71BE27FA687ED56EEB41F8E6867D8",
+      "release": "/www/helstera/.helstera-candidate.Tn9zZb/next",
+      "phase": "prepared",
+      "isolatedRestore": true
+    },
+    "newHostUploaded": false,
+    "productionDatabaseMigrated": false,
+    "fullCandidateDeployed": false,
+    "sshSessionsClosedAfterVerification": true
+  },
+  "frozenLocalFiles": {
+    "hashFormat": "SHA-256 of raw working-tree bytes; checkout line endings can differ",
+    "files": {
+      "scripts/legacy-bootstrap-host.py": "4af50fe88db113a2f792daee69be52cbf94b5675f286f7e41f188a7b9361de6e",
+      "scripts/test_legacy_bootstrap_host.py": "d414baade33e49205ad7f73e702fc35d465660a8d8aa4b3785a9c568ac33515f",
+      "scripts/legacy-downgrade-guard.mjs": "df50fb707de265aed29d957b95799eb0c404ac194043ecff4a592262fb4fd4cd",
+      "scripts/migration-release.py": "8780c7ac006f0637e4b4245e093ef988eb26ab461f49c427cc813f4a95f21622",
+      "scripts/test_migration_release.py": "b56dd039f9af151462a2004699e0a1d278e41e3dee4e113f686b9d4c86f4acee",
+      "scripts/blue-green-release.py": "e4caa7187fa5a7620894e4770699f7ad4bcbaafcc37d161eb72f35c2c8bf3158",
+      "apps/web/src/components/agent-browser/session-manager.tsx": "5b774b54d8d27e1f7cdf7f65b97f3004d3c8f6a5a1accd1f287dc878b2a6c6d9",
+      "apps/web/test/website-session-account.test.tsx": "d5cfa47ec93e3c5c2a8748486f7a192042aa10a42cc17ca6b2b7409606aeb321"
+    }
+  },
+  "draftMigration": {
+    "cliExecutionDisabled": true,
+    "genericProtocolTests": 6,
+    "hostIOVerified": false,
+    "isolatedDatabaseVerified": false,
+    "recoveryComplete": false,
+    "deployWired": false
+  },
+  "safetyScan": {
+    "reviewedHeuristicMatches": 50,
+    "categories": {
+      "isolatedCiDatabaseUrls": 2,
+      "exampleDatabasePlaceholder": 1,
+      "hostileUrlTestFixtures": 5,
+      "syntheticCredentialsAndAuthStubs": 34,
+      "sessionCookieMarkerConstants": 8
+    },
+    "knownPrivateKeyGithubProviderKeyJwtTokenUrlMatches": 0,
+    "foundLiveCredentialsInReviewedScope": false,
+    "rawScanKeptLocal": true
+  },
+  "publicRuntimeReview": {
+    "creative": {
+      "files": 17,
+      "bytes": 55517503,
+      "gzipPairsVerified": 6,
+      "largestFileBytes": 29260484,
+      "stagedRawFilesVerified": 17,
+      "stagedGzipPairsVerified": 6,
+      "generatedBundleWhitespaceFindings": 1998,
+      "bytePreservingGitAttributes": true
+    },
+    "fashionGallery": {
+      "files": 2816,
+      "bytes": 129523819,
+      "catalogEntries": 1407,
+      "mediaFiles": 2814
+    },
+    "scriptFixtures": {
+      "files": 2,
+      "bytes": 5793
+    },
+    "sourcePinsAndLicensesRetained": true,
+    "independentUpstreamRebuildThisHandoff": false
+  },
+  "originalEvidence": {
+    "location": "ignored .creative-test-results on original device; raw files are not published",
+    "sha256": {
+      "production-prepared-r25.json": "3472bab3417b4b5e14d6a60f798a178f9338e49fe74ccb3ce87c16d4d9d54a64",
+      "production-bridge-host-preflight-r25.json": "a7a67477c9597e349205c2292a99b32cc85d9effb5f52f041f08304c35497caa",
+      "production-bridge-baseline-r25.json": "6532b63e0253b034311f4067aa1a2d1b71baf4cd0e8cc81b176789fbdb90d008",
+      "production-bridge-launch-r25.json": "65fd7f2118de57144429d8b3a66e9804d8fa1e68d952a8d06e1f66a880a615a0",
+      "production-bridge-progress-r25.json": "c4aa0aff941300dda50e55d12831150fda2879554160007d64c608bf86975c70",
+      "production-bridge-rollback-terminal-r25.json": "75920ff3011434a40745846eae4ed62339d6829d2fd891822dde3f1b8b95e42f",
+      "production-isolated-bootstrap-tests-r25-rerun.json": "854863bf209abe2b94f129637156882e38f626d6d84f95aef7f667e324069e8a",
+      "production-public-final-state-r24.json": "92487ef2d22c6210763415435cdc79928ba24f3658b4af713f76436c0bc8de8d",
+      "github-handoff-python-20261116.log": "03c5a5366c44477afae1d74afa4623390b5ae208b8ac175b7532505204f1e9b5",
+      "github-handoff-node-20261116.log": "6210aac582a7a96c3b6c8d0bf1e0b94458edc5be3d6ebbf2192b62a2dd3e9dd5",
+      "github-handoff-web-session-20261116.log": "6145795ee67e639907f5417a0cd7285ff65bc233ec18f28b9cfc03ce23f8e9a7",
+      "github-handoff-web-typecheck-20261116.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "github-handoff-scope-scan-20261116.json": "d8c96ad69ad6d8590b6089077b7c1fbd059626cdbe869d8d25b0ca75955e6762"
+    }
+  },
+  "remaining": [
+    "Bootstrap new helper needs a fresh stage, frozen upload, preflight and real cutover.",
+    "After bridge ownership changes, create a new topology-matching backup and fresh prepared candidate.",
+    "Migration adapter recovery, raw JS checksum normalization, host IO and isolated PostgreSQL tests remain incomplete.",
+    "Full candidate deployment, signed-in flows, paid generation/refund/rollback evidence remain incomplete.",
+    "Electron sandbox startup fails in the current host execution environment; all-repository Biome remains failing."
+  ],
+  "pushProtection": {
+    "firstPushRejected": true,
+    "category": "Mistral AI API Key",
+    "file": "apps/web/public/creative/visualforge/browser-studio-transformers-entry.mjs",
+    "classificationNotIndependentlyConfirmed": true,
+    "bypassUsed": false,
+    "excludedLocalOnly": [
+      "apps/web/public/creative/visualforge/browser-studio-transformers-entry.mjs",
+      "apps/web/public/creative/visualforge/browser-studio-transformers-entry.mjs.gz"
+    ],
+    "remainingCreativeFiles": 15,
+    "remainingCreativeGzipPairs": 5
+  }
+}

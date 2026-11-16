@@ -11,6 +11,8 @@ if (process.env.GLOBAL_AGENT_HTTP_PROXY) {
 }
 
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Pool } from "pg";
 import { loadServerEnv } from "./config/env.js";
 import { createPgmqClient, type PgmqMessage } from "./queue/pgmq-client.js";
@@ -34,6 +36,17 @@ import { processDueSyncJobs } from "./features/jobs/sync-service.js";
 import { startOneTakeWorker } from "./features/onetake/worker.js";
 import { PeriodicTasks } from "./runtime/periodic-tasks.js";
 import { startQueueRunner } from "./runtime/queue-runner.js";
+import { createProcessReceipt } from "./runtime/process-receipt.js";
+import { assertWorkerDependencies } from "./runtime/worker-readiness.js";
+import {
+  ActiveJobTracker,
+  checkpointActiveJobs,
+  JOB_SHUTDOWN_STAGE,
+} from "./runtime/job-shutdown-checkpoint.js";
+import { recoverInterruptedJobs } from "./runtime/job-recovery.js";
+import { recoverCanceledRefunds } from "./runtime/canceled-refund-recovery.js";
+import { reconcileGenerationBilling } from "./runtime/billing-reconciliation.js";
+import { shouldQuarantineCanceledReplay } from "./runtime/cancellation-recovery.js";
 
 // Import executors to trigger registration via side effects
 import "./features/jobs/executors/image-generation.js";
@@ -43,8 +56,6 @@ import "./features/jobs/executors/website-capture.js";
 import { isFeedRenderPayload, markFeedPackageFailed } from "./features/jobs/executors/feed-render.js";
 
 import {
-  calculateTokenCredits,
-  getConfiguredBilling,
   type AnyBackgroundJobType,
   type BackgroundJobType,
 } from "@helstera/shared";
@@ -80,8 +91,9 @@ const VT_BY_QUEUE: Record<string, number> = {
 
 
 
-async function main() {
+export async function startWorker() {
   const env = loadServerEnv();
+  const receipt = createProcessReceipt("worker");
 
   const databaseUrl = env.databaseUrl;
   if (!databaseUrl) {
@@ -96,45 +108,20 @@ async function main() {
   const pgmq = createLocalJobQueue(localDb);
   const jobService = createLocalJobService(localDb, pgmq);
   const creditService = createLocalCreditService(localDb);
-  const storage = createStorageProvider({ provider: "local", root: env.storageRoot ?? "/www/helstera/uploads", baseUrl: env.webOrigin });
+  const storageRoot = env.storageRoot ?? "/www/helstera/uploads";
+  const storage = createStorageProvider({ provider: "local", root: storageRoot, baseUrl: env.webOrigin });
+  await assertWorkerDependencies(localDb, storageRoot, env.capacityPolicy);
   const maintenanceDb = localDb;
   const maintenance = new PeriodicTasks((name, error) => console.error(`[worker:${name}] maintenance failed`, error));
-  const stopOneTake = process.env.HELSTERA_ONETAKE_PYTHON ? startOneTakeWorker(localDb, env.storageRoot ?? "/www/helstera/uploads") : async () => {};
+  const stopOneTake = process.env.HELSTERA_ONETAKE_PYTHON ? startOneTakeWorker(localDb, storageRoot, env.capacityPolicy) : async () => {};
   const getAdminClient = () => {
     throw new Error("Supabase runtime support has been removed; use local PostgreSQL services.");
   };
 
-  // A local worker can be restarted while a job is in flight. Requeue only
-  // jobs that have not updated for a full lease window; active jobs keep
-  // renewing updated_at from their executor heartbeat.
   if (localDb) {
-    const expired = await localDb.query(
-      `update background_jobs
-       set status = 'failed',
-           error_code = 'stale_job_timeout',
-           error_message = 'Job exceeded the 30-minute recovery window.',
-           failed_at = now(),
-           updated_at = now()
-       where status = 'running'
-         and job_type = 'video_generation'
-         and updated_at < now() - interval '30 minutes'
-       returning id`,
-    );
-    if (expired.rowCount) {
-      console.warn(`[worker] Failed ${expired.rowCount} stale video job(s) beyond the hard timeout.`);
-    }
-    const recovered = await localDb.query(
-      `update background_jobs
-       set status = 'queued', stage = '�����߳��ѻָ��������Ŷ�', updated_at = now()
-       where status = 'running'
-         and updated_at < now() - interval '10 minutes'
-         and updated_at >= now() - interval '30 minutes'
-         and attempt_count < max_attempts
-       returning id`,
-    );
-    if (recovered.rowCount) {
-      console.warn(`[worker] Requeued ${recovered.rowCount} stale job(s) after startup.`);
-    }
+    const recovery = await recoverInterruptedJobs(localDb);
+    if (recovery.expired) console.warn(`[worker] Failed ${recovery.expired} stale video job(s) beyond the hard timeout.`);
+    if (recovery.recovered) console.warn(`[worker] Requeued ${recovery.recovered} interrupted job(s) after startup.`);
   }
 
   const reapStaleJobs = async () => {
@@ -159,6 +146,12 @@ async function main() {
     }
   };
   maintenance.every("stale-jobs", 60_000, reapStaleJobs);
+  maintenance.every("canceled-refunds", 60_000, async () => {
+    const recovery = await recoverCanceledRefunds(localDb);
+    if (recovery.refunded.length || recovery.review.length || recovery.failed.length) {
+      console.info("[worker] canceled refund recovery", recovery);
+    }
+  });
   let trendSyncRunning = false;
   let publishingScheduleRunning = false;
   const syncTrends = async () => {
@@ -221,22 +214,42 @@ async function main() {
   const pollTimeoutSeconds = Math.max(1, Math.floor((env.workerPollIntervalMs ?? 5000) / 1000));
   const workerId = env.workerId ?? randomUUID().slice(0, 8);
   const tag = `[worker:${workerId}]`;
+  const activeJobIds = new ActiveJobTracker();
+  let shutdownRequested = false;
   const runner = startQueueRunner<PgmqMessage>({
     queues: QUEUES.map(name => ({ name, concurrency: CONCURRENCY_BY_QUEUE[name] ?? 1 })),
     poll: (queue, available) => pgmq.readWithPoll(queue, VT_BY_QUEUE[queue] ?? 120, available, pollTimeoutSeconds, 500),
     execute: async (queue, msg) => {
-      const ctx: ExecutorContext = {
-        ...baseCtx,
-        queue,
-        msgId: msg.msg_id,
-        renewVt: async (vtSeconds: number) => {
-          try { await pgmq.setVt(queue, msg.msg_id, vtSeconds); }
-          catch (error) { console.warn(`[renewVt] failed for msg ${msg.msg_id}:`, error); }
-        },
-        heartbeat: (progress, stage) => jobService.updateProgress(String(msg.message.job_id), progress, stage),
-      };
-      await processMessage(queue, msg, ctx, creditService, tag);
+      const jobId = typeof msg.message.job_id === "string" ? msg.message.job_id : "";
+      let claimedJobId = "";
+      try {
+        const ctx: ExecutorContext = {
+          ...baseCtx,
+          queue,
+          msgId: msg.msg_id,
+          renewVt: async (vtSeconds: number) => {
+            try { await pgmq.setVt(queue, msg.msg_id, vtSeconds); }
+            catch (error) { console.warn(`[renewVt] failed for msg ${msg.msg_id}:`, error); }
+          },
+          heartbeat: (progress, stage) => jobService.updateProgress(String(msg.message.job_id), progress, stage),
+        };
+        await processMessage(
+          queue,
+          msg,
+          ctx,
+          creditService,
+          tag,
+          () => shutdownRequested,
+          (claimedId) => {
+            claimedJobId = claimedId;
+            activeJobIds.enter(claimedId);
+          },
+        );
+      } finally {
+        activeJobIds.leave(claimedJobId);
+      }
     },
+    release: async (queue, msg) => { await pgmq.setVt(queue, msg.msg_id, 0); },
     onError: (queue, error) => console.error(`${tag} ${queue} failed:`, error),
   });
 
@@ -244,17 +257,43 @@ async function main() {
   const shutdown = () => {
     stopping ??= (async () => {
       console.log(`${tag} Shutting down, waiting for ${runner.activeCount} in-flight jobs...`);
+      shutdownRequested = true;
       // Stop intake before waiting: a pending query must never escape the drain.
       const drained = runner.stop();
-      await pgmq.shutdown();
-      await Promise.all([drained, maintenance.stop(), stopOneTake()]);
-      await localDb.end();
+      const checkpoint = checkpointActiveJobs(jobService, activeJobIds.ids());
+      const failures: unknown[] = [];
+      const settle = async (label: string, task: Promise<unknown>) => {
+        try {
+          await task;
+        } catch (error) {
+          failures.push(new Error(`${label} failed`, { cause: error }));
+        }
+      };
+
+      await Promise.all([
+        settle("queue drain", drained),
+        settle("maintenance stop", maintenance.stop()),
+        settle("OneTake stop", stopOneTake()),
+        settle("job shutdown checkpoint", checkpoint),
+      ]);
+      await settle("queue shutdown", pgmq.shutdown());
+      await settle("database shutdown", localDb.end());
+      if (failures.length) throw new AggregateError(failures, "Worker shutdown failed");
+      await receipt.drained();
       console.log(`${tag} Shutdown complete.`);
     })().catch(error => { console.error(`${tag} Shutdown failed:`, error); process.exitCode = 1; });
+    return stopping;
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
   console.log(`${tag} Started. concurrency=${JSON.stringify(CONCURRENCY_BY_QUEUE)}, longPollTimeout=${pollTimeoutSeconds}s`);
+  try {
+    await receipt.ready();
+    process.send?.("ready");
+  } catch (error) {
+    await shutdown();
+    throw error;
+  }
 
 }
 
@@ -303,6 +342,8 @@ async function processMessage(
   ctx: ExecutorContext,
   creditService: CreditService,
   tag: string,
+  shutdownRequested: () => boolean = () => false,
+  onClaimed: (jobId: string) => void = () => undefined,
 ) {
   const jobId = msg.message.job_id as string;
   const jobType =
@@ -348,7 +389,28 @@ async function processMessage(
     return;
   }
   const { attempt_count, max_attempts } = attempt;
+  // Only the worker that won the atomic claim may checkpoint this job.
+  onClaimed(jobId);
   await ctx.jobService.updateProgress(jobId, 5, "已领取任务");
+  if (attempt_count > 1) {
+    const job = await ctx.jobService.getJobAdmin(jobId);
+    if (shouldQuarantineCanceledReplay({
+      attemptCount: attempt_count,
+      cancelRequestedAt: job.cancel_requested_at,
+      providerCheckpointExists: await ctx.jobService.hasProviderCheckpoint(jobId),
+    })) {
+      await ctx.jobService.markCancellationOutcomeUnknown(
+        jobId,
+        "任务在取消请求后中断，供应商结果回执未保存；预扣积分保留，禁止自动重跑，请核验供应商任务。",
+      );
+      await ctx.pgmq.archive(queue, msg.msg_id);
+      console.error(`${tag} Job ${jobId} replay quarantined after an unresolved cancellation request.`);
+      return;
+    }
+  }
+  if (shutdownRequested()) {
+    await ctx.jobService.markShutdownRequested(jobId, JOB_SHUTDOWN_STAGE);
+  }
 
   try {
     const result = await executor(
@@ -357,7 +419,7 @@ async function processMessage(
       ctx,
     );
     await syncWebsitePromoTask(jobId, result, ctx);
-    await reconcileTokenBilling(jobId, result, ctx, creditService, tag);
+    await reconcileGenerationBilling(jobId, result, ctx, tag);
     if (result.sync_pending === true) {
       await ctx.jobService.markSyncPending(
         jobId,
@@ -384,6 +446,25 @@ async function processMessage(
       console.error(`${tag} Could not inspect Provider checkpoint for ${jobId}; preserving charged outcome:`, checkpointError);
     }
 
+    if (providerCheckpointExists && errorCode === "generation_settlement_review_required") {
+      await ctx.jobService.markSyncFailed(jobId, errorCode, errorMessage);
+      await ctx.pgmq.archive(queue, msg.msg_id);
+      console.warn(`${tag} Job ${jobId} is waiting for settlement review; the saved result will not be generated again.`);
+      return;
+    }
+
+    if (!providerCheckpointExists) {
+      const cancellationRetained = await ctx.jobService.markCancellationOutcomeUnknown(
+        jobId,
+        "取消请求期间任务异常结束；供应商是否已接受或计费未知，预扣积分未退款，请核验供应商任务回执。",
+      );
+      if (cancellationRetained) {
+        await ctx.pgmq.archive(queue, msg.msg_id);
+        console.error(`${tag} Job ${jobId} cancellation outcome is unknown; kept the reservation and stopped automatic retry.`);
+        return;
+      }
+    }
+
     // Non-retryable errors: retrying with the same input will always fail.
     // Dead-letter immediately so the caller (agent polling) gets fast feedback.
     const NON_RETRYABLE_CODES = new Set([
@@ -407,6 +488,9 @@ async function processMessage(
       "url_credentials_blocked",
       "private_address_blocked",
       "recording_too_large",
+      "missing_token_usage",
+      "missing_provider_duration",
+      "generation_settlement_review_required",
     ]);
     const shouldDeadLetter = attempt_count >= max_attempts || (!providerCheckpointExists && NON_RETRYABLE_CODES.has(errorCode));
 
@@ -488,77 +572,6 @@ async function loadJobPayload(
   return (data?.payload as Record<string, unknown> | undefined) ?? null;
 }
 
-async function reconcileTokenBilling(
-  jobId: string,
-  result: Record<string, unknown>,
-  ctx: ExecutorContext,
-  creditService: CreditService,
-  tag: string,
-) {
-  const usage = result.usage as
-    | { inputTokens?: number; outputTokens?: number }
-    | undefined;
-  const job = await ctx.jobService.getJobAdmin(jobId);
-  const model = typeof job.payload.model === "string" ? job.payload.model : "";
-  const billing = getConfiguredBilling(model);
-  if (!billing || billing.billingUnit !== "per_million_tokens") return;
-  if (!usage || usage.inputTokens === undefined || usage.outputTokens === undefined) {
-    const error = new Error(`Token-billed model ${model} did not return token usage`);
-    (error as Error & { code?: string }).code = "missing_token_usage";
-    throw error;
-  }
-  const actualCost = calculateTokenCredits(
-    usage.inputTokens,
-    usage.outputTokens,
-    billing.inputTokenPriceCny,
-    billing.outputTokenPriceCny,
-  );
-  const current = await loadReservedCredits(jobId, ctx);
-  const delta = actualCost - current;
-  if (delta === 0) return;
-  const description = `HelsterAgent usage (${usage.inputTokens} input, ${usage.outputTokens} output tokens)`;
-  const txId =
-    delta > 0
-      ? await creditService.deductCredits(
-          job.workspace_id,
-          job.created_by,
-          delta,
-          jobId,
-          description,
-        )
-      : await creditService.refundCredits(
-          job.workspace_id,
-          job.created_by,
-          Math.abs(delta),
-          jobId,
-          description,
-        );
-  await ctx.jobService.setCreditsInfo(jobId, actualCost, txId);
-  console.log(
-    `${tag} Token billing reconciled for ${jobId}: reserved=${current}, actual=${actualCost}`,
-  );
-}
-
-async function loadReservedCredits(
-  jobId: string,
-  ctx: ExecutorContext,
-): Promise<number> {
-  if (ctx.localDb) {
-    const { rows } = await ctx.localDb.query<{ credits_cost: number | null }>(
-      "select credits_cost from background_jobs where id=$1",
-      [jobId],
-    );
-    return Number(rows[0]?.credits_cost ?? 0);
-  }
-  const { data } = await ctx
-    .getAdminClient()
-    .from("background_jobs")
-    .select("credits_cost")
-    .eq("id", jobId)
-    .single();
-  return Number(data?.credits_cost ?? 0);
-}
-
 /**
  * Refund credits for a dead-lettered job if credits were deducted.
  * Only dead-lettered (permanently failed) jobs get refunds — not cancelled jobs.
@@ -624,7 +637,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-main().catch((err) => {
-  console.error("[worker] Fatal error:", err);
-  process.exit(1);
-});
+// PM2 executes a container script, so process.argv[1] is not the configured
+// Worker path. Prefer PM2's explicit entry path while retaining direct Node
+// execution for local development and recovery tools.
+const entryPath = process.env.pm_exec_path ?? process.argv[1];
+if (entryPath && resolve(entryPath) === fileURLToPath(import.meta.url)) {
+  startWorker().catch((err) => {
+    console.error("[worker] Fatal error:", err);
+    process.exit(1);
+  });
+}

@@ -4,7 +4,13 @@ import {
   scaleToFit,
 } from "./canvas-elements";
 import { getServerBaseUrl } from "./env";
-import { inspectCanvasMedia, readCanvasAsset } from "./canvas-media-file";
+import {
+  inspectCanvasMedia,
+  inspectCanvasMediaUrl,
+  readCanvasAssetFile,
+  readCanvasAssetMetadata,
+} from "./canvas-media-file";
+import { preparePrivateMedia } from "./private-media";
 
 type SceneElement = Record<string, unknown>;
 export type CanvasImportApi = {
@@ -64,10 +70,19 @@ export async function importCanvasAsset(
     reveal(api, prior);
     return prior;
   }
-  const asset = await readCanvasAsset(token, id, signal);
-  const info = await inspectCanvasMedia(asset.file, signal);
+  const source = await readCanvasAssetMetadata(token, id, signal);
+  const isVideoSource = source.mimeType.startsWith("video/");
+  const stream = isVideoSource
+    ? await preparePrivateMedia(source.assetId, token, signal)
+    : null;
+  const asset = isVideoSource
+    ? null
+    : await readCanvasAssetFile(token, source, signal);
+  const info = isVideoSource
+    ? await inspectCanvasMediaUrl(stream!.path, stream!.mimeType, signal)
+    : await inspectCanvasMedia(asset!.file, signal);
   signal.throwIfAborted();
-  const existing = findImported(api, [id, asset.assetId, asset.libraryAssetId]);
+  const existing = findImported(api, [id, source.assetId, source.libraryAssetId]);
   if (existing) {
     reveal(api, existing);
     return existing;
@@ -79,22 +94,22 @@ export async function importCanvasAsset(
     y: center.y - size.height / 2,
     ...size,
   };
-  const url = `${getServerBaseUrl()}/api/uploads/${asset.assetId}/file`;
+  const url = `${getServerBaseUrl()}/api/uploads/${source.assetId}/file`;
   const customData = {
-    assetId: asset.assetId,
-    libraryAssetId: asset.libraryAssetId,
+    assetId: source.assetId,
+    libraryAssetId: source.libraryAssetId,
     importAssetId: id,
-    title: asset.title,
+    title: source.title,
     source: "uploaded",
     storageUrl: url,
     mediaWidth: info.width,
     mediaHeight: info.height,
-    mimeType: asset.file.type,
+    mimeType: stream?.mimeType ?? asset!.file.type,
   };
   let element: SceneElement;
-  if (asset.file.type.startsWith("image/")) {
+  if (source.mimeType.startsWith("image/")) {
     if (!info.dataUrl) throw new Error("图片解码未完成，请重试。");
-    const fileId = `asset-${asset.assetId}`;
+    const fileId = `asset-${source.assetId}`;
     element = {
       ...createExcalidrawImageElement({ fileId, ...placement }),
       customData,
@@ -103,11 +118,11 @@ export async function importCanvasAsset(
       {
         id: fileId,
         dataURL: info.dataUrl,
-        mimeType: asset.file.type,
+        mimeType: asset!.file.type,
         created: Date.now(),
       },
     ]);
-  } else if (asset.file.type.startsWith("video/")) {
+  } else if (source.mimeType.startsWith("video/")) {
     const { fileId, crop, ...shape } = createExcalidrawImageElement({
       fileId: "",
       ...placement,
@@ -130,15 +145,15 @@ export async function importCanvasAsset(
   signal.throwIfAborted();
   const concurrent = findImported(api, [
     id,
-    asset.assetId,
-    asset.libraryAssetId,
+    source.assetId,
+    source.libraryAssetId,
   ]);
   if (concurrent) {
     reveal(api, concurrent);
     return concurrent;
   }
   // Stable identity also deduplicates a refresh before the URL handoff is consumed.
-  element.id = `asset-${asset.assetId}`;
+  element.id = `asset-${source.assetId}`;
   api.updateScene({
     elements: [...api.getSceneElements(), element],
     captureUpdate: "IMMEDIATELY",

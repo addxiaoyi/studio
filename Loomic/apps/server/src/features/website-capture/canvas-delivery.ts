@@ -87,13 +87,14 @@ export async function deliverCaptureToCanvas(db: Pool, storage: StorageProvider,
   } finally { client.release(); }
 }
 
-export async function finishCaptureCanvasDelivery(db: Pool, storage: StorageProvider, taskId: string): Promise<void> {
-  try { await deliverCaptureToCanvas(db, storage, taskId); }
+export async function finishCaptureCanvasDelivery(db: Pool, storage: StorageProvider, taskId: string): Promise<Delivery | undefined> {
+  try { return await deliverCaptureToCanvas(db, storage, taskId); }
   catch (error) {
     console.error("[website-capture/canvas-delivery] delivery failed", { taskId, error });
     const delivery: Delivery = { status: "failed", elementIds: [], error: "素材已保存，但添加到画布失败。请重试添加。" };
     try {
       await db.query("update website_capture_tasks set result=jsonb_set(result,'{canvasDelivery}',$2::jsonb),updated_at=now() where id=$1 and status='succeeded' and result->'canvasDelivery'->>'status' is distinct from 'succeeded'", [taskId, JSON.stringify(delivery)]);
+      return delivery;
     } catch (markerError) {
       // The original pending receipt can be retried; losing the marker must not
       // turn a completed capture into a failed job that deletes its saved assets.

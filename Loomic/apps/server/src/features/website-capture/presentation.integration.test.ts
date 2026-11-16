@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
 import { launchAgentBrowser } from "../agent-browser/engine.js";
 import { capturePresentationScene } from "./presentation-snapshot.js";
+import { ffmpegBinary } from "./video-encoder.js";
 import {
   preparePresentationPage,
   recordWebsitePresentation,
@@ -127,16 +128,13 @@ it("rebuilds the real page with multiple cursors and records a playable WebM", a
     const bytes = await readFile(file);
     expect(bytes.length).toBeGreaterThan(10_000);
     expect(bytes.subarray(0, 4).toString("hex")).toBe("1a45dfa3");
-    const ffmpeg = process.env.HELSTERA_FFMPEG ?? (
-      process.platform === "win32"
-        ? resolve("../desktop/resources/ffmpeg/win-x64/ffmpeg.exe")
-        : "ffmpeg");
     const decode=spawnSync(
-      ffmpeg,
+      ffmpegBinary(),
       ["-hide_banner", "-xerror", "-i", file, "-f", "null", "-"],
       { timeout: 30000, windowsHide: true,encoding:"utf8" },
     );
-    expect(decode.status,decode.stderr.slice(-1000)).toBe(0);
+    if (decode.error) throw decode.error;
+    expect(decode.status,decode.stderr?.slice(-1000)).toBe(0);
     const match=decode.stderr.match(/Duration: (\d+):(\d+):([\d.]+)/);
     expect(match).not.toBeNull();
     const seconds=Number(match![1])*3600+Number(match![2])*60+Number(match![3]);
@@ -144,6 +142,7 @@ it("rebuilds the real page with multiple cursors and records a playable WebM", a
     expect(seconds).toBeLessThan(config.durationSeconds+5);
     await copyFile(file, join(evidence, "website-introduction.webm"));
   } finally {
+    await context.close();
     await browser.close();
     await rm(directory, { recursive: true, force: true });
   }

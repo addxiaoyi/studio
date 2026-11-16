@@ -33,6 +33,7 @@ function jobRow() {
     completed_at: null,
     failed_at: null,
     canceled_at: null,
+    cancel_requested_at: null,
   };
 }
 
@@ -48,6 +49,43 @@ describe("local job idempotency", () => {
     expect(query.mock.calls[1]?.[1]?.[2]).toBe("asset_ready");
     expect(query.mock.calls[1]?.[1]?.[0]).toBe("workspace-1");
     expect(String(query.mock.calls[1]?.[1]?.[5])).toContain("asset-1");
+  });
+
+  it("records a late completion after a cancellation request", async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [{ workspace_id: "workspace-1", created_by: "user-1", job_type: "video_generation" }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const service = createLocalJobService({ query } as unknown as Pool);
+
+    await service.markSucceeded("job-1", {
+      asset_id: "asset-1",
+    });
+
+    expect(String(query.mock.calls[0]?.[0])).toContain("cancel_requested_at is not null");
+    expect(String(query.mock.calls[0]?.[0])).toContain("completed_after_cancel_request");
+    expect(String(query.mock.calls[0]?.[0])).toContain("'completed_after_cancel_request'");
+  });
+
+  it("preserves the late cancellation outcome while canvas synchronization is pending", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const service = createLocalJobService({ query } as unknown as Pool);
+
+    await service.markSyncPending("job-1", { asset_id: "asset-1" }, "canvas_sync_failed", "offline");
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("cancel_requested_at is not null");
+    expect(sql).toContain("completed_after_cancel_request");
+    expect(sql).toContain("then 'cancel_requested' else 'canvas_sync_pending'");
+  });
+
+  it("preserves a cancellation request timestamp separately from job status", async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...jobRow(), status: "running", cancel_requested_at: new Date().toISOString() }] });
+    const service = createLocalJobService({ query } as unknown as Pool);
+
+    await expect(service.cancelJob(user, "job-1")).resolves.toMatchObject({ status: "running", cancel_requested_at: expect.any(String) });
+    expect(String(query.mock.calls[1]?.[0])).toContain("cancel_requested_at = coalesce(cancel_requested_at, now())");
   });
 
   it("requeues a sync-failed job from its Provider checkpoint without creating a new job", async () => {
@@ -110,7 +148,53 @@ describe("local job idempotency", () => {
     expect(String(query.mock.calls[0]?.[0] ?? "")).toContain("returning attempt_count, max_attempts");
   });
 
-  it("requeues a canceled idempotent job for a failed approval retry", async () => {
+  it("records a cancellation request without pretending a running task is canceled", async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...jobRow(), status: "running", stage: "cancel_requested", error_code: "cancel_requested" }] });
+    const service = createLocalJobService({ query } as unknown as Pool);
+
+    await expect(service.cancelJob(user, "job-1")).resolves.toMatchObject({ status: "running", stage: "cancel_requested" });
+    expect(String(query.mock.calls[0]?.[0])).toContain("status = 'queued'");
+    expect(String(query.mock.calls[1]?.[0])).toContain("stage = 'cancel_requested'");
+  });
+
+  it("retains an unknown provider outcome after cancellation and blocks blind retry", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ id: "job-1" }] });
+    const service = createLocalJobService({ query } as unknown as Pool);
+
+    await expect(service.markCancellationOutcomeUnknown("job-1", "核验供应商回执")).resolves.toBe(true);
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("status='dead_letter'");
+    expect(sql).toContain("error_code='cancel_outcome_unknown'");
+    expect(sql).toContain("cancel_requested_at is not null");
+  });
+
+  it("marks only running jobs with a shutdown checkpoint", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const service = createLocalJobService({ query } as unknown as Pool);
+
+    await service.markShutdownRequested("job-1", "worker_shutdown_waiting");
+
+    expect(query).toHaveBeenCalledWith(
+      "update background_jobs set stage = case when stage = 'cancel_requested' then stage else $1 end, updated_at = now() where id = $2 and status = 'running'",
+      ["worker_shutdown_waiting", "job-1"],
+    );
+  });
+
+  it("preserves a shutdown checkpoint when progress heartbeats arrive", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const service = createLocalJobService({ query } as unknown as Pool);
+
+    await service.updateProgress("job-1", 48, "rendering");
+
+    expect(String(query.mock.calls[0]?.[0])).toContain(
+      "case when stage in ('worker_shutdown_waiting','cancel_requested') then stage else $2 end",
+    );
+    expect(query.mock.calls[0]?.[1]).toEqual([48, "rendering", "job-1"]);
+  });
+
+  it("preserves a canceled idempotent job without requeueing or undoing its refund", async () => {
     const canceled = { ...jobRow(), status: "canceled", canceled_at: new Date().toISOString() };
     const queue = { send: vi.fn().mockResolvedValue(1) } as any;
     const query = vi.fn()
@@ -126,7 +210,8 @@ describe("local job idempotency", () => {
       payload: { prompt: "same" },
     });
 
-    expect(job).toMatchObject({ id: "job-1", reused: true, reactivated: true, status: "queued" });
-    expect(queue.send).toHaveBeenCalledTimes(1);
+    expect(job).toMatchObject({ id: "job-1", reused: true, status: "canceled" });
+    expect(queue.send).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledTimes(2);
   });
 });

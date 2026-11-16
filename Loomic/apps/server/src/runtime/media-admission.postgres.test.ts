@@ -33,6 +33,30 @@ describe.skipIf(!process.env.HELT_TEST_DATABASE_URL)("media admission with real 
       expect(denied.reason.code).toBe("media_capacity_busy");
       for (const claim of claims) if (claim.status === "fulfilled") await claim.value.release();
       expect((await first.query("select * from media_resource_leases")).rows).toHaveLength(0);
+
+      const admissionBoundary = BigInt(request.reserveBytes + 2 * 1024 ** 3);
+      vi.mocked(statfs).mockResolvedValue({ bavail: admissionBoundary, bsize: 1n } as never);
+      const exact = await acquireMediaBudget({ ...request, db: first });
+      await exact.release();
+      vi.mocked(statfs).mockResolvedValue({ bavail: admissionBoundary - 1n, bsize: 1n } as never);
+      await expect(acquireMediaBudget({ ...request, db: second })).rejects.toMatchObject({ code: "media_disk_full" });
+      expect((await first.query("select * from media_resource_leases")).rows).toHaveLength(0);
+      vi.mocked(statfs).mockResolvedValue(roomy);
+
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      const renewalLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const expired = await acquireMediaBudget({ ...request, db: second });
+      try {
+        await first.query("update media_resource_leases set lease_until=now()-interval '1 second'");
+        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.waitFor(() => expect(expired.signal.aborted).toBe(true));
+        expect((await first.query("select count(*)::int as count from media_resource_leases where lease_until>now()")).rows[0].count).toBe(0);
+      } finally {
+        await expired.release();
+        vi.useRealTimers();
+        renewalLog.mockRestore();
+      }
+      expect((await first.query("select * from media_resource_leases")).rows).toHaveLength(0);
       const lateAbort = new AbortController();
       await expect(withMediaBudget({ ...request, db: second, signal: lateAbort.signal }, async () => {
         lateAbort.abort(new Error("Canceled during final write"));

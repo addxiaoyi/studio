@@ -199,8 +199,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   writeAssetToLocal: (input: { directory: string; fileName: string; bytes: ArrayBuffer }) =>
     ipcRenderer.invoke("assets.write-local", input),
   exportVideo: (input: { format: "portrait" | "landscape"; clips: Array<{ name: string; mimeType: string; bytes: ArrayBuffer; startMs: number; endMs: number }>; captions?: Array<{ text: string; startMs: number; endMs: number }>; audio?: Array<{ name: string; mimeType: string; bytes: ArrayBuffer; startMs: number; volume: number }> }) => ipcRenderer.invoke("video.export", input),
+  cancelVideoPreview: () => ipcRenderer.invoke("video.cancel-preview"),
   readExportPreview: (id: string) => ipcRenderer.invoke("video.read-export-preview", id),
   listExportPreviews: () => ipcRenderer.invoke("video.list-export-previews"),
+  onVideoPreviewProgress: (callback: (event: { state: "starting" | "running" | "completed" | "failed"; sourceBytes?: number; outTimeMs?: number; error?: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: { state: "starting" | "running" | "completed" | "failed"; sourceBytes?: number; outTimeMs?: number; error?: string }) => callback(value);
+    ipcRenderer.on("desktop:video-preview-progress", listener);
+    return () => ipcRenderer.removeListener("desktop:video-preview-progress", listener);
+  },
   getWorkspaceTree: () => ipcRenderer.invoke("workspace.tree"),
   readWorkspaceFile: (path: string) => ipcRenderer.invoke("workspace.read", path),
   writeWorkspaceFile: (input: { path: string; content: string }) => ipcRenderer.invoke("workspace.write", input),
@@ -399,6 +405,8 @@ declare global {
       callMcpTool: (input: { id: string; name: string; arguments: string }) => Promise<string>;
       onWorkspaceScriptOutput: (callback: (event: { runId: string; chunk: string }) => void) => () => void;
       onWorkspaceScriptFinished: (callback: (event: { runId: string; ok: boolean; exitCode?: number; message?: string }) => void) => () => void;
+      onVideoPreviewProgress: (callback: (event: { state: "starting" | "running" | "completed" | "failed"; sourceBytes?: number; outTimeMs?: number; error?: string }) => void) => () => void;
+      cancelVideoPreview: () => Promise<{ canceled: boolean }>;
       onAgentEvent: (callback: (event: Record<string, unknown>) => void) => () => void;
     };
   }

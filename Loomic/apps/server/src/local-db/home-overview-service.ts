@@ -65,7 +65,7 @@ export async function loadHomeOverview(
          select created_at::date as date, sum(-amount) as spent
          from credit_transactions
          where workspace_id = $1 and created_at >= current_date - ($2::int - 1)
-           and transaction_type = 'generation_deduct' and amount < 0
+           and transaction_type in ('generation_deduct','generation_adjustment','generation_refund')
          group by created_at::date
        )
        select to_char(days.date, 'YYYY-MM-DD') as date,

@@ -1,14 +1,22 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { realpath, stat, unlink } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { z } from "zod";
 import type { RequestAuthenticator } from "../auth/types.js";
-import { mediaFileVersion } from "./media-file-version.js";
 
 const proofSchema = z.object({ bytes: z.number().int().positive().max(2 * 1024 ** 3), sha256: z.string().regex(/^[a-f0-9]{64}$/), confirmation: z.literal("release-cloud-copy") });
 type Proof = z.infer<typeof proofSchema>;
 class ReleaseError extends Error { constructor(message: string, readonly status: number) { super(message); } }
+
+async function fileChecksum(path: string): Promise<string> {
+  // Deleting the cloud copy requires proof of its bytes, not the playback ETag.
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
 
 async function releaseCopy(db: Pool, root: string, actor: string, assetId: string, proof: Proof) {
   const client = await db.connect();
@@ -33,7 +41,7 @@ async function releaseCopy(db: Pool, root: string, actor: string, assetId: strin
     const metadata = (await client.query<{ metadata: { localCopyRelease?: { sha256: string; bytes: number } } }>("select metadata from generated_assets where workspace_id=$1 and object_path=$2 for update", [asset.workspace_id, asset.object_path])).rows;
     const pending = metadata.some(row => row.metadata?.localCopyRelease?.sha256 === proof.sha256 && row.metadata.localCopyRelease.bytes === proof.bytes);
     try {
-      if (await realpath(path) !== path || (await stat(path)).size !== proof.bytes || await mediaFileVersion(path) !== `"${proof.sha256}"`) throw new ReleaseError("云端文件与本地校验记录不一致，未释放素材。", 409);
+      if (await realpath(path) !== path || (await stat(path)).size !== proof.bytes || await fileChecksum(path) !== proof.sha256) throw new ReleaseError("云端文件与本地校验记录不一致，未释放素材。", 409);
     } catch (error) { if (!(pending && (error as NodeJS.ErrnoException).code === "ENOENT")) throw error; }
     const receipt = JSON.stringify({ assetId, sha256: proof.sha256, bytes: proof.bytes });
     if (!metadata.length) {

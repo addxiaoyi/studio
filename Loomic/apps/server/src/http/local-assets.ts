@@ -1,31 +1,98 @@
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { createReadStream } from "node:fs";
+import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import sharp from "sharp";
 import type { RequestAuthenticator } from "../auth/types.js";
 import { verifyProviderAssetSignature } from "../features/uploads/provider-asset-url.js";
+import { registerLocalCopyRelease } from "./local-copy-release.js";
+import { mediaCookie, mediaCookieOwner } from "./media-access.js";
 import { parseByteRange } from "./media-byte-range.js";
 import { mediaFileVersion } from "./media-file-version.js";
-import { mediaCookie, mediaCookieOwner } from "./media-access.js";
-import { registerLocalCopyRelease } from "./local-copy-release.js";
+import { MediaPreviewCache } from "./media-preview-cache.js";
+
+const activeAssetSql = `not exists(select 1 from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path
+    and (ga.deleted_at is not null or ga.retention_state<>'active' or ga.retention_until<=now()))
+  and (ao.bucket not in ('private-video','private-try-on')
+    or exists(select 1 from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path and ga.retention_until>now())
+    or ao.created_at>now()-interval '3 days')`;
 
 export const readableAssetSql = `select ao.bucket, ao.object_path, ao.mime_type, ao.byte_size,
   coalesce((select min(ga.retention_until) from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path), case when ao.bucket in ('private-video','private-try-on') then ao.created_at+interval '3 days' end) as expires_at
   from asset_objects ao where ao.id=$1
   and exists(select 1 from workspace_members wm where wm.workspace_id=ao.workspace_id and wm.user_id=$2)
-  and not exists(select 1 from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path
-    and (ga.deleted_at is not null or ga.retention_state<>'active' or ga.retention_until<=now()))
-  and (ao.bucket not in ('private-video','private-try-on') or (ao.created_by=$2
-    and (exists(select 1 from generated_assets ga where ga.workspace_id=ao.workspace_id and ga.object_path=ao.object_path and ga.retention_until>now())
-      or ao.created_at>now()-interval '3 days')))`;
+  and (ao.bucket not in ('private-video','private-try-on') or ao.created_by=$2)
+  and ${activeAssetSql}`;
 
 const execFileAsync = promisify(execFile);
+const VIDEO_PREVIEW_TIMEOUT_MS = 15_000;
+
+async function createVideoPreview(filePath: string): Promise<{ contentType: "image/jpeg"; bytes: Buffer }> {
+  let lastError: unknown = null;
+  for (const seek of ["0.5", "0"]) {
+    try {
+      const { stdout } = await execFileAsync(
+        "ffmpeg",
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-ss",
+          seek,
+          "-i",
+          filePath,
+          "-frames:v",
+          "1",
+          "-vf",
+          "scale=640:-2",
+          "-f",
+          "image2pipe",
+          "-vcodec",
+          "mjpeg",
+          "pipe:1",
+        ],
+        {
+          encoding: "buffer",
+          maxBuffer: 8 * 1024 * 1024,
+          timeout: VIDEO_PREVIEW_TIMEOUT_MS,
+        },
+      );
+      if (stdout.length > 0) return { contentType: "image/jpeg", bytes: stdout };
+      lastError = new Error("FFmpeg returned an empty preview.");
+    } catch (error) {
+      lastError = error;
+      if (typeof error === "object" && error !== null && "code" in error && String(error.code) === "ENOENT") break;
+    }
+  }
+  throw lastError ?? new Error("Video preview generation failed.");
+}
+
+function previewEtag(sourceEtag: string): string {
+  return `W/\"preview-${sourceEtag.replaceAll('"', "")}\"`;
+}
+
+function previewFailure(error: unknown): { statusCode: 422 | 503; code: string; message: string } {
+  const errorCode = typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : "";
+  if (errorCode === "ENOENT") {
+    return { statusCode: 503, code: "preview_runtime_unavailable", message: "预览服务暂时不可用，请稍后重试。" };
+  }
+  if (typeof error === "object" && error !== null && "killed" in error && error.killed === true) {
+    return { statusCode: 503, code: "preview_generation_timeout", message: "预览生成超时，请重试或下载原文件。" };
+  }
+  return { statusCode: 422, code: "preview_generation_failed", message: "素材预览生成失败，文件可能损坏或格式不受支持。" };
+}
+
+function isPrivateAsset(bucket: string): boolean {
+  return bucket === "private-video" || bucket === "private-try-on";
+}
 
 export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Pool; auth: RequestAuthenticator; root: string }) {
+  const previewCache = new MediaPreviewCache();
   registerLocalCopyRelease(app, options);
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/thumbnail", async (request, reply) => {
     const user = await options.auth.authenticate(request);
@@ -47,11 +114,9 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
       resolve(options.root, objectPath),
     ]);
 
-    for (const filePath of candidates) {
-      if (!isWithin(options.root, filePath)) continue;
+    for (const candidate of candidates) {
       try {
-        const fileInfo = await stat(filePath);
-        if (!fileInfo.isFile()) continue;
+        const { path: filePath, info: fileInfo } = await storedFile(options.root, candidate);
         reply.type(thumbnailMimeType(filePath));
         reply.header("content-length", String(fileInfo.size));
         reply.header("cache-control", "private, max-age=3600");
@@ -77,7 +142,10 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
     }
 
     const asset = await options.db.query<{ bucket: string; object_path: string; mime_type: string | null }>(
-      "select bucket,object_path,mime_type from asset_objects where id=$1",
+      `select ao.bucket,ao.object_path,ao.mime_type from asset_objects ao where ao.id=$1
+        and ${activeAssetSql}
+        and (ao.bucket not in ('private-video','private-try-on') or exists(
+          select 1 from workspace_members wm where wm.workspace_id=ao.workspace_id and wm.user_id=ao.created_by))`,
       [request.params.assetId],
     );
     const row = asset.rows[0];
@@ -85,16 +153,15 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
 
     try {
       const bucketRoot = resolve(options.root, row.bucket);
-      const filePath = resolve(bucketRoot, row.object_path);
-      const relativePath = relative(bucketRoot, filePath);
+      const candidate = resolve(bucketRoot, row.object_path);
+      const relativePath = relative(bucketRoot, candidate);
       if (isAbsolute(relativePath) || relativePath === ".." || relativePath.startsWith(`..${sep}`)) {
         return reply.code(404).send({ error: { code: "not_found", message: "File not found" } });
       }
-      const fileInfo = await stat(filePath);
-      if (!fileInfo.isFile()) return reply.code(404).send({ error: { code: "not_found", message: "File not found" } });
+      const { path: filePath, info: fileInfo } = await storedFile(options.root, candidate);
       reply.type(row.mime_type ?? "application/octet-stream");
       reply.header("content-length", String(fileInfo.size));
-      reply.header("cache-control", "private, max-age=60");
+      reply.header("cache-control", "private, no-store");
       reply.header("cross-origin-resource-policy", "cross-origin");
       return reply.send(createReadStream(filePath));
     } catch {
@@ -125,48 +192,78 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
     try {
       const bucketPath = join(options.root, asset.bucket, asset.object_path);
       const rootPath = join(options.root, asset.object_path);
-      let filePath = bucketPath;
+      let file: Awaited<ReturnType<typeof storedFile>>;
       try {
-        await stat(bucketPath);
-      } catch {
-        await stat(rootPath);
-        filePath = rootPath;
+        file = await storedFile(options.root, bucketPath);
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+        file = await storedFile(options.root, rootPath);
       }
-      const relativePath = relative(options.root, filePath);
-      const outsideRoot = isAbsolute(relativePath) || relativePath === ".." || relativePath.startsWith(".." + sep);
-      if (outsideRoot) return reply.code(404).send({ error: { code: "asset_not_found", message: "Asset not found." } });
+      const { path: filePath, info: fileInfo } = file;
       const wantsPreview = request.query.preview === "1";
-      if (wantsPreview && String(asset.mime_type).startsWith("image/")) {
-        const preview = await sharp(filePath)
-          .rotate()
-          .resize(640, 640, { fit: "inside", withoutEnlargement: true })
-          .webp({ quality: 78 })
-          .toBuffer();
-        reply.type("image/webp");
-        reply.header("Content-Length", String(preview.length));
-        reply.header("Cache-Control", asset.bucket === "private-video" || asset.bucket === "private-try-on" ? "private, no-store" : "private, max-age=86400");
-        return reply.send(preview);
-      }
-      if (wantsPreview && String(asset.mime_type).startsWith("video/")) {
-        const { stdout } = await execFileAsync("ffmpeg", [
-          "-hide_banner", "-loglevel", "error", "-ss", "0.5", "-i", filePath,
-          "-frames:v", "1", "-vf", "scale=640:-2", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",
-        ], { encoding: "buffer", maxBuffer: 8 * 1024 * 1024 });
-        reply.type("image/jpeg");
-        reply.header("Content-Length", String(stdout.length));
-        reply.header("Cache-Control", asset.bucket === "private-video" || asset.bucket === "private-try-on" ? "private, no-store" : "private, max-age=86400");
-        return reply.send(stdout);
-      }
-      const fileInfo = await stat(filePath);
-      reply.type(asset.mime_type ?? "application/octet-stream");
       const etag = await mediaFileVersion(filePath);
+      const previewKey = `${filePath}:${etag}:${asset.mime_type}`;
+      let cachedPreview: { contentType: string; bytes: Buffer } | null = null;
+      if (wantsPreview) {
+        try {
+          cachedPreview = await previewCache.getOrCreate(previewKey, async () => {
+            if (String(asset.mime_type).startsWith("image/")) {
+              const bytes = await sharp(filePath)
+                .rotate()
+                .resize(640, 640, { fit: "inside", withoutEnlargement: true })
+                .webp({ quality: 78 })
+                .toBuffer();
+              return { contentType: "image/webp", bytes };
+            }
+
+            if (String(asset.mime_type).startsWith("video/")) return createVideoPreview(filePath);
+            return null;
+          });
+        } catch (error) {
+          const failure = previewFailure(error);
+          reply.header("Cache-Control", "private, no-store");
+          reply.header("Vary", "Authorization, Cookie");
+          return reply.code(failure.statusCode).send({ error: { code: failure.code, message: failure.message } });
+        }
+      }
+      if (cachedPreview) {
+        const previewTag = previewEtag(etag);
+        reply.header("ETag", previewTag);
+        reply.header("X-Media-Preview", "generated");
+        reply.header("X-Content-Type-Options", "nosniff");
+        reply.header("Cache-Control", isPrivateAsset(asset.bucket) ? "private, no-store" : "private, max-age=86400");
+        reply.header("Vary", "Authorization, Cookie");
+        if (request.headers["if-none-match"]?.split(",").map((value) => value.trim()).includes(previewTag)) {
+          return reply.code(304).send();
+        }
+        reply.type(cachedPreview.contentType);
+        reply.header("Content-Length", String(cachedPreview.bytes.length));
+        return reply.send(cachedPreview.bytes);
+      }
+      if (wantsPreview) {
+        reply.header("Cache-Control", "private, no-store");
+        reply.header("Vary", "Authorization, Cookie");
+        return reply.code(415).send({ error: { code: "preview_not_supported", message: "该素材类型暂不支持预览。" } });
+      }
+      reply.type(asset.mime_type ?? "application/octet-stream");
       reply.header("ETag", etag);
       reply.header("X-Content-Type-Options", "nosniff");
       if (request.query.download === "1") {
-        const extensions: Record<string,string> = {"video/webm":"webm","video/mp4":"mp4","image/png":"png","image/jpeg":"jpg","image/webp":"webp","audio/mpeg":"mp3","audio/wav":"wav"};
+        const extensions: Record<string, string> = {
+          "video/webm": "webm",
+          "video/mp4": "mp4",
+          "video/ogg": "ogv",
+          "video/quicktime": "mov",
+          "video/x-matroska": "mkv",
+          "image/png": "png",
+          "image/jpeg": "jpg",
+          "image/webp": "webp",
+          "audio/mpeg": "mp3",
+          "audio/wav": "wav",
+        };
         reply.header("Content-Disposition", `attachment; filename="${request.params.assetId.replace(/[^a-zA-Z0-9-]/g, "")}.${extensions[String(asset.mime_type)] ?? "bin"}"`);
       }
-      reply.header("Cache-Control", asset.bucket === "private-video" || asset.bucket === "private-try-on" ? "private, no-store" : "private, max-age=300");
+      reply.header("Cache-Control", isPrivateAsset(asset.bucket) ? "private, no-store" : "private, max-age=300");
       if (/^(video|audio|image)\//.test(String(asset.mime_type))) {
         reply.header("Accept-Ranges", "bytes");
         const range = !request.headers["if-range"] || request.headers["if-range"] === etag ? request.headers.range : undefined;
@@ -188,6 +285,16 @@ export function registerLocalAssetRoutes(app: FastifyInstance, options: { db: Po
       return reply.code(404).send({ error: { code: "asset_not_found", message: "Asset file not found." } });
     }
   });
+}
+
+async function storedFile(root: string, candidate: string) {
+  if (!isWithin(root, resolve(candidate))) throw new Error("Asset path is outside storage.");
+  const [physicalRoot, physicalFile] = await Promise.all([realpath(root), realpath(candidate)]);
+  // Lexical containment alone still follows junctions and symlinks out of storage.
+  if (!isWithin(physicalRoot, physicalFile)) throw new Error("Asset link is outside storage.");
+  const info = await stat(physicalFile);
+  if (!info.isFile()) throw new Error("Asset path is not a file.");
+  return { path: physicalFile, info };
 }
 
 function isWithin(root: string, filePath: string) {

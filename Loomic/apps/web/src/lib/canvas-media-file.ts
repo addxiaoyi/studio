@@ -17,6 +17,99 @@ export type CanvasMediaInfo = {
   dataUrl?: string;
 };
 
+export type CanvasAssetMetadata = {
+  assetId: string;
+  libraryAssetId: string;
+  title: string;
+  mimeType: string;
+};
+
+export async function readCanvasAssetMetadata(
+  token: string,
+  id: string,
+  signal: AbortSignal,
+): Promise<CanvasAssetMetadata> {
+  if (!UUID.test(id)) throw new Error("�زı�ʶ��Ч������زĿ����´򿪡�");
+  const lookup = await fetch(
+    `${getServerBaseUrl()}/api/assets/${id}/canvas-source`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+      credentials: "include",
+      redirect: "error",
+    },
+  );
+  if (!lookup.ok)
+    throw new Error(
+      lookup.status === 401
+        ? "��¼��ʧЧ�������µ�¼�����Ե��롣"
+        : lookup.status === 404
+          ? "�ز��ѹ��ڡ���ɾ������Ȩ���ʣ��뵽�زĿ�˶ԡ�"
+          : `��ȡ�ز���Ϣʧ�ܣ�${lookup.status}���������ԡ�`,
+    );
+  const body: unknown = await lookup.json();
+  const source =
+    body && typeof body === "object" && "data" in body
+      ? (body.data as Record<string, unknown>)
+      : null;
+  if (
+    !source ||
+    typeof source.assetId !== "string" ||
+    !UUID.test(source.assetId) ||
+    typeof source.libraryAssetId !== "string" ||
+    !UUID.test(source.libraryAssetId) ||
+    typeof source.mimeType !== "string" ||
+    !/^(image|video|audio)\//.test(source.mimeType)
+  )
+    throw new Error("�ز���Ϣ�������������Զ�ȡ��");
+  return {
+    assetId: source.assetId,
+    libraryAssetId: source.libraryAssetId,
+    title: typeof source.title === "string" ? source.title : "�ز�",
+    mimeType: source.mimeType,
+  };
+}
+
+export async function readCanvasAssetFile(
+  token: string,
+  source: CanvasAssetMetadata,
+  signal: AbortSignal,
+): Promise<CanvasAssetFile> {
+  const response = await fetch(
+    `${getServerBaseUrl()}/api/uploads/${source.assetId}/file`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+      credentials: "include",
+      redirect: "error",
+    },
+  );
+  if (!response.ok)
+    throw new Error(
+      `�ز��ļ���ȡʧ�ܣ�${response.status}����ԭ����δ�������ɣ������Ե��롣`,
+    );
+  const blob = await boundedResponseBlob(response, MEDIA_LIMIT);
+  signal.throwIfAborted();
+  if (!blob.size || !/^(image|video|audio)\//.test(blob.type))
+    throw new Error("�ز�Ϊ�ջ��ʽ����֧�֡�");
+  const extensions: Record<string, string> = {
+    "audio/mp4": "m4a",
+    "audio/mpeg": "mp3",
+    "audio/x-wav": "wav",
+    "image/jpeg": "jpg",
+  };
+  return {
+    assetId: source.assetId,
+    libraryAssetId: source.libraryAssetId,
+    title: source.title,
+    file: new File(
+      [blob],
+      `${source.assetId}.${extensions[blob.type] ?? blob.type.split("/")[1]?.split(";")[0] ?? "bin"}`,
+      { type: blob.type },
+    ),
+  };
+}
+
 export async function readCanvasAsset(
   token: string,
   id: string,
@@ -152,6 +245,47 @@ export async function inspectCanvasMedia(
     media.preload = "metadata";
     media.onloadedmetadata = () => finish();
     media.onerror = () => finish(new Error("素材无法解码，请检查文件格式。"));
+    media.src = url;
+  });
+}
+
+export function inspectCanvasMediaUrl(
+  url: string,
+  mimeType: string,
+  signal: AbortSignal,
+): Promise<CanvasMediaInfo> {
+  if (!mimeType.startsWith("video/"))
+    return Promise.reject(new Error("Only video metadata can be read from a stream."));
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const media = document.createElement("video");
+    const finish = (error?: Error) => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      const info = {
+        width: media.videoWidth,
+        height: media.videoHeight,
+        duration: media.duration,
+      };
+      media.onloadedmetadata = null;
+      media.onerror = null;
+      media.removeAttribute("src");
+      media.load();
+      if (error) reject(error);
+      else if (!Number.isFinite(info.duration) || info.duration <= 0 || !info.width || !info.height)
+        reject(new Error("Unable to read video duration or dimensions."));
+      else resolve(info);
+    };
+    const abort = () => finish(new DOMException("The metadata request was canceled.", "AbortError"));
+    const timer = setTimeout(
+      () => finish(new Error("Video metadata took too long to load.")),
+      METADATA_TIMEOUT,
+    );
+    signal.addEventListener("abort", abort, { once: true });
+    media.crossOrigin = "use-credentials";
+    media.preload = "metadata";
+    media.onloadedmetadata = () => finish();
+    media.onerror = () => finish(new Error("The video metadata could not be read."));
     media.src = url;
   });
 }

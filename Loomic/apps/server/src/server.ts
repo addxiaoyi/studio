@@ -12,9 +12,11 @@ if (process.env.GLOBAL_AGENT_HTTP_PROXY) {
 import { buildApp } from "./app.js";
 import { loadServerEnv } from "./config/env.js";
 import { ServiceLifecycle } from "./runtime/lifecycle.js";
+import { createProcessReceipt } from "./runtime/process-receipt.js";
 
 const env = loadServerEnv();
 const lifecycle = new ServiceLifecycle();
+const receipt = createProcessReceipt("server");
 const app = buildApp({
   env,
   lifecycle,
@@ -27,6 +29,7 @@ const stop = () => {
   stopping ??= (async () => {
     await lifecycle.drain();
     await app.close();
+    await receipt.drained();
   })().catch(error => { app.log.error(error, "Graceful shutdown failed"); process.exitCode = 1; });
 };
 process.once("SIGTERM", stop); process.once("SIGINT", stop);
@@ -40,6 +43,7 @@ try {
   console.log(`@helstera/server listening on http://${host}:${env.port}`);
   const readiness = await app.inject("/api/health/ready");
   if (readiness.statusCode !== 200) throw new Error("Server dependencies are not ready");
+  await receipt.ready();
   process.send?.("ready");
 } catch (error) {
   app.log.error(error);

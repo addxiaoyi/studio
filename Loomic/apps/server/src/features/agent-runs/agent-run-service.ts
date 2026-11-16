@@ -18,6 +18,7 @@ export class AgentRunPersistenceError extends Error {
 export type AgentRunMetadataService = {
   createAcceptedRun(input: CreateAcceptedAgentRunInput): Promise<void>;
   updateRun(input: UpdateAgentRunInput): Promise<void>;
+  close?(): Promise<void>;
 };
 
 export function createAgentRunMetadataService(options: {

@@ -1,8 +1,8 @@
 import { expect,test } from "@playwright/test";
 import { createPresentationFixture } from "../../server/src/features/website-capture/presentation-fixture";
-import { createBlankTemplateProject } from "../../../vendor/visualforge/packages/browser-studio/src/templates/blank";
 
 test("keeps the same project between canvas and video, retains old drafts and identifies missing copies on a second device", async ({page,browser},info) => {
+  const { createBlankTemplateProject } = await import("../../../vendor/visualforge/packages/browser-studio/src/templates/blank");
   const fixture=await createPresentationFixture(process.env.DATABASE_URL!,"http://localhost:3238",async ctx => {
     ctx.app.get("/api/workspace/settings",async()=>({settings:{autoDeleteEmptyCanvas:false}}));
   });

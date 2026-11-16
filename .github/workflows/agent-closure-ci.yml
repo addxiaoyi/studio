@@ -52,21 +52,35 @@ jobs:
           pnpm --filter @helstera/server typecheck
           pnpm --filter @helstera/web typecheck
           pnpm --filter @helstera/desktop typecheck
+      - name: Reject invalid server build inputs
+        run: |
+          node --test scripts/validate-foundation-app.test.mjs
+          pnpm --filter @helstera/server build
+      - name: Public media recovery gates
+        run: |
+          pnpm --filter @helstera/server exec vitest run src/http/public-media.test.ts src/http/local-public-media.test.ts src/http/health.test.ts
+          python3 -m unittest scripts.test_route_public_media_recovery -v
       - name: Approval, recovery and private asset database gates
         run: |
+          node --test scripts/prepare-test-postgres.test.mjs
           psql "$HELT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;'
-          node scripts/test-local-postgres.mjs src/features/agent-goals/goal-steps.postgres.test.ts src/runtime/media-admission.postgres.test.ts src/features/projects/project-context.postgres.test.ts src/features/projects/video-document.postgres.test.ts src/features/assets/private-lifecycle.postgres.test.ts src/local-db/private-upload-ownership.postgres.test.ts src/local-db/viewer-locks.postgres.test.ts src/features/onetake/onetake.postgres.test.ts src/features/video-editor/plan-store.postgres.test.ts
+          node scripts/test-local-postgres.mjs src/features/agent-goals/goal-steps.postgres.test.ts src/runtime/media-admission.postgres.test.ts src/runtime/job-recovery.postgres.test.ts src/local-db/agent-run-lease.postgres.test.ts src/features/projects/project-context.postgres.test.ts src/features/projects/video-document.postgres.test.ts src/features/assets/private-lifecycle.postgres.test.ts src/local-db/private-upload-ownership.postgres.test.ts src/local-db/viewer-locks.postgres.test.ts src/features/onetake/onetake.postgres.test.ts src/features/video-editor/plan-store.postgres.test.ts
+          pnpm --filter @helstera/server exec vitest run src/features/projects/project-context.test.ts
           pnpm --filter @helstera/web exec vitest run test/project-context.test.tsx test/project-video-sync.test.ts test/media-file-hash.test.ts test/canvas-video-import-state.test.tsx test/studio-project-key.test.ts test/select-pointer.test.tsx test/styled-select.test.tsx test/snapshot-thumbnail-ready.test.ts
       - name: Readiness, graceful drain and release retention
         run: |
-          pnpm --filter @helstera/server exec vitest run src/http/health.test.ts src/queue/local-job-queue.test.ts src/runtime/queue-runner.test.ts src/runtime/periodic-tasks.test.ts src/runtime/drain-gate.test.ts src/features/agent-goals/worker-drain.test.ts
+          node scripts/test-local-postgres.mjs src/runtime/worker-process.postgres.test.ts
+          pnpm --filter @helstera/server exec vitest run src/http/health.test.ts src/queue/local-job-queue.test.ts src/runtime/queue-runner.test.ts src/runtime/periodic-tasks.test.ts src/runtime/drain-gate.test.ts src/runtime/process-receipt.test.ts src/runtime/job-shutdown-checkpoint.test.ts src/runtime/media-admission.test.ts src/features/agent-goals/worker-drain.test.ts
           python3 -m unittest scripts/test_switch_server_upstream.py
           sudo python3 -m unittest scripts/test_storage_retention.py
       - name: Preserve production authentication, project identity and public media
         run: |
           node scripts/test-local-postgres.mjs src/http/local-auth-register.postgres.test.ts src/local-db/project-idempotency.postgres.test.ts
+          node scripts/test-local-postgres.mjs src/http/local-auth-boundary.postgres.test.ts src/http/credit-pagination.postgres.test.ts
+          pnpm --filter @helstera/server exec vitest run src/local-db/password-hash.test.ts
           pnpm --filter @helstera/server exec vitest run src/http/public-media.test.ts src/local-db/chat-service.test.ts src/local-db/project-service.test.ts src/features/website-capture/assistant-recording-claim.test.ts
           pnpm --filter @helstera/web exec vitest run test/register.test.tsx test/login.test.tsx test/local-auth-network-error.test.ts
+          pnpm --filter @helstera/web exec vitest run test/auth-session-order.test.tsx test/local-session-contract.test.ts test/credit-account-isolation.test.tsx test/billing-account-isolation.test.tsx test/workspace-sidebar-route.test.tsx
       - name: Structured model planning deadlines
         run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/goal-planner.test.ts src/features/agent-goals/goal-plan-timeout.test.ts src/features/video-editor/planner.test.ts
       - name: Private Agent browser access and controls
@@ -75,7 +89,8 @@ jobs:
           pnpm --filter @helstera/web exec vitest run test/agent-browser-dock.test.tsx test/agent-browser-poll.test.ts test/canvas-bottom-bar.test.tsx
       - name: Private playback and saved workspace recovery
         run: |
-          pnpm --filter @helstera/server exec vitest run src/http/media-access.test.ts src/http/local-assets.test.ts
+          pnpm --filter @helstera/server exec vitest run src/http/media-access.test.ts src/http/local-assets.test.ts src/http/local-assets-boundary.test.ts
+          node scripts/test-local-postgres.mjs src/http/provider-assets.postgres.test.ts
           node scripts/test-local-postgres.mjs src/http/private-video.postgres.test.ts
           pnpm --filter @helstera/web exec vitest run test/authenticated-recording.test.tsx test/fashion-retention.test.tsx test/feed-page.test.tsx
       - name: Website presentation parameters and recording approval
@@ -93,15 +108,34 @@ jobs:
           pnpm --filter @helstera/server exec vitest run src/features/canvas-workflows/execution-access.test.ts src/features/canvas-workflows/logic-executor.test.ts src/features/canvas-workflows/batch-executor.test.ts src/features/canvas-workflows/generation.test.ts src/features/agent-goals/agent-goal-background.test.ts src/agent/tools/index.test.ts
           pnpm --filter @helstera/web exec vitest run test/workflow-navigation.test.tsx test/workflow-node-inspector.test.tsx test/workflow-run.test.tsx test/workflow-scene.test.ts test/workflow-groups.test.ts test/workflow-references.test.tsx test/canvas-workflow-document.test.tsx test/canvas-timeline-panel.test.tsx test/agent-workflow-card.test.tsx test/canvas-save-conflict.test.tsx test/canvas-save-merge.test.ts test/canvas-recovery-copy.test.ts
       - name: Shared UI recovery and desktop navigation
-        run: pnpm --filter @helstera/web exec vitest run test/ui-recovery.test.tsx test/workspace-session.test.tsx test/desktop-navigation.test.tsx test/desktop-history-ui.test.tsx test/goal-history.test.tsx test/product-label.test.ts test/assets-latest-request.test.tsx test/workbench-save.test.tsx test/styled-select.test.tsx src/components/toast.test.tsx src/components/error-boundary.test.tsx
+        run: pnpm --filter @helstera/web exec vitest run test/ui-recovery.test.tsx test/workspace-session.test.tsx test/desktop-navigation.test.tsx test/desktop-history-ui.test.tsx test/desktop-download-refresh.test.tsx test/goal-history.test.tsx test/product-label.test.ts test/assets-latest-request.test.tsx test/workbench-save.test.tsx test/styled-select.test.tsx src/components/toast.test.tsx src/components/error-boundary.test.tsx
+      - name: Prompt selection and search recovery
+        run: |
+          pnpm --filter @helstera/web exec vitest run test/prompt-library.test.tsx test/prompt-composer.test.tsx test/chat-input.test.tsx
+          pnpm --filter @helstera/server exec vitest run src/http/prompt-catalog.test.ts src/http/local-growth.test.ts
+          node scripts/test-local-postgres.mjs src/http/prompt-catalog.postgres.test.ts src/http/legacy-tasks.postgres.test.ts
+      - name: Safe redirects and unresolved route recovery
+        run: pnpm --filter @helstera/web exec vitest run test/navigation.test.ts test/workspace-breadcrumbs.test.tsx test/workspace-session.test.tsx test/workspace-sidebar-route.test.tsx test/login.test.tsx
+      - name: Serialized migrations and gallery privacy
+        run: |
+          pnpm --filter @helstera/shared exec vitest run src/gallery-captions.test.ts
+          pnpm --filter @helstera/server exec vitest run src/local-db/migrate.test.ts src/local-db/schema-policy-guard.test.ts
+          node scripts/test-local-postgres.mjs src/local-db/migrate.postgres.test.ts src/http/gallery-boundary.postgres.test.ts src/http/gallery-media.postgres.test.ts src/http/gallery-captions.postgres.test.ts
+          pnpm --filter @helstera/web exec vitest run test/gallery-recovery.test.tsx test/gallery-comments.test.tsx test/gallery-captions.test.tsx test/asset-publication-account.test.tsx test/assets-account-effects.test.tsx
+      - name: Reject incomplete background task drain
+        run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/worker-drain.test.ts src/runtime/queue-runner.test.ts src/runtime/drain-gate.test.ts
       - name: Canvas import identity, timeline and upload recovery
         run: |
           pnpm --filter @helstera/server exec vitest run src/http/canvas-asset-source.test.ts src/http/uploads-media.test.ts
           pnpm --filter @helstera/web exec vitest run test/canvas-asset-import.test.tsx test/canvas-timeline.test.ts test/canvas-timeline-panel.test.tsx test/video-player-panel.test.tsx test/studio-project-key.test.ts test/studio-brand.test.ts test/studio-display-name.test.ts
       - name: Try-on billing and shared form regressions
         run: |
+          node scripts/test-local-postgres.mjs src/runtime/billing-reconciliation.postgres.test.ts
+          pnpm --filter @helstera/server exec vitest run src/runtime/billing-reconciliation.test.ts src/features/generation/pricing-snapshot.test.ts src/local-db/provider-generation.video.test.ts src/features/jobs/executors/video-generation.test.ts
+          pnpm --filter @helstera/web exec vitest run test/credit-usage-history.test.tsx
+          pnpm --filter @helstera/web exec vitest run test/job-settlement-review.test.tsx
           pnpm --filter @helstera/server exec vitest run src/features/generation/fashion-billing.postgres.test.ts src/http/fashion-billing.test.ts src/http/image-models-route.test.ts src/http/generation-approvals.test.ts src/http/media-connector-gate.test.ts
-          pnpm --filter @helstera/web exec vitest run test/fashion-models.test.ts test/fashion-generation.test.ts test/app-select.test.tsx test/styled-select.test.tsx test/website-assistant-settings.test.tsx test/desktop-mcp-panel.test.tsx
+          pnpm --filter @helstera/web exec vitest run test/fashion-models.test.ts test/fashion-generation.test.ts test/studio-video-generation.test.ts test/app-select.test.tsx test/styled-select.test.tsx test/website-assistant-settings.test.tsx test/desktop-mcp-panel.test.tsx
       - name: Video conversation contracts and model gates
         run: |
           pnpm --filter @helstera/shared exec vitest run src/video-editor-contracts.test.ts src/video-editor-chat.test.ts src/video-motion.test.ts
@@ -118,10 +152,21 @@ jobs:
         run: pnpm --filter @helstera/web exec vitest run test/video-locale.test.tsx test/studio-ai-context.test.tsx test/studio-ai-workflow.test.tsx test/studio-creator-menu.test.ts test/studio-ai-edit.test.ts test/studio-ai-session.test.ts test/studio-timeline-diff.test.tsx test/generated-asset-identity.test.ts test/studio-asset-picker.test.tsx test/onetake-history.test.tsx test/onetake-export-options.test.tsx test/send-video-to-chat.test.tsx test/agent-workspace-panel.test.tsx test/agent-goal-timeout.test.ts
       - name: Deployment recovery gates on Linux
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nginx
           python3 -m pip install -r scripts/requirements-desktop-release.txt
           node --test scripts/server-runtime-lock.test.mjs
           python3 -m unittest scripts.test_deploy_web_static -q
           python3 -m unittest scripts.test_deploy_production_candidate scripts.test_prepare_production_candidate scripts.test_isolated_pg_rehearsal scripts.test_apply_studio_nginx scripts.test_validate_studio_nginx -q
+          python3 -m unittest scripts.test_inspect_website_release -q
+          python3 -m unittest scripts.test_blue_green_release scripts.test_release_topology scripts.test_blue_green_nginx -v
+          npm install --prefix "$RUNNER_TEMP/helstera-pm2" --ignore-scripts --no-audit --no-fund pm2@6.0.8
+          export PATH="$RUNNER_TEMP/helstera-pm2/node_modules/.bin:$PATH"
+          export HELT_RELEASE_TEST_NODE_MODULES="$(realpath apps/server/node_modules)"
+          export HELT_RELEASE_TEST_DATABASE_URL="$HELT_TEST_DATABASE_URL"
+          export HELT_RELEASE_TEST_REQUIRED=1
+          export HELT_RELEASE_TEST_FULL_WORKER=1
+          python3 -m unittest scripts.test_blue_green_pm2 -v
           python3 -m unittest discover -s apps/server/src/features/onetake -p test_runner.py -v
   editor-browser:
     runs-on: ubuntu-24.04
@@ -165,6 +210,9 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
           pnpm --filter @helstera/web exec playwright install --with-deps chromium
+      - name: Session and logout response ordering with real HttpOnly cookies
+        if: ${{ !inputs.workflow_only }}
+        run: pnpm --filter @helstera/web exec playwright test --config playwright.auth-cookie.config.ts
       - name: Confirm, compare, undo, reload and decode export (injected model plan)
         if: ${{ !inputs.workflow_only }}
         run: pnpm --filter @helstera/web exec playwright test --config playwright.diff-undo.config.ts
@@ -175,6 +223,12 @@ jobs:
         run: |
           node scripts/prepare-creative-sources.mjs fashion
           node scripts/build-fashion-runtime.mjs
+      - name: Published Gallery playback and withdrawal
+        if: ${{ !inputs.workflow_only }}
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;'
+          pnpm --filter @helstera/web build
+          HELT_TEST_DATABASE_URL="$DATABASE_URL" pnpm --filter @helstera/web exec playwright test --config playwright.gallery.config.ts
       - name: Try-on quote, result recovery and responsive menus (injected API)
         if: ${{ !inputs.workflow_only }}
         run: pnpm --filter @helstera/web exec playwright test --config playwright.fashion-billing.config.ts
@@ -220,5 +274,9 @@ jobs:
             Loomic/.creative-test-results/workflow.json
             Loomic/.creative-test-results/project-context/
             Loomic/.creative-test-results/project-context.json
+            Loomic/.creative-test-results/gallery-browser/
+            Loomic/.creative-test-results/gallery-browser.json
+            Loomic/.creative-test-results/auth-cookie-browser/
+            Loomic/.creative-test-results/auth-cookie-browser.json
           if-no-files-found: error
           retention-days: 7

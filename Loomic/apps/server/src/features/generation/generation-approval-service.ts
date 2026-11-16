@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import { assertWorkflowGenerationActive } from "../canvas-workflows/approval-access.js";
 import { workflowBudgetError } from "../canvas-workflows/budget.js";
+import { snapshotCatalogPricing } from "./pricing-snapshot.js";
 
 export type GenerationApprovalState =
   | "confirmation_required"
@@ -28,6 +29,8 @@ export type GenerationApprovalRequest = {
     websiteCaptureTaskId?: string;
     workflowGoalId?: string;
     workflowStepId?: string;
+    reservationJobId?: string;
+    requestKey?: string;
   };
   jobId?: string;
 };
@@ -56,6 +59,9 @@ type GateInput = {
   estimatedCredits: number;
   approvalId?: string;
   forceConfirmation?: boolean;
+  deferConsumption?: boolean;
+  jobId?: string;
+  idempotencyKey?: string;
   context?: GenerationApprovalRequest["context"];
 };
 
@@ -66,9 +72,9 @@ export type GenerationApprovalGateResult =
 export function createGenerationApprovalService(db: Pool) {
   return {
     async gate(input: GateInput): Promise<GenerationApprovalGateResult> {
-      if (input.estimatedCredits <= 0 && !input.forceConfirmation) return { state: "approved" };
-
       const fingerprint = fingerprintPayload({ payload: input.payload, estimatedCredits: input.estimatedCredits });
+      if (input.approvalId) return consumeApproved(db, input, fingerprint);
+      if (input.estimatedCredits <= 0 && !input.forceConfirmation) return { state: "approved" };
       const autoApprove = await db.query<{ enabled: boolean }>(
         "select auto_approve_paid_generation as enabled from workspace_settings where workspace_id = $1",
         [input.workspaceId],
@@ -80,17 +86,12 @@ export function createGenerationApprovalService(db: Pool) {
           `select id from generation_approvals
            where workspace_id = $1 and user_id = $2 and job_type = $3
              and model = $4 and payload_fingerprint = $5
-             and context->>'canvasId' is not distinct from $6
-             and context->>'sessionId' is not distinct from $7
+             and context=$6::jsonb
              and status = 'approved' and consumed_at is null and expires_at > now()
            order by approved_at desc nulls last limit 1`,
-          [input.workspaceId, input.userId, input.jobType, input.model, fingerprint, input.context?.canvasId ?? null, input.context?.sessionId ?? null],
+          [input.workspaceId, input.userId, input.jobType, input.model, fingerprint, JSON.stringify(input.context ?? {})],
         );
         if (previouslyApproved.rows[0]) return { state: "approved", approvalId: previouslyApproved.rows[0].id };
-      }
-
-      if (input.approvalId) {
-        return consumeApproved(db, input, fingerprint);
       }
 
       const approvalScope = [
@@ -99,22 +100,19 @@ export function createGenerationApprovalService(db: Pool) {
         input.jobType,
         input.model,
         fingerprint,
-        input.context?.canvasId ?? null,
-        input.context?.sessionId ?? null,
+        JSON.stringify(input.context ?? {}),
       ];
       await db.query(
         `update generation_approvals set status = 'expired'
          where workspace_id = $1 and user_id = $2 and job_type = $3 and model = $4
-           and payload_fingerprint = $5 and context->>'canvasId' is not distinct from $6
-           and context->>'sessionId' is not distinct from $7
+           and payload_fingerprint = $5 and context=$6::jsonb
            and status = 'pending' and expires_at <= now()`,
         approvalScope,
       );
       const pending = await db.query<{ id: string; expires_at: string }>(
         `select id, expires_at from generation_approvals
          where workspace_id = $1 and user_id = $2 and job_type = $3 and model = $4
-           and payload_fingerprint = $5 and context->>'canvasId' is not distinct from $6
-           and context->>'sessionId' is not distinct from $7
+           and payload_fingerprint = $5 and context=$6::jsonb
            and status = 'pending' and expires_at > now()
          order by created_at desc limit 1`,
         approvalScope,
@@ -127,11 +125,23 @@ export function createGenerationApprovalService(db: Pool) {
       }
 
       let created: { rows: Array<{ id: string; expires_at: string }> };
+      const catalogPricing = snapshotCatalogPricing(input.model, input.payload, input.estimatedCredits);
       try {
         created = await db.query(
           `insert into generation_approvals
-            (workspace_id, user_id, job_type, model, payload, payload_fingerprint, estimated_credits, expires_at, context)
-           values ($1, $2, $3, $4, $5::jsonb, $6, $7, now() + interval '10 minutes', $8::jsonb)
+            (workspace_id, user_id, job_type, model, payload, payload_fingerprint, estimated_credits, expires_at, context, billing_pricing)
+           values ($1, $2, $3, $4, $5::jsonb, $6, $7, now() + interval '10 minutes', $8::jsonb,
+             coalesce((
+               select case pm.billing_unit
+                 when 'per_second' then jsonb_build_object('billingUnit','per_second',
+                   'creditCost',$7::numeric/nullif(($5::jsonb->>'duration')::numeric,0))
+                 when 'per_million_tokens' then jsonb_build_object('billingUnit','per_million_tokens',
+                   'inputTokenPriceCny',pm.input_token_price_cny,'outputTokenPriceCny',pm.output_token_price_cny)
+                 else jsonb_build_object('billingUnit','per_generation','creditCost',$7::numeric) end
+               from provider_models pm join provider_configs pc on pc.id=pm.provider_id
+               where pm.model_id=$4 and pm.enabled=true and pc.enabled=true and pc.health_status='healthy'
+               order by pm.priority,pc.latency_ms nulls last limit 1
+             ), $9::jsonb))
           returning id, expires_at`,
           [
             input.workspaceId,
@@ -142,6 +152,7 @@ export function createGenerationApprovalService(db: Pool) {
             fingerprint,
             input.estimatedCredits,
             JSON.stringify(input.context ?? {}),
+            catalogPricing ? JSON.stringify(catalogPricing) : null,
           ],
         );
       } catch (error) {
@@ -149,8 +160,7 @@ export function createGenerationApprovalService(db: Pool) {
         const raced = await db.query<{ id: string; expires_at: string }>(
           `select id, expires_at from generation_approvals
            where workspace_id = $1 and user_id = $2 and job_type = $3 and model = $4
-             and payload_fingerprint = $5 and context->>'canvasId' is not distinct from $6
-             and context->>'sessionId' is not distinct from $7
+             and payload_fingerprint = $5 and context=$6::jsonb
              and status = 'pending' and expires_at > now()
            order by created_at desc limit 1`,
           approvalScope,
@@ -179,7 +189,7 @@ export function createGenerationApprovalService(db: Pool) {
         [input.approvalId, input.workspaceId, input.userId],
       );
       const prior = existing.rows[0];
-      if (prior?.job_id) return { ...toRequestFromRow(prior), jobId: prior.job_id };
+      if (prior?.job_id && prior.status === "approved") return { ...toRequestFromRow(prior), jobId: prior.job_id };
       if (prior) await assertWorkflowGenerationActive(db, toRequestFromRow(prior));
 
       const row = await db.query<ApprovalRow>(
@@ -206,7 +216,7 @@ export function createGenerationApprovalService(db: Pool) {
       );
       const approval = current.rows[0];
       if (!approval) throw new GenerationApprovalError("generation_approval_invalid", "This generation confirmation is not valid.");
-      if (approval.job_id) return { ...toRequestFromRow(approval), jobId: approval.job_id };
+      if (approval.job_id && approval.status === "approved") return { ...toRequestFromRow(approval), jobId: approval.job_id };
       if (approval.status === "approved" && approval.approved_at && new Date(approval.approved_at).getTime() < new Date(approval.expires_at).getTime()) return toRequestFromRow(approval);
       if (new Date(approval.expires_at).getTime() <= Date.now()) {
         await expire(db, input.approvalId);
@@ -218,12 +228,43 @@ export function createGenerationApprovalService(db: Pool) {
     },
 
     async attachJob(approvalId: string, jobId: string) {
-      await db.query(
-        "update generation_approvals set job_id = coalesce(job_id, $2), consumed_at = coalesce(consumed_at, now()) where id = $1 and status = 'approved'",
+      const client = await db.connect();
+      try {
+        await client.query("begin");
+        const job = (await client.query<{ billing_approval_id: string | null; credits_transaction_id: string | null }>(
+          "select billing_approval_id,credits_transaction_id from background_jobs where id=$1 for update", [jobId],
+        )).rows[0];
+        if (!job || (job.credits_transaction_id && job.billing_approval_id && job.billing_approval_id !== approvalId)) {
+          await client.query("rollback");
+          return null;
+        }
+        const { rows } = await client.query<{ job_id: string }>(
+        `update generation_approvals approval set job_id=coalesce(approval.job_id,$2),consumed_at=coalesce(approval.consumed_at,now())
+         where approval.id=$1 and approval.status='approved' and (approval.job_id is null or approval.job_id=$2)
+           and exists(select 1 from background_jobs job where job.id=$2 and job.workspace_id=approval.workspace_id
+             and job.created_by=approval.user_id and job.job_type=approval.job_type and job.payload=approval.payload
+             and job.canvas_id::text is not distinct from approval.context->>'canvasId'
+             and job.session_id::text is not distinct from approval.context->>'sessionId'
+             and job.project_id::text is not distinct from approval.context->>'projectId'
+             and job.thread_id is not distinct from approval.context->>'threadId'
+             and (job.credits_transaction_id is null or approval.estimated_credits=
+               coalesce((job.billing_receipt->>'reservedCredits')::numeric,job.credits_cost))
+             and (approval.context->>'reservationJobId' is null or approval.context->>'reservationJobId'=job.id::text)
+             and (approval.context->>'requestKey' is null or approval.context->>'requestKey'=job.idempotency_key))
+         returning approval.job_id`,
         [approvalId, jobId],
       );
-      const { rows } = await db.query<{ job_id: string | null }>("select job_id from generation_approvals where id = $1", [approvalId]);
-      return rows[0]?.job_id ?? null;
+        if (!rows[0]) {
+          await client.query("rollback");
+          return null;
+        }
+        await client.query("update background_jobs set billing_approval_id=$2 where id=$1", [jobId, approvalId]);
+        await client.query("commit");
+        return rows[0].job_id;
+      } catch (cause) {
+        await client.query("rollback");
+        throw cause;
+      } finally { client.release(); }
     },
 
     async reject(input: { approvalId: string; workspaceId: string; userId: string }) {
@@ -265,14 +306,32 @@ async function consumeApproved(
 ): Promise<GenerationApprovalGateResult> {
   const approvalId = input.approvalId;
   if (!approvalId) throw new GenerationApprovalError("generation_approval_invalid", "A confirmation id is required.");
+  if (input.deferConsumption) {
+    const approved = await db.query<{ id: string }>(
+      `select approval.id from generation_approvals approval
+       where approval.id=$1 and approval.workspace_id=$2 and approval.user_id=$3 and approval.job_type=$4
+         and approval.model=$5 and approval.payload_fingerprint=$6 and approval.status='approved'
+         and approval.expires_at>now()
+         and (approval.context-'reservationJobId')=($7::jsonb-'reservationJobId')
+         and (approval.context->>'reservationJobId' is null or approval.context->>'reservationJobId'=$8::text)
+         and (approval.consumed_at is null or exists(select 1 from background_jobs job where job.id=approval.job_id
+           and job.workspace_id=$2 and job.created_by=$3 and job.job_type=$4 and job.payload=approval.payload
+           and (job.id=$8::uuid or ($9::text is not null and job.idempotency_key=$9)
+             or ($8::uuid is null and $9::text is null and job.idempotency_key='approval:'||approval.id::text))))`,
+      [approvalId,input.workspaceId,input.userId,input.jobType,input.model,fingerprint,JSON.stringify(input.context ?? {}),
+        input.jobId ?? null,input.idempotencyKey ?? null],
+    );
+    if (approved.rows[0]) return { state: "approved", approvalId };
+    throw new GenerationApprovalError("generation_approval_invalid", "确认已过期、参数已变化或已用于另一任务，请重新确认。");
+  }
   const consumed = await db.query<{ id: string }>(
     `update generation_approvals
      set consumed_at = now()
      where id = $1 and workspace_id = $2 and user_id = $3
        and job_type = $4 and model = $5 and payload_fingerprint = $6
-       and status = 'approved' and consumed_at is null and expires_at > now()
+       and status = 'approved' and consumed_at is null and expires_at > now() and context=$7::jsonb
      returning id`,
-    [approvalId, input.workspaceId, input.userId, input.jobType, input.model, fingerprint],
+    [approvalId, input.workspaceId, input.userId, input.jobType, input.model, fingerprint, JSON.stringify(input.context ?? {})],
   );
   if (consumed.rows[0]) return { state: "approved", approvalId };
 
@@ -294,7 +353,9 @@ async function consumeApproved(
 }
 
 async function expire(db: Pool, approvalId: string) {
-  await db.query("update generation_approvals set status = 'expired' where id = $1 and status in ('pending','approved')", [approvalId]);
+  // The submission deadline cannot revoke the quote funding an existing task.
+  await db.query(`update generation_approvals set status = 'expired'
+    where id = $1 and status in ('pending','approved') and consumed_at is null and job_id is null`, [approvalId]);
 }
 
 function toRequest(input: GateInput, payloadFingerprint: string, approvalId: string, expiresAt: string): GenerationApprovalRequest {

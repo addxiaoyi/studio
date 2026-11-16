@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { randomBytes } from "node:crypto";
 import type { Pool } from "pg";
 import nodemailer from "nodemailer";
-import { issueLoginToken, exchangeLoginToken, getLocalSession, revokeLocalSession, verifyPassword, hashToken, issueVerificationCode, verifyVerificationCode, hashPassword, registerWithVerificationCode } from "../local-db/auth.js";
+import { issueLoginToken, exchangeLoginToken, getLocalSession, revokeLocalSession, verifyPassword, hashToken, issueVerificationCode, verifyVerificationCode, hashPassword, registerWithVerificationCode, resetPasswordWithVerificationCode } from "../local-db/auth.js";
+import { readSessionToken } from "../auth/session-token.js";
 import type { ServerEnv } from "../config/env.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -15,7 +16,14 @@ function sessionCookie(value: string, webOrigin: string) {
   return `${COOKIE}=${value}; Max-Age=${30 * 24 * 60 * 60}; Path=/; HttpOnly${secure}; SameSite=Lax`;
 }
 
+function field(value: unknown): string { return typeof value === "string" ? value : ""; }
+
 export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Pool; env: ServerEnv }) {
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.url.startsWith("/api/local-auth/") || request.url.split("?")[0] === "/api/auth/magic-link") {
+      reply.header("Cache-Control", "private, no-store").header("Vary", "Cookie, Authorization");
+    }
+  });
   app.post<{ Body: { email?: string; password?: string; code?: string } }>("/api/local-auth/register", async (request, reply) => {
     const email = typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
     const password = typeof request.body?.password === "string" ? request.body.password : "";
@@ -31,12 +39,12 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
   });
   // Legacy clients may still call the old path while their static bundle is cached.
   app.post("/api/auth/magic-link", async (request, reply) => {
-    const email = (request.body as { email?: string } | undefined)?.email?.trim().toLowerCase();
+    const email = field((request.body as { email?: unknown } | undefined)?.email).trim().toLowerCase();
     if (!email || !emailPattern.test(email)) return reply.code(400).send({ error: { code: "invalid_email", message: "请输入有效的邮箱地址" } });
     return reply.redirect("/api/local-auth/send-code", 307);
   });
   app.post<{ Body: { email?: string } }>("/api/local-auth/send-code", async (request, reply) => {
-    const email = request.body?.email?.trim().toLowerCase();
+    const email = field(request.body?.email).trim().toLowerCase();
     if (!email || !emailPattern.test(email)) return reply.code(400).send({ error: { code: "invalid_email", message: "请输入有效的邮箱地址" } });
     const { mailHost, mailUser, mailPassword, mailFrom } = options.env;
     if (!mailHost || !mailUser || !mailPassword || !mailFrom) return reply.code(503).send({ error: { code: "email_not_configured", message: "验证码服务暂不可用" } });
@@ -71,8 +79,8 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
   });
 
   app.post<{ Body: { email?: string; code?: string } }>("/api/local-auth/verify-code", async (request, reply) => {
-    const email = request.body?.email?.trim().toLowerCase();
-    const code = request.body?.code?.trim();
+    const email = field(request.body?.email).trim().toLowerCase();
+    const code = field(request.body?.code).trim();
     if (!email || !emailPattern.test(email) || !code || !/^\d{6}$/.test(code)) return reply.code(400).send({ error: { code: "invalid_code", message: "请输入 6 位验证码" } });
     const session = await verifyVerificationCode(options.db, email, code);
     if (!session) return reply.code(401).send({ error: { code: "invalid_code", message: "验证码错误或已过期" } });
@@ -81,7 +89,7 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
   });
 
   app.post<{ Body: { email?: string } }>("/api/local-auth/magic-link", async (request, reply) => {
-    const email = request.body?.email?.trim().toLowerCase();
+    const email = field(request.body?.email).trim().toLowerCase();
     if (!email || !emailPattern.test(email)) {
       return reply.code(400).send({ error: { code: "invalid_email", message: "请输入有效的邮箱地址" } });
     }
@@ -109,8 +117,8 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
   });
 
   app.post<{ Body: { email?: string; password?: string } }>("/api/local-auth/password", async (request, reply) => {
-    const email = request.body?.email?.trim().toLowerCase();
-    const password = request.body?.password;
+    const email = field(request.body?.email).trim().toLowerCase();
+    const password = field(request.body?.password);
     if (!email || !password || !emailPattern.test(email)) return reply.code(400).send({ error: { code: "invalid_credentials", message: "邮箱或密码不正确" } });
     const { rows } = await options.db.query("select id, email, password_hash from app_users where email = $1", [email]);
     const user = rows[0];
@@ -127,19 +135,23 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
   });
 
   app.post<{ Body: { email?: string; code?: string; password?: string } }>("/api/local-auth/reset-password", async (request, reply) => {
-    const email = request.body?.email?.trim().toLowerCase();
-    const code = request.body?.code?.trim();
-    const password = request.body?.password ?? "";
+    const email = field(request.body?.email).trim().toLowerCase();
+    const code = field(request.body?.code).trim();
+    const password = field(request.body?.password);
     if (!email || !emailPattern.test(email) || !code || !/^\d{6}$/.test(code) || password.length < 8) return reply.code(400).send({ error: { code: "invalid_reset", message: "请输入邮箱、6 位验证码和至少 8 位新密码" } });
-    const session = await verifyVerificationCode(options.db, email, code);
+    let session: Awaited<ReturnType<typeof resetPasswordWithVerificationCode>>;
+    try { session = await resetPasswordWithVerificationCode(options.db, email, code, await hashPassword(password)); }
+    catch (error) {
+      request.log.error({ err: error }, "password reset transaction failed");
+      return reply.code(500).send({ error: { code: "reset_unavailable", message: "密码重置暂不可用，请稍后重试。" } });
+    }
     if (!session) return reply.code(401).send({ error: { code: "invalid_code", message: "验证码错误或已过期" } });
-    await options.db.query("update app_users set password_hash = $1, updated_at = now() where id = $2", [await hashPassword(password), session.userId]);
     reply.header("set-cookie", sessionCookie(session.token, options.env.webOrigin));
     return reply.send({ ok: true, access_token: "local-session", user: { id: session.userId, email: session.email } });
   });
 
   app.post<{ Body: { token?: string } }>("/api/local-auth/exchange", async (request, reply) => {
-    const token = request.body?.token?.trim();
+    const token = field(request.body?.token).trim();
     if (!token) return reply.code(400).send({ error: { code: "missing_token", message: "登录链接无效" } });
     const session = await exchangeLoginToken(options.db, token);
     if (!session) return reply.code(401).send({ error: { code: "invalid_token", message: "登录链接已过期或已使用" } });
@@ -148,7 +160,7 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
   });
 
   app.post<{ Body: { state?: string; callbackUrl?: string } }>("/api/local-auth/desktop-confirm", async (request, reply) => {
-    const state = request.body?.state?.trim();
+    const state = field(request.body?.state).trim();
     if (!state || !DESKTOP_LOGIN_STATE_PATTERN.test(state)) {
       return reply.code(400).send({ error: { code: "invalid_desktop_login", message: "桌面登录请求无效，请返回桌面重新发起。" } });
     }
@@ -158,7 +170,8 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
 
     let callbackUrl: URL;
     try {
-      callbackUrl = new URL(request.body?.callbackUrl?.trim() || "helstera://auth/callback");
+      if (request.body?.callbackUrl !== undefined && typeof request.body.callbackUrl !== "string") throw new TypeError("Invalid callback URL type");
+      callbackUrl = new URL(field(request.body?.callbackUrl).trim() || "helstera://auth/callback");
     } catch {
       return reply.code(400).send({ error: { code: "invalid_callback", message: "桌面回调地址无效，请重新发起登录。" } });
     }
@@ -182,7 +195,7 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
   });
 
   app.post<{ Body: { token?: string } }>("/api/local-auth/desktop-exchange", async (request, reply) => {
-    const token = request.body?.token?.trim();
+    const token = field(request.body?.token).trim();
     if (!token) return reply.code(400).send({ error: { code: "missing_token", message: "桌面登录授权码无效。" } });
     const session = await exchangeLoginToken(options.db, token, { allowReplayGrace: false });
     if (!session) return reply.code(401).send({ error: { code: "invalid_token", message: "桌面登录授权已过期或已使用，请重新发起。" } });
@@ -191,13 +204,13 @@ export function registerLocalAuthRoutes(app: FastifyInstance, options: { db: Poo
   });
 
   app.get("/api/local-auth/session", async (request, reply) => {
-    const cookie = request.headers.cookie?.match(/(?:^|;\s*)helstera_session=([^;]+)/)?.[1];
-    const user = cookie ? await getLocalSession(options.db, cookie) : null;
+    const token = readSessionToken(request.headers.authorization, request.headers.cookie);
+    const user = token ? await getLocalSession(options.db, token) : null;
     return reply.send({ session: user ? { access_token: "local-session", user } : null });
   });
 
   app.post("/api/local-auth/sign-out", async (request, reply) => {
-    const token = request.headers.cookie?.match(/(?:^|;\s*)helstera_session=([^;]+)/)?.[1];
+    const token = readSessionToken(request.headers.authorization, request.headers.cookie);
     if (token) await revokeLocalSession(options.db, token);
     reply.header("set-cookie", sessionCookie("", options.env.webOrigin).replace(`Max-Age=${30 * 24 * 60 * 60}`, "Max-Age=0"));
     return reply.code(204).send();

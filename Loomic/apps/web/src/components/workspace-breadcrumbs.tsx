@@ -27,21 +27,24 @@ const routeLabels: Record<string, string> = {
   team: "团队",
   "texture-lab": "纹理工坊",
   video: "视频创作",
-  "fashion-gallery":"女装试穿",
-  "agent-history":"任务历史",
-  marketplace:"扩展市场",
+  "fashion-gallery": "女装试穿",
+  "agent-history": "任务历史",
+  marketplace: "扩展市场",
   archived: "回收站",
   dashboard: "运营总览",
 };
 
 function labelFor(segment: string) {
-  return (
-    routeLabels[segment] ?? decodeURIComponent(segment).replaceAll("-", " ")
-  );
+  if (routeLabels[segment]) return routeLabels[segment];
+  try {
+    return decodeURIComponent(segment).replaceAll("-", " ");
+  } catch {
+    return segment.replaceAll("-", " ");
+  }
 }
 
 export function WorkspaceBreadcrumbs() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
   const segments = pathname.split("/").filter(Boolean);
 
   if (segments.length < 2) return null;

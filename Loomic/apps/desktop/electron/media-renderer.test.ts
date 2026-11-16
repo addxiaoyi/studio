@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import { assertVideoEncoders, assertVideoTools, resolveFfmpegPath, runFfmpeg } from "./media-renderer.js";
+import { assertVideoEncoders, assertVideoTools, resolveFfmpegPath, runFfmpeg, VIDEO_PREVIEW_FILTER } from "./media-renderer.js";
 
 function fakeProcess() {
   const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: ReturnType<typeof vi.fn> };
@@ -11,6 +11,9 @@ function fakeProcess() {
 }
 
 describe("media renderer", () => {
+  it("pads proxy frames to even H.264 dimensions", () => {
+    expect(VIDEO_PREVIEW_FILTER).toContain("pad=ceil(iw/2)*2:ceil(ih/2)*2");
+  });
   it("requires real x264 and AAC encoder entries", () => {
     expect(() => assertVideoEncoders(" V....D libx264 H.264 encoder\n A..... aac AAC encoder\n")).not.toThrow();
     expect(() => assertVideoEncoders(" V..... libx264rgb H.264\n A..... aac AAC\n")).toThrow("libx264");
@@ -85,5 +88,20 @@ describe("media renderer", () => {
     const response = await promise;
     expect(response.stderr.length).toBe(64 * 1024);
     expect(response.stderr.endsWith("last frame")).toBe(true);
+  });
+
+  it("parses machine-readable FFmpeg progress events", async () => {
+    const child = fakeProcess();
+    const onProgress = vi.fn();
+    const promise = runFfmpeg([], {
+      resourcesPath: "C:/resources",
+      spawnProcess: vi.fn(() => child) as never,
+      onProgress,
+    });
+    child.stderr.emit("data", "out_time_ms=1234567\nprogress=continue\n");
+    child.emit("close", 0);
+    await promise;
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ key: "out_time_ms", outTimeMs: 1234567 }));
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ key: "progress", progress: "continue" }));
   });
 });

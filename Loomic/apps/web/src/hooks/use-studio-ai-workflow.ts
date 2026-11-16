@@ -7,7 +7,7 @@ import { completeStudioPlan, confirmStudioPlan, requestStudioAiPlan, type Studio
 import { studioContextPrompt, type StudioAiContext } from "@/lib/studio-ai-context";
 import { readRecoveredStudioSession, type StudioAiSession } from "@/lib/studio-ai-session";
 import { clearStudioPlan, saveStudioPlan, type StudioExport } from "@/lib/visualforge-storage";
-import { desktopVideoBridge, exportStudioCut, recoverDesktopExport } from "@/lib/studio-desktop-export";
+import { desktopVideoBridge, exportStudioCut, recoverDesktopExport, type VideoPreviewProgress } from "@/lib/studio-desktop-export";
 import { studioVideoDuration } from "@/lib/studio-video-metadata";
 import { useLocale } from "@/lib/i18n";
 
@@ -35,6 +35,7 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, projectKey
   const [actionUndoAvailable, setActionUndoAvailable] = useState(false);
   const [completelyUndone, setCompletelyUndone] = useState(false);
   const [receiptPending, setReceiptPending] = useState(false);
+  const [previewProgress, setPreviewProgress] = useState<VideoPreviewProgress | null>(null);
   const pendingReceipt = useRef(receiptPending);pendingReceipt.current = receiptPending;
   const [exportedOnce, setExportedOnce] = useState(false);
   const [exportReceipt, setExportReceipt] = useState<VideoEditorExportReceipt>();
@@ -49,6 +50,11 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, projectKey
   const currentTarget = useRef<string | null>(null);
   useEffect(() => { mounted.current = true;return () => { mounted.current = false;requestVersion.current += 1; }; }, []);
   useEffect(() => { onBusyChange?.(busy || receiptPending); }, [busy, receiptPending, onBusyChange]);
+  useEffect(() => {
+    if (!active) return;
+    const unsubscribe = desktopVideoBridge()?.onVideoPreviewProgress?.(setPreviewProgress);
+    return unsubscribe;
+  }, [active]);
 
   const clearPreview = useCallback(() => {
     requestVersion.current += 1;
@@ -212,6 +218,7 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, projectKey
   async function exportVideo() {
     if (!runtime || receiptPending) return;
     await run(async () => {
+      setPreviewProgress(null);
       const snapshot = await runtime.snapshot();
       if (undoneActions.length || !plan?.exportFormat || !applied || !snapshot.cut || snapshot.cut.transitions?.length || snapshot.cut.images?.length || !desktopVideoBridge()) {
         runtime.openExport();setNotice("请在导出窗口确认格式和文件名，完成后可在下方预览并保存成片。");return;
@@ -233,6 +240,10 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, projectKey
     });
   }
 
+  async function cancelPreview() {
+    await desktopVideoBridge()?.cancelVideoPreview?.();
+  }
+
   async function importMusic(file: File) {
     if (!runtime) return;
     await run(async () => {
@@ -246,6 +257,7 @@ export function useStudioAiWorkflow({ runtime, mediaRevision, userId, projectKey
 
   const media = runtime?.listMedia() ?? [];
   return { prompt, setPrompt, promptRef, context, target, plan, confirmed, busy, restoring, error, notice, applied, canUndo, receiptPending, exportedOnce, undoneActions, actionUndoAvailable, completelyUndone, undoAppliedAction,
+    previewProgress, cancelPreview,
     music, setMusic, volume, setVolume, musicStart, setMusicStart, audio: media.filter(item => item.mimeType.startsWith("audio/")), hasVideo: media.some(item => item.mimeType.startsWith("video/")),
     previewPlan, applyPlan, confirmAllAndApply, discardPlan, undoPlan, retryReceipt, exportVideo, toggleAction, addRequest, importMusic, removeContext, acceptPlan, refreshTarget };
 }

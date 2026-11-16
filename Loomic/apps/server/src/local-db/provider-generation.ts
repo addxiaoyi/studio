@@ -719,7 +719,13 @@ export async function generateConfiguredVideoOnce(db: Pool, model: string, param
   await markModelHealthy(db, row.provider_model_id!);
   await db.query("update provider_configs set latency_ms=$2, last_error=null, last_probed_at=now(), updated_at=now() where id=$1", [row.id, Date.now() - started]);
   console.log("[video-provider] request_done", JSON.stringify({ requestId, model, providerId: row.id, elapsedMs: Date.now() - started }));
-  return { url, mimeType: "video/mp4", width: 1024, height: 1024, durationSeconds: readDuration(payload) ?? params.duration ?? 5, ...(usage ? { usage } : {}) };
+  const providerDuration = readDuration(payload);
+  return {
+    url, mimeType: "video/mp4", width: 1024, height: 1024,
+    durationSeconds: providerDuration ?? params.duration ?? 5,
+    durationSource: providerDuration === undefined ? "request_fallback" : "provider",
+    ...(usage ? { usage } : {}),
+  };
 }
 
 async function generateConfiguredVideoWithFailover(db: Pool, model: string, params: { prompt: string; duration?: number; resolution?: string; aspectRatio?: string; inputImages?: string[]; inputVideo?: string; enableAudio?: boolean }): Promise<GeneratedVideo | null> {

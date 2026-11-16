@@ -8,7 +8,10 @@ import {
   type GenerationApprovalRequest,
 } from "../features/generation/generation-approval-service.js";
 import { createGenerationApprovalService } from "../features/generation/generation-approval-service.js";
+import { startConfirmedGeneration } from "../features/generation/confirmed-generation.js";
+import { GenerationSettlementError } from "../local-db/generation-settlement.js";
 import type { JobService } from "../features/jobs/job-service.js";
+import { JobServiceError } from "../features/jobs/job-service.js";
 import { CreditServiceError, type CreditService } from "../features/credits/credit-service.js";
 import { assertConnectorEnabled, ConnectorDisabledError } from "../features/agent-goals/connector-gate.js";
 import { assertWorkflowGenerationActive, WorkflowApprovalBlocked } from "../features/canvas-workflows/approval-access.js";
@@ -41,20 +44,8 @@ export function registerGenerationApprovalRoutes(
       const approval = await approvals.approve({ approvalId, workspaceId: viewer.workspace.id, userId: user.id });
       await assertWorkflowGenerationActive(options.db, approval);
       if (!options.jobService) return reply.send({ ok: true, data: { state: "approved", approval } });
-      const job = await options.jobService.createJob(user, {
-        workspaceId: viewer.workspace.id,
-        ...(approval.context?.canvasId ? { canvasId: approval.context.canvasId } : {}),
-        ...(approval.context?.sessionId ? { sessionId: approval.context.sessionId } : {}),
-        ...(approval.context?.threadId ? { threadId: approval.context.threadId } : {}),
-        jobType: approval.jobType,
-        idempotencyKey: `approval:${approvalId}`,
-        payload: approval.parameters,
-      });
-      if (options.creditService && approval.estimatedCredits > 0) {
-        const txId = await options.creditService.deductCredits(viewer.workspace.id, user.id, approval.estimatedCredits, job.id, `${approval.jobType === "video_generation" ? "Video" : "Image"} generation`);
-        await options.jobService.setCreditsInfo(job.id, approval.estimatedCredits, txId);
-      }
-      await approvals.attachJob(approvalId, job.id);
+      const job = await startConfirmedGeneration({ db: options.db, jobs: options.jobService,
+        ...(options.creditService ? { credits: options.creditService } : {}), user, workspaceId: viewer.workspace.id, approval });
       if (approval.context?.websiteCaptureTaskId) {
         await options.db.query("update website_capture_tasks set promo_status='queued', promo_job_id=$2, updated_at=now() where id=$1 and workspace_id=$3", [approval.context.websiteCaptureTaskId, job.id, viewer.workspace.id]);
       }
@@ -215,30 +206,9 @@ export function registerGenerationApprovalRoutes(
       await assertConnectorEnabled(options.db, viewer.workspace.id, user.id, "media-generation");
       const approval = await approvals.approve({ approvalId, workspaceId: viewer.workspace.id, userId: user.id });
       await assertWorkflowGenerationActive(options.db, approval);
-      if (approval.jobId) return reply.code(200).send({ ok: true, data: { state: "approved", approval, jobId: approval.jobId } });
       if (!options.jobService) return reply.code(200).send({ ok: true, data: { state: "approved", approval } });
-      const job = await options.jobService.createJob(user, {
-        workspaceId: viewer.workspace.id,
-        ...(approval.context?.canvasId ? { canvasId: approval.context.canvasId } : {}),
-        ...(approval.context?.sessionId ? { sessionId: approval.context.sessionId } : {}),
-        ...(approval.context?.threadId ? { threadId: approval.context.threadId } : {}),
-        ...(approval.context?.projectId ? { projectId: approval.context.projectId } : {}),
-        idempotencyKey: `approval:${approvalId}`,
-        jobType: approval.jobType,
-        payload: approval.parameters,
-      });
-      if (options.creditService && approval.estimatedCredits > 0) {
-        try {
-          const txId = await options.creditService.deductCredits(viewer.workspace.id, user.id, approval.estimatedCredits, job.id, `${approval.jobType === "video_generation" ? "Video" : "Image"} generation`);
-          await options.jobService.setCreditsInfo(job.id, approval.estimatedCredits, txId);
-        } catch (error) {
-          await options.jobService.cancelJob(user, job.id).catch(() => undefined);
-          throw error;
-        }
-      }
-      const attachedJobId = await approvals.attachJob(approvalId, job.id);
-      if (!attachedJobId) throw new GenerationApprovalError("generation_approval_invalid", "The approved job could not be linked to its confirmation.");
-      if (attachedJobId !== job.id) throw new GenerationApprovalError("generation_approval_invalid", "This confirmation is already linked to another job.");
+      const job = await startConfirmedGeneration({ db: options.db, jobs: options.jobService,
+        ...(options.creditService ? { credits: options.creditService } : {}), user, workspaceId: viewer.workspace.id, approval });
       if (approval.context?.websiteCaptureTaskId) {
         await options.db.query("update website_capture_tasks set promo_status='queued', promo_job_id=$2, updated_at=now() where id=$1 and workspace_id=$3", [approval.context.websiteCaptureTaskId, job.id, viewer.workspace.id]);
       }
@@ -281,6 +251,7 @@ function unauthorized(reply: FastifyReply) {
 }
 
 function approvalError(error: unknown, reply: FastifyReply) {
+  if (error instanceof GenerationSettlementError) return reply.code(409).send({ ok: false, error: { code: error.code, message: error.message } });
   if (error instanceof WorkflowApprovalBlocked) return reply.code(409).send({ok:false,error:{code:"workflow_stopped",message:error.message}});
   if (error instanceof ConnectorDisabledError) {
     return reply.code(403).send({ ok: false, error: { code: "connector_disabled", message: error.message } });
@@ -288,8 +259,8 @@ function approvalError(error: unknown, reply: FastifyReply) {
   if (error instanceof GenerationApprovalError) {
     return reply.code(error.statusCode).send({ ok: false, error: { code: error.code, message: error.message } });
   }
-  if (error instanceof CreditServiceError && error.code === "insufficient_credits") {
-    return reply.code(402).send({ ok: false, error: { code: error.code, message: error.message } });
+  if (error instanceof CreditServiceError || error instanceof JobServiceError) {
+    return reply.code(error.statusCode).send({ ok: false, error: { code: error.code, message: error.message } });
   }
   console.error("[generation-approvals] request failed", error);
   return reply.code(500).send({ ok: false, error: { code: "generation_approval_failed", message: "Unable to update generation confirmation." } });

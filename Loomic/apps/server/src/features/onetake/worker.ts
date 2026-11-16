@@ -3,6 +3,7 @@ import { mkdir, rename, rm } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Pool } from "pg";
 import { createTranscriptEdit, transcriptSchema } from "@helstera/shared";
+import { DEFAULT_CAPACITY_POLICY, type CapacityPolicy } from "../../config/capacity-policy.js";
 import { runOneTake } from "./runner.js";
 import { budgetedMediaRunner } from "./budgeted-runner.js";
 import type { ExportRow, TranscriptRow } from "./store.js";
@@ -93,8 +94,8 @@ export async function expireTranscripts(db: Pool, storageRoot: string) {
   }
 }
 
-export function startOneTakeWorker(db: Pool, storageRoot: string) {
-  const runMedia = budgetedMediaRunner(db, storageRoot);
+export function startOneTakeWorker(db: Pool, storageRoot: string, capacityPolicy: CapacityPolicy = DEFAULT_CAPACITY_POLICY) {
+  const runMedia = budgetedMediaRunner(db, storageRoot, capacityPolicy);
   const controller = new AbortController();
   let current: Promise<void> | undefined;
   let lastCleanup = 0;

@@ -32,9 +32,7 @@ const runningTask = {
 
 describe("website capture assistant event lifecycle", () => {
   it("only consumes an approved action while its task is still running on the same connection", async () => {
-    const query = vi.fn()
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] });
+    const query = vi.fn().mockResolvedValue({ rows: [] });
     const hub = buildHub(query);
     const internals = hub as unknown as HubInternals;
 
@@ -45,26 +43,26 @@ describe("website capture assistant event lifecycle", () => {
       action: { kind: "submit", target: "Checkout" },
     });
 
-    const [sql, values] = query.mock.calls[1] as [string, unknown[]];
+    const [sql, values] = query.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain("t.status='running'");
     expect(sql).toContain("t.workspace_id=a.workspace_id");
     expect(sql).toContain("t.assistant_connection_id=$2");
     expect(sql).toContain("a.status='approved'");
     expect(values.slice(0, 2)).toEqual(["action-1", "connection-1"]);
-    expect(query).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(live.ws.send).toHaveBeenCalledWith(expect.stringContaining("website_capture.action_denied"));
   });
 
   it("ignores recording failure messages for tasks not owned by the assistant connection", async () => {
-    const query = vi.fn()
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] });
+    const query = vi.fn().mockResolvedValue({ rows: [] });
     const hub = buildHub(query);
     const internals = hub as unknown as HubInternals;
 
     await internals.recordingFailed(live, { taskId: "other-task", message: "spoofed" });
 
-    expect(query.mock.calls).toHaveLength(2);
-    expect(String(query.mock.calls[1]?.[0])).toContain("created_by=$2 and assistant_connection_id=$3");
+    expect(query.mock.calls).toHaveLength(1);
+    expect(String(query.mock.calls[0]?.[0])).toContain("created_by=$2 and assistant_connection_id=$3");
+    expect(query.mock.calls[0]?.[1]).toEqual(["other-task", live.userId, live.id]);
   });
 
   it("bounds progress event persistence to one event per second and normalizes unknown stages", async () => {

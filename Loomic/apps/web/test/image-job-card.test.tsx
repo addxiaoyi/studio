@@ -5,12 +5,14 @@ import userEvent from '@testing-library/user-event';
 import type { ToolBlock } from '@helstera/shared';
 import { ToolBlockView } from '../src/components/chat/tool-block-view';
 
-const { fetchJob, fetchJobTimeline, syncJob } = vi.hoisted(() => ({ fetchJob: vi.fn(), fetchJobTimeline: vi.fn(), syncJob: vi.fn() }));
-vi.mock('../src/lib/server-api', () => ({ fetchJob, fetchJobs: vi.fn(), fetchJobTimeline, cancelJob: vi.fn(), syncJob, exportJob: vi.fn() }));
-vi.mock('../src/lib/auth-context', () => ({ useAuth: () => ({ session: { access_token: 'test' } }) }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.useRealTimers(); });
+const { fetchJob, fetchJobTimeline, cancelJob, syncJob, exportJob, account } = vi.hoisted(() => ({ fetchJob: vi.fn(), fetchJobTimeline: vi.fn(), cancelJob: vi.fn(), syncJob: vi.fn(), exportJob: vi.fn(), account: { id: 'owner' } }));
+vi.mock('../src/lib/server-api', () => ({ fetchJob, fetchJobs: vi.fn(), fetchJobTimeline, cancelJob, syncJob, exportJob }));
+vi.mock('../src/lib/auth-context', () => ({ useAuth: () => ({ session: { access_token: 'test', user: { id: account.id } } }) }));
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 beforeEach(() => {
+  vi.resetAllMocks();
+  account.id = 'owner';
   fetchJobTimeline.mockResolvedValue({ events: [] });
 });
 
@@ -135,6 +137,59 @@ it('shows timeline and export recovery controls in the task detail panel', async
   expect(detailPanel).toHaveTextContent('Task timeline');
   expect(within(detailPanel).getByText('Provider task')).toBeInTheDocument();
   expect(within(detailPanel).getByRole('button', { name: 'Export JSON' })).toBeInTheDocument();
+});
+
+it('explains that a cancellation request is pending and credits are not refunded yet', async () => {
+  fetchJob.mockResolvedValue({ job });
+  cancelJob.mockResolvedValue({ job: { ...job, stage: 'cancel_requested' } });
+  const user = userEvent.setup();
+  render(<ToolBlockView block={{ ...block, output: { jobId: 'accepted', pending: true } }} />);
+
+  await user.click(await screen.findByRole('button', { name: 'Open task details' }));
+  const detailPanel = await screen.findByRole('dialog');
+  await user.click(within(detailPanel).getByRole('button', { name: 'Cancel task' }));
+
+  expect(await within(detailPanel).findByRole('status'))
+    .toHaveTextContent('Cancellation request submitted. Waiting for the task result; credits have not been refunded.');
+  expect(within(detailPanel).queryByRole('alert')).not.toBeInTheDocument();
+  expect(cancelJob).toHaveBeenCalledWith('test', 'accepted');
+});
+
+it('closes old account details and ignores a late cancellation with the same session token', async () => {
+  fetchJob.mockResolvedValue({ job });
+  let complete: (value: { job: typeof job }) => void = () => { throw new Error('Cancellation not started'); };
+  cancelJob.mockReturnValue(new Promise<{ job: typeof job }>(resolve => { complete = resolve; }));
+  const user = userEvent.setup();
+  const pending = { ...block, output: { jobId: 'accepted', pending: true } };
+  const view = render(<ToolBlockView block={pending} />);
+  await user.click(await screen.findByRole('button', { name: 'Open task details' }));
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel task' }));
+
+  account.id = 'other-account';
+  fetchJob.mockRejectedValue(new Error('Not the owner'));
+  view.rerender(<ToolBlockView block={{ ...pending }} />);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  await act(async () => { complete({ job: { ...job, stage: 'cancel_requested' } }); });
+  expect(screen.queryByText(/Cancellation request submitted/)).not.toBeInTheDocument();
+});
+
+it('does not download an export that arrives after its account changes', async () => {
+  fetchJob.mockResolvedValue({ job });
+  let complete: (value: Blob) => void = () => { throw new Error('Export not started'); };
+  exportJob.mockReturnValue(new Promise<Blob>(resolve => { complete = resolve; }));
+  const createObjectURL = vi.fn().mockReturnValue('blob:old-account');
+  vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: vi.fn() });
+  const user = userEvent.setup();
+  const pending = { ...block, output: { jobId: 'accepted', pending: true } };
+  const view = render(<ToolBlockView block={pending} />);
+  await user.click(await screen.findByRole('button', { name: 'Open task details' }));
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Export JSON' }));
+
+  account.id = 'other-account';
+  fetchJob.mockRejectedValue(new Error('Not the owner'));
+  view.rerender(<ToolBlockView block={{ ...pending }} />);
+  await act(async () => { complete(new Blob(['private task details'])); });
+  expect(createObjectURL).not.toHaveBeenCalled();
 });
 
 it('offers checkpoint sync recovery without resubmitting a completed generation', async () => {

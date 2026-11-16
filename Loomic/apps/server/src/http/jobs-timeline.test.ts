@@ -49,4 +49,29 @@ describe("job timeline route", () => {
     const { app } = buildApp("failed"); await app.ready(); const response = await app.inject({ method: "GET", url: "/api/jobs/job-1/timeline" }); const events = (response.json() as { events: Array<{ key: string; status: string }> }).events;
     expect(response.statusCode).toBe(200); expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ key: "provider", status: "failed" }), expect.objectContaining({ key: "asset", status: "failed" })])); await app.close();
   });
+
+  it("shows a running cancellation request as an active timeline stage", async () => {
+    const { app, jobService } = buildApp("running");
+    jobService.getJob.mockResolvedValue({ ...buildJob("running"), cancel_requested_at: "2026-10-12T00:01:30.000Z", stage: "cancel_requested" });
+    await app.ready();
+    const response = await app.inject({ method: "GET", url: "/api/jobs/job-1/timeline" });
+    const events = (response.json() as { events: Array<{ key: string; status: string }> }).events;
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ key: "cancellation", status: "active" })]));
+    await app.close();
+  });
+
+  it("shows a late completion after cancellation as a completed timeline stage", async () => {
+    const { app, jobService } = buildApp("succeeded");
+    jobService.getJob.mockResolvedValue({
+      ...buildJob("succeeded"),
+      cancel_requested_at: "2026-10-12T00:01:30.000Z",
+      stage: "completed_after_cancel_request",
+      result: { ...buildJob("succeeded").result, cancellation: { requested: true, message: "结果已保留" } },
+    });
+    await app.ready();
+    const response = await app.inject({ method: "GET", url: "/api/jobs/job-1/timeline" });
+    const events = (response.json() as { events: Array<{ key: string; status: string; detail?: string }> }).events;
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ key: "cancellation", status: "done", detail: "结果已保留" })]));
+    await app.close();
+  });
 });

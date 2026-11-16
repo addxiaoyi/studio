@@ -82,6 +82,40 @@ export type CreateVideoJobRequest = z.infer<typeof createVideoJobRequestSchema>;
 
 // --- Job entity ---
 
+export const generationPricingSchema = z.discriminatedUnion("billingUnit", [
+  z.object({ billingUnit: z.literal("per_generation"), creditCost: z.number().finite().nonnegative() }),
+  z.object({ billingUnit: z.literal("per_second"), creditCost: z.number().finite().nonnegative() }),
+  z.object({ billingUnit: z.literal("per_million_tokens"), inputTokenPriceCny: z.number().finite().nonnegative(), outputTokenPriceCny: z.number().finite().nonnegative() }),
+]);
+export type GenerationPricing = z.infer<typeof generationPricingSchema>;
+
+export const generationSettlementSchema = z.object({
+  version: z.literal(1),
+  reservedCredits: z.number().finite().nonnegative(),
+  settledCredits: z.number().finite().nonnegative(),
+  balanceDelta: z.number().finite(),
+  reservationTransactionId: z.string().uuid().nullable(),
+  adjustmentTransactionId: z.string().uuid().nullable(),
+  basis: z.discriminatedUnion("unit", [
+    z.object({ unit: z.literal("per_second"), model: z.string(), seconds: z.number().finite().positive(), creditsPerSecond: z.number().finite().nonnegative() }),
+    z.object({ unit: z.literal("per_million_tokens"), model: z.string(), inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative(), inputRate: z.number().finite().nonnegative(), outputRate: z.number().finite().nonnegative() }),
+  ]),
+  settledAt: z.string().datetime(),
+});
+export type GenerationSettlement = z.infer<typeof generationSettlementSchema>;
+
+export const settlementReviewSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["pending", "approved", "rejected", "consumed"]),
+  actualCost: z.number().finite().nonnegative(),
+  reservedCredits: z.number().finite().nonnegative(),
+  additionalCredits: z.number().finite().positive(),
+  description: z.string(),
+  basis: generationSettlementSchema.shape.basis,
+  createdAt: z.string().datetime(),
+});
+export type SettlementReview = z.infer<typeof settlementReviewSchema>;
+
 export const backgroundJobSchema = z.object({
   id: z.string().uuid(),
   workspace_id: z.string().uuid(),
@@ -107,6 +141,10 @@ export const backgroundJobSchema = z.object({
   completed_at: z.string().nullable(),
   failed_at: z.string().nullable(),
   canceled_at: z.string().nullable(),
+  cancel_requested_at: z.string().nullable().optional(),
+  billing_receipt: generationSettlementSchema.nullable().optional(),
+  billing_pricing: generationPricingSchema.nullable().optional(),
+  settlement_review: settlementReviewSchema.nullable().optional(),
   sync_attempt_count: z.number().int().optional(),
   next_sync_at: z.string().nullable().optional(),
   sync_error_code: z.string().nullable().optional(),

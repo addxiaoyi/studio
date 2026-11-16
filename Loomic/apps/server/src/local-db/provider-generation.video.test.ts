@@ -137,6 +137,22 @@ describe("configured video input validation", () => {
 });
 
 describe("configured video polling", () => {
+  it.each([
+    { returnedDuration: undefined, expectedDuration: 5, source: "request_fallback" },
+    { returnedDuration: 7.5, expectedDuration: 7.5, source: "provider" },
+  ])("records duration provenance as $source", async ({ returnedDuration, expectedDuration, source }) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      video_url: "https://cdn.test/video.mp4",
+      ...(returnedDuration === undefined ? {} : { duration: returnedDuration }),
+    })));
+    const ciphertext = encryptedKey();
+    const query = vi.fn().mockImplementation(async (sql: string) => sql.includes("select pc.id, pc.label")
+      ? { rows: [{ id: "provider-1", provider_model_id: "model-1", label: "fixture", base_url: "https://provider.test", key_ciphertext: ciphertext, api_format: "custom", request_template: { prompt: "{{prompt}}" }, response_template: {} }] }
+      : { rows: [] });
+    await expect(generateConfiguredVideoOnce({ query } as unknown as Pool, "fixture-video", { prompt: "orbit", duration: 5 }))
+      .resolves.toMatchObject({ durationSeconds: expectedDuration, durationSource: source });
+  });
+
   it("retries a transient 5xx poll and returns the later video URL", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn<typeof fetch>()
@@ -153,7 +169,7 @@ describe("configured video polling", () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await vi.advanceTimersByTimeAsync(3_000);
 
-    await expect(pending).resolves.toMatchObject({ url: "https://cdn.test/video.mp4", durationSeconds: 5 });
+    await expect(pending).resolves.toMatchObject({ url: "https://cdn.test/video.mp4", durationSeconds: 5, durationSource: "request_fallback" });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[1]?.[0]).toBe("https://provider.test/videos/task-1");
     expect(fetchMock.mock.calls[2]?.[0]).toBe("https://provider.test/videos/task-1");

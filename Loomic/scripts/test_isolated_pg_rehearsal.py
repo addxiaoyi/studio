@@ -73,11 +73,28 @@ class RehearsalTests(unittest.TestCase):
              patch.object(rehearsal.subprocess, "check_output", side_effect=output):
             rehearsal.rehearse(self.base, self.dump, self.server, self.bins)
 
-        cmd, env = next((cmd, env) for cmd, env in commands if cmd[0] == "node")
+        cmd, env = next((cmd, env) for cmd, env in commands if cmd[-1] == "./src/local-db/migrate.ts")
         self.assertFalse(any(arg.startswith("--env-file") for arg in cmd))
         self.assertNotIn("PGHOSTADDR", env)
         self.assertNotIn("SECRET", env)
-        self.assertIn("host=%2F", env["DATABASE_URL"])
+        self.assertRegex(env["DATABASE_URL"], r"[?&]host=[^&]+&port=5432$")
+
+    def test_missing_migration_runtime_fails_before_restore_or_cluster_start(self):
+        commands = []
+
+        def run(cmd, **kwargs):
+            commands.append(cmd)
+            if cmd[0] == 'node':
+                raise RuntimeError('Cannot find package tsx')
+
+        with patch.object(rehearsal.os, 'geteuid', return_value=0), \
+             patch.object(rehearsal.os, 'chown'), \
+             patch.object(rehearsal.pwd, 'getpwnam', return_value=types.SimpleNamespace(pw_uid=1, pw_gid=1)), \
+             patch.object(rehearsal, 'run', side_effect=run):
+            with self.assertRaisesRegex(RuntimeError, 'tsx'):
+                rehearsal.rehearse(self.base, self.dump, self.server, self.bins)
+        self.assertEqual(len(commands), 1)
+        self.assertFalse(list(self.base.glob('.loomic-pg-rehearsal-*')))
 
 
 if __name__ == "__main__":

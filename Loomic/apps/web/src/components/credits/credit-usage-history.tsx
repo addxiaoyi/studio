@@ -1,13 +1,16 @@
 // @credits-system — Usage history table showing credit transactions
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Zap } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useAuth } from "@/lib/auth-context";
-import { fetchCreditTransactions, type CreditTransaction } from "@/lib/credits-api";
-import { LoadingState } from "@/components/loading-state";
 import { formatPublicTransactionDescription } from "@/components/chat/utils";
+import { LoadingState } from "@/components/loading-state";
+import { useAuth } from "@/lib/auth-context";
+import {
+  type CreditTransaction,
+  fetchCreditTransactions,
+} from "@/lib/credits-api";
 
 // ── Transaction type labels ──────────────────────────────────
 
@@ -15,6 +18,7 @@ const TYPE_LABELS: Record<string, string> = {
   topup: "充值到账",
   generation_deduct: "生成扣费",
   generation_refund: "生成退款",
+  generation_adjustment: "用量结算差额",
   admin_adjustment: "管理员调整",
   bonus: "赠送积分",
 };
@@ -25,6 +29,7 @@ const PUBLIC_TYPE_LABELS: Record<string, string> = {
   topup: "Top up",
   generation_deduct: "Generation charge",
   generation_refund: "Generation refund",
+  generation_adjustment: "Usage settlement",
   admin_adjustment: "Admin adjustment",
   bonus: "Bonus",
 };
@@ -35,19 +40,9 @@ const FILTER_OPTIONS: Array<{ value: FilterMode; label: string }> = [
   { value: "granted", label: "Granted" },
 ];
 
-const DEDUCT_TYPES = new Set(["generation_deduct"]);
-const GRANT_TYPES = new Set([
-  "subscription_grant",
-  "daily_grant",
-  "purchase",
-  "generation_refund",
-  "admin_adjustment",
-  "bonus",
-]);
-
 // ── Page size ────────────────────────────────────────────────
 
-const PAGE_SIZE = 365;
+const PAGE_SIZE = 100;
 const HEATMAP_DAYS = 84;
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -64,7 +59,9 @@ function formatDate(iso: string | number): string {
 }
 
 function dayKey(value: string | number): string {
-  const date = new Date(typeof value === "number" && value < 1e12 ? value * 1000 : value);
+  const date = new Date(
+    typeof value === "number" && value < 1e12 ? value * 1000 : value,
+  );
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
@@ -80,41 +77,85 @@ function heatLevel(amount: number, max: number): number {
 
 export function CreditUsageHistory() {
   const { session } = useAuth();
-  const accessTokenRef = useRef(session?.access_token);
-  accessTokenRef.current = session?.access_token;
+  const identity = session?.access_token
+    ? `${session?.user?.id ?? "unknown"}:${session.access_token}`
+    : "signed-out";
+  return <SessionUsageHistory key={identity} token={session?.access_token} />;
+}
+
+function SessionUsageHistory({ token }: { token: string | undefined }) {
+  const latestRequest = useRef(0);
+  const pending = useRef(false);
+  const requestedOffset = useRef(0);
+  const nextOffset = useRef(0);
 
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(token));
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterMode>("all");
   const [hasMore, setHasMore] = useState(true);
 
-  const loadTransactions = useCallback(async (limit: number) => {
-    const token = accessTokenRef.current;
-    if (!token) return;
-    setLoadError(null);
-    try {
-      const result = await fetchCreditTransactions(token, limit);
-      setTransactions(result.transactions as unknown as CreditTransaction[]);
-      setHasMore(result.transactions.length >= limit);
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "无法加载用量记录。");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadTransactions = useCallback(
+    async (offset: number) => {
+      if (!token || pending.current) return;
+      pending.current = true;
+      requestedOffset.current = offset;
+      const request = ++latestRequest.current;
+      setLoadError(null);
+      try {
+        const history = await fetchCreditTransactions(token, PAGE_SIZE, offset);
+        if (latestRequest.current !== request) return;
+        setTransactions((previous) =>
+          offset === 0
+            ? history.transactions
+            : [
+                ...new Map(
+                  [...previous, ...history.transactions].map((transaction) => [
+                    transaction.id,
+                    transaction,
+                  ]),
+                ).values(),
+              ],
+        );
+        nextOffset.current = offset + PAGE_SIZE;
+        setHasMore(history.pagination?.hasMore === true);
+      } catch (error) {
+        if (latestRequest.current !== request) return;
+        setLoadError(
+          error instanceof Error ? error.message : "无法加载用量记录。",
+        );
+      } finally {
+        if (latestRequest.current === request) {
+          pending.current = false;
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    },
+    [token],
+  );
 
   useEffect(() => {
-    loadTransactions(PAGE_SIZE);
+    void loadTransactions(0);
+    return () => {
+      latestRequest.current += 1;
+      pending.current = false;
+    };
   }, [loadTransactions]);
 
   const handleLoadMore = async () => {
+    if (pending.current) return;
     setLoadingMore(true);
-    const nextLimit = transactions.length + PAGE_SIZE;
-    await loadTransactions(nextLimit);
-    setLoadingMore(false);
+    await loadTransactions(nextOffset.current);
   };
+
+  function retryHistory() {
+    if (pending.current) return;
+    if (!transactions.length) setLoading(true);
+    else setLoadingMore(true);
+    void loadTransactions(requestedOffset.current);
+  }
 
   const heatmap = useMemo(() => {
     const totals = new Map<string, number>();
@@ -139,8 +180,8 @@ export function CreditUsageHistory() {
   }, [transactions]);
   // Filter transactions
   const filtered = transactions.filter((t) => {
-    if (filter === "deducted") return DEDUCT_TYPES.has(t.transaction_type);
-    if (filter === "granted") return GRANT_TYPES.has(t.transaction_type);
+    if (filter === "deducted") return Number(t.amount) < 0;
+    if (filter === "granted") return Number(t.amount) > 0;
     return true;
   });
 
@@ -148,26 +189,27 @@ export function CreditUsageHistory() {
     return <LoadingState variant="text" lines={4} className="py-8" />;
   }
 
-  if (loadError) {
-    return (
-      <div
-        role="alert"
-        className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 text-sm"
+  const errorNotice = loadError ? (
+    <div
+      role="alert"
+      className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 text-sm"
+    >
+      <p className="text-destructive">{loadError}</p>
+      <button
+        type="button"
+        onClick={retryHistory}
+        disabled={loadingMore}
+        className="mt-4 min-h-10 rounded-lg border border-destructive/30 px-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5"
       >
-        <p className="text-destructive">{loadError}</p>
-        <button
-          type="button"
-          onClick={() => void loadTransactions(PAGE_SIZE)}
-          className="mt-4 min-h-10 rounded-lg border border-destructive/30 px-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5"
-        >
-          重新加载用量记录
-        </button>
-      </div>
-    );
-  }
+        重新加载用量记录
+      </button>
+    </div>
+  ) : null;
+  if (loadError && !transactions.length) return errorNotice;
 
   return (
     <div className="space-y-4">
+      {errorNotice}
       <div>
         <h2 className="text-base font-medium">Usage</h2>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -193,28 +235,65 @@ export function CreditUsageHistory() {
         ))}
       </div>
 
-      <section className="rounded-2xl border border-border/40 bg-card/50 p-4 sm:p-5" aria-label="Credit usage heatmap">
+      <section
+        className="rounded-2xl border border-border/40 bg-card/50 p-4 sm:p-5"
+        aria-label="Credit usage heatmap"
+      >
         <div className="flex items-end justify-between gap-4">
           <div>
             <h3 className="text-sm font-medium text-foreground">Activity</h3>
-            <p className="mt-1 text-xs text-muted-foreground">Daily net credit movement over the last 12 weeks.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Net movement in loaded transactions over the last 12 weeks.
+            </p>
           </div>
           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
             <span>Less</span>
-            {[0, 1, 2, 3, 4].map((level) => <span key={level} className={`size-3 rounded-sm border border-border/30 ${level === 0 ? "bg-muted" : level === 1 ? "bg-emerald-100" : level === 2 ? "bg-emerald-300" : level === 3 ? "bg-emerald-500" : "bg-emerald-700"}`} aria-label={`Level ${level}`} />)}
+            {[0, 1, 2, 3, 4].map((level) => (
+              <span
+                key={level}
+                className={`size-3 rounded-sm border border-border/30 ${level === 0 ? "bg-muted" : level === 1 ? "bg-emerald-100" : level === 2 ? "bg-emerald-300" : level === 3 ? "bg-emerald-500" : "bg-emerald-700"}`}
+                aria-label={`Level ${level}`}
+              />
+            ))}
             <span>More</span>
           </div>
         </div>
         <div className="mt-4 grid grid-cols-7 gap-1.5 sm:grid-cols-12 sm:gap-2">
           {heatmap.days.map((day) => {
             const level = heatLevel(Math.abs(day.amount), heatmap.max);
-            const color = level === 0 ? "bg-muted" : level === 1 ? "bg-emerald-100" : level === 2 ? "bg-emerald-300" : level === 3 ? "bg-emerald-500" : "bg-emerald-700";
-            return <div key={day.key} title={`${day.date.toLocaleDateString()} · ${day.amount >= 0 ? "+" : ""}${day.amount.toFixed(2)} credits`} aria-label={`${day.key}: ${day.amount.toFixed(2)} credits`} className={`aspect-square rounded-md border border-border/20 ${color}`} />;
+            const color =
+              level === 0
+                ? "bg-muted"
+                : level === 1
+                  ? "bg-emerald-100"
+                  : level === 2
+                    ? "bg-emerald-300"
+                    : level === 3
+                      ? "bg-emerald-500"
+                      : "bg-emerald-700";
+            return (
+              <div
+                key={day.key}
+                title={`${day.date.toLocaleDateString()} · ${day.amount >= 0 ? "+" : ""}${day.amount.toFixed(2)} credits`}
+                aria-label={`${day.key}: ${day.amount.toFixed(2)} credits`}
+                className={`aspect-square rounded-md border border-border/20 ${color}`}
+              />
+            );
           })}
         </div>
         <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
-          <span>{heatmap.days[0]?.date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
-          <span>{heatmap.days.at(-1)?.date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+          <span>
+            {heatmap.days[0]?.date.toLocaleDateString(undefined, {
+              month: "short",
+              day: "numeric",
+            })}
+          </span>
+          <span>
+            {heatmap.days.at(-1)?.date.toLocaleDateString(undefined, {
+              month: "short",
+              day: "numeric",
+            })}
+          </span>
         </div>
       </section>
       {/* Table */}
@@ -238,7 +317,7 @@ export function CreditUsageHistory() {
             </thead>
             <tbody>
               {filtered.map((t, idx) => {
-                const isGrant = !DEDUCT_TYPES.has(t.transaction_type);
+                const isGrant = Number(t.amount) > 0;
                 return (
                   <tr
                     key={t.id}
@@ -247,10 +326,14 @@ export function CreditUsageHistory() {
                     }`}
                   >
                     <td className="px-4 py-2.5 text-foreground">
-                      {formatPublicTransactionDescription(t.description, t.transaction_type)}
+                      {formatPublicTransactionDescription(
+                        t.description,
+                        t.transaction_type,
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground">
-                      {PUBLIC_TYPE_LABELS[t.transaction_type] ?? "Credit transaction"}
+                      {PUBLIC_TYPE_LABELS[t.transaction_type] ??
+                        "Credit transaction"}
                     </td>
                     <td className="px-4 py-2.5 tabular-nums text-muted-foreground">
                       {formatDate(t.created_at)}
@@ -276,7 +359,7 @@ export function CreditUsageHistory() {
       )}
 
       {/* Load more */}
-      {hasMore && filtered.length > 0 && (
+      {!loadError && hasMore && transactions.length > 0 && (
         <div className="flex justify-center pt-2">
           <button
             type="button"

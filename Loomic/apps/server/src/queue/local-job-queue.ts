@@ -8,7 +8,7 @@ export function createLocalJobQueue(db: Pool): PgmqClient {
   const stop = new AbortController();
   return {
     async send(_queue, payload) {
-      const { rows } = await db.query("update background_jobs set status = 'queued', updated_at = now() where id = $1 returning id", [payload.job_id]);
+      const { rows } = await db.query("update background_jobs set updated_at = now() where id = $1 and status = 'queued' returning id", [payload.job_id]);
       return rows[0]?.id ?? 0;
     },
     async read<T = Record<string, unknown>>(queue: string, _vt: number, qty: number): Promise<PgmqMessage<T>[]> {

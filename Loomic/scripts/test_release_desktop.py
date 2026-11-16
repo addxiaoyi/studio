@@ -6,7 +6,7 @@ import pathlib
 import tempfile
 import unittest
 from email.message import Message
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import yaml
 
@@ -33,6 +33,20 @@ class FakeResponse:
 
     def __exit__(self, *_args):
         return False
+
+
+class FakeChannel:
+    def recv_exit_status(self) -> int:
+        return 0
+
+
+class FakeStream:
+    def __init__(self, body: bytes = b"") -> None:
+        self.body = body
+        self.channel = FakeChannel()
+
+    def read(self) -> bytes:
+        return self.body
 
 
 class ReleasePathTests(unittest.TestCase):
@@ -98,6 +112,79 @@ class ReleasePathTests(unittest.TestCase):
 
     def test_remote_download_root_uses_posix_separators(self) -> None:
         self.assertEqual(str(release_desktop.DOWNLOAD_ROOT), "/www/helstera/apps/web/out/downloads")
+
+    def test_remote_installer_retention_reports_candidates_without_deleting(self) -> None:
+        plan = {
+            "files": [{"path": "apps/web/out/downloads/Helstera-0.2.20.zip"}],
+            "candidateBytes": 1200,
+            "exclusiveBytes": 900,
+        }
+        target = MagicMock()
+        target.exec_command.return_value = (
+            None,
+            FakeStream(json.dumps(plan).encode()),
+            FakeStream(),
+        )
+        sftp = MagicMock()
+
+        report = release_desktop.run_remote_retention(target, sftp, "/tmp/release-stage")
+
+        self.assertEqual(report["status"], "review_required")
+        self.assertEqual(report["removedFiles"], 0)
+        self.assertEqual(report["candidateBytes"], 1200)
+        self.assertEqual(report["exclusiveBytes"], 900)
+        self.assertEqual(report["paths"], ["apps/web/out/downloads/Helstera-0.2.20.zip"])
+        target.exec_command.assert_called_once()
+        self.assertNotIn("--apply", target.exec_command.call_args.args[0])
+
+    def test_remote_installer_retention_reports_clean_when_no_candidates_exist(self) -> None:
+        plan = {"files": [], "candidateBytes": 0, "exclusiveBytes": 0}
+        target = MagicMock()
+        target.exec_command.return_value = (
+            None,
+            FakeStream(json.dumps(plan).encode()),
+            FakeStream(),
+        )
+
+        report = release_desktop.run_remote_retention(
+            target, MagicMock(), "/tmp/release-stage"
+        )
+
+        self.assertEqual(report["status"], "clean")
+        self.assertEqual(report["removedFiles"], 0)
+        target.exec_command.assert_called_once()
+
+    def test_remote_installer_retention_applies_only_after_preview(self) -> None:
+        plan = {
+            "files": [{"path": "apps/web/out/downloads/Helstera-0.2.20.zip"}],
+            "candidateBytes": 1200,
+            "exclusiveBytes": 900,
+        }
+        applied = {
+            "removedFiles": 1,
+            "unlinkedBytes": 1200,
+            "exclusiveBytes": 900,
+            "paths": ["apps/web/out/downloads/Helstera-0.2.20.zip"],
+            "errors": [],
+        }
+        target = MagicMock()
+        target.exec_command.side_effect = [
+            (None, FakeStream(json.dumps(plan).encode()), FakeStream()),
+            (None, FakeStream(json.dumps(applied).encode()), FakeStream()),
+        ]
+
+        report = release_desktop.run_remote_retention(
+            target,
+            MagicMock(),
+            "/tmp/release-stage",
+            apply_retention=True,
+        )
+
+        self.assertEqual(report["status"], "applied")
+        self.assertEqual(report["removedFiles"], 1)
+        self.assertEqual(report["unlinkedBytes"], 1200)
+        self.assertIn("--plan", target.exec_command.call_args_list[0].args[0])
+        self.assertIn("--apply", target.exec_command.call_args_list[1].args[0])
 
     def test_workspace_build_scripts_use_explicit_boolean_approval(self) -> None:
         workspace_path = pathlib.Path(__file__).resolve().parents[1] / "pnpm-workspace.yaml"

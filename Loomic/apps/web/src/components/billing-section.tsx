@@ -1,23 +1,17 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Zap,
-  Plus,
-  Loader2,
-  ChevronRight,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
 import { t, useLocale } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { motion } from "framer-motion";
+import { Loader2, Plus, Zap } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { useAuth } from "@/lib/auth-context";
 import { useCredits } from "@/hooks/use-credits";
+import { useAuth } from "@/lib/auth-context";
 import {
-  createEpayTopup,
   createEpayCustomTopup,
+  createEpayTopup,
   fetchTopupPackages,
   getTopupOrder,
   isEpayEnabled,
@@ -26,6 +20,14 @@ import type { TopupPackage } from "@helstera/shared";
 
 type EpayType = "alipay" | "wxpay";
 type NoticeKind = "success" | "error" | "info";
+const TOPUP_POLL_LIMIT = 12;
+const TOPUP_POLL_INTERVAL_MS = 2500;
+const PACKAGE_PLACEHOLDERS = [
+  "package-1",
+  "package-2",
+  "package-3",
+  "package-4",
+];
 
 function formatPrice(
   pkg: TopupPackage,
@@ -38,6 +40,14 @@ function formatPrice(
 }
 
 export function BillingSection() {
+  const { session } = useAuth();
+  const account = session
+    ? `${session.user?.id ?? "unknown"}:${session.access_token}`
+    : "signed-out";
+  return <BillingAccount key={account} />;
+}
+
+function BillingAccount() {
   const copy = t(useLocale()).billing;
   const { session } = useAuth();
   const searchParams = useSearchParams();
@@ -52,11 +62,21 @@ export function BillingSection() {
   const [packageError, setPackageError] = useState<string | null>(null);
   const [customAmount, setCustomAmount] = useState("100");
   const [payType, setPayType] = useState<EpayType>("alipay");
-
-  const showNotice = useCallback((message: string | null, kind: NoticeKind = "info") => {
-    setNotice(message);
-    setNoticeKind(kind);
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
   }, []);
+
+  const showNotice = useCallback(
+    (message: string | null, kind: NoticeKind = "info") => {
+      setNotice(message);
+      setNoticeKind(kind);
+    },
+    [],
+  );
 
   // Load packages
   const loadPackages = useCallback(async () => {
@@ -64,12 +84,14 @@ export function BillingSection() {
     setPackageError(null);
     try {
       const { packages } = await fetchTopupPackages();
+      if (!active.current) return;
       setPackages(packages);
     } catch (err) {
+      if (!active.current) return;
       console.error("[billing] Failed to load packages:", err);
       setPackageError("充值套餐暂时无法加载，可先使用自定义充值。请重试。");
     } finally {
-      setLoadingPackages(false);
+      if (active.current) setLoadingPackages(false);
     }
   }, []);
   useEffect(() => {
@@ -82,12 +104,19 @@ export function BillingSection() {
     if (!outTradeNo || !token) return;
 
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
-      for (let attempt = 0; attempt < 12 && !cancelled; attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < TOPUP_POLL_LIMIT && !cancelled;
+        attempt += 1
+      ) {
         try {
           const { order } = await getTopupOrder(token, outTradeNo);
+          if (cancelled) return;
           if (order.status === "paid") {
             await refresh();
+            if (cancelled) return;
             showNotice(copy.paid, "success");
             return;
           }
@@ -96,16 +125,20 @@ export function BillingSection() {
             return;
           }
         } catch (error) {
+          if (cancelled) return;
           console.error("[billing] Failed to refresh top-up order:", error);
           showNotice(copy.unknown, "error");
           return;
         }
-        await new Promise((resolve) => setTimeout(resolve, 2500));
+        await new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, TOPUP_POLL_INTERVAL_MS);
+        });
       }
     };
     void poll();
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [copy, refresh, searchParams, session?.access_token, showNotice]);
 
@@ -125,11 +158,16 @@ export function BillingSection() {
           throw new Error("支付网关尚未配置，请联系管理员。");
         }
         const { checkoutUrl } = await createEpayTopup(token, pkg.id, payType);
+        if (!active.current) return;
         window.location.assign(checkoutUrl);
       } catch (err) {
-        showNotice(err instanceof Error ? err.message : copy.createFailed, "error");
+        if (!active.current) return;
+        showNotice(
+          err instanceof Error ? err.message : copy.createFailed,
+          "error",
+        );
       } finally {
-        setLoadingPackageId(null);
+        if (active.current) setLoadingPackageId(null);
       }
     },
     [copy, payType, session?.access_token, showNotice],
@@ -148,15 +186,21 @@ export function BillingSection() {
     setCustomLoading(true);
     showNotice(null);
     try {
-      const { checkoutUrl } = await createEpayCustomTopup(token, amount, payType);
+      const { checkoutUrl } = await createEpayCustomTopup(
+        token,
+        amount,
+        payType,
+      );
+      if (!active.current) return;
       window.location.assign(checkoutUrl);
     } catch (error) {
+      if (!active.current) return;
       showNotice(
         error instanceof Error ? error.message : "创建订单失败，请重试。",
         "error",
       );
     } finally {
-      setCustomLoading(false);
+      if (active.current) setCustomLoading(false);
     }
   }, [copy, customAmount, payType, session?.access_token, showNotice]);
 
@@ -171,8 +215,13 @@ export function BillingSection() {
       <div className="rounded-2xl glass-soft border border-border/40 p-5">
         <h3 className="font-medium text-foreground">{copy.custom}</h3>
         <p className="mt-1 text-sm text-muted-foreground">{copy.customHint}</p>
-        <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="支付方式">
-          {([['alipay', '支付宝'], ['wxpay', '微信支付']] as const).map(([value, label]) => (
+        <fieldset className="mt-4 flex flex-wrap gap-2" aria-label="支付方式">
+          {(
+            [
+              ["alipay", "支付宝"],
+              ["wxpay", "微信支付"],
+            ] as const
+          ).map(([value, label]) => (
             <button
               key={value}
               type="button"
@@ -188,7 +237,7 @@ export function BillingSection() {
               {label}
             </button>
           ))}
-        </div>
+        </fieldset>
         <div className="mt-4 flex max-w-sm gap-2">
           <input
             value={customAmount}
@@ -212,13 +261,34 @@ export function BillingSection() {
         </div>
       </div>
       {packageError ? (
-        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-800 dark:text-amber-200"
+        >
           <span>{packageError}</span>
-          <button type="button" onClick={() => void loadPackages()} disabled={loadingPackages} className="rounded-md border border-amber-500/40 px-3 py-1.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">重试加载套餐</button>
+          <button
+            type="button"
+            onClick={() => void loadPackages()}
+            disabled={loadingPackages}
+            className="rounded-md border border-amber-500/40 px-3 py-1.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          >
+            重试加载套餐
+          </button>
         </div>
       ) : null}
       {notice ? (
-        <p role={noticeKind === "error" ? "alert" : "status"} aria-live={noticeKind === "error" ? "assertive" : "polite"} className={cn("rounded-xl border px-4 py-3 text-sm", noticeKind === "error" ? "border-destructive/30 bg-destructive/5 text-destructive" : noticeKind === "success" ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300" : "border-border/50 bg-muted/30 text-muted-foreground")}>
+        <p
+          role={noticeKind === "error" ? "alert" : "status"}
+          aria-live={noticeKind === "error" ? "assertive" : "polite"}
+          className={cn(
+            "rounded-xl border px-4 py-3 text-sm",
+            noticeKind === "error"
+              ? "border-destructive/30 bg-destructive/5 text-destructive"
+              : noticeKind === "success"
+                ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
+                : "border-border/50 bg-muted/30 text-muted-foreground",
+          )}
+        >
           {notice}
         </p>
       ) : null}
@@ -276,23 +346,13 @@ export function BillingSection() {
           <div className="self-start inline-flex items-center gap-1 rounded-full glass-soft border border-border/40 p-1 text-xs">
             <button
               type="button"
-              className={cn(
-                "rounded-full px-3 py-1.5 transition-all duration-200",
-                false
-                  ? "bg-foreground text-background font-medium"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
+              className="rounded-full px-3 py-1.5 transition-all duration-200 text-muted-foreground hover:text-foreground"
             >
               🌐 USD
             </button>
             <button
               type="button"
-              className={cn(
-                "rounded-full px-3 py-1.5 transition-all duration-200",
-                true
-                  ? "bg-foreground text-background font-medium"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
+              className="rounded-full px-3 py-1.5 transition-all duration-200 bg-foreground text-background font-medium"
             >
               🇨🇳 CNY
             </button>
@@ -307,9 +367,9 @@ export function BillingSection() {
 
         {loadingPackages ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
+            {PACKAGE_PLACEHOLDERS.map((placeholder) => (
               <div
-                key={i}
+                key={placeholder}
                 className="rounded-[1.5rem] glass-soft border border-border/40 p-7 animate-pulse"
               >
                 <div className="h-4 w-20 rounded glass-soft" />
@@ -334,8 +394,6 @@ export function BillingSection() {
           </div>
         )}
       </div>
-
-
     </div>
   );
 }
@@ -393,7 +451,8 @@ function PackageCard({
       </div>
 
       <p className="mt-2 text-xs text-muted-foreground/80 font-light">
-        {copy.total} ¥{(pkg.priceCnyFen / 100).toLocaleString()} 余额 · {copy.permanent}
+        {copy.total} ¥{(pkg.priceCnyFen / 100).toLocaleString()} 余额 ·{" "}
+        {copy.permanent}
       </p>
 
       <button

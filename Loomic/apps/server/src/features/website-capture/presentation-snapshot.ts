@@ -75,7 +75,10 @@ export async function capturePresentationScene(
   const maxScroll=await page.evaluate("Math.min(Math.max(document.documentElement.scrollHeight,document.body.scrollHeight)-innerHeight,1440)") as number;
   const offsets=Array.from({length:Math.ceil(Math.max(0,maxScroll)/480)+1},(_,index)=>Math.min(index*480,Math.max(0,maxScroll)));
   for(const offset of offsets){
-    await page.evaluate(`window.scrollTo(0,${offset})`);await page.waitForTimeout(550);
+    // Observe a rendered scroll position before moving on so lazy sections also
+    // initialize when a busy browser delays IntersectionObserver callbacks.
+    await page.evaluate(`new Promise(resolve=>{window.scrollTo(0,${offset});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()));})`);
+    await page.waitForTimeout(550);
   }
   await page.evaluate("window.scrollTo(0,0)");
   await page.waitForTimeout(550);

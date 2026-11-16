@@ -1,6 +1,8 @@
 import type { CreditTransactionType, TopupPackage } from "@helstera/shared";
 import { applyTopupVariants, getTopupPackage } from "@helstera/shared";
 import type { Pool } from "pg";
+import { linkGenerationReservation } from "./generation-reservation.js";
+import { GenerationSettlementError } from "./generation-settlement.js";
 import {
   type BalanceInfo,
   type CreditService,
@@ -13,7 +15,7 @@ export function createLocalCreditService(db: Pool): CreditService {
   return {
     async getBalance(workspaceId): Promise<BalanceInfo> {
       const { rows } = await db.query(
-        "select coalesce((select balance from credit_balances where workspace_id = $1), 0) as balance, coalesce((select sum(amount) from credit_transactions where workspace_id = $1 and transaction_type = 'topup'), 0) as topped, coalesce((select sum(abs(amount)) from credit_transactions where workspace_id = $1 and transaction_type = 'generation_deduct'), 0) as spent",
+        "select coalesce((select balance from credit_balances where workspace_id = $1), 0) as balance, coalesce((select sum(amount) from credit_transactions where workspace_id = $1 and transaction_type = 'topup'), 0) as topped, coalesce((select -sum(amount) from credit_transactions where workspace_id = $1 and transaction_type in ('generation_deduct','generation_adjustment','generation_refund')), 0) as spent",
         [workspaceId],
       );
       return {
@@ -22,7 +24,7 @@ export function createLocalCreditService(db: Pool): CreditService {
         totalSpent: Number(rows[0].spent),
       };
     },
-    async deductCredits(workspaceId, userId, amount, jobId, description) {
+    async deductCredits(workspaceId, userId, amount, jobId, description, approvalId) {
       return changeBalance(
         db,
         workspaceId,
@@ -31,6 +33,7 @@ export function createLocalCreditService(db: Pool): CreditService {
         "generation_deduct",
         jobId,
         description,
+        approvalId,
       );
     },
     async refundCredits(workspaceId, userId, amount, jobId, description) {
@@ -47,10 +50,11 @@ export function createLocalCreditService(db: Pool): CreditService {
     async getTransactions(
       workspaceId,
       limit = 20,
+      offset = 0,
     ): Promise<CreditTransactionRow[]> {
       const { rows } = await db.query(
-        "select id, transaction_type, amount, balance_after, job_id, description, extract(epoch from created_at) * 1000 as created_at from credit_transactions where workspace_id = $1 order by created_at desc limit $2",
-        [workspaceId, Math.min(Math.max(limit, 1), 100)],
+        "select id, transaction_type, amount, balance_after, job_id, description, extract(epoch from created_at) * 1000 as created_at from credit_transactions where workspace_id = $1 order by created_at desc,id desc limit $2 offset $3",
+        [workspaceId, Math.min(Math.max(limit, 1), 101), offset],
       );
       return rows.map((row) => ({
         ...row,
@@ -219,10 +223,25 @@ async function changeBalance(
   type: CreditTransactionType,
   jobId?: string | null,
   description?: string,
+  approvalId?: string,
 ) {
   const client = await db.connect();
   try {
     await client.query("begin");
+    const job = type === "generation_deduct" && jobId
+      ? (await client.query<{ id: string; workspace_id: string; created_by: string; status: string; billing_approval_id: string | null }>(
+          "select id,workspace_id,created_by,status,billing_approval_id from background_jobs where id::text=$1 for update", [jobId],
+        )).rows[0]
+      : undefined;
+    if (job && (job.workspace_id !== workspaceId || job.created_by !== userId)) {
+      throw new CreditServiceError("credit_deduct_failed", "任务与扣款账户不匹配。", 403);
+    }
+    if (job?.status === "canceled") {
+      throw new CreditServiceError("credit_deduct_failed", "任务已取消，未扣除积分。", 409);
+    }
+    if (approvalId && job?.billing_approval_id !== approvalId) {
+      throw new CreditServiceError("credit_deduct_failed", "任务的费用确认已变化，请刷新原任务后重试。", 409);
+    }
     await client.query(
       "insert into credit_balances (workspace_id, balance) values ($1, 0) on conflict (workspace_id) do nothing",
       [workspaceId],
@@ -232,11 +251,15 @@ async function changeBalance(
       [workspaceId],
     );
     if (jobId) {
-      const existing = await client.query<{ id: string }>(
-        "select id from credit_transactions where job_id = $1 and transaction_type = $2 order by created_at limit 1",
-        [jobId, type],
+      const existing = await client.query<{ id: string; amount: string }>(
+        "select id,amount from credit_transactions where job_id = $1 and transaction_type = $2 and workspace_id=$3 and user_id=$4 order by created_at limit 1",
+        [jobId, type, workspaceId, userId],
       );
       if (existing.rows[0]) {
+        if (job && Number(existing.rows[0].amount) !== amount) {
+          throw new CreditServiceError("credit_deduct_failed", "重试金额与原始预扣凭证不一致。", 409);
+        }
+        if (job) await linkGenerationReservation(client, job.id, -amount, existing.rows[0].id);
         await client.query("commit");
         return existing.rows[0].id;
       }
@@ -264,11 +287,12 @@ async function changeBalance(
         description ?? null,
       ],
     );
+    if (job) await linkGenerationReservation(client, job.id, -amount, rows[0].id as string);
     await client.query("commit");
     return rows[0].id as string;
   } catch (error) {
     await client.query("rollback");
-    if (error instanceof CreditServiceError) throw error;
+    if (error instanceof CreditServiceError || error instanceof GenerationSettlementError) throw error;
     throw new CreditServiceError(
       "credit_deduct_failed",
       "Failed to update credits.",

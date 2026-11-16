@@ -27,6 +27,7 @@ type QueryBuilder = {
   in(...args: any[]): QueryBuilder;
   order(...args: any[]): QueryBuilder;
   limit(...args: any[]): QueryBuilder;
+  range(...args: any[]): QueryBuilder;
   upsert(...args: any[]): QueryBuilder;
   single(): QueryResult;
   maybeSingle(): QueryResult;

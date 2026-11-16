@@ -2,13 +2,17 @@
 
 import { Check, Download, FolderOpen, Images, RefreshCw, Save, Search, Share2, Trash2, Undo2, Video, X } from "lucide-react";
 import { useCallback, useEffect, useRef,useState } from "react";
+import type { GalleryCaptionInput } from "@helstera/shared";
 import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "@/lib/auth-context";
 import { GradualBlur } from "@/components/gradual-blur";
+import { AssetPreviewDialog } from "@/components/asset-preview-dialog";
+import { PublishAssetDialog } from "@/components/publish-asset-dialog";
 import { createProject, deleteGeneratedAssets, fetchGeneratedAssets, publishAsset, unpublishAsset, restoreGeneratedAsset, type GeneratedAsset } from "@/lib/server-api";
-import { isCompatibleAssetPreviewMime } from "@/lib/asset-preview";
+import { buildMediaDownloadUrl, buildMediaPreviewUrl, isCompatibleAssetPreviewMime } from "@/lib/asset-preview";
 import { chooseLocalAssetFolder, getLocalAssetFolderName, saveAssetToLocalFolder } from "@/lib/local-asset-storage";
+import { preparePrivateMedia } from "@/lib/private-media";
 
 const PREVIEW_CONCURRENCY = 4;
 const PREVIEW_TIMEOUT_MS = 12_000;
@@ -58,9 +62,11 @@ async function loadPreviewEntries(
       signal.addEventListener("abort", abortRequest, { once: true });
       const timeout = window.setTimeout(abortRequest, PREVIEW_TIMEOUT_MS);
       try {
-        const requestUrl = `${asset.url}?preview=1`;
+        const requestUrl = buildMediaPreviewUrl(asset.url);
         const response = await fetch(requestUrl, {
+          credentials: "include",
           headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
           signal: requestController.signal,
         });
         if (!response.ok) {
@@ -72,7 +78,9 @@ async function loadPreviewEntries(
           onEntry([asset.id, "", "文件类型与资产记录不一致"]);
           continue;
         }
-        const objectUrl = URL.createObjectURL(await response.blob());
+        const blob = await response.blob();
+        if (signal.aborted) return;
+        const objectUrl = URL.createObjectURL(blob);
         onObjectUrl(objectUrl);
         onEntry([asset.id, objectUrl, ""]);
       } catch (error) {
@@ -92,9 +100,20 @@ async function loadPreviewEntries(
 }
 
 export default function AssetsPage() {
+  const { session } = useAuth();
+  const accountKey = `${session?.user?.id ?? "anonymous"}:${session?.access_token ?? ""}`;
+  return <AssetsContent key={accountKey} />;
+}
+
+function AssetsContent() {
   const pathname = usePathname();
   const { session } = useAuth();
   const router = useRouter();
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
   const [assets, setAssets] = useState<GeneratedAsset[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -110,17 +129,36 @@ export default function AssetsPage() {
   const [errorAction, setErrorAction] = useState<
     | { type: "load" }
     | { type: "editor"; assetId: string }
-    | { type: "publish" | "unpublish" | "restore"; assetId: string }
+    | { type: "publish" | "unpublish" | "restore" | "download"; assetId: string }
     | null
   >(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
-  const [previewRetry, setPreviewRetry] = useState(0);
   const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [publicationAsset, setPublicationAsset] = useState<GeneratedAsset | null>(null);
+  useEffect(() => { setPublicationAsset(null); }, [session?.user?.id]);
   const [publishNotice, setPublishNotice] = useState("");
   const [showRecovery, setShowRecovery] = useState(false);
   const [localFolder, setLocalFolder] = useState<string | null>(null);
   const [localSaveBusy, setLocalSaveBusy] = useState(false);
   const [localSaveError, setLocalSaveError] = useState("");
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [previewAsset, setPreviewAsset] = useState<GeneratedAsset | null>(null);
+  const downloadFrame = useRef<HTMLIFrameElement>(null);
+  const previewObjectUrls = useRef(new Set<string>());
+  const previewRetries = useRef(new Map<string, AbortController>());
+  const rememberPreviewUrl = useCallback((url: string) => {
+    previewObjectUrls.current.add(url);
+  }, []);
+  const markPreviewFailed = useCallback((assetId: string, url: string) => {
+    URL.revokeObjectURL(url);
+    setPreviewUrls((current) => {
+      if (current[assetId] !== url) return current;
+      const next = { ...current };
+      delete next[assetId];
+      return next;
+    });
+    setPreviewErrors((current) => ({ ...current, [assetId]: "预览图解码失败，请重试" }));
+  }, []);
 
   const chooseLocalFolder = async () => {
     setLocalSaveError("");
@@ -140,6 +178,7 @@ export default function AssetsPage() {
     let savedCount = 0;
     try {
       for (const asset of selectedAssets) {
+        if (!active.current) return;
         if (!asset.url || asset.retentionState === "soft_deleted") continue;
         await saveAssetToLocalFolder({ url: asset.url, accessToken: token, accountId: session.user.id, fileName: assetDisplayName(asset), mediaType: asset.mediaType });
         savedCount += 1;
@@ -152,6 +191,42 @@ export default function AssetsPage() {
       setLocalSaveBusy(false);
     }
   };
+
+  const downloadAsset = useCallback(async (asset: GeneratedAsset) => {
+    const token = session?.access_token;
+    if (!token || !asset.url || downloadingId) return;
+    setDownloadingId(asset.id);
+    setError("");
+    setErrorAction(null);
+    try {
+      if (asset.assetObjectId) {
+        const media = await preparePrivateMedia(asset.assetObjectId, token, AbortSignal.timeout(30_000));
+        if (!active.current) return;
+        if (downloadFrame.current) downloadFrame.current.src = buildMediaDownloadUrl(media.path);
+        return;
+      }
+
+      const response = await fetch(buildMediaDownloadUrl(asset.url), {
+        credentials: "include",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`原文件下载失败（${response.status}）。`);
+      const blob = await response.blob();
+      if (!active.current) return;
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = assetDisplayName(asset);
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "原文件下载失败，请重试。");
+      setErrorAction({ type: "download", assetId: asset.id });
+    } finally {
+      setDownloadingId(null);
+    }
+  }, [downloadingId, session?.access_token]);
 
   useEffect(() => {
     void getLocalAssetFolderName().then(setLocalFolder).catch((cause: unknown) => {
@@ -180,8 +255,13 @@ export default function AssetsPage() {
 
   const publish = useCallback(async (asset: GeneratedAsset) => {
     if (!session?.access_token || asset.published || publishingId) return;
+    setPublicationAsset(asset);
+  }, [publishingId, session?.access_token]);
+
+  const confirmPublication = useCallback(async (caption?: GalleryCaptionInput) => {
+    const asset = publicationAsset;
+    if (!session?.access_token || !asset || publishingId) return;
     const displayName = assetDisplayName(asset);
-    if (!window.confirm(`确认公开“${displayName}”？图片、标题、作者和生成信息会展示在公共作品库。`)) return;
     setPublishingId(asset.id);
     setPublishNotice("");
     setError("");
@@ -190,17 +270,20 @@ export default function AssetsPage() {
       const details = {
         title: displayName,
         ...(asset.description ? { description: asset.description } : {}),
+        ...(caption ? { caption } : {}),
       };
       await publishAsset(session.access_token, asset.id, details);
       setAssets((current) => current.map((item) => item.id === asset.id ? { ...item, published: true } : item));
       setPublishNotice("作品已公开到作品库");
+      setPublicationAsset(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "公开作品失败");
       setErrorAction({ type: "publish", assetId: asset.id });
+      throw cause;
     } finally {
       setPublishingId(null);
     }
-  }, [publishingId, session?.access_token]);
+  }, [publicationAsset, publishingId, session?.access_token]);
 
   const openEditor = useCallback(async (asset: GeneratedAsset) => {
     if (!session?.access_token || !asset.url) return;
@@ -212,6 +295,7 @@ export default function AssetsPage() {
         { name: assetDisplayName(asset) },
         { idempotencyKey: `asset-editor:${asset.id}` },
       );
+      if (!active.current) return;
       const canvasRoute = pathname.startsWith("/desktop-app/") ? "/desktop-app/canvas" : "/canvas";
       router.push(`${canvasRoute}?id=${project.primaryCanvas.id}&assetId=${encodeURIComponent(asset.assetObjectId)}&mediaType=${asset.mediaType}`);
     } catch (cause) {
@@ -223,7 +307,7 @@ export default function AssetsPage() {
   }, [router, session?.access_token,pathname]);
 
   const load = useCallback(async () => {
-    if (!session?.access_token) return;
+    if (!active.current || !session?.access_token) return;
     const requestId=++loadId.current;
     setLoading(true);
     setError("");
@@ -261,7 +345,6 @@ export default function AssetsPage() {
     }
 
     let cancelled = false;
-    const objectUrls: string[] = [];
     const controller = new AbortController();
     setPreviewUrls({});
     setPreviewErrors({});
@@ -270,10 +353,13 @@ export default function AssetsPage() {
       assets,
       token,
       controller.signal,
-      (url) => objectUrls.push(url),
+      rememberPreviewUrl,
       ([id, url, entryError]) => {
         if (cancelled) return;
-        if (url) setPreviewUrls((current) => ({ ...current, [id]: url }));
+        if (url) {
+          setPreviewUrls((current) => ({ ...current, [id]: url }));
+          setPreviewErrors((current) => { const next = { ...current }; delete next[id]; return next; });
+        }
         if (entryError) setPreviewErrors((current) => ({ ...current, [id]: entryError }));
       },
     );
@@ -281,9 +367,47 @@ export default function AssetsPage() {
     return () => {
       cancelled = true;
       controller.abort();
-      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+      previewRetries.current.forEach((request) => request.abort());
+      previewRetries.current.clear();
+      previewObjectUrls.current.forEach((url) => URL.revokeObjectURL(url));
+      previewObjectUrls.current.clear();
     };
-  }, [assets, previewRetry, session?.access_token]);
+  }, [assets, rememberPreviewUrl, session?.access_token]);
+
+  const retryPreview = useCallback((assetId: string) => {
+    const token = session?.access_token;
+    const asset = assets.find((item) => item.id === assetId);
+    if (!token || !asset) return;
+
+    previewRetries.current.get(assetId)?.abort();
+    const controller = new AbortController();
+    previewRetries.current.set(assetId, controller);
+    setPreviewErrors((current) => { const next = { ...current }; delete next[assetId]; return next; });
+    setPreviewUrls((current) => {
+      const previousUrl = current[assetId];
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      const next = { ...current };
+      delete next[assetId];
+      return next;
+    });
+
+    void loadPreviewEntries(
+      [asset],
+      token,
+      controller.signal,
+      rememberPreviewUrl,
+      ([id, url, entryError]) => {
+        if (controller.signal.aborted) return;
+        if (url) {
+          setPreviewUrls((current) => ({ ...current, [id]: url }));
+          setPreviewErrors((current) => { const next = { ...current }; delete next[id]; return next; });
+        }
+        if (entryError) setPreviewErrors((current) => ({ ...current, [id]: entryError }));
+      },
+    ).finally(() => {
+      if (previewRetries.current.get(assetId) === controller) previewRetries.current.delete(assetId);
+    });
+  }, [assets, rememberPreviewUrl, session?.access_token]);
 
   const visible = filter === "all" ? assets : assets.filter((asset) => asset.mediaType === filter);
   const toggleSelected = (id: string) => setSelectedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
@@ -331,10 +455,16 @@ export default function AssetsPage() {
       }
       return;
     }
+    if (errorAction?.type === "download") {
+      const asset = assets.find((item) => item.id === errorAction.assetId);
+      if (asset) void downloadAsset(asset);
+      return;
+    }
     void load();
   };
 
   return <main data-assets-scroll aria-busy={loading} className="relative mx-auto max-h-[calc(100vh-4rem)] min-h-full max-w-7xl overflow-y-auto p-6 pb-24 md:p-10 md:pb-28">
+    <iframe ref={downloadFrame} title="原始素材下载" hidden />
     {!loading && !error && visible.length > 0 && <GradualBlur autoHide height="4rem" className="bottom-24 z-0" />}
     {showRecovery && <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs"><span>恢复区资产将在 7 天后清理</span><button type="button" onClick={() => void restoreSelected()} disabled={selectedIds.size === 0||batchBusy} className="rounded-md border px-2 py-1 disabled:opacity-40">{batchBusy?"正在恢复…":"恢复所选"}</button></div>}
     <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-muted-foreground">图片与视频云端副本 · 保留 3 天</p><h1 className="mt-1 text-3xl font-semibold">我的资产</h1><p className="mt-2 text-sm text-muted-foreground">推荐保存到电脑上的文件夹；本地副本只保存在你的设备，云端副本 3 天后自动清理。</p></div><div className="flex gap-2"><button type="button" onClick={() => void chooseLocalFolder()} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm"><FolderOpen className="size-4" />{localFolder ? `本地：${localFolder}` : "选择本地文件夹"}</button><button type="button" onClick={() => void load()} disabled={loading} aria-label="刷新资产" className="flex size-10 items-center justify-center rounded-lg border disabled:opacity-50"><RefreshCw className="size-4" /></button></div></header>
@@ -352,7 +482,7 @@ export default function AssetsPage() {
         <div className="space-y-2 p-4"><div className="h-3 w-3/5 animate-pulse rounded bg-muted-foreground/10" /><div className="h-2.5 w-2/5 animate-pulse rounded bg-muted-foreground/10" /><div className="h-8 w-20 animate-pulse rounded-md bg-muted-foreground/10" /></div>
       </div>)}
     </div>}
-    {!loading && error && <div role="alert" className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive"><span>{error}</span><button type="button" onClick={retryErrorAction} className="inline-flex h-9 items-center gap-2 rounded-md border border-destructive/30 px-3 text-xs font-medium hover:bg-destructive/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><RefreshCw className="size-3.5" />{errorAction?.type === "editor" ? "重试打开画布" : errorAction?.type === "publish" ? "重试公开作品" : errorAction?.type === "unpublish" ? "重试取消公开" : errorAction?.type === "restore" ? "重试恢复" : "重试加载"}</button></div>}
+    {!loading && error && <div role="alert" className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive"><span>{error}</span><button type="button" onClick={retryErrorAction} className="inline-flex h-9 items-center gap-2 rounded-md border border-destructive/30 px-3 text-xs font-medium hover:bg-destructive/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><RefreshCw className="size-3.5" />{errorAction?.type === "editor" ? "重试打开画布" : errorAction?.type === "publish" ? "重试公开作品" : errorAction?.type === "unpublish" ? "重试取消公开" : errorAction?.type === "restore" ? "重试恢复" : errorAction?.type === "download" ? "重试下载" : "重试加载"}</button></div>}
     {!loading && !error && visible.length === 0 && <div className="mt-8 flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed text-center"><Images className="size-10 text-muted-foreground/40" /><h2 className="mt-4 font-medium">还没有资产</h2><p className="mt-1 text-sm text-muted-foreground">从图片或视频创作页开始生成。</p></div>}
     {publishNotice && <p role="status" className="mt-5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">{publishNotice}</p>}
     {!loading && !error && visible.length > 0 && (
@@ -377,8 +507,8 @@ export default function AssetsPage() {
               </button>
               <div className="relative flex aspect-square items-center justify-center bg-muted" aria-busy={!previewUrl && !previewError}>
                 {previewUrl ? (
-                  <button type="button" onClick={() => void openEditor(asset)} disabled={!editable} aria-label={`在画布中编辑 ${displayName}`} className="group h-full w-full disabled:cursor-not-allowed">
-                    <img src={previewUrl} alt={asset.mediaType === "video" ? `${displayName} 视频预览图` : displayName} loading="lazy" className="h-full w-full object-cover transition-opacity group-hover:opacity-85" />
+                  <button type="button" onClick={() => setPreviewAsset(asset)} aria-label={`预览 ${displayName}`} className="group h-full w-full">
+                    <img src={previewUrl} alt={asset.mediaType === "video" ? `${displayName} 视频预览图` : displayName} loading="lazy" onError={() => markPreviewFailed(asset.id, previewUrl)} className="h-full w-full object-cover transition-opacity group-hover:opacity-85" />
                     {asset.mediaType === "video" && <span className="pointer-events-none absolute bottom-3 left-3 rounded-md bg-black/65 px-2 py-1 text-[11px] text-white">视频预览图</span>}
                   </button>
                 ) : previewError ? (
@@ -397,7 +527,7 @@ export default function AssetsPage() {
                   {daysLeft !== null ? <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{asset.retentionState === "soft_deleted" ? "恢复期剩余" : "保留期剩余"} {daysLeft} 天</p> : null}
                   {editable && <button type="button" onClick={() => void openEditor(asset)} disabled={openingId === asset.id} className="mt-2 text-xs font-medium text-foreground underline underline-offset-2 disabled:opacity-50">{openingId === asset.id ? "正在打开…" : "在画布中编辑"}</button>}
                 </div>
-                <div className="flex shrink-0 gap-1">{localFolder && asset.url && asset.retentionState !== "soft_deleted" && <button type="button" onClick={() => void saveLocally([asset])} disabled={localSaveBusy} aria-label={`保存 ${displayName} 到本地文件夹`} title="保存到本地文件夹" className="flex size-8 items-center justify-center rounded-md border disabled:opacity-50"><Save className="size-4" /></button>}{previewUrl ? <a href={previewUrl} download aria-label={`下载 ${displayName}`} className="flex size-8 items-center justify-center rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Download className="size-4" /></a> : previewError ? <button type="button" onClick={() => setPreviewRetry((value) => value + 1)} aria-label={`重试加载 ${displayName}`} className="shrink-0 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">重试预览</button> : <span className="size-8 shrink-0" aria-hidden="true" />}</div>
+                <div className="flex shrink-0 gap-1">{localFolder && asset.url && asset.retentionState !== "soft_deleted" && <button type="button" onClick={() => void saveLocally([asset])} disabled={localSaveBusy} aria-label={`保存 ${displayName} 到本地文件夹`} title="保存到本地文件夹" className="flex size-8 items-center justify-center rounded-md border disabled:opacity-50"><Save className="size-4" /></button>}{asset.url && <button type="button" onClick={() => void downloadAsset(asset)} disabled={downloadingId === asset.id} aria-label={`下载 ${displayName} 原文件`} title="下载原文件" className="flex size-8 items-center justify-center rounded-md border disabled:opacity-50"><Download className="size-4" /></button>}{previewError ? <button type="button" onClick={() => retryPreview(asset.id)} aria-label={`重试加载 ${displayName}`} className="shrink-0 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">重试预览</button> : <span className="size-8 shrink-0" aria-hidden="true" />}</div>
               </div>
               <div className="relative z-10 flex items-center justify-between border-t border-border/50 bg-card px-4 py-3">
                 <span className="text-[11px] text-muted-foreground">{asset.retentionState === "soft_deleted" ? "恢复区资产" : asset.published ? "已公开到作品库" : "仅自己可见"}</span>
@@ -415,5 +545,20 @@ export default function AssetsPage() {
       </div>
     )}
     {!loading && !error && pagination.total > 0 && <div className="relative z-10 mt-8 flex items-center justify-center gap-3"><button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="rounded-lg border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">上一页</button><span className="text-xs text-muted-foreground">第 {pagination.page} 页 · 共 {pagination.total} 项</span><button type="button" disabled={!pagination.hasMore} onClick={() => setPage((value) => value + 1)} className="rounded-lg border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">下一页</button></div>}
+    <AssetPreviewDialog
+      key={previewAsset?.id ?? "closed"}
+      asset={previewAsset}
+      accessToken={session?.access_token ?? ""}
+      onOpenChange={(open) => { if (!open) setPreviewAsset(null); }}
+      onDownload={(asset) => void downloadAsset(asset)}
+    />
+    {publicationAsset ? <PublishAssetDialog
+      key={`${session?.user.id}:${publicationAsset.id}`}
+      title={assetDisplayName(publicationAsset)}
+      video={publicationAsset.mediaType === "video"}
+      busy={publishingId === publicationAsset.id}
+      onConfirm={confirmPublication}
+      onCancel={() => setPublicationAsset(null)}
+    /> : null}
   </main>;
 }

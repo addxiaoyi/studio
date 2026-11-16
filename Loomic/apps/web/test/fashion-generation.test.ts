@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
-import { clearFashionApproval,decodeFashionImage, generateFashion, normalizeFashionResult, pendingFashion, resumeFashion } from "@/lib/fashion-generation";
+import { cancelFashion, clearFashionApproval,decodeFashionImage, generateFashion, normalizeFashionResult, pendingFashion, resumeFashion } from "@/lib/fashion-generation";
 
-const api = vi.hoisted(() => ({ uploadFile: vi.fn(), fetchJob: vi.fn(), fetchGenerationApprovalStatus: vi.fn() }));
+const api = vi.hoisted(() => ({ uploadFile: vi.fn(), fetchJob: vi.fn(), fetchGenerationApprovalStatus: vi.fn(), cancelJob: vi.fn() }));
 vi.mock("@/lib/server-api", () => api);
 vi.mock("@/lib/env", () => ({ getServerBaseUrl: () => "" }));
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -63,6 +63,31 @@ it("keeps the original request when the server cannot confirm the job state", as
   api.fetchJob.mockRejectedValue(new Error("offline"));
   await expect(resumeFashion("user", "token", vi.fn(), new AbortController().signal)).rejects.toThrow("offline");
   expect(pendingFashion("user")?.jobId).toBe(id(5));
+});
+
+it("reconfirms the existing failed reservation only when the user explicitly restores it", async () => {
+  const approval = { approvalId: id(4), model: "test-model", estimatedCredits: 2, expiresAt: "2030-01-01" };
+  localStorage.setItem("loomic:fashion:pending:user", JSON.stringify({ key: id(1), fingerprint: "test", assets: [id(2), id(3)], model: "test-model", jobId: id(5), approval }));
+  api.fetchJob.mockResolvedValueOnce({ job: { status: "queued", stage: "awaiting_credit_reservation", error_code: "credit_reservation_failed" } })
+    .mockRejectedValueOnce(new Error("after explicit confirmation"));
+  const confirm = vi.fn().mockResolvedValue(id(5));
+  await expect(resumeFashion("user", "token", confirm, new AbortController().signal)).rejects.toThrow("after explicit confirmation");
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(confirm).toHaveBeenCalledWith(approval);
+  expect(pendingFashion("user")?.jobId).toBe(id(5));
+  expect(api.uploadFile).not.toHaveBeenCalled();
+});
+
+it("retains the try-on request and reserved credits while cancellation is still unresolved", async () => {
+  const request = { key: id(1), fingerprint: "test", assets: [id(2), id(3)], model: "test-model", jobId: id(5) };
+  localStorage.setItem("loomic:fashion:pending:user", JSON.stringify(request));
+  api.fetchJob.mockResolvedValue({ job: { status: "running", stage: "cancel_requested", cancel_requested_at: "2026-11-14T00:00:00.000Z" } });
+  api.cancelJob.mockResolvedValue({ job: { ...request, status: "running" } });
+
+  await expect(cancelFashion("user", "token")).rejects.toThrow("积分暂不退款");
+
+  expect(pendingFashion("user")?.jobId).toBe(id(5));
+  expect(api.cancelJob).toHaveBeenCalledWith("token", id(5));
 });
 
 it("does not auto-confirm rejected or expired approval", async () => {

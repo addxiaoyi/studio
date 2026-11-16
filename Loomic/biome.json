@@ -6,8 +6,16 @@
       "**/node_modules/**",
       "**/.turbo/**",
       "**/.next/**",
+      "**/.next-dev/**",
       "**/dist/**",
-      "**/out/**"
+      "**/out/**",
+      ".creative-test-results/**",
+      ".codex-release/**",
+      "release-candidates/**",
+      "vendor/**",
+      "deploy/**",
+      "apps/web/public/creative/**",
+      "apps/web/public/fashion-gallery/**"
     ],
     "include": [
       "**/*.js",

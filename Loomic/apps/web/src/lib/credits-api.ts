@@ -81,13 +81,14 @@ export async function fetchCredits(
 export async function fetchCreditTransactions(
   accessToken: string,
   limit = 20,
-): Promise<{ transactions: CreditTransaction[] }> {
+  offset = 0,
+): Promise<{ transactions: CreditTransaction[]; pagination?: { limit: number; offset: number; hasMore: boolean } }> {
   const response = await fetch(
-    `${getServerBaseUrl()}/api/credits/transactions?limit=${limit}`,
+    `${getServerBaseUrl()}/api/credits/transactions?limit=${limit}&offset=${offset}`,
     { headers: authHeaders(accessToken), credentials: "include" },
   );
   if (!response.ok) return handleErrorResponse(response);
-  return (await response.json()) as { transactions: CreditTransaction[] };
+  return (await response.json()) as { transactions: CreditTransaction[]; pagination?: { limit: number; offset: number; hasMore: boolean } };
 }
 
 export async function fetchTopupPackages(): Promise<{ packages: TopupPackage[] }> {

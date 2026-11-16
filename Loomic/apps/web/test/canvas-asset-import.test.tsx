@@ -3,11 +3,20 @@ import { afterEach, expect, it, vi } from "vitest";
 import { useCanvasAssetImport } from "@/hooks/use-canvas-asset-import";
 import { importCanvasAsset } from "@/lib/canvas-asset-import";
 
-const media = vi.hoisted(() => ({ describe: vi.fn(), read: vi.fn() }));
+const media = vi.hoisted(() => ({
+  describe: vi.fn(),
+  describeUrl: vi.fn(),
+  metadata: vi.fn(),
+  readFile: vi.fn(),
+  grant: vi.fn(),
+}));
 vi.mock("@/lib/canvas-media-file", () => ({
   inspectCanvasMedia: media.describe,
-  readCanvasAsset: media.read,
+  inspectCanvasMediaUrl: media.describeUrl,
+  readCanvasAssetMetadata: media.metadata,
+  readCanvasAssetFile: media.readFile,
 }));
+vi.mock("@/lib/private-media", () => ({ preparePrivateMedia: media.grant }));
 vi.mock("@excalidraw/excalidraw", () => ({
   convertToExcalidrawElements: (elements: unknown[]) => elements,
 }));
@@ -33,11 +42,17 @@ function fixture() {
       if (scene.elements) elements = scene.elements;
     }),
   };
-  media.read.mockResolvedValue({
+  media.readFile.mockResolvedValue({
     assetId,
     libraryAssetId: "11111111-1111-4111-8111-111111111111",
     title: "试穿结果",
     file: new File(["image"], "out.png", { type: "image/png" }),
+  });
+  media.metadata.mockResolvedValue({
+    assetId,
+    libraryAssetId: "11111111-1111-4111-8111-111111111111",
+    title: "�Դ����",
+    mimeType: "image/png",
   });
   media.describe.mockResolvedValue({
     width: 1200,
@@ -45,11 +60,19 @@ function fixture() {
     duration: 0,
     dataUrl: "data:image/png;base64,dGVzdA==",
   });
+  media.describeUrl.mockResolvedValue({ width: 720, height: 1280, duration: 125.5 });
+  media.grant.mockResolvedValue({
+    path: `https://api.test/api/uploads/${assetId}/file`,
+    mimeType: "video/webm",
+    byteSize: 800 * 1024 * 1024,
+    expiresAt: null,
+    grantSeconds: 300,
+  });
   return api;
 }
 it("waits for canvas hydration and exposes failure with an explicit retry", async () => {
   const api = fixture();
-  media.read.mockRejectedValueOnce(new Error("素材已过期"));
+  media.readFile.mockRejectedValueOnce(new Error("素材已过期"));
   const { result, rerender } = renderHook(
     ({ ready }) =>
       useCanvasAssetImport({
@@ -61,7 +84,7 @@ it("waits for canvas hydration and exposes failure with an explicit retry", asyn
       }),
     { initialProps: { ready: false } },
   );
-  expect(media.read).not.toHaveBeenCalled();
+  expect(media.readFile).not.toHaveBeenCalled();
   rerender({ ready: true });
   await waitFor(() => expect(result.current.error).toBe("素材已过期"));
   act(() => result.current.retry());
@@ -81,11 +104,11 @@ it("retains source identity, centers the image and deduplicates after remount", 
   expect(api.scrollToContent).toHaveBeenCalled();
   await importCanvasAsset(api, "token", assetId, signal);
   expect(api.getSceneElements()).toHaveLength(1);
-  expect(media.read).toHaveBeenCalledOnce();
+  expect(media.readFile).toHaveBeenCalledOnce();
 });
 it("uses decoded video metadata and does not create an image data URL", async () => {
   const api = fixture();
-  media.read.mockResolvedValue({
+  media.readFile.mockResolvedValue({
     assetId,
     libraryAssetId: assetId,
     title: "竖屏录像",
@@ -96,8 +119,28 @@ it("uses decoded video metadata and does not create an image data URL", async ()
     height: 1280,
     duration: 125.5,
   });
+  media.metadata.mockResolvedValue({
+    assetId,
+    libraryAssetId: assetId,
+    title: "video recording",
+    mimeType: "video/webm",
+  });
+  media.grant.mockResolvedValue({
+    path: `https://api.test/api/uploads/${assetId}/file`,
+    mimeType: "video/webm",
+    byteSize: 800 * 1024 * 1024,
+    expiresAt: null,
+    grantSeconds: 300,
+  });
   await importCanvasAsset(api, "token", assetId, new AbortController().signal);
   expect(api.addFiles).not.toHaveBeenCalled();
+  expect(media.readFile).not.toHaveBeenCalled();
+  expect(media.grant).toHaveBeenCalledWith(assetId, "token", expect.any(AbortSignal));
+  expect(media.describeUrl).toHaveBeenCalledWith(
+    `https://api.test/api/uploads/${assetId}/file`,
+    "video/webm",
+    expect.any(AbortSignal),
+  );
   expect(api.getSceneElements()[0]?.customData).toMatchObject({
     assetId,
     durationSeconds: 125.5,

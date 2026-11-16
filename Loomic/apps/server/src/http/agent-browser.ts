@@ -10,6 +10,15 @@ import {
   assertConnectorEnabled,
   ConnectorDisabledError,
 } from "../features/agent-goals/connector-gate.js";
+import { isTransientAgentBrowserError } from "./agent-browser-errors.js";
+
+const SESSION_LIST_CACHE_MS = 400;
+const MAX_SESSION_LIST_CACHE = 256;
+type SessionListCacheEntry = {
+  expiresAt: number;
+  value?: Awaited<ReturnType<ReturnType<typeof browserViewStore>["list"]>>;
+  pending?: Promise<Awaited<ReturnType<ReturnType<typeof browserViewStore>["list"]>>>;
+};
 
 export function registerAgentBrowserRoutes(
   app: FastifyInstance,
@@ -22,6 +31,7 @@ export function registerAgentBrowserRoutes(
   },
 ) {
   const store = browserViewStore(options.db, options.storageRoot);
+  const sessionListCache = new Map<string, SessionListCacheEntry>();
   const owners = new WeakMap<
     FastifyRequest,
     { userId: string; workspaceId: string }
@@ -68,6 +78,20 @@ export function registerAgentBrowserRoutes(
               message: "隔离浏览器连接器已禁用。",
             },
           });
+      if (isTransientAgentBrowserError(error)) {
+        request.log.warn({ err: error }, "agent-browser dependency temporarily unavailable");
+        return reply
+          .header("Retry-After", "5")
+          .code(503)
+          .send({
+            ok: false,
+            error: {
+              code: "browser_view_unavailable",
+              message: "隔离浏览服务暂时不可用，请稍后重试。",
+              retryable: true,
+            },
+          });
+      }
       request.log.error({ err: error }, "agent-browser route failed");
       return reply
         .code(500)
@@ -84,6 +108,29 @@ export function registerAgentBrowserRoutes(
       if (!identity) throw new Error("Authenticated browser owner is missing.");
       return identity;
     }
+    async function listSessions(identity: { userId: string; workspaceId: string }) {
+      const key = `${identity.workspaceId}:${identity.userId}`;
+      const now = Date.now();
+      const cached = sessionListCache.get(key);
+      if (cached?.value && cached.expiresAt > now) return cached.value;
+      if (cached?.pending) return cached.pending;
+
+      const pending = store.list(identity);
+      sessionListCache.set(key, { expiresAt: now + SESSION_LIST_CACHE_MS, pending });
+      try {
+        const value = await pending;
+        sessionListCache.set(key, { expiresAt: Date.now() + SESSION_LIST_CACHE_MS, value });
+        while (sessionListCache.size > MAX_SESSION_LIST_CACHE) {
+          const oldest = sessionListCache.keys().next().value;
+          if (!oldest) break;
+          sessionListCache.delete(oldest);
+        }
+        return value;
+      } catch (error) {
+        if (sessionListCache.get(key)?.pending === pending) sessionListCache.delete(key);
+        throw error;
+      }
+    }
     scope.post('/api/agent/browser/handoff/input',async(request,reply)=>{
       const input=websiteHandoffRequestSchema.parse(request.body);
       try{return {ok:true,data:await queueHandoffInput(options.db,owner(request),input)};}
@@ -96,7 +143,7 @@ export function registerAgentBrowserRoutes(
     scope.get("/api/agent/browser/sessions", async (request, reply) =>
       reply.send({
         enabled: options.enabled,
-        sessions: options.enabled ? await store.list(await owner(request)) : [],
+        sessions: options.enabled ? await listSessions(await owner(request)) : [],
       }),
     );
     scope.get<{ Params: { id: string } }>(

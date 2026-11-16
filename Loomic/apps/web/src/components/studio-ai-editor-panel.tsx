@@ -68,6 +68,13 @@ export function StudioAiEditorPanel(props: Props) {
       </details>
 
       <Button className="w-full" disabled={!props.runtime || !flow.target || !flow.prompt.trim() || locked} onClick={flow.previewPlan}><Sparkles className="size-4" aria-hidden="true" />{copy(flow.restoring ? "正在恢复编辑记录…" : flow.busy ? "正在处理…" : "预览修改方案")}</Button>
+      {flow.previewProgress && <output aria-live="polite" className={`block rounded-md border px-3 py-2 text-xs ${flow.previewProgress.state === "failed" ? "border-destructive/40 text-destructive" : "text-muted-foreground"}`}>
+        {flow.previewProgress.state === "starting" && copy("正在准备低分辨率预览…")}
+        {flow.previewProgress.state === "running" && `${copy("正在生成预览，已编码")} ${((flow.previewProgress.outTimeMs ?? 0) / 1_000_000).toFixed(1)} ${copy("秒")}`}
+        {flow.previewProgress.state === "completed" && copy("预览生成完成。")}
+        {flow.previewProgress.state === "failed" && (flow.previewProgress.error || copy("预览生成失败，请检查本地磁盘空间后重试。"))}
+      </output>}
+      {flow.previewProgress && ["starting", "running"].includes(flow.previewProgress.state) && <Button size="sm" variant="outline" className="w-full" onClick={() => void flow.cancelPreview()}>{copy("取消预览生成")}</Button>}
       {!flow.prompt.trim() && !flow.restoring && <p className="text-xs text-muted-foreground">{copy("输入修改要求，或选择上方的常用操作。")}</p>}
 
       {flow.plan && <section className="space-y-3 rounded-lg border bg-background p-3" data-testid="studio-ai-plan">

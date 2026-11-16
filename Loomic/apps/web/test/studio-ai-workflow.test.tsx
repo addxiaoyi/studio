@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { StudioAiEditorPanel } from "@/components/studio-ai-editor-panel";
 import { completeStudioPlan, confirmStudioPlan, normalizeModelPlan, requestStudioAiPlan } from "@/lib/studio-ai-edit";
@@ -12,6 +12,24 @@ vi.mock("@/lib/visualforge-storage", () => ({ saveStudioPlan: vi.fn(), clearStud
 vi.mock("@/lib/studio-ai-session", () => ({ readRecoveredStudioSession: vi.fn() }));
 vi.mock("@/lib/studio-ai-edit", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/studio-ai-edit")>(), requestStudioAiPlan: vi.fn(), confirmStudioPlan: vi.fn(), completeStudioPlan: vi.fn() }));
 vi.mock("@/lib/i18n", () => ({ useLocale: () => "zh-CN" }));
+const desktopBridge = vi.hoisted(() => ({
+  enabled: false,
+  listener: null as ((event: { state: "starting" | "running" | "completed" | "failed"; outTimeMs?: number; error?: string }) => void) | null,
+  cancel: vi.fn(),
+}));
+vi.mock("@/lib/studio-desktop-export", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/studio-desktop-export")>(),
+  desktopVideoBridge: () => desktopBridge.enabled ? {
+    exportVideo: vi.fn(),
+    readExportPreview: vi.fn(),
+    listExportPreviews: vi.fn(),
+    cancelVideoPreview: desktopBridge.cancel,
+    onVideoPreviewProgress: (callback: typeof desktopBridge.listener) => {
+      desktopBridge.listener = callback;
+      return () => { desktopBridge.listener = null; };
+    },
+  } : undefined,
+}));
 
 const original = { compositionId: "MyComp", revision: "a".repeat(64), duration: 2, format: "landscape" as const, captions: [], cut: null };
 const approval = { id: "123e4567-e89b-42d3-a456-426614174000", fingerprint: "b".repeat(64), expiresAt: "2099-01-01T00:00:00Z", estimatedCredits: 0 as const };
@@ -63,7 +81,18 @@ it("keeps an action undo when saving the panel fails and recovers it without ano
   expect(undoAction).toHaveBeenCalledOnce();expect(runtime.applyEdit).not.toHaveBeenCalled();
   expect(confirmStudioPlan).not.toHaveBeenCalled();expect(completeStudioPlan).not.toHaveBeenCalled();
 });
-afterEach(() => { cleanup();vi.clearAllMocks(); });
+afterEach(() => { cleanup();desktopBridge.enabled = false;desktopBridge.listener = null;vi.clearAllMocks(); });
+
+it("shows proxy progress and cancels the active preview render", async () => {
+  desktopBridge.enabled = true;
+  const { runtime } = editor();
+  render(<StudioAiEditorPanel runtime={runtime as unknown as StudioRuntime} token="test" userId="u" mediaRevision={1} exported={vi.fn()} />);
+  await waitFor(() => expect(desktopBridge.listener).toBeTypeOf("function"));
+  act(() => desktopBridge.listener?.({ state: "running", outTimeMs: 12_300_000 }));
+  expect(await screen.findByText(/已编码.*12\.3/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "取消预览生成" }));
+  expect(desktopBridge.cancel).toHaveBeenCalledOnce();
+});
 
 it("guides preview, explicit approval, application, export and guarded undo", async () => {
   const { runtime } = editor();await preview(runtime);

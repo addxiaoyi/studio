@@ -1,5 +1,5 @@
-import type { NextConfig } from "next";
 import withBundleAnalyzer from "@next/bundle-analyzer";
+import type { NextConfig } from "next";
 
 const bundleAnalyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
@@ -10,9 +10,6 @@ const nextConfig: NextConfig = {
   distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
   output: "export",
   trailingSlash: true,
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   env: {
     NEXT_PUBLIC_SERVER_BASE_URL: process.env.NEXT_PUBLIC_SERVER_BASE_URL,
     NEXT_PUBLIC_PAYMENT_PROVIDER: process.env.NEXT_PUBLIC_PAYMENT_PROVIDER,
@@ -31,22 +28,68 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   async headers() {
     return [
-      ...["/video/:path*", "/creative/visualforge/:path*"].map(source => ({ source, headers: [
-        { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-        { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
-      ] })),
-      { source: "/sw.js", headers: [{ key: "Cache-Control", value: "public, max-age=0, must-revalidate" }, { key: "Service-Worker-Allowed", value: "/" }] },
-      { source: "/manifest.json", headers: [{ key: "Cache-Control", value: "public, max-age=86400, immutable" }] },
-      { source: "/logo-helstera.png", headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] },
-      { source: "/images/showcase/:path*", headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] },
-      { source: "/:favicon.ico|logo.svg|apple-touch-icon.png", headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] },
-      { source: "/robots.txt", headers: [{ key: "Cache-Control", value: "public, max-age=86400" }] },
-      { source: "/(.*)", headers: [
-        ...(process.env.NODE_ENV === "production" ? [{ key: "X-Frame-Options", value: "DENY" }] : []),
-        { key: "X-Content-Type-Options", value: "nosniff" },
-        { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-        { key: "X-DNS-Prefetch-Control", value: "on" },
-      ] },
+      ...["/video/:path*", "/creative/visualforge/:path*"].map((source) => ({
+        source,
+        headers: [
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
+        ],
+      })),
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+      {
+        source: "/manifest.json",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=86400, immutable" },
+        ],
+      },
+      {
+        source: "/logo-helstera.png",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/images/showcase/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/:favicon.ico|logo.svg|apple-touch-icon.png",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/robots.txt",
+        headers: [{ key: "Cache-Control", value: "public, max-age=86400" }],
+      },
+      {
+        source: "/(.*)",
+        headers: [
+          ...(process.env.NODE_ENV === "production"
+            ? [{ key: "X-Frame-Options", value: "DENY" }]
+            : []),
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "X-DNS-Prefetch-Control", value: "on" },
+        ],
+      },
     ];
   },
 };

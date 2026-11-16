@@ -16,6 +16,7 @@ export class GoalStepWorker {
   private stopped = false;
   private scanning: Promise<Promise<void>[]> | undefined;
   private readonly pending = new Set<Promise<void>>();
+  private readonly unsettled = new Map<string, unknown>();
   constructor(private readonly db: Pool, private readonly execute: StepExecutor, private readonly concurrency = 4) {}
   start() { if (this.timer) return; this.stopped = false; this.timer = setInterval(() => void this.tick(), 1000); this.timer.unref(); void this.tick(); }
   async stop() {
@@ -25,6 +26,9 @@ export class GoalStepWorker {
     for (const controller of this.active.values()) controller.abort();
     await this.scanning;
     await Promise.all([...this.pending]);
+    if (this.unsettled.size) {
+      throw new AggregateError([...this.unsettled.values()], "Agent goal steps did not drain safely");
+    }
   }
   async tick(): Promise<void> {
     if (this.stopped) return;
@@ -42,7 +46,12 @@ export class GoalStepWorker {
         if (this.active.size >= this.concurrency) break;
         if (this.active.has(goal.id)) continue;
         const controller = new AbortController(); this.active.set(goal.id, controller);
-        const task = this.process(goal, controller).catch(error => console.error("[goal-steps] processing failed", { goalId: goal.id, error })).finally(() => { this.active.delete(goal.id); this.pending.delete(task); });
+        const task = this.process(goal, controller)
+          .then(verified => { if (verified) this.unsettled.delete(goal.id); })
+          .catch(error => {
+            this.unsettled.set(goal.id, error);
+            console.error("[goal-steps] processing failed", { goalId: goal.id, error });
+          }).finally(() => { this.active.delete(goal.id); this.pending.delete(task); });
         this.pending.add(task);
         pending.push(task);
       }
@@ -123,14 +132,15 @@ export class GoalStepWorker {
       await client.query("commit"); return { step: claimed, previous };
     } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
   }
-  private async process(goal: ExecutingGoal, controller: AbortController) {
+  private async process(goal: ExecutingGoal, controller: AbortController): Promise<boolean> {
     let work: Awaited<ReturnType<GoalStepWorker["claim"]>>;
     try { work = await this.claim(goal); }
     catch (error) {
       await this.db.query("update agent_goals set status='failed',error_message=$2,updated_at=now() where id=$1 and status in ('running','waiting_approval','waiting_desktop')", [goal.id, error instanceof Error ? error.message.slice(0,1000) : "步骤校验失败"]);
-      throw error;
+      console.error("[goal-steps] claim failed", { goalId: goal.id, error });
+      return true;
     }
-    if (!work) return;
+    if (!work) return false;
     const { step, previous } = work;
     const assertActive = async () => {
       controller.signal.throwIfAborted();
@@ -176,6 +186,7 @@ export class GoalStepWorker {
         await stepEvent(this.db, goal.id, "goal.step_interrupted", error instanceof Error ? error.message.slice(0,1000) : "步骤失败", { stepId: step.step_id, state });
       }
     } finally { clearInterval(heartbeat); await checking; }
+    return true;
   }
   private async planState(db: Pick<PoolClient, "query">, goal: ExecutingGoal, stepId: string, status: "running" | "succeeded" | "skipped") {
     await db.query(`update agent_goals set plan=jsonb_set(plan,'{steps}',(select jsonb_agg(case when item->>'id'=$2 then jsonb_set(item,'{status}',to_jsonb($3::text)) else item end order by n) from jsonb_array_elements(plan->'steps') with ordinality as steps(item,n))),updated_at=now() where id=$1`, [goal.id, stepId, status]);

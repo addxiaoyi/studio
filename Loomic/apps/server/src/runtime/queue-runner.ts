@@ -5,18 +5,25 @@ type QueueRunnerOptions<T> = {
   queues: readonly Queue[];
   poll(queue: string, available: number): Promise<T[]>;
   execute(queue: string, message: T): Promise<void>;
+  release(queue: string, message: T): Promise<void>;
   onError(queue: string, error: unknown): void;
 };
 
 export function startQueueRunner<T>(options: QueueRunnerOptions<T>) {
   for (const queue of options.queues) {
-    if (!Number.isInteger(queue.concurrency) || queue.concurrency < 1) throw new Error(`Invalid concurrency for ${queue.name}`);
+    if (!Number.isInteger(queue.concurrency) || queue.concurrency < 1)
+      throw new Error(`Invalid concurrency for ${queue.name}`);
   }
   const controller = new AbortController();
   const active = new Set<Promise<void>>();
+  const releaseErrors: unknown[] = [];
+  const executionErrors = new Map<string, unknown>();
   const pause = async (ms: number) => {
-    try { await delay(ms, undefined, { signal: controller.signal }); }
-    catch (error) { if (!controller.signal.aborted) throw error; }
+    try {
+      await delay(ms, undefined, { signal: controller.signal });
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    }
   };
   const pump = async (queue: Queue) => {
     const jobs = new Set<Promise<void>>();
@@ -26,12 +33,35 @@ export function startQueueRunner<T>(options: QueueRunnerOptions<T>) {
         continue;
       }
       try {
-        const messages = await options.poll(queue.name, queue.concurrency - jobs.size);
-        if (controller.signal.aborted) break;
+        const messages = await options.poll(
+          queue.name,
+          queue.concurrency - jobs.size,
+        );
+        if (controller.signal.aborted) {
+          for (const message of messages) {
+            try {
+              await options.release(queue.name, message);
+            } catch (error) {
+              releaseErrors.push(error);
+              options.onError(queue.name, error);
+            }
+          }
+          break;
+        }
         for (const message of messages) {
-          const job = Promise.resolve().then(() => options.execute(queue.name, message))
-            .catch(error => options.onError(queue.name, error))
-            .finally(() => { jobs.delete(job); active.delete(job); });
+          const job = Promise.resolve()
+            .then(() => options.execute(queue.name, message))
+            .catch((error) => {
+              // Rejection means the executor could not persist a disposition. A later
+              // successful job cannot prove that earlier work is safe to hand off.
+              if (!executionErrors.has(queue.name))
+                executionErrors.set(queue.name, error);
+              options.onError(queue.name, error);
+            })
+            .finally(() => {
+              jobs.delete(job);
+              active.delete(job);
+            });
           jobs.add(job);
           active.add(job);
         }
@@ -47,12 +77,20 @@ export function startQueueRunner<T>(options: QueueRunnerOptions<T>) {
   const pumps = options.queues.map(pump);
   let stopping: Promise<void> | undefined;
   return {
-    get activeCount() { return active.size; },
+    get activeCount() {
+      return active.size;
+    },
     stop() {
       controller.abort();
       stopping ??= (async () => {
         await Promise.all(pumps);
         await Promise.all([...active]);
+        if (releaseErrors.length || executionErrors.size) {
+          throw new AggregateError(
+            [...releaseErrors, ...executionErrors.values()],
+            "Could not settle all queue executions or release all unexecuted queue leases",
+          );
+        }
       })();
       return stopping;
     },

@@ -8,6 +8,7 @@ import { allowLoginRequest, newAuthenticatedContext, signInWebsite } from "./log
 import { capturePresentationScene } from "./presentation-snapshot.js";
 import { recordWebsitePresentation } from "./presentation.js";
 import { discoverLoginPage } from "./login-detection.js";
+import { ffmpegBinary } from "./video-encoder.js";
 
 it("logs in once, transfers the session, masks credentials and records authenticated content",async()=>{
   const {browser}=await launchAgentBrowser();
@@ -46,15 +47,20 @@ it("logs in once, transfers the session, masks credentials and records authentic
     expect(scene.layers.some(layer=>layer.text==="我的工作台")).toBe(true);
     const file=await recordWebsitePresentation({browser,directory:dir,scenes:[scene],config:{style:"cursor-rebuild",durationSeconds:12,cursorCount:4},onPage:async()=>{},checkpoint:async()=>{},onProgress:async()=>{}});
     expect((await readFile(file)).length).toBeGreaterThan(10000);
-    const ffmpeg=process.platform==="win32"?resolve("../desktop/resources/ffmpeg/win-x64/ffmpeg.exe"):"ffmpeg";
+    const ffmpeg=ffmpegBinary();
     const decode=spawnSync(ffmpeg,["-v","error","-xerror","-i",file,"-f","null","-"],{windowsHide:true,timeout:30000,encoding:"utf8"});
+    if (decode.error) throw decode.error;
     expect(decode.status,decode.stderr).toBe(0);
     const evidence=resolve("../../.creative-test-results/website-login");await mkdir(evidence,{recursive:true});
     await copyFile(file,join(evidence,"authenticated-introduction.webm"));
     const raw=content.video()!;await signed.close();const rawFile=await raw.path();
     const rawDecode=spawnSync(ffmpeg,["-v","error","-xerror","-i",rawFile,"-f","null","-"],{windowsHide:true,timeout:30000,encoding:"utf8"});
     expect(rawDecode.status,rawDecode.stderr).toBe(0);await copyFile(rawFile,join(evidence,"authenticated-browsing.webm"));
-  }finally{await browser.close();await rm(dir,{recursive:true,force:true});}
+  }finally{
+    await Promise.all(browser.contexts().map(context=>context.close()));
+    await browser.close();
+    await rm(dir,{recursive:true,force:true});
+  }
 },60000);
 
 it("does not expose fill values in login errors",async()=>{

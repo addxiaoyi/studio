@@ -7,6 +7,7 @@ export type CreditTransactionType =
   | "topup"
   | "generation_deduct"
   | "generation_refund"
+  | "generation_adjustment"
   | "admin_adjustment"
   | "bonus";
 

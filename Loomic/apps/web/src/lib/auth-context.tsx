@@ -1,12 +1,13 @@
 "use client";
 
 import {
+  type ReactNode,
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
-  useCallback,
-  type ReactNode,
 } from "react";
 
 import { fetchLocalSession, signOutLocal } from "./local-auth";
@@ -59,8 +60,18 @@ function isUnauthenticatedAnswer(error: Error): boolean {
     statusCode?: unknown;
     code?: unknown;
   };
-  if (status === 401 || status === 403 || statusCode === 401 || statusCode === 403) return true;
-  return code === "unauthorized" || code === "unauthenticated" || code === "invalid_token";
+  if (
+    status === 401 ||
+    status === 403 ||
+    statusCode === 401 ||
+    statusCode === 403
+  )
+    return true;
+  return (
+    code === "unauthorized" ||
+    code === "unauthenticated" ||
+    code === "invalid_token"
+  );
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -68,15 +79,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<LocalUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [sessionError, setSessionError] = useState<Error | null>(null);
+  const revision = useRef(0);
+  const mounted = useRef(true);
+  const lookup = useRef<AbortController | null>(null);
+  const pendingSignOut = useRef<Promise<void> | null>(null);
 
   const refreshSession = useCallback(async () => {
+    if (pendingSignOut.current) {
+      await pendingSignOut.current.catch(() => undefined);
+      return;
+    }
+    const current = ++revision.current;
+    lookup.current?.abort();
+    const abort = new AbortController();
+    lookup.current = abort;
     setLoading(true);
     try {
-      const { session: localSession } = await fetchLocalSession();
+      const { session: localSession } = await fetchLocalSession(abort.signal);
+      if (!mounted.current || current !== revision.current) return;
       setSession(localSession);
       setUser(localSession?.user ?? null);
       setSessionError(null);
     } catch (cause) {
+      if (!mounted.current || current !== revision.current) return;
       const error = toError(cause);
       console.error("[auth] Session lookup failed:", error);
       if (isUnauthenticatedAnswer(error)) {
@@ -90,11 +115,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSessionError(error);
       }
     } finally {
-      setLoading(false);
+      if (mounted.current && current === revision.current) setLoading(false);
     }
   }, []);
 
   const acceptSession = useCallback((next: LocalSession) => {
+    revision.current += 1;
+    lookup.current?.abort();
     setSession(next);
     setUser(next.user);
     setSessionError(null);
@@ -102,15 +129,71 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     void refreshSession();
+    return () => {
+      mounted.current = false;
+      revision.current += 1;
+      lookup.current?.abort();
+    };
   }, [refreshSession]);
 
-  async function signOut() {
-    await signOutLocal();
-    setSession(null);
-    setUser(null);
-    setSessionError(null);
-  }
+  const signOut = useCallback((): Promise<void> => {
+    if (pendingSignOut.current) return pendingSignOut.current;
+    const current = ++revision.current;
+    lookup.current?.abort();
+    // Keep the current shell mounted so its logout button can show a failed request.
+    setLoading(false);
+    const logout = (async () => {
+      try {
+        await signOutLocal();
+        if (!mounted.current) return;
+        if (current !== revision.current) {
+          // A late Set-Cookie from logout can invalidate a newer login in the browser.
+          const checked = ++revision.current;
+          lookup.current?.abort();
+          const abort = new AbortController();
+          lookup.current = abort;
+          setLoading(true);
+          try {
+            const actual = await fetchLocalSession(abort.signal);
+            if (!mounted.current || checked !== revision.current) return;
+            setSession(actual.session);
+            setUser(actual.session?.user ?? null);
+            setSessionError(null);
+          } catch (cause) {
+            if (!mounted.current || checked !== revision.current) return;
+            const error = toError(cause);
+            if (isUnauthenticatedAnswer(error)) {
+              setSession(null);
+              setUser(null);
+              setSessionError(null);
+            } else setSessionError(error);
+          } finally {
+            if (mounted.current && checked === revision.current)
+              setLoading(false);
+          }
+          return;
+        }
+        setSession(null);
+        setUser(null);
+        setSessionError(null);
+      } catch (cause) {
+        const error = toError(cause);
+        if (mounted.current && current === revision.current)
+          setSessionError(error);
+        throw error;
+      } finally {
+        if (mounted.current && current === revision.current) setLoading(false);
+      }
+    })();
+    pendingSignOut.current = logout;
+    const clearPending = () => {
+      if (pendingSignOut.current === logout) pendingSignOut.current = null;
+    };
+    void logout.then(clearPending, clearPending);
+    return logout;
+  }, []);
 
   return (
     <AuthContext.Provider

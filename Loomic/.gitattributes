@@ -1,0 +1,4 @@
+# Pinned runtime bundles must keep the same bytes as their gzip counterparts.
+apps/web/public/creative/** -text whitespace=cr-at-eol
+apps/web/public/creative/*.mjs -diff linguist-generated
+apps/web/public/creative/visualforge/*.mjs -diff linguist-generated

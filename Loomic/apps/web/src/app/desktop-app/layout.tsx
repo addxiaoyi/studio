@@ -19,7 +19,7 @@ import { usePathname } from "next/navigation";
  */
 export default function DesktopAppLayout({ children }: { children: ReactNode }) {
   const { session } = useAuth();
-  const pathname=usePathname();
+  const pathname = usePathname() ?? "";
   return (
     <DesktopToastProvider>
       <DesktopConnectionBanner />

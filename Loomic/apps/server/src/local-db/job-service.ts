@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { approvalBillingReady } from "./job-billing-gate.js";
+import { recordGenerationReservation } from "./generation-reservation.js";
 import type { BackgroundJob, BackgroundJobStatus, BackgroundJobType } from "@helstera/shared";
 import type { AuthenticatedUser } from "../auth/types.js";
 import type { CreateJobInput, JobService } from "../features/jobs/job-service.js";
@@ -7,19 +8,19 @@ import { JobServiceError } from "../features/jobs/job-service.js";
 import type { PgmqClient } from "../queue/pgmq-client.js";
 
 const queueNames: Record<BackgroundJobType, string> = { image_generation: "image_generation_jobs", video_generation: "video_generation_jobs", website_capture: "website_capture_jobs" };
-const columns = "id, workspace_id, project_id, canvas_id, session_id, thread_id, idempotency_key, queue_name, job_type, status, payload, result, error_code, error_message, progress, stage, attempt_count, max_attempts, created_by, created_at, updated_at, started_at, completed_at, failed_at, canceled_at, sync_attempt_count, next_sync_at, sync_error_code, sync_error_message";
+const columns = "id, workspace_id, project_id, canvas_id, session_id, thread_id, idempotency_key, queue_name, job_type, status, payload, result, error_code, error_message, progress, stage, attempt_count, max_attempts, created_by, created_at, updated_at, started_at, completed_at, failed_at, canceled_at, cancel_requested_at, billing_receipt, billing_pricing, settlement_review, sync_attempt_count, next_sync_at, sync_error_code, sync_error_message";
 /**
  * List reads must never pull the raw `payload`: image jobs embed multi-megabyte data
  * URIs there, and parsing that much JSON into Node cost ~4s per /api/jobs call even
  * though PostgreSQL answered in under 1ms. `payload_summary` is written alongside the
  * payload and holds the elided, stable-shape copy the list UI actually reads.
  */
-const listColumns = "id, workspace_id, project_id, canvas_id, session_id, thread_id, idempotency_key, queue_name, job_type, status, coalesce(payload_summary, '{}'::jsonb) as payload, result, error_code, error_message, progress, stage, attempt_count, max_attempts, created_by, created_at, updated_at, started_at, completed_at, failed_at, canceled_at, sync_attempt_count, next_sync_at, sync_error_code, sync_error_message";
+const listColumns = "id, workspace_id, project_id, canvas_id, session_id, thread_id, idempotency_key, queue_name, job_type, status, coalesce(payload_summary, '{}'::jsonb) as payload, result, error_code, error_message, progress, stage, attempt_count, max_attempts, created_by, created_at, updated_at, started_at, completed_at, failed_at, canceled_at, cancel_requested_at, billing_receipt, billing_pricing, settlement_review, sync_attempt_count, next_sync_at, sync_error_code, sync_error_message";
 
 export function createLocalJobService(db: Pool, queue?: PgmqClient): JobService {
   return {
     async createJob(user, input: CreateJobInput) {
-      const insert = await db.query(`insert into background_jobs (workspace_id, project_id, canvas_id, session_id, thread_id, idempotency_key, queue_name, job_type, payload, payload_summary, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing returning ${columns}`, [input.workspaceId, input.projectId ?? null, input.canvasId ?? null, input.sessionId ?? null, input.threadId ?? null, input.idempotencyKey ?? null, queueNames[input.jobType], input.jobType, input.payload, JSON.stringify(trimListPayload(input.payload) ?? null), user.id]);
+      const insert = await db.query(`insert into background_jobs (workspace_id, project_id, canvas_id, session_id, thread_id, idempotency_key, queue_name, job_type, payload, payload_summary, created_by, billing_required, stage) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing returning ${columns}`, [input.workspaceId, input.projectId ?? null, input.canvasId ?? null, input.sessionId ?? null, input.threadId ?? null, input.idempotencyKey ?? null, queueNames[input.jobType], input.jobType, input.payload, JSON.stringify(trimListPayload(input.payload) ?? null), user.id, input.requiresCreditReservation === true, input.requiresCreditReservation ? "awaiting_credit_reservation" : null]);
       if (insert.rows[0]) {
         const job = mapJob(insert.rows[0]);
         try {
@@ -33,28 +34,22 @@ export function createLocalJobService(db: Pool, queue?: PgmqClient): JobService 
       }
       if (input.idempotencyKey) {
         const existing = await db.query(`select ${columns} from background_jobs where created_by=$1 and idempotency_key=$2`, [user.id, input.idempotencyKey]);
-        if (existing.rows[0] && existing.rows[0].status !== "canceled") return { ...mapJob(existing.rows[0]), reused: true };
-        const reactivated = await db.query(`update background_jobs set status = 'queued', canceled_at = null, failed_at = null, error_code = null, error_message = null, updated_at = now() where id = $1 and status = 'canceled' returning ${columns}`, [existing.rows[0].id]);
-        if (reactivated.rows[0]) {
-          try {
-            if (queue) await queue.send(queueNames[input.jobType], { job_id: reactivated.rows[0].id, job_type: input.jobType, workspace_id: input.workspaceId });
-            return { ...mapJob(reactivated.rows[0]), status: "queued", reused: true, reactivated: true };
-          } catch (error) {
-            await db.query("update background_jobs set status = 'canceled', canceled_at = now(), updated_at = now() where id = $1", [reactivated.rows[0].id]);
-            throw new JobServiceError("job_create_failed", `Failed to re-enqueue job: ${error instanceof Error ? error.message : String(error)}`, 500);
-          }
-        }
-        const current = await db.query(`select ${columns} from background_jobs where created_by=$1 and idempotency_key=$2`, [user.id, input.idempotencyKey]);
-        if (current.rows[0]) return { ...mapJob(current.rows[0]), reused: true };
+        if (existing.rows[0]) return { ...mapJob(existing.rows[0]), reused: true };
       }
       throw new JobServiceError("job_create_failed", "Failed to create job record.", 500);
     },
     async getJob(user, jobId) { const { rows } = await db.query(`select ${columns} from background_jobs where id = $1 and created_by = $2`, [jobId, user.id]); if (!rows[0]) throw new JobServiceError("job_not_found", "Job not found.", 404); return mapJob(rows[0]); },
     async listJobs(user, filters) { const values: unknown[] = [user.id]; const where = ["created_by = $1"]; if (filters?.status) { values.push(filters.status); where.push(`status = $${values.length}`); } if (filters?.jobType) { values.push(filters.jobType); where.push(`job_type = $${values.length}`); } const { rows } = await db.query(`select ${listColumns} from background_jobs where ${where.join(" and ")} order by created_at desc limit 50`, values); return rows.map(mapJobForList); },
-    async cancelJob(user, jobId) { const { rows } = await db.query(`update background_jobs set status = 'canceled', canceled_at = now(), updated_at = now() where id = $1 and created_by = $2 and status in ('queued','running') returning ${columns}`, [jobId, user.id]); if (!rows[0]) throw new JobServiceError("job_not_found", "Job not found or already completed.", 404); return mapJob(rows[0]); },
+    async cancelJob(user, jobId) {
+      const { rows } = await db.query(`update background_jobs set status = 'canceled', canceled_at = now(), updated_at = now() where id = $1 and created_by = $2 and status = 'queued' returning ${columns}`, [jobId, user.id]);
+      if (rows[0]) return mapJob(rows[0]);
+      const requested = await db.query(`update background_jobs set cancel_requested_at = coalesce(cancel_requested_at, now()), stage = 'cancel_requested', error_code = 'cancel_requested', error_message = '取消请求已提交，正在等待任务结果。', updated_at = now() where id = $1 and created_by = $2 and status = 'running' returning ${columns}`, [jobId, user.id]);
+      if (requested.rows[0]) return mapJob(requested.rows[0]);
+      throw new JobServiceError("job_not_found", "Job not found or already completed.", 404);
+    },
     async retryJob(user, jobId) { const { rows } = await db.query(`update background_jobs set status='queued', canceled_at=null, failed_at=null, error_code=null, error_message=null, updated_at=now() where id=$1 and created_by=$2 and status in ('failed','dead_letter') returning ${columns}`, [jobId, user.id]); if (!rows[0]) throw new JobServiceError("job_not_found", "Job not found or not retryable.", 409); const job = mapJob(rows[0]); if (queue) await queue.send(job.queue_name, { job_id: job.id, job_type: job.job_type, workspace_id: job.workspace_id }); return job; },
     async getJobAdmin(jobId) { const { rows } = await db.query(`select ${columns} from background_jobs where id = $1`, [jobId]); if (!rows[0]) throw new JobServiceError("job_not_found", "Job not found.", 404); return mapJob(rows[0]); },
-    async setCreditsInfo(jobId, creditsCost, transactionId) { await db.query("update background_jobs set credits_cost = $1, credits_transaction_id = $2, updated_at = now() where id = $3", [creditsCost, transactionId, jobId]); },
+    async setCreditsInfo(jobId, creditsCost, transactionId) { await recordGenerationReservation(db, jobId, creditsCost, transactionId); },
     async markRunning(jobId) { await db.query("update background_jobs set status = 'running', started_at = now(), updated_at = now() where id = $1 and status = 'queued'", [jobId]); },
     async claimJob(jobId) {
       const { rows } = await db.query<{ attempt_count: number; max_attempts: number }>(
@@ -65,7 +60,16 @@ export function createLocalJobService(db: Pool, queue?: PgmqClient): JobService 
     },
     async markSucceeded(jobId, result) {
       const updated = await db.query<{ workspace_id: string; created_by: string | null; job_type: BackgroundJobType }>(
-        "update background_jobs set status = 'succeeded', result = $1, error_code = null, error_message = null, completed_at = now(), updated_at = now() where id = $2 and status = 'running' returning workspace_id,created_by,job_type",
+        `update background_jobs set status = 'succeeded',
+          result = case when cancel_requested_at is not null then
+            coalesce($1::jsonb, '{}'::jsonb) || jsonb_build_object('cancellation', jsonb_build_object(
+              'requested', true, 'outcome', 'completed_after_cancel_request',
+              'message', '取消请求到达时任务已完成，产物和费用按实际结果保留。'))
+            else $1::jsonb end,
+          error_code = null, error_message = null,
+          stage = case when cancel_requested_at is not null then 'completed_after_cancel_request' else stage end,
+          completed_at = now(), updated_at = now()
+         where id = $2 and status = 'running' returning workspace_id,created_by,job_type`,
         [result, jobId],
       );
       await notifyGeneration(db, updated.rows[0], jobId, "asset_ready", "Asset ready", "Your generated asset is ready.", result);
@@ -97,9 +101,26 @@ export function createLocalJobService(db: Pool, queue?: PgmqClient): JobService 
       catch (error) { await db.query("update background_jobs set status='sync_failed',updated_at=now() where id=$1 and status='queued'", [jobId]); throw error; }
       return true;
     },
-    async markSyncPending(jobId, result, errorCode, errorMessage) { await db.query("update background_jobs set status='sync_pending', result=$1, stage='canvas_sync_pending', sync_error_code=$2, sync_error_message=$3, error_code=$2, error_message=$3, next_sync_at=now(), updated_at=now() where id=$4 and status='running'", [result, errorCode, errorMessage, jobId]); },
+    async markSyncPending(jobId, result, errorCode, errorMessage) {
+      await db.query(`update background_jobs set status='sync_pending',
+        result=case when cancel_requested_at is not null then coalesce($1::jsonb,'{}'::jsonb) || jsonb_build_object('cancellation',jsonb_build_object(
+          'requested',true,'outcome','completed_after_cancel_request','message','取消请求到达时任务已完成，产物和费用按实际结果保留。')) else $1::jsonb end,
+        stage=case when cancel_requested_at is not null then 'cancel_requested' else 'canvas_sync_pending' end,
+        sync_error_code=$2,sync_error_message=$3,error_code=$2,error_message=$3,next_sync_at=now(),updated_at=now()
+        where id=$4 and status='running'`, [result, errorCode, errorMessage, jobId]);
+    },
     async markSyncFailed(jobId, errorCode, errorMessage) { await db.query("update background_jobs set status='sync_failed', sync_error_code=$1, sync_error_message=$2, error_code=$1, error_message=$2, stage='provider_result_sync_failed', next_sync_at=null, sync_claimed_at=null, failed_at=now(), updated_at=now() where id=$3 and status in ('running','sync_pending','sync_failed')", [errorCode, errorMessage, jobId]); },    async incrementAttempt(jobId) { const { rows } = await db.query("update background_jobs set attempt_count = attempt_count + 1, updated_at = now() where id = $1 returning attempt_count, max_attempts", [jobId]); return rows[0] ?? { attempt_count: 1, max_attempts: 3 }; },
-    async updateProgress(jobId, progress, stage) { await db.query("update background_jobs set progress = $1, stage = $2, updated_at = now() where id = $3", [Math.max(0, Math.min(100, progress)), stage, jobId]); },
+    async updateProgress(jobId, progress, stage) { await db.query("update background_jobs set progress = $1, stage = case when stage in ('worker_shutdown_waiting','cancel_requested') then stage else $2 end, updated_at = now() where id = $3", [Math.max(0, Math.min(100, progress)), stage, jobId]); },
+    async markShutdownRequested(jobId, stage) { await db.query("update background_jobs set stage = case when stage = 'cancel_requested' then stage else $1 end, updated_at = now() where id = $2 and status = 'running'", [stage, jobId]); },
+    async markCancellationOutcomeUnknown(jobId, message) {
+      const { rows } = await db.query<{ id: string }>(
+        `update background_jobs set status='dead_letter',error_code='cancel_outcome_unknown',
+          error_message=$2,stage='cancel_outcome_unknown',failed_at=now(),updated_at=now()
+         where id=$1 and status='running' and cancel_requested_at is not null returning id`,
+        [jobId, message],
+      );
+      return Boolean(rows[0]);
+    },
   };
 }
 
@@ -134,7 +155,30 @@ function mapJobForList(row: any): BackgroundJob {
   return { ...job, payload: trimListPayload(job.payload) as BackgroundJob["payload"] };
 }
 
-function mapJob(row: any): BackgroundJob { return { id: row.id, workspace_id: row.workspace_id, project_id: row.project_id, canvas_id: row.canvas_id, session_id: row.session_id, thread_id: row.thread_id, queue_name: row.queue_name, job_type: row.job_type, status: row.status, payload: row.payload ?? {}, result: row.result, error_code: row.error_code, error_message: row.error_message, progress: Number(row.progress ?? 0), stage: row.stage ?? null, attempt_count: row.attempt_count, max_attempts: row.max_attempts, created_by: row.created_by, created_at: new Date(row.created_at).toISOString(), updated_at: new Date(row.updated_at).toISOString(), started_at: row.started_at ? new Date(row.started_at).toISOString() : null, completed_at: row.completed_at ? new Date(row.completed_at).toISOString() : null, failed_at: row.failed_at ? new Date(row.failed_at).toISOString() : null, canceled_at: row.canceled_at ? new Date(row.canceled_at).toISOString() : null, sync_attempt_count: Number(row.sync_attempt_count ?? 0), next_sync_at: row.next_sync_at ? new Date(row.next_sync_at).toISOString() : null, sync_error_code: row.sync_error_code ?? null, sync_error_message: row.sync_error_message ?? null }; }
+function mapJob(row: any): BackgroundJob {
+  return {
+    id: row.id, workspace_id: row.workspace_id, project_id: row.project_id,
+    canvas_id: row.canvas_id, session_id: row.session_id, thread_id: row.thread_id,
+    queue_name: row.queue_name, job_type: row.job_type, status: row.status,
+    payload: row.payload ?? {}, result: row.result,
+    error_code: row.error_code, error_message: row.error_message,
+    progress: Number(row.progress ?? 0), stage: row.stage ?? null,
+    attempt_count: row.attempt_count, max_attempts: row.max_attempts,
+    created_by: row.created_by,
+    created_at: new Date(row.created_at).toISOString(), updated_at: new Date(row.updated_at).toISOString(),
+    started_at: row.started_at ? new Date(row.started_at).toISOString() : null,
+    completed_at: row.completed_at ? new Date(row.completed_at).toISOString() : null,
+    failed_at: row.failed_at ? new Date(row.failed_at).toISOString() : null,
+    canceled_at: row.canceled_at ? new Date(row.canceled_at).toISOString() : null,
+    cancel_requested_at: row.cancel_requested_at ? new Date(row.cancel_requested_at).toISOString() : null,
+    billing_receipt: row.billing_receipt ?? null,
+    billing_pricing: row.billing_pricing ?? null,
+    settlement_review: row.settlement_review ?? null,
+    sync_attempt_count: Number(row.sync_attempt_count ?? 0),
+    next_sync_at: row.next_sync_at ? new Date(row.next_sync_at).toISOString() : null,
+    sync_error_code: row.sync_error_code ?? null, sync_error_message: row.sync_error_message ?? null,
+  };
+}
 
 async function notifyGeneration(
   db: Pool,

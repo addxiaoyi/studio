@@ -3,6 +3,9 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from types import SimpleNamespace
+from contextlib import ExitStack
+from unittest.mock import MagicMock
 from unittest.mock import patch
 from pathlib import Path, PurePosixPath
 
@@ -20,9 +23,184 @@ validate_local_web_marketplace_bundle = DEPLOY.validate_local_web_marketplace_bu
 validate_source = DEPLOY.validate_source
 validate_stage_path = DEPLOY.validate_stage_path
 desktop_markers = DEPLOY.DESKTOP_MARKERS
+from scripts.test_prepare_production_candidate import write_creative_runtime
 
 
 class WebStaticCandidateTests(unittest.TestCase):
+    def test_html_shells_without_creative_assets_are_rejected_before_ssh(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "apps/web/out"
+            for relative in DEPLOY.REQUIRED_FILES:
+                path = output.joinpath(*relative.parts[1:])
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('<script src="/_next/static/app.js"></script>', encoding="utf-8")
+            (output / "_next/static").mkdir(parents=True)
+            (output / "_next/static/app.js").write_text(" ".join((*desktop_markers, DEPLOY.MARKETPLACE_MARKER)), encoding="utf-8")
+            with patch.object(DEPLOY, "PROJECT_ROOT", root, create=True), \
+                 patch.object(DEPLOY.paramiko, "SSHClient") as ssh:
+                with self.assertRaisesRegex(FileNotFoundError, "Creative runtime is missing"):
+                    DEPLOY.deploy(SimpleNamespace(source=output, resume_stage=None, resume_backup=None,
+                        dry_run=True, password_env="UNUSED_TEST_PASSWORD"))
+            ssh.assert_not_called()
+
+    def test_staged_export_must_match_the_checked_archive_even_when_resuming(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output, archive = root / "out", root / "candidate.zip"
+            path = output / "creative/visualforge/entry.mjs"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"stale editor")
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("out/creative/visualforge/entry.mjs", b"verified editor")
+            with self.assertRaisesRegex(ValueError, "Staged Web file differs"):
+                DEPLOY.verify_staged_archive(archive, output)
+            path.write_bytes(b"verified editor")
+            DEPLOY.verify_staged_archive(archive, output)
+            path.unlink()
+            with self.assertRaisesRegex(FileNotFoundError, "Staged Web file is missing"):
+                DEPLOY.verify_staged_archive(archive, output)
+
+    def test_staged_check_allows_retained_chunks_and_managed_downloads(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output, archive = root / "out", root / "candidate.zip"
+            (output / "_next/static").mkdir(parents=True)
+            (output / "downloads").mkdir()
+            (output / "_next/static/current.js").write_bytes(b"current")
+            (output / "_next/static/previous.js").write_bytes(b"retained")
+            (output / "downloads/desktop-release-windows-x64.json").write_bytes(b"live manifest")
+            live = root / "live"
+            (live / "_next/static").mkdir(parents=True)
+            (live / "downloads").mkdir()
+            (live / "_next/static/previous.js").write_bytes(b"retained")
+            (live / "downloads/desktop-release-windows-x64.json").write_bytes(b"live manifest")
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("out/_next/static/current.js", b"current")
+                bundle.writestr("out/downloads/desktop-release-windows-x64.json", b"stale manifest")
+            DEPLOY.verify_staged_archive(archive, output, live)
+            (output / "downloads/desktop-release-windows-x64.json").write_bytes(b"altered manifest")
+            with self.assertRaisesRegex(ValueError, "Staged Web file differs"):
+                DEPLOY.verify_staged_archive(archive, output, live)
+
+    def test_staged_web_owned_downloads_and_extra_modules_cannot_be_modified(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output, archive = root / "out", root / "candidate.zip"
+            (output / "downloads").mkdir(parents=True)
+            (output / "downloads/guide.json").write_bytes(b"modified guide")
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("out/downloads/guide.json", b"reviewed guide")
+            with self.assertRaisesRegex(ValueError, "Staged Web file differs"):
+                DEPLOY.verify_staged_archive(archive, output)
+            (output / "downloads/guide.json").write_bytes(b"reviewed guide")
+            (output / "unreviewed.js").write_bytes(b"module")
+            with self.assertRaisesRegex(ValueError, "Unreviewed file"):
+                DEPLOY.verify_staged_archive(archive, output)
+
+    def publication(self, *, switch_unknown=False, public_failure=False, rollback_failure=False, resume=False, staged_failure=False):
+        scripts = []
+        stage = '/www/helstera/apps/web/.helstera-static.TEST'
+
+        def archive(_source, destination):
+            destination.write_bytes(b'candidate')
+            return 'A' * 64
+
+        def remote(_client, command, **_kwargs):
+            if 'mktemp -d' in command:
+                return stage
+            if 'sha256sum' in command:
+                return 'A' * 64
+            return ''
+
+        def python(_client, source, **_kwargs):
+            scripts.append(source)
+            if staged_failure and 'staged-files-verified' in source:
+                raise ValueError('Staged Web file differs from verified archive')
+            if 'with zipfile.ZipFile' in source:
+                return stage + '/out'
+            if switch_unknown and ('atomic-exchange-ok' in source or "else 'not-exchanged'" in source):
+                raise RuntimeError('SSH observation failed')
+            if rollback_failure and 'rollback-exchange-ok' in source:
+                raise RuntimeError('rollback failed')
+            return '{}'
+
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            args = SimpleNamespace(resume_stage=None, resume_backup=None, source=Path(directory), password_env='TEST_DEPLOY_SECRET',
+                dry_run=False, jump_host='jump', jump_port=22, jump_user='test', target_host='target', target_user='test',
+                verify_url='https://example.test/desktop-app/')
+            if resume:
+                args.resume_stage = stage
+                args.resume_backup = '/www/helstera/backups/web-static-test'
+            stack.enter_context(patch.dict(DEPLOY.os.environ, {'TEST_DEPLOY_SECRET': 'test-only'}))
+            stack.enter_context(patch.object(DEPLOY.paramiko, 'SSHClient', return_value=MagicMock()))
+            stack.enter_context(patch.object(DEPLOY, 'configure_ssh'))
+            stack.enter_context(patch.object(DEPLOY, 'validate_source', return_value=Path(directory)))
+            stack.enter_context(patch.object(DEPLOY, 'validate_local_desktop_bundle'))
+            stack.enter_context(patch.object(DEPLOY, 'validate_local_web_marketplace_bundle'))
+            stack.enter_context(patch.object(DEPLOY, 'create_archive', side_effect=archive))
+            stack.enter_context(patch.object(DEPLOY, 'remote_run', side_effect=remote))
+            stack.enter_context(patch.object(DEPLOY, 'remote_python', side_effect=python))
+            stack.enter_context(patch.object(DEPLOY, 'verify_public_desktop',
+                side_effect=RuntimeError('public verification failed') if public_failure else None, return_value={'status': 200}))
+            stack.enter_context(patch('builtins.print'))
+            failure = None
+            try:
+                DEPLOY.deploy(args)
+            except Exception as error:
+                failure = error
+        return scripts, failure
+
+    def test_modified_resume_tree_is_rejected_before_exchange(self):
+        scripts, failure = self.publication(resume=True, staged_failure=True)
+        self.assertIn('Staged Web file differs', str(failure))
+        self.assertFalse(any('atomic-exchange-ok' in source for source in scripts))
+
+    def test_unknown_switch_keeps_the_only_recovery_tree(self):
+        scripts, failure = self.publication(switch_unknown=True)
+        self.assertIn('outcome is unknown', str(failure))
+        self.assertFalse(any('shutil.rmtree' in source for source in scripts))
+        self.assertFalse(any('retention.apply' in source for source in scripts))
+
+    def test_verified_publication_retires_old_archives_and_cleans_its_stage(self):
+        scripts, failure = self.publication()
+        self.assertIsNone(failure)
+        self.assertEqual(sum('shutil.rmtree' in source for source in scripts), 1)
+        self.assertTrue(any('retention.apply' in source and "'archives'" in source for source in scripts))
+
+    def test_failed_public_check_restores_before_cleaning_without_retiring_archives(self):
+        scripts, failure = self.publication(public_failure=True)
+        self.assertIn('public verification failed', str(failure))
+        rollback = next(i for i, source in enumerate(scripts) if 'rollback-exchange-ok' in source)
+        cleanup = next(i for i, source in enumerate(scripts) if 'shutil.rmtree' in source)
+        self.assertLess(rollback, cleanup)
+        self.assertFalse(any('retention.apply' in source for source in scripts))
+
+    def test_failed_rollback_keeps_recovery_files(self):
+        scripts, failure = self.publication(public_failure=True, rollback_failure=True)
+        self.assertIn('rollback failed', str(failure))
+        self.assertFalse(any('shutil.rmtree' in source for source in scripts))
+
+    def test_archive_cleanup_executes_policy_and_keeps_two_newest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archives = []
+            for day in ('01', '02', '03'):
+                archive = root / 'backups' / f'web-static-202611{day}-010000-AABB' / 'out.tar.gz'
+                archive.parent.mkdir(parents=True)
+                archive.write_bytes(b'archive')
+                archives.append(archive)
+
+            def remote(_client, source, **_kwargs):
+                exec(compile(source, '<remote-retention>', 'exec'), {})
+                return 'verified'
+
+            with patch.object(DEPLOY, 'DEFAULT_ROOT', str(root)), patch.object(DEPLOY, 'remote_python', side_effect=remote), patch('builtins.print'):
+                self.assertEqual(DEPLOY.retire_static_archives(None), 'verified')
+            self.assertFalse(archives[0].exists())
+            self.assertTrue(all(p.exists() for p in archives[1:]))
+
+
     def test_retains_one_previous_static_generation_without_copying_private_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -182,7 +360,9 @@ class WebStaticCandidateTests(unittest.TestCase):
 
     def test_requires_desktop_canvas_and_static_asset_routes(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            project = Path(temporary)
+            write_creative_runtime(project, project)
+            root = project / "apps/web/out"
             (root / "desktop").mkdir()
             (root / "desktop-app").mkdir()
             (root / "desktop-app" / "marketplace").mkdir()
@@ -205,7 +385,8 @@ class WebStaticCandidateTests(unittest.TestCase):
                 " ".join(desktop_markers), encoding="utf-8"
             )
 
-            self.assertEqual(validate_source(root), root.resolve())
+            with patch.object(DEPLOY, "PROJECT_ROOT", project):
+                self.assertEqual(validate_source(root), root.resolve())
             validate_local_desktop_bundle(root)
             (root / "_next" / "static" / "marketplace.js").write_text(
                 DEPLOY.MARKETPLACE_MARKER, encoding="utf-8"

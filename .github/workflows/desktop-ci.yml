@@ -110,6 +110,7 @@ jobs:
         run: node apps/desktop/scripts/check-video-resources.mjs
       - name: Typecheck and test desktop
         run: |
+          node --test apps/desktop/scripts/renderer-startup-diagnostics.test.mjs
           pnpm --filter @helstera/desktop typecheck
           node --test apps/desktop/scripts/verify-video-resources.test.mjs
           pnpm --filter @helstera/desktop test

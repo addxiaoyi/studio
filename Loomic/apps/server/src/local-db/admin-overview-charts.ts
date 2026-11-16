@@ -64,10 +64,10 @@ export async function loadAdminOverviewCharts(
            and ($2::uuid is null or workspace_id = $2)
          group by created_at::date
        ), credits as (
-         select created_at::date as date, sum(-amount)::int as spent
+         select created_at::date as date, sum(-amount) as spent
          from credit_transactions
          where created_at >= current_date - ($1::int - 1)
-           and transaction_type = 'generation_deduct' and amount < 0
+           and transaction_type in ('generation_deduct','generation_adjustment','generation_refund')
            and ($2::uuid is null or workspace_id = $2)
          group by created_at::date
        )
@@ -75,7 +75,7 @@ export async function loadAdminOverviewCharts(
               coalesce(jobs.requested, 0)::int as requested,
               coalesce(jobs.succeeded, 0)::int as succeeded,
               coalesce(jobs.failed, 0)::int as failed,
-              coalesce(credits.spent, 0)::int as credits_spent
+              coalesce(credits.spent, 0)::numeric as credits_spent
        from days
        left join jobs using (date)
        left join credits using (date)

@@ -69,6 +69,7 @@ export interface GeneratedVideo {
   width: number;
   height: number;
   durationSeconds: number;
+  durationSource?: "provider" | "request_fallback";
   usage?: GenerationUsage;
 }
 

@@ -8,6 +8,7 @@ import {
   wsRpcResponseSchema,
 } from "@helstera/shared";
 import type { AgentRunService } from "../agent/runtime.js";
+import type { DrainGate } from "../runtime/drain-gate.js";
 import type { AgentRunMetadataService } from "../features/agent-runs/agent-run-service.js";
 import type { ThreadService } from "../features/chat/thread-service.js";
 import type { SettingsService } from "../features/settings/settings-service.js";
@@ -32,6 +33,7 @@ import {
 } from "./persistence-retry.js";
 
 type RegisterWsOptions = {
+  commandGate?: DrainGate;
   agentRuns: AgentRunService;
   agentRunMetadataService?: AgentRunMetadataService;
   auth?: RequestAuthenticator;
@@ -177,6 +179,13 @@ async function authenticateAndBind(
       }
 
       if (msg.action === "agent.run") {
+        let leave = () => {};
+        try {
+          leave = options.commandGate?.enter() ?? leave;
+        } catch {
+          connectionManager.sendTo(connectionId, { type: "error", message: "服务正在切换，请稍后重试。" });
+          return;
+        }
         const p = msg.payload;
         const runToken = p.accessToken ?? token;
         void handleRunCommand(
@@ -208,7 +217,10 @@ async function authenticateAndBind(
           agentRuns,
           connectionManager,
           options,
-        );
+        ).catch(error => {
+          log.error("run_command_failed", { error: describeError(error) });
+          connectionManager.sendTo(connectionId, { type: "error", message: "对话任务未能保存，请稍后重试。" });
+        }).finally(leave);
       } else if (msg.action === "agent.cancel") {
         log.info("run_cancel", {
           userId: authenticatedUser.id,
@@ -396,8 +408,14 @@ async function handleRunCommand(
         sessionId: payload.sessionId,
         threadId,
       });
-    } catch {
-      // Non-fatal
+    } catch (error) {
+      agentRuns.cancelRun(runId);
+      log.error("run_ownership_persist_failed", { runId, error: describeError(error) });
+      if (charge && services.creditService) {
+        await refundAgentMessage({ user: authenticatedUser, charge, creditService: services.creditService });
+      }
+      connectionManager.sendTo(connectionId, { type: "error", message: "对话任务未能保存，请稍后重试。" });
+      return;
     }
   }
 

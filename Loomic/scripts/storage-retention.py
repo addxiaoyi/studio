@@ -12,6 +12,8 @@ import sys
 ARCHIVE = re.compile(r'backups/web-static-(\d{8}-\d{6})-[A-Za-z0-9]+/out\.tar\.gz$')
 INSTALLER = re.compile(r'Helstera-(?:Setup-)?(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z0-9_-]+)?\.(?:exe|dmg|AppImage|zip)(?:\.blockmap)?$')
 MAX_FILES = 2000
+UPDATE_PLATFORMS = ('windows-x64', 'macos-x64', 'macos-arm64', 'linux-x64')
+VERSIONS_TO_KEEP = 3
 
 def identity(path):
     info = path.lstat()
@@ -41,36 +43,44 @@ def channel_snapshot(downloads):
         for match in re.finditer(r'(?<!\d)(\d+)\.(\d+)\.(\d+)(?!\d)',text): versions.add(tuple(map(int,match.groups())))
     return snapshot, versions
 
-def preview(root):
+def preview(root, category='all'):
+    if category not in ('all', 'archives', 'installers'): raise ValueError('Invalid retention category')
     root = pathlib.Path(root).resolve(strict=True); downloads = root/'apps/web/out/downloads'
     channels, protected = channel_snapshot(downloads); files=[]
-    archives=[]
-    for path in (root/'backups').glob('web-static-*/out.tar.gz'):
-        relative=path.relative_to(root).as_posix(); match=ARCHIVE.fullmatch(relative)
-        if match: archives.append((match[1],relative,path))
-    for _,relative,path in sorted(archives,reverse=True)[2:]: files.append({'path':relative, 'reason':'older_static_archive', **identity(path)})
+    if category in ('all', 'archives'):
+        archives=[]
+        for path in (root/'backups').glob('web-static-*/out.tar.gz'):
+            relative=path.relative_to(root).as_posix(); match=ARCHIVE.fullmatch(relative)
+            if match: archives.append((match[1],relative,path))
+        for _,relative,path in sorted(archives,reverse=True)[2:]: files.append({'path':relative, 'reason':'older_static_archive', **identity(path)})
     installers=[]
-    for folder in [downloads, *[downloads/'updates'/platform for platform in ['windows-x64','macos-x64','macos-arm64','linux-x64']]]:
-        for path in folder.glob('Helstera-*'):
-            match=INSTALLER.fullmatch(path.name)
-            if match: installers.append((tuple(map(int,match.groups())),path))
-    # The fixed legacy AppImage upgrade acceptance needs 0.2.27 and 0.2.28.
-    protected.update({(0,2,27),(0,2,28)})
-    protected.update(sorted({version for version,_ in installers},reverse=True)[:3])
-    for version,path in installers:
-        if version not in protected:
-            relative=path.relative_to(root).as_posix();generated_path(root,relative)
-            files.append({'path':relative,'reason':'older_desktop_version',**identity(path)})
+    if category in ('all', 'installers'):
+        for folder in [downloads, *[downloads/'updates'/platform for platform in UPDATE_PLATFORMS]]:
+            for path in folder.glob('Helstera-*'):
+                match=INSTALLER.fullmatch(path.name)
+                if match: installers.append((tuple(map(int,match.groups())),path))
+        # The fixed legacy AppImage upgrade acceptance needs 0.2.27 and 0.2.28.
+        protected.update({(0,2,27),(0,2,28)})
+        root_versions = {version for version,path in installers if path.parent == downloads}
+        protected.update(sorted(root_versions,reverse=True)[:VERSIONS_TO_KEEP])
+        for platform in UPDATE_PLATFORMS:
+            platform_versions = {version for version,path in installers if path.parent == downloads/'updates'/platform}
+            protected.update(sorted(platform_versions,reverse=True)[:VERSIONS_TO_KEEP])
+        for version,path in installers:
+            if version not in protected:
+                relative=path.relative_to(root).as_posix();generated_path(root,relative)
+                files.append({'path':relative,'reason':'older_desktop_version',**identity(path)})
     if len(files)>MAX_FILES: raise RuntimeError('Retention inventory exceeds review limit')
-    return {'version':1,'root':str(root),'createdAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'channels':channels,'protectedVersions':['.'.join(map(str,v)) for v in sorted(protected)],'files':files,'candidateBytes':sum(file['size'] for file in files),'exclusiveBytes':sum(file['size'] for file in files if file['links']==1)}
+    return {'version':1,'category':category,'root':str(root),'createdAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'channels':channels,'protectedVersions':['.'.join(map(str,v)) for v in sorted(protected)],'files':files,'candidateBytes':sum(file['size'] for file in files),'exclusiveBytes':sum(file['size'] for file in files if file['links']==1)}
 
-def apply(root, plan):
+def apply(root, plan, category=None):
     root=pathlib.Path(root).resolve(strict=True)
-    if plan.get('version')!=1 or plan.get('root')!=str(root) or not isinstance(plan.get('files'),list) or len(plan['files'])>MAX_FILES: raise ValueError('Invalid retention plan')
+    category=category or plan.get('category','all')
+    if plan.get('version')!=1 or plan.get('category','all')!=category or category not in ('all','archives','installers') or plan.get('root')!=str(root) or not isinstance(plan.get('files'),list) or len(plan['files'])>MAX_FILES: raise ValueError('Invalid retention plan')
     created=datetime.datetime.fromisoformat(plan['createdAt'])
     age=(datetime.datetime.now(datetime.timezone.utc)-created).total_seconds()
     if not 0<=age<=3600: raise ValueError('Retention preview has expired')
-    current=preview(root); allowed={item['path']:item for item in current['files']}
+    current=preview(root,category); allowed={item['path']:item for item in current['files']}
     if current['channels']!=plan['channels']: raise RuntimeError('Published channels changed; preview again')
     seen=set()
     for entry in plan['files']:
@@ -107,10 +117,10 @@ def assert_not_open(entries):
         except FileNotFoundError: continue
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--plan');parser.add_argument('--apply');args=parser.parse_args()
-    if args.apply:report=apply(args.root,json.loads(pathlib.Path(args.apply).read_text()))
+    parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--plan');parser.add_argument('--apply');parser.add_argument('--category',choices=('all','archives','installers'),default='all');args=parser.parse_args()
+    if args.apply:report=apply(args.root,json.loads(pathlib.Path(args.apply).read_text()),args.category)
     else:
-        report=preview(args.root)
+        report=preview(args.root,args.category)
         if args.plan:
             path=pathlib.Path(args.plan);path.write_text(json.dumps(report,indent=2));os.chmod(path,0o600)
     print(json.dumps(report))

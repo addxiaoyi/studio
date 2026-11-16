@@ -24,23 +24,32 @@ export function useProjectContext(input: { userId?: string | undefined; token?: 
 
   useEffect(() => {
     const abort = new AbortController(); lifetime.current = abort;
-    setContext(null); current.current = null; setError("");
+    setError("");
     if (!enabled || !userId || !token) {
+      setContext(null); current.current = null;
       if (userId && !enabled && new URL(address).searchParams.get("draft")==="1") {
         try { sessionStorage.setItem(`helstera:project-mode:${userId}`,"draft"); }
         catch (cause) { console.warn("[project-context] Draft mode hint could not be saved", cause); }
       }
       setLoading(false); return () => abort.abort();
     }
-    setLoading(true);
     let query = contextQuery(address);
+    const draftMode = !query.projectId && !query.canvasId && !query.sessionId && readDraftMode(userId);
+    if (draftMode) {
+      setContext(null); current.current = null; setLoading(false);
+      return () => abort.abort();
+    }
+    const cached = readCachedContext(userId, query);
+    if (cached) {
+      current.current = cached;
+      setContext(cached);
+    } else {
+      setContext(null); current.current = null;
+    }
+    setLoading(true);
     // The editor owns ?/Composition navigation; keep the verified project identity beside it.
     if (!query.projectId && !query.canvasId && new URL(address).search.startsWith("?/")) {
-      try {
-        if (sessionStorage.getItem(`helstera:project-mode:${userId}`)==="draft") { setLoading(false); return () => abort.abort(); }
-        const cached = projectContextSchema.safeParse(JSON.parse(sessionStorage.getItem(`helstera:project-context:${userId}`) ?? "null"));
-        if (cached.success) query = { projectId: cached.data.project.id, canvasId: cached.data.canvas.id };
-      } catch (cause) { console.warn("[project-context] Stored navigation hint is unreadable", cause); }
+      if (cached) query = { projectId: cached.project.id, canvasId: cached.canvas.id };
     }
     void fetchProjectContext(token,query,abort.signal).then(async next => {
       if (abort.signal.aborted) return;
@@ -79,4 +88,27 @@ export function useProjectContext(input: { userId?: string | undefined; token?: 
     return pending;
   }, [remember,token]);
   return { context, loading, error, retry, saveLocation };
+}
+
+function readDraftMode(userId: string): boolean {
+  try {
+    return sessionStorage.getItem(`helstera:project-mode:${userId}`) === "draft";
+  } catch (cause) {
+    console.warn("[project-context] Stored draft mode is unreadable", cause);
+    return false;
+  }
+}
+
+function readCachedContext(userId: string, query: ReturnType<typeof contextQuery>): ProjectContext | null {
+  try {
+    const parsed = projectContextSchema.safeParse(JSON.parse(sessionStorage.getItem(`helstera:project-context:${userId}`) ?? "null"));
+    if (!parsed.success) return null;
+    if (query.projectId && query.projectId !== parsed.data.project.id) return null;
+    if (query.canvasId && query.canvasId !== parsed.data.canvas.id) return null;
+    if (query.sessionId && query.sessionId !== parsed.data.session?.id) return null;
+    return parsed.data;
+  } catch (cause) {
+    console.warn("[project-context] Stored navigation hint is unreadable", cause);
+    return null;
+  }
 }

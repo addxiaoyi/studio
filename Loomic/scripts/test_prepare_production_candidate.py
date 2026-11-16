@@ -14,7 +14,87 @@ assert SPEC and SPEC.loader
 SPEC.loader.exec_module(candidate)
 
 
+def write_creative_runtime(source: Path, build: Path) -> None:
+    pins = {"fashion": {"repository": "https://example.test/fashion.git", "commit": "a" * 40},
+            "video": {"repository": "https://example.test/video.git", "commit": "b" * 40}}
+    (source / "scripts").mkdir(parents=True, exist_ok=True)
+    (source / "scripts/creative-sources.json").write_text(json.dumps(pins), encoding="utf-8")
+    assets = {relative: "fixture runtime" for relative in candidate.CREATIVE_RUNTIME_FILES}
+    assets.update({
+        "creative/fashion-source.json": json.dumps(pins["fashion"]),
+        "creative/visualforge/source.json": json.dumps(pins["video"]),
+        "fashion-gallery/catalog.json": json.dumps([{"id": "outfit", "image": "img/outfit.jpg", "thumb": "thumbs/outfit.jpg"}]),
+        "fashion-gallery/img/outfit.jpg": "fixture image",
+        "fashion-gallery/thumbs/outfit.jpg": "fixture thumbnail",
+    })
+    for directory in (source / "apps/web/public", build / "apps/web/public", build / "apps/web/out"):
+        for relative, content in assets.items():
+            path = directory / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+
 class ProductionCandidateTests(unittest.TestCase):
+    def test_html_shells_without_dynamic_runtimes_cannot_be_packaged(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, build, archive = root / "source", root / "build", root / "candidate.zip"
+            for relative in ("index.html", "video/index.html", "fashion-gallery/index.html"):
+                path = build / "apps/web/out" / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("page shell", encoding="utf-8")
+            with patch.object(candidate, "verify_build_inputs"):
+                with self.assertRaisesRegex(FileNotFoundError, "Creative runtime is missing"):
+                    candidate.create_candidate(source, build, archive)
+            self.assertFalse(archive.exists())
+
+    def test_missing_worker_and_empty_compiler_are_rejected(self):
+        for relative in ("creative/visualforge/browser-studio-worker.mjs", "creative/visualforge/rspack.wasm32-wasi.wasm"):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as temporary:
+                source, build = Path(temporary) / "source", Path(temporary) / "build"
+                write_creative_runtime(source, build)
+                exported = build / "apps/web/out" / relative
+                if relative.endswith(".wasm"):
+                    exported.write_bytes(b"")
+                else:
+                    exported.unlink()
+                with self.assertRaisesRegex(FileNotFoundError, "Creative runtime is missing"):
+                    candidate.verify_creative_runtime(source, build / "apps/web/out")
+
+    def test_runtime_provenance_must_match_the_reviewed_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source, build = Path(temporary) / "source", Path(temporary) / "build"
+            write_creative_runtime(source, build)
+            provenance = source / "apps/web/public/creative/visualforge/source.json"
+            provenance.write_text(json.dumps({"repository": "https://example.test/video.git", "commit": "c" * 40}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "does not match the pinned source"):
+                candidate.verify_creative_runtime(source, build / "apps/web/out")
+
+    def test_fashion_catalog_requires_its_originals_and_thumbnails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source, build = Path(temporary) / "source", Path(temporary) / "build"
+            write_creative_runtime(source, build)
+            (source / "apps/web/public/fashion-gallery/img/outfit.jpg").unlink()
+            with self.assertRaisesRegex(FileNotFoundError, "Creative runtime is missing"):
+                candidate.verify_creative_runtime(source, build / "apps/web/out")
+
+    def test_fashion_catalog_cannot_reference_files_outside_the_gallery(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source, build = Path(temporary) / "source", Path(temporary) / "build"
+            write_creative_runtime(source, build)
+            catalog = source / "apps/web/public/fashion-gallery/catalog.json"
+            catalog.write_text(json.dumps([{"image": "../../private.jpg", "thumb": "thumbs/outfit.jpg"}]), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "escapes its asset directory"):
+                candidate.verify_creative_runtime(source, build / "apps/web/out")
+
+    def test_exported_runtime_must_match_public_build_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source, build = Path(temporary) / "source", Path(temporary) / "build"
+            write_creative_runtime(source, build)
+            (build / "apps/web/out/creative/visualforge/entry.mjs").write_text("stale runtime", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Exported creative runtime differs"):
+                candidate.verify_creative_runtime(source, build / "apps/web/out")
+
     def test_tracked_onetake_snapshot_builds_without_a_vendor_checkout(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -114,6 +194,7 @@ class ProductionCandidateTests(unittest.TestCase):
                 path = build / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("build", encoding="utf-8")
+            write_creative_runtime(source, build)
             archive = root / "candidate.zip"
             with patch.object(candidate, "INPUT_FILES", ()), patch.object(candidate, "INCLUDE_FILES", ()):
                 digest = candidate.create_candidate(source, build, archive)

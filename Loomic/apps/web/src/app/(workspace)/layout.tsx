@@ -43,7 +43,7 @@ export default function WorkspaceLayout({
 }) {
   const { user, loading,sessionError,retrySession } = useAuth();
   const router = useRouter();
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
 
   useEffect(() => {
     const title = routeTitles[pathname.replace(/\/$/, "")];

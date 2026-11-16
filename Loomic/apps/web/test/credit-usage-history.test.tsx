@@ -36,4 +36,22 @@ describe("CreditUsageHistory", () => {
     await waitFor(() => expect(fetchTransactionsMock).toHaveBeenCalledTimes(2));
     expect(screen.getByText("No transactions found.")).toBeInTheDocument();
   });
+
+  it("places usage adjustments in the correct signed credit filter", async () => {
+    fetchTransactionsMock.mockResolvedValue({ transactions: [
+      { id: "charge", transaction_type: "generation_adjustment", amount: -0.6, description: "usage", created_at: Date.now() },
+      { id: "refund", transaction_type: "generation_adjustment", amount: 1.5, description: "usage", created_at: Date.now() },
+    ] });
+    render(<CreditUsageHistory />);
+    expect(await screen.findByText("-0.6")).toBeInTheDocument();
+    expect(screen.getByText("+1.5")).toBeInTheDocument();
+    expect(screen.queryByText("+-0.6")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Deducted" }));
+    expect(screen.getByText("-0.6")).toBeInTheDocument();
+    expect(screen.queryByText("+1.5")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Granted" }));
+    expect(screen.getByText("+1.5")).toBeInTheDocument();
+    expect(screen.queryByText("-0.6")).not.toBeInTheDocument();
+  });
+
 });

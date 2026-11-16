@@ -35,6 +35,7 @@ function makeContext(payload: Record<string, unknown>, linkedTaskIds: string[] =
     if (sql.includes("where background_job_id=$1")) return { rows: linkedTaskIds.map((id) => ({ id })) };
     if (sql.includes("set status='running', progress=1")) return { rows: [{ id: task.id }] };
     if (sql.includes("with completed as")) return { rows: [{ session_id: "session-1" }] };
+    if (sql.includes("select result,created_by,workspace_id,session_id")) return { rows: [{ ...task, result: { pages: [] }, session_id: null }] };
     return { rows: [] };
   });
   const ctx = {
@@ -42,7 +43,7 @@ function makeContext(payload: Record<string, unknown>, linkedTaskIds: string[] =
       getJobAdmin: vi.fn().mockResolvedValue({ id: jobId, payload }),
       updateProgress: vi.fn().mockResolvedValue(undefined),
     },
-    localDb: { query },
+    localDb: { query, connect: vi.fn().mockResolvedValue({ query, release: vi.fn() }) },
     storage: {},
     env: { storageRoot: "/tmp/helstera", webOrigin: "https://studio.example.test" },
   } as never;
@@ -77,7 +78,7 @@ describe("website capture job payload recovery", () => {
     });
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      await expect(getExecutor("website_capture")!(jobId, { job_id: jobId }, ctx)).resolves.toEqual({ pages: [] });
+      await expect(getExecutor("website_capture")!(jobId, { job_id: jobId }, ctx)).resolves.toEqual({ pages: [], canvasDelivery: { status: "unlinked", elementIds: [] } });
       expect(softDeleteWebsiteCaptureAssets).not.toHaveBeenCalled();
       expect(log).toHaveBeenCalledWith("[website-capture] failed to append completed event", expect.any(Error));
     } finally { log.mockRestore(); }
@@ -87,7 +88,7 @@ describe("website capture job payload recovery", () => {
     const { ctx, query } = makeContext({ task_id: "task-1", recording_approval_id: "approval-1" });
     const executor = getExecutor("website_capture");
 
-    await expect(executor?.(jobId, { job_id: jobId, job_type: "website_capture" }, ctx)).resolves.toEqual({ pages: [] });
+    await expect(executor?.(jobId, { job_id: jobId, job_type: "website_capture" }, ctx)).resolves.toEqual({ pages: [], canvasDelivery: { status: "unlinked", elementIds: [] } });
 
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining("from website_capture_tasks where id=$1"),
@@ -104,7 +105,7 @@ describe("website capture job payload recovery", () => {
     const { ctx } = makeContext({}, ["task-1"]);
     const executor = getExecutor("website_capture");
 
-    await expect(executor?.(jobId, { job_id: jobId }, ctx)).resolves.toEqual({ pages: [] });
+    await expect(executor?.(jobId, { job_id: jobId }, ctx)).resolves.toEqual({ pages: [], canvasDelivery: { status: "unlinked", elementIds: [] } });
     expect(captureIsolatedWebsite).toHaveBeenCalledOnce();
   });
 
@@ -120,6 +121,25 @@ describe("website capture job payload recovery", () => {
     expect(completion?.[1]).toEqual(expect.arrayContaining([
       expect.stringContaining("[网站录屏](/assets/recording.webm)"),
     ]));
+  });
+
+  it("reports a failed canvas delivery without discarding a completed recording", async () => {
+    const { ctx, query } = makeContext({ task_id: "task-1" });
+    const original = query.getMockImplementation()!;
+    query.mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("select result,created_by,workspace_id,session_id")) throw new Error("Canvas unavailable");
+      return original(sql, params);
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(getExecutor("website_capture")!(jobId, { job_id: jobId }, ctx)).resolves.toEqual({
+        pages: [],
+        canvasDelivery: { status: "failed", elementIds: [], error: "素材已保存，但添加到画布失败。请重试添加。" },
+      });
+      expect(softDeleteWebsiteCaptureAssets).not.toHaveBeenCalled();
+      expect(query).toHaveBeenCalledWith(expect.stringContaining("result=jsonb_set(result,'{canvasDelivery}'"),
+        ["task-1", expect.stringContaining('"status":"failed"')]);
+    } finally { log.mockRestore(); }
   });
 
   it("does not report completion when the task was canceled during capture", async () => {

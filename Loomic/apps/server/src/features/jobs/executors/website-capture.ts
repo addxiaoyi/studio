@@ -80,13 +80,15 @@ registerExecutor("website_capture", async (jobId, _queueMessage, ctx: ExecutorCo
       storageRoot: ctx.env.storageRoot ?? "/www/helstera/uploads",
       webOrigin: ctx.env.webOrigin,
       task,
+      capacityPolicy: ctx.env.capacityPolicy,
       onProgress,
     });
     result.canvasDelivery = { status: "pending", elementIds: [] };
     if (!await completeWebsiteCapture(ctx.localDb, taskId, result)) {
       throw Object.assign(new Error("Website capture is no longer running."), { code: "job_canceled" });
     }
-    await finishCaptureCanvasDelivery(ctx.localDb, ctx.storage, taskId);
+    const delivery = await finishCaptureCanvasDelivery(ctx.localDb, ctx.storage, taskId);
+    if (delivery) result.canvasDelivery = delivery;
     await appendEvent(ctx, taskId, "completed", "网站介绍与素材已保存").catch((eventError) => {
       console.error("[website-capture] failed to append completed event", eventError);
     });

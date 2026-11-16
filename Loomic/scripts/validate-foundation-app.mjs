@@ -1,9 +1,15 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import ts from "typescript";
 
 const mode = process.argv[2] ?? "typecheck";
 const cwd = process.cwd();
+if (!["build", "typecheck"].includes(mode)) {
+  throw new Error(`Unknown validation mode: ${mode}`);
+}
+const outputDir = path.join(cwd, "dist");
+const marker = path.join(outputDir, ".helstera-build");
+if (mode === "build") await rm(marker, { force: true });
 
 const formatHost = {
   getCurrentDirectory: () => cwd,
@@ -22,7 +28,7 @@ if (
   !manifest.name.startsWith("@helstera/")
 ) {
   throw new Error(
-    "Task 1 app manifests must stay private, ESM, and scoped under @helstera/.",
+    "App manifests must stay private, ESM, and scoped under @helstera/.",
   );
 }
 
@@ -34,23 +40,31 @@ if (configResult.error) {
 }
 
 const parsed = ts.parseJsonConfigFileContent(configResult.config, ts.sys, cwd);
-const diagnostics = parsed.errors.filter((error) => error.code !== 18003);
+if (parsed.errors.length > 0) {
+  throw new Error(
+    ts.formatDiagnosticsWithColorAndContext(parsed.errors, formatHost),
+  );
+}
+
+if (parsed.options.noEmit !== true) {
+  throw new Error(
+    "App tsconfig files must set noEmit=true for the TypeScript runtime.",
+  );
+}
+
+const program = ts.createProgram({
+  rootNames: parsed.fileNames,
+  options: parsed.options,
+  projectReferences: parsed.projectReferences,
+});
+const diagnostics = ts.getPreEmitDiagnostics(program);
 if (diagnostics.length > 0) {
   throw new Error(
     ts.formatDiagnosticsWithColorAndContext(diagnostics, formatHost),
   );
 }
 
-if (parsed.options.noEmit !== true) {
-  throw new Error("Task 1 app tsconfig files must set noEmit=true.");
-}
-
 if (mode === "build") {
-  const outputDir = path.join(cwd, "dist");
   await mkdir(outputDir, { recursive: true });
-  await writeFile(
-    path.join(outputDir, ".helstera-build"),
-    "Task 1 foundation build marker\n",
-    "utf8",
-  );
+  await writeFile(marker, "TypeScript runtime validated\n", "utf8");
 }

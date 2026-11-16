@@ -3,6 +3,7 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { createPrivateVideoFixture } from "../local-db/private-video-fixture.js";
+import { mediaFileVersion } from "./media-file-version.js";
 
 it.skipIf(!process.env.HELT_TEST_DATABASE_URL)("requires the owner, confirmation and matching file proof, then releases once", async () => {
   const f = await createPrivateVideoFixture(process.env.HELT_TEST_DATABASE_URL!);
@@ -19,6 +20,8 @@ it.skipIf(!process.env.HELT_TEST_DATABASE_URL)("requires the owner, confirmation
     expect((await f.app.inject({ method: "POST", url, payload, headers: { authorization: `Bearer ${f.colleagueToken}` } })).statusCode).toBe(404);
     expect((await f.app.inject({ method: "POST", url, payload: { ...payload, confirmation: undefined }, headers })).statusCode).toBe(400);
     expect((await f.app.inject({ method: "POST", url, payload: { ...payload, sha256: "0".repeat(64) }, headers })).statusCode).toBe(409);
+    const playbackVersion = (await mediaFileVersion(join(f.root, "private-try-on", path))).replaceAll('"', "");
+    expect((await f.app.inject({ method: "POST", url, payload: { ...payload, sha256: playbackVersion }, headers })).statusCode).toBe(409);
     expect((await stat(join(f.root, "private-try-on", path))).size).toBe(bytes.length);
     const released = await f.app.inject({ method: "POST", url, payload, headers });
     expect(released.statusCode).toBe(200);

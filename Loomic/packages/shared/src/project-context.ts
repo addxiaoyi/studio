@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const projectViewSchema = z.enum(["canvas", "workflow", "timeline", "video", "conversation"]);
+export const projectViewSchema = z.enum(["canvas", "workflow", "timeline", "video", "conversation", "fitting"]);
 export const projectContextQuerySchema = z.object({
   projectId: z.string().uuid().optional(),
   canvasId: z.string().uuid().optional(),
@@ -20,6 +20,12 @@ export const projectContextSchema = z.object({
   session: z.object({ id: z.string().uuid(), title: z.string() }).nullable(),
   view: projectViewSchema,
   compositionId: z.string().nullable(),
+  nextStep: z.object({
+    kind: z.enum(["agent_goal"]),
+    label: z.string().min(1).max(160),
+    goalId: z.string().uuid(),
+    status: z.enum(["draft", "running", "waiting_approval", "waiting_desktop", "paused"]),
+  }).nullable().optional(),
   revision: z.number().int().nonnegative(),
   updatedAt: z.string().datetime(),
 });
@@ -37,6 +43,7 @@ export function projectViewHref(context: ProjectContext, view: ProjectView, desk
     const identity = `projectId=${context.project.id}&canvasId=${context.canvas.id}`;
     return `/video/?${search()}#${identity}`;
   }
+  if (view === "fitting") return `/fashion-gallery/?${search()}`;
   query.id = context.canvas.id;
   query.view = view;
   return `${desktop ? "/desktop-app" : ""}/canvas/?${search()}`;

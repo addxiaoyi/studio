@@ -14,6 +14,29 @@ vi.mock("next/navigation", () => ({
 import { WorkspaceBreadcrumbs } from "../src/components/workspace-breadcrumbs";
 
 describe("WorkspaceBreadcrumbs", () => {
+  it("waits for a pathname without crashing or inventing a parent route", () => {
+    mockUsePathname.mockReturnValue(null);
+    const view = render(<WorkspaceBreadcrumbs />);
+    expect(
+      screen.queryByRole("navigation", { name: "页面路径" }),
+    ).not.toBeInTheDocument();
+    mockUsePathname.mockReturnValue("/projects/archived");
+    view.rerender(<WorkspaceBreadcrumbs />);
+    expect(screen.getByText("回收站")).toHaveAttribute("aria-current", "page");
+  });
+
+  it("renders a malformed encoded route segment without losing workspace navigation", () => {
+    mockUsePathname.mockReturnValue("/projects/%E0%A4%A");
+    render(<WorkspaceBreadcrumbs />);
+    expect(screen.getByText("%E0%A4%A")).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("link", { name: "返回项目" })).toHaveAttribute(
+      "href",
+      "/projects",
+    );
+  });
   afterEach(() => {
     cleanup();
     mockUsePathname.mockReset();

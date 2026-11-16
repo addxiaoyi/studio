@@ -1,12 +1,12 @@
 import { expect, test, _electron, type ElectronApplication, type Page, type TestInfo } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { loadEnvFile } from "node:process";
+import { loadOptionalTestEnv } from "./test-env";
 import { mkdir, mkdtemp, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createEditorBrowserFixture } from "../../server/src/features/video-editor/browser-fixture";
 
-loadEnvFile(resolve("../../.env.local"));
+loadOptionalTestEnv();
 const realModel = process.env.HELT_TEST_REAL_MODEL === "1";
 const candidatePath = process.env.HELT_TEST_CANDIDATE_PATH;
 test.skip(!realModel && process.env.HELT_TEST_EDITOR_FIXTURE !== "1", "Opt in to a real model or an explicitly injected test plan.");

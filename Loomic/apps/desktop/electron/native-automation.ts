@@ -166,6 +166,7 @@ export async function inspectNativeDesktop(options: {
 
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "helstera-native-screen-"));
   let worker: Awaited<ReturnType<typeof createWorker>> | undefined;
+  let inspection: { ok: true; evidence: NativeDesktopEvidence } | { ok: false; error: unknown };
   try {
     const screenshotPath = await screen.captureRegion("active-window", await activeWindow.region, FileType.PNG, temporaryDirectory);
     const screenshot = await readFile(screenshotPath);
@@ -206,7 +207,7 @@ export async function inspectNativeDesktop(options: {
       /* fall back to the region size */
     }
     const pixelScale = windowRegion.width > 0 ? screenshotWidth / windowRegion.width : 1;
-    return {
+    const evidence: NativeDesktopEvidence = {
       windowTitle: (await activeWindow.title).slice(0, 300),
       ...(windowsSnapshot?.processStarted ? { windowIdentity: { windowId: windowsSnapshot.windowId, pid: windowsSnapshot.pid, processStarted: windowsSnapshot.processStarted } } : {}),
       windowRegion: {
@@ -234,15 +235,36 @@ export async function inspectNativeDesktop(options: {
       pixelScale,
       ...(fallbackReason ? { fallbackReason } : {}),
     };
+    inspection = { ok: true, evidence };
   } catch (error) {
-    if (error instanceof Error && /permission|accessibility|screen recording|not supported|display/i.test(error.message)) {
-      throw new Error("Native screen access is unavailable. Grant the platform's Accessibility and Screen Recording permissions, or use the browser Agent.", { cause: error });
-    }
-    throw error;
-  } finally {
-    await worker?.terminate();
-    await rm(temporaryDirectory, { recursive: true, force: true });
+    inspection = {
+      ok: false,
+      error: error instanceof Error && /permission|accessibility|screen recording|not supported|display/i.test(error.message)
+        ? new Error("Native screen access is unavailable. Grant the platform's Accessibility and Screen Recording permissions, or use the browser Agent.", { cause: error })
+        : error,
+    };
   }
+  const cleanupErrors: unknown[] = [];
+  try {
+    await worker?.terminate();
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  try {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  if (cleanupErrors.length) {
+    if (!inspection.ok) cleanupErrors.unshift(inspection.error);
+    throw new AggregateError(
+      cleanupErrors,
+      "Could not fully clean up native screen inspection. OCR worker or temporary screenshot cleanup failed.",
+      inspection.ok ? undefined : { cause: inspection.error },
+    );
+  }
+  if (!inspection.ok) throw inspection.error;
+  return inspection.evidence;
 }
 
 export async function clickNativeText(target: string, userDataPath: string): Promise<void> {
@@ -346,17 +368,28 @@ export async function pressNativeKey(key: string, modifiers: string[] = []): Pro
     return resolved;
   });
   const pressed: number[] = [];
+  let action: { ok: true } | { ok: false; error: unknown } = { ok: true };
   try {
     for (const modifier of modifierKeys) {
       pressed.push(modifier);
       await keyboard.pressKey(modifier as never);
     }
     await keyboard.type(targetKey as never);
-  } finally {
-    const released = await Promise.allSettled(pressed.reverse().map((modifier) => keyboard.releaseKey(modifier as never)));
-    const failures = released.filter((entry): entry is PromiseRejectedResult => entry.status === "rejected");
-    if (failures.length) throw new AggregateError(failures.map((entry) => entry.reason), "Could not release native keyboard modifiers. Release held keys before continuing.");
+  } catch (error) {
+    action = { ok: false, error };
   }
+  const released = await Promise.allSettled(pressed.reverse().map((modifier) => keyboard.releaseKey(modifier as never)));
+  const failures = released.filter((entry): entry is PromiseRejectedResult => entry.status === "rejected");
+  if (failures.length) {
+    const errors: unknown[] = failures.map((entry) => entry.reason);
+    if (!action.ok) errors.unshift(action.error);
+    throw new AggregateError(
+      errors,
+      "Could not release native keyboard modifiers. Release held keys before continuing.",
+      action.ok ? undefined : { cause: action.error },
+    );
+  }
+  if (!action.ok) throw action.error;
 }
 
 export async function scrollNativeWindow(dx: number, dy: number): Promise<void> {

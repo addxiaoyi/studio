@@ -76,11 +76,11 @@ import { assistantReconnectDelay, interruptedApprovalRequiresReview, nativeResum
 import { checkDesktopUpdate, installDesktopUpdate } from "./update-actions.js";
 import { getDesktopUpdatePolicy } from "./update-policy.js";
 import { checkManualUpdate } from "./manual-update.js";
-import { assertVideoTools, resolveFfmpegPath, runFfmpeg } from "./media-renderer.js";
+import { assertVideoTools, resolveFfmpegPath, runFfmpeg, VIDEO_PREVIEW_FILTER } from "./media-renderer.js";
 import { createVideoExportHandler } from "./video-export-handler.js";
 import { renderVideoCaptions } from "./video-caption-images.js";
 import { probeVideo } from "./video-probe.js";
-import { VideoExportPreviews } from "./video-export-preview.js";
+import { VideoExportPreviews, type VideoPreviewProgress } from "./video-export-preview.js";
 import { videoExportConfirmation } from "./video-export-confirmation.js";
 import { isolatedTestDirectory } from "./isolated-test-mode.js";
 import { readWindowPlacement, rememberWindowPlacement } from "./window-placement.js";
@@ -148,6 +148,7 @@ let mainWindowReady = false;
 let isQuitting = false;
 let quitNoticeOpen = false;
 let activeVideoExports = 0;
+let previewAbortController: AbortController | null = null;
 let workspaceLoader: WorkspaceLoader | null = null;
 let tray: Tray | null = null;
 let embeddedBrowserWindow: BrowserWindow | null = null;
@@ -163,7 +164,40 @@ async function exportDirectory() {
   if (folder.permission !== "granted" || !folder.path) throw new Error("Choose an available local asset folder first.");
   return folder.path;
 }
-const videoExportPreviews = new VideoExportPreviews(join(app.getPath("userData"), "video-export-history"), exportDirectory);
+const renderVideoPreview = async (sourcePath: string, previewPath: string, report: (event: VideoPreviewProgress) => void, signal: AbortSignal) => {
+  let lastProgress = -1;
+  await runFfmpeg([
+    "-hide_banner",
+    "-loglevel", "error",
+    "-i", sourcePath,
+    "-map_metadata", "-1",
+    "-vf", VIDEO_PREVIEW_FILTER,
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "30",
+    "-c:a", "aac",
+    "-b:a", "96k",
+    "-nostats",
+    "-progress", "pipe:2",
+    "-movflags", "+faststart",
+    "-y", previewPath,
+  ], {
+    timeoutMs: 30 * 60_000,
+    signal,
+    onProgress: event => {
+      if (event.outTimeMs === undefined || event.outTimeMs - lastProgress < 1_000_000) return;
+      lastProgress = event.outTimeMs;
+      report({ state: "running", outTimeMs: event.outTimeMs });
+      console.info(`[video-preview] encoded ${(event.outTimeMs / 1_000_000).toFixed(1)}s`);
+    },
+  });
+};
+const videoExportPreviews = new VideoExportPreviews(
+  join(app.getPath("userData"), "video-export-history"),
+  exportDirectory,
+  renderVideoPreview,
+  event => mainWindow?.webContents.send("desktop:video-preview-progress", event),
+);
 const recorderLock = new RecorderLock();
 let assistantSocket: WebSocket | null = null;
 let assistantSessionToken = "";
@@ -1002,12 +1036,23 @@ const runVideoExport = createVideoExportHandler({
 ipcMain.handle("video.export", async (event, input: unknown) => {
   requireMainWindow(event);
   activeVideoExports++;
+  const previewAbort = new AbortController();
+  previewAbortController = previewAbort;
   try {
     const output = await runVideoExport(input);
     if (!output) return null;
-    try { return { ...output, previewId: await videoExportPreviews.register(output.path) }; }
+    try { return { ...output, previewId: await videoExportPreviews.register(output.path, previewAbort.signal) }; }
     catch { return { ...output, previewWarning: true }; }
-  } finally { activeVideoExports--; }
+  } finally {
+    if (previewAbortController === previewAbort) previewAbortController = null;
+    activeVideoExports--;
+  }
+});
+ipcMain.handle("video.cancel-preview", async event => {
+  requireMainWindow(event);
+  if (!previewAbortController) return { canceled: false };
+  previewAbortController.abort();
+  return { canceled: true };
 });
 ipcMain.handle("video.read-export-preview", async (event, id: unknown) => {
   requireMainWindow(event);

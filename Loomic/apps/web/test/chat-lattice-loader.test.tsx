@@ -25,6 +25,7 @@ it('uses the same loader for streamed thinking and removes it when settled', () 
 
 it('disables the retry action while a retry is being submitted', () => {
   render(<ChatMessage role="assistant" contentBlocks={[{ type: 'text', text: 'failed' }]} isRetrying onRetry={() => {}} />);
-  expect(screen.getByRole('button')).toBeDisabled();
-  expect(screen.getByRole('button')).toHaveAttribute('aria-busy', 'true');
+  const retry = screen.getByRole('button', { name: '重试上一条请求' });
+  expect(retry).toBeDisabled();
+  expect(retry).toHaveAttribute('aria-busy', 'true');
 });

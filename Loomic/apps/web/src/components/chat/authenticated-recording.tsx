@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { buildMediaDownloadUrl } from "@/lib/media-url";
 import { preparePrivateMedia, type PrivateMedia } from "@/lib/private-media";
 
 const MAX_RECORDING_BYTES = 40 * 1024 * 1024;
@@ -55,7 +56,7 @@ export function AuthenticatedRecording({ assetId, accessToken, maxBytes = MAX_RE
     try {
       const current = await preparePrivateMedia(assetId,accessToken,AbortSignal.timeout(30000));
       // A download from a configured API origin must not navigate the desktop's main window.
-      if(downloadFrame.current) downloadFrame.current.src=current.path+"?download=1";
+      if(downloadFrame.current) downloadFrame.current.src=buildMediaDownloadUrl(current.path);
     } catch(cause) {setError(cause instanceof Error?cause.message:"下载连接超时，请重试。");}
     finally {setDownloading(false);}
   }

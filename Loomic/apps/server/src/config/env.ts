@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { parseCapacityPolicy, type CapacityPolicy } from "./capacity-policy.js";
 
 export const DEFAULT_AGENT_BACKEND_MODE = "state";
 export const DEFAULT_AGENT_MODEL = "gpt-4.1";
@@ -26,6 +27,7 @@ export type AgentBackendMode = "filesystem" | "state";
 
 export type ServerEnv = {
   authProvider: "local";
+  capacityPolicy: CapacityPolicy;
   databaseUrl?: string;
   storageProvider: "local";
   storageRoot?: string;
@@ -115,6 +117,7 @@ export function loadServerEnv(
   const storageProvider = "local" as const;
   const storageRoot =
     overrides.storageRoot ?? normalizeOptionalString(source.STORAGE_ROOT) ?? "/www/helstera/uploads";
+  const capacityPolicy = overrides.capacityPolicy ?? parseCapacityPolicy(source);
   const systemAdminEmails =
     overrides.systemAdminEmails ??
     (source.SYSTEM_ADMIN_EMAILS ?? "")
@@ -259,6 +262,7 @@ export function loadServerEnv(
 
   return {
     authProvider,
+    capacityPolicy,
     storageProvider,
     ...(storageRoot ? { storageRoot } : {}),
     systemAdminEmails,

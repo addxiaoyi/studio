@@ -17,6 +17,10 @@ import type { RequestAuthenticator } from "../auth/types.js";
 
 const packageIdSchema = z.object({ packageId: z.string() });
 const topupCheckoutSchema = z.object({ packageId: z.string() });
+const transactionQuery = z.object({
+  limit: z.string().regex(/^\d+$/).default("20").transform(Number).pipe(z.number().int().min(1).max(100)),
+  offset: z.string().regex(/^\d+$/).default("0").transform(Number).pipe(z.number().int().min(0).max(2_147_483_647)),
+});
 
 export async function registerCreditRoutes(
   app: FastifyInstance,
@@ -59,18 +63,18 @@ export async function registerCreditRoutes(
       const user = await options.auth.authenticate(request);
       if (!user) return sendUnauthenticated(reply);
 
+      const query = transactionQuery.safeParse(request.query);
+      if (!query.success) return reply.code(400).send({ error: { code: "invalid_transaction_query", message: "用量记录分页参数无效。" } });
+      const { limit, offset } = query.data;
       const viewer = await options.viewerService.ensureViewer(user);
-      const query = request.query as { limit?: string };
-      const limit = query.limit
-        ? Math.min(Number.parseInt(query.limit, 10), 100)
-        : 20;
 
       const transactions = await options.creditService.getTransactions(
         viewer.workspace.id,
-        limit,
+        limit + 1,
+        offset,
       );
 
-      return reply.code(200).send({ transactions });
+      return reply.header("Cache-Control", "private, no-store").code(200).send({ transactions: transactions.slice(0, limit), pagination: { limit, offset, hasMore: transactions.length > limit } });
     } catch (error) {
       return sendCreditError(error, reply, "credit_query_failed");
     }

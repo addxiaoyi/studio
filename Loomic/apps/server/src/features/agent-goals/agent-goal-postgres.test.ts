@@ -22,11 +22,18 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
   let admin: pg.Client;
   let db: pg.Pool;
   let goals: AgentGoalService;
+  const hubs: WebsiteAssistantHub[] = [];
   let created = false;
   const userId = randomUUID();
   const workspaceId = randomUUID();
   const canvasId = randomUUID();
   const sessionId = randomUUID();
+
+  function createHub(options: ConstructorParameters<typeof WebsiteAssistantHub>[0]) {
+    const hub = new WebsiteAssistantHub(options);
+    hubs.push(hub);
+    return hub;
+  }
 
   beforeAll(async () => {
     const url = new URL(process.env.DATABASE_URL!);
@@ -59,6 +66,11 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
   }, 60_000);
 
   afterAll(async () => {
+    for (const hub of hubs) {
+      // Test connections have no real sockets or disconnect events to drain.
+      (hub as unknown as { connections: Map<string, unknown> }).connections.clear();
+      await hub.drain();
+    }
     await db?.end();
     try {
       if (created) {
@@ -85,7 +97,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     await db.query("update desktop_agent_tasks set goal_id=$2,execution_mode='windows_ui' where id=$1", [taskId, goal.id]);
     const sent: Array<Record<string, unknown>> = [];
     const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } };
-    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const hub = createHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     const internals = hub as unknown as { connections: Map<string, unknown>; handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void>; recoverDesktopAgentTasks(live: unknown): Promise<void> };
     internals.connections.set(connectionId, live);
     const windowIdentity = { windowId: "ab12", pid: 42, processStarted: "133000000000000000" };
@@ -187,7 +199,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
         return operation;
       },
     };
-    const hub = new WebsiteAssistantHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const hub = createHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     (hub as unknown as { connections: Map<string, unknown> }).connections.set(connectionId, { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } });
     const client = await db.connect();
     try {
@@ -234,7 +246,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     };
     const sent: Array<Record<string, unknown>> = [];
     const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } };
-    const hub = new WebsiteAssistantHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const hub = createHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     const internals = hub as unknown as { connections: Map<string, unknown>; handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void> };
     internals.connections.set(connectionId, live);
     await hub.approveDesktopAction(userId, workspaceId, approvalId);
@@ -267,7 +279,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
       },
     };
     const live = { id: oldConnectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: vi.fn() } };
-    const hub = new WebsiteAssistantHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const hub = createHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     const internals = hub as unknown as { handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void>; cleanupTaskAssets(taskId: string): Promise<void> };
     const cleanup = vi.spyOn(internals, "cleanupTaskAssets");
     await internals.handleDesktopAgentEvent(live, { taskId, eventType: "completed", result: { summary: "Stale result" } });
@@ -286,7 +298,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
     await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,chat_session_id) values($1,$2,$3,$4,'Test','operator','[]'::jsonb,'running',$5)", [taskId, workspaceId, userId, connectionId, sessionId]);
     await db.query("update desktop_agent_tasks set status='failed',error_message='Disconnected' where id=$1", [taskId]);
-    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const hub = createHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     expect((await hub.listDesktopAgentTasks(userId, workspaceId, taskId))[0]?.chatDeliveryPending).toBe(true);
     await db.query(`create function reject_test_terminal_chat() returns trigger language plpgsql as $$ begin raise exception 'chat unavailable'; end; $$`);
     await db.query("create trigger reject_test_terminal_chat before insert on chat_messages for each row execute function reject_test_terminal_chat()");
@@ -313,7 +325,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     await db.query("insert into website_capture_connections(id,pairing_id,workspace_id,user_id,session_token_hash) values($1,$2,$3,$4,$5)", [connectionId, pairingId, workspaceId, userId, randomUUID()]);
     await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,result) values($1,$2,$3,$4,'Test','operator','[]'::jsonb,'running',$5::jsonb)", [taskId, workspaceId, userId, connectionId, JSON.stringify({ summary: "Original evidence" })]);
     const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: vi.fn() } };
-    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const hub = createHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     const internals = hub as unknown as { handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void> };
     await db.query("alter table desktop_agent_events add constraint test_reject_terminal_event check (event_type <> 'completed') not valid");
     try {
@@ -347,7 +359,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     };
     const sent: Array<Record<string, unknown>> = [];
     const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } };
-    const hub = new WebsiteAssistantHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const hub = createHub({ db: wrappedDb as never, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     await (hub as unknown as { recoverDesktopAgentTasks(live: unknown): Promise<void> }).recoverDesktopAgentTasks(live);
     expect(injected).toBe(true);
     expect(sent.some((message) => message.type === "desktop_agent.stop" && message.taskId === taskId)).toBe(true);
@@ -365,7 +377,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     const sent: Array<Record<string, unknown>> = [];
     const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } };
     const planner = vi.fn().mockResolvedValue([{ kind: "native_click", x: 10, y: 20 }]);
-    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: ".", onDesktopAgentPlanNext: planner });
+    const hub = createHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: ".", onDesktopAgentPlanNext: planner });
     const internals = hub as unknown as { handleDesktopAgentObserve(live: unknown, message: unknown): Promise<void> };
     const observation = { taskId, round: 1, windowTitle: "Test window", observation: "Visible control" };
     await Promise.all([internals.handleDesktopAgentObserve(live, observation), internals.handleDesktopAgentObserve(live, observation)]);
@@ -409,7 +421,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
       log.mockRestore();
       await db.query("alter table desktop_agent_plan_rounds drop constraint test_reject_round");
     }
-    const noPlanner = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const noPlanner = createHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     sent.length = 0;
     await (noPlanner as unknown as { handleDesktopAgentObserve(live: unknown, message: unknown): Promise<void> }).handleDesktopAgentObserve(live, { ...observation, round: 4 });
     expect(sent.some((message) => message.type === "desktop_agent.action_denied")).toBe(true);
@@ -433,7 +445,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     await db.query("insert into desktop_agent_approvals(id,task_id,connection_id,user_id,workspace_id,request_id,action,status,expires_at) values($1,$2,$3,$4,$5,$6,$7::jsonb,'executed',now()+interval '1 hour')", [approvalId, taskId, connectionId, userId, workspaceId, checkpoint.action.requestId, JSON.stringify({ taskId, requestId: checkpoint.action.requestId, kind: checkpoint.action.kind })]);
     const sent: Array<Record<string, unknown>> = [];
     const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: (payload: string) => sent.push(JSON.parse(payload)) } };
-    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const hub = createHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     const internals = hub as unknown as { recoverDesktopAgentTasks(live: unknown): Promise<void> };
     const isTaskResume = (message: Record<string, unknown>) => message.type === "desktop_agent.resume" && JSON.stringify(message).includes(taskId);
     await internals.recoverDesktopAgentTasks(live);
@@ -511,7 +523,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
           firstSocket.close();
         } else firstSocket.send(payload);
       } } };
-      const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+      const hub = createHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
       const internals = hub as unknown as { connections: Map<string, unknown>; handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void>; recoverDesktopAgentTasks(live: unknown): Promise<void> };
       internals.connections.set(connectionId, live);
       const executed = readMessage(firstSocket);
@@ -555,7 +567,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,planned_actions,goal_id,chat_session_id,result) values($1,$2,$3,$4,'Test','operator','[]'::jsonb,'running','[]'::jsonb,$5,$6,$7::jsonb)", [taskId, workspaceId, userId, connectionId, goal.id, sessionId, JSON.stringify({ assets: [{ id: screenshotId, mediaType: "image" }], screenshotAsset: { assetId: screenshotId, url: "/screenshot" }, recordingAsset: { assetId: recordingId, url: "/recording" } })]);
     await db.query("update agent_goals set status=$2 where id=$1", [goal.id, status]);
     const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: vi.fn() } };
-    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const hub = createHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     const internals = hub as unknown as { handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void> };
     await internals.handleDesktopAgentEvent(live, { taskId, eventType: "completed", result: { summary: "Desktop result" } });
     expect((await db.query("select status from agent_goals where id=$1", [goal.id])).rows[0].status).toBe(status);
@@ -585,7 +597,7 @@ describe.skipIf(!enabled)("Agent goals on isolated PostgreSQL", () => {
     await db.query("insert into desktop_agent_tasks(id,workspace_id,created_by,connection_id,goal,role,capabilities,status,planned_actions,goal_id) values($1,$2,$3,$4,'Test','operator','[]'::jsonb,'running','[]'::jsonb,$5)", [taskId, workspaceId, userId, connectionId, goal.id]);
     await db.query("update agent_goals set status='canceled' where id=$1", [goal.id]);
     const live = { id: connectionId, userId, workspaceId, paused: false, ws: { readyState: 1, send: vi.fn() } };
-    const hub = new WebsiteAssistantHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
+    const hub = createHub({ db, storage: {} as never, webOrigin: "https://example.test", storageRoot: "." });
     const internals = hub as unknown as { handleDesktopAgentEvent(live: unknown, event: unknown): Promise<void> };
     await internals.handleDesktopAgentEvent(live, { taskId, eventType: "failed", detail: "Late failure" });
     expect((await goals.get(userId, workspaceId, goal.id)).status).toBe("canceled");

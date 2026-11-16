@@ -12,6 +12,7 @@ import os
 import pathlib
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,7 @@ import yaml
 
 
 DOWNLOAD_ROOT = pathlib.PurePosixPath("/www/helstera/apps/web/out/downloads")
+DEPLOY_ROOT = DOWNLOAD_ROOT.parents[3]
 TARGET_HOST = os.environ.get("HELT_DEPLOY_HOST", "23.251.32.222")
 TARGET_USER = os.environ.get("HELT_DEPLOY_USER", "root")
 JUMP_HOST = os.environ.get("HELT_DEPLOY_JUMP_HOST", "103.40.14.25")
@@ -358,11 +360,83 @@ def clean_remote_stage(sftp: paramiko.SFTPClient, stage: pathlib.Path, remote_st
             sftp.remove(f"{remote_stage}/{source.relative_to(stage).as_posix()}")
         except OSError:
             pass
-    for directory in (f"{remote_stage}/downloads", f"{remote_stage}/updates/{target}", f"{remote_stage}/updates", remote_stage):
+
+
+def run_remote_retention(
+    target: paramiko.SSHClient,
+    sftp: paramiko.SFTPClient,
+    remote_stage: str,
+    *,
+    apply_retention: bool = False,
+) -> dict[str, object]:
+    script = pathlib.Path(__file__).with_name("storage-retention.py")
+    remote_script = f"{remote_stage}/storage-retention.py"
+    remote_plan = f"{remote_stage}/storage-retention-plan.json"
+    sftp.put(str(script), remote_script)
+
+    def execute(action: str) -> dict[str, object]:
+        command = " ".join((
+            "python3",
+            shlex.quote(remote_script),
+            "--root",
+            shlex.quote(str(DEPLOY_ROOT)),
+            action,
+            shlex.quote(remote_plan),
+            "--category installers",
+        ))
+        _stdin, stdout, stderr = target.exec_command(command, timeout=180)
+        status = stdout.channel.recv_exit_status()
+        output = stdout.read().decode("utf-8", errors="replace").strip()
+        failure = stderr.read().decode("utf-8", errors="replace").strip()
+        if status != 0:
+            raise RuntimeError(f"Remote retention {action} failed ({status}): {failure or output}")
         try:
-            sftp.rmdir(directory)
-        except OSError:
-            pass
+            report = json.loads(output)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"Remote retention {action} returned invalid JSON") from error
+        if not isinstance(report, dict):
+            raise RuntimeError(f"Remote retention {action} returned an invalid report")
+        return report
+
+    try:
+        plan = execute("--plan")
+        candidates = plan.get("files")
+        if not isinstance(candidates, list):
+            raise RuntimeError("Remote retention preview did not return a file inventory")
+        if any(not isinstance(item, dict) or not isinstance(item.get("path"), str) for item in candidates):
+            raise RuntimeError("Remote retention preview returned an invalid file inventory")
+        report = {
+            "status": "review_required" if candidates else "clean",
+            "removedFiles": 0,
+            "unlinkedBytes": 0,
+            "exclusiveBytes": int(plan.get("exclusiveBytes", 0)),
+            "candidateBytes": int(plan.get("candidateBytes", 0)),
+            "paths": [item["path"] for item in candidates],
+            "plan": plan,
+            "errors": [],
+        }
+        if not candidates or not apply_retention:
+            return report
+
+        applied = execute("--apply")
+        errors = applied.get("errors")
+        if not isinstance(errors, list) or errors:
+            raise RuntimeError("Remote retention apply returned deletion errors")
+        report.update({
+            "status": "applied",
+            "removedFiles": int(applied.get("removedFiles", 0)),
+            "unlinkedBytes": int(applied.get("unlinkedBytes", 0)),
+            "exclusiveBytes": int(applied.get("exclusiveBytes", 0)),
+            "paths": applied.get("paths", report["paths"]),
+            "apply": applied,
+        })
+        return report
+    finally:
+        for path in (remote_plan, remote_script):
+            try:
+                sftp.remove(path)
+            except OSError:
+                pass
 
 
 def verify_public_installer(files: list[pathlib.Path], stage: pathlib.Path) -> None:
@@ -561,6 +635,18 @@ def release(args: argparse.Namespace) -> None:
             print(f"Verifying public downloads for {args.platform}...", flush=True)
             verified_files = [file for file in files if not repairing_current or file != release_manifest]
             verify_public_installer(verified_files, stage)
+            retention = run_remote_retention(
+                target,
+                sftp,
+                remote_stage,
+                apply_retention=args.apply_retention,
+            )
+            print(
+                f"Installer retention: {retention['status']} "
+                f"({retention['candidateBytes']} bytes in review, "
+                f"{retention['removedFiles']} removed).",
+                flush=True,
+            )
         finally:
             clean_remote_stage(sftp, stage, remote_stage, args.platform, files)
             sftp.close()
@@ -580,6 +666,7 @@ def main() -> int:
     parser.add_argument("--output-dir", type=pathlib.Path, help="Write build artifacts to an isolated directory; relative paths are based on apps/desktop")
     parser.add_argument("--direct", action="store_true", help="Connect to the target server without the SSH jump host")
     parser.add_argument("--repair-current", action="store_true", help="Repair missing assets for the same published version when its portable package hash matches")
+    parser.add_argument("--apply-retention", action="store_true", help="Delete only verified desktop artifacts outside the retention policy after publishing")
     parser.add_argument("--dry-run", action="store_true", help="Build and list release files without uploading")
     parser.add_argument("--stage-dir", type=pathlib.Path, help="Keep staged downloads and update feed here; relative paths are based on the repository root")
     args = parser.parse_args()

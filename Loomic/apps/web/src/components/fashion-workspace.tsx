@@ -35,6 +35,7 @@ import {
 import { fashionModels, type FashionModel } from "@/lib/fashion-models";
 import { FashionControls } from "./fashion-controls";
 import { FashionAssetPicker } from "./fashion-asset-picker";
+import type { ProjectContext } from "@helstera/shared";
 
 type ExternalApproval = { origin: string; model: string };
 type FashionRuntime = {
@@ -63,9 +64,11 @@ type FashionModule = {
   ): FashionRuntime;
 };
 
-export function FashionWorkspace() {
+export function FashionWorkspace({ project = null }: { project?: ProjectContext | null }) {
   const { session } = useAuth();
   const { resolvedTheme } = useTheme();
+  const projectRef = useRef(project);
+  projectRef.current = project;
   const container = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const runtime = useRef<FashionRuntime | null>(null);
@@ -194,7 +197,14 @@ export function FashionWorkspace() {
                   selected?.reason || "所选模型当前不可用，请刷新模型目录。",
                 );
               return generateFashion(
-                input,
+                projectRef.current
+                  ? {
+                      ...input,
+                      project_id: projectRef.current.project.id,
+                      canvas_id: projectRef.current.canvas.id,
+                      ...(projectRef.current.session ? { session_id: projectRef.current.session.id } : {}),
+                    }
+                  : input,
                 userId,
                 token,
                 requestConfirmation,

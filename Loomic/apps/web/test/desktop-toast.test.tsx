@@ -37,8 +37,11 @@ describe("DesktopToast", () => {
     expect(await screen.findByText("安装完成")).toBeTruthy();
     expect(screen.getByText("连接失败")).toBeTruthy();
     expect(screen.getByText("正在检查更新")).toBeTruthy();
-    const region = document.querySelector(".desktop-toast-viewport");
-    expect(region?.getAttribute("aria-live")).toBe("polite");
+    expect(screen.getAllByRole("status").map((notice) => notice.textContent)).toEqual([
+      "安装完成",
+      "正在检查更新",
+    ]);
+    expect(screen.getByRole("alert").textContent).toBe("连接失败");
   });
 
   it("collapses repeated informational chatter inside the de-duplication window", async () => {

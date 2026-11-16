@@ -7,12 +7,14 @@ import argparse
 import base64
 import hashlib
 import html.parser
+import importlib.util
 import inspect
 import json
 import os
 import pathlib
 import shlex
 import ssl
+import stat
 import tempfile
 import time
 import urllib.error
@@ -23,6 +25,7 @@ import zipfile
 import paramiko
 
 
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_JUMP_HOST = "103.40.14.25"
 DEFAULT_JUMP_PORT = 19198
 DEFAULT_JUMP_USER = "add"
@@ -97,6 +100,13 @@ def validate_source(source: pathlib.Path) -> pathlib.Path:
     static_dir = root / "_next" / "static"
     if not static_dir.is_dir():
         raise FileNotFoundError(f"Next.js static assets are missing: {static_dir}")
+    validator_path = pathlib.Path(__file__).with_name("prepare-production-candidate.py")
+    spec = importlib.util.spec_from_file_location("production_candidate", validator_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Cannot load the production creative runtime validator.")
+    validator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validator)
+    validator.verify_creative_runtime(PROJECT_ROOT, root)
     return root
 
 
@@ -143,6 +153,69 @@ def create_archive(source: pathlib.Path, destination: pathlib.Path) -> str:
                     raise ValueError("The Web export exceeds the static release size limits.")
                 archive.write(path, pathlib.PurePosixPath("out", *path.relative_to(source).parts))
     return hashlib.sha256(destination.read_bytes()).hexdigest().upper()
+
+
+def verify_staged_archive(archive: pathlib.Path, output: pathlib.Path, live: pathlib.Path | None = None) -> None:
+    if output.is_symlink() or not output.is_dir():
+        raise ValueError("Staged Web export must be a regular directory.")
+
+    def checked_file(root, name):
+        target = root
+        for part in pathlib.PurePosixPath(name).parts:
+            target = target / part
+            if target.is_symlink():
+                raise ValueError("Staged Web file uses a symbolic link: " + name)
+        if not target.is_file():
+            raise FileNotFoundError("Staged Web file is missing: " + name)
+        return target
+
+    def digest(path):
+        hasher = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        return hasher.digest()
+
+    def managed_download(name):
+        parts = pathlib.PurePosixPath(name).parts
+        return (len(parts) > 1 and parts[0] == "downloads" and
+                (parts[1] == "updates" or parts[-1].startswith(("Helstera-", "desktop-release-", "SHA256SUMS-"))))
+
+    def inherited(name, actual):
+        return live is not None and digest(checked_file(live, name)) == actual
+
+    exported: set[str] = set()
+    with zipfile.ZipFile(archive) as bundle:
+        seen: set[str] = set()
+        for entry in bundle.infolist():
+            parts = entry.filename.rstrip("/").split("/")
+            if (entry.filename in seen or "\\" in entry.filename or parts[0] != "out" or
+                    len(parts) < 2 or any(part in ("", ".", "..") or ":" in part for part in parts) or
+                    stat.S_ISLNK(entry.external_attr >> 16)):
+                raise ValueError("Unsafe staged Web archive entry: " + entry.filename)
+            seen.add(entry.filename)
+            if entry.is_dir():
+                continue
+            name = "/".join(parts[1:])
+            exported.add(name)
+            actual = digest(checked_file(output, name))
+            expected = hashlib.sha256()
+            with bundle.open(entry) as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    expected.update(chunk)
+            if actual != expected.digest() and not (managed_download(name) and inherited(name, actual)):
+                raise ValueError("Staged Web file differs from verified archive: " + entry.filename)
+    for path in output.rglob("*"):
+        name = path.relative_to(output).as_posix()
+        if path.is_symlink():
+            raise ValueError("Staged Web file uses a symbolic link: " + name)
+        if not path.is_file() or name in exported:
+            continue
+        if name in (".helstera-retained-static.json", ".helstera-static-release"):
+            continue
+        if (name.startswith("_next/static/") or managed_download(name)) and inherited(name, digest(path)):
+            continue
+        raise ValueError("Unreviewed file in staged Web export: " + name)
 
 
 def preserve_previous_static(live_out: pathlib.Path, candidate_out: pathlib.Path) -> int:
@@ -255,6 +328,36 @@ def validate_stage_path(web_root: pathlib.PurePosixPath, value: str) -> pathlib.
     return stage
 
 
+def cleanup_stage_source(stage_path: str) -> str:
+    web_root = pathlib.PurePosixPath(DEFAULT_ROOT) / 'apps/web'
+    stage = validate_stage_path(web_root, stage_path)
+    return f"""import pathlib, shutil
+stage = pathlib.Path({str(stage)!r})
+web_root = pathlib.Path({str(web_root)!r})
+if stage.is_symlink() or stage.resolve() != stage or web_root.resolve() != web_root:
+    raise RuntimeError('Refusing linked staging cleanup')
+if stage.exists():
+    if not stage.is_dir() or stage.parent != web_root or not stage.name.startswith('.helstera-static.'):
+        raise RuntimeError('Invalid staging cleanup target')
+    shutil.rmtree(stage)
+print('staging-cleaned')
+"""
+
+
+def retire_static_archives(client: paramiko.SSHClient) -> str:
+    policy = pathlib.Path(__file__).with_name('storage-retention.py').read_text(encoding='utf-8')
+    source = f"""import json, types
+retention = types.ModuleType('retention')
+exec(compile({policy!r}, 'storage-retention.py', 'exec'), retention.__dict__)
+plan = retention.preview({DEFAULT_ROOT!r}, 'archives')
+receipt = retention.apply({DEFAULT_ROOT!r}, plan, 'archives')
+print(json.dumps(receipt))
+if receipt['errors']:
+    raise RuntimeError('Static archive retention failed')
+"""
+    return remote_python(client, source, timeout=180)
+
+
 def verify_public_desktop(url: str, cache_key: str) -> dict[str, object]:
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme != "https" or not parsed.hostname:
@@ -360,6 +463,7 @@ def deploy(args: argparse.Namespace) -> None:
         backup_path: str | None = None
         stage_path: str | None = None
         exchanged = False
+        switch_unknown = False
         stage_out: str | None = None
         try:
             jump.connect(
@@ -478,6 +582,14 @@ print(destination)
 """
                 remote_python(target, backup, timeout=600)
 
+            staged_check = (
+                "import hashlib, pathlib, stat, zipfile\n"
+                + inspect.getsource(verify_staged_archive)
+                + f"\nverify_staged_archive(pathlib.Path({archive_remote!r}), pathlib.Path({stage_out!r}), pathlib.Path({str(live_path)!r}))\n"
+                + "print('staged-files-verified')\n"
+            )
+            remote_python(target, staged_check, timeout=180)
+
             verify_candidate = f"""
 from html.parser import HTMLParser
 from pathlib import Path
@@ -518,8 +630,10 @@ if result != 0:
 print('atomic-exchange-ok')
 """
             try:
+                switch_unknown = True
                 remote_python(target, exchange)
                 exchanged = True
+                switch_unknown = False
             except Exception:
                 marker_check = f"""
 from pathlib import Path
@@ -527,7 +641,11 @@ marker = Path({str(live_path)!r}) / {marker_name!r}
 print('exchanged' if marker.is_file() and marker.read_text(encoding='ascii') == {archive_hash!r} else 'not-exchanged')
 """
                 try:
-                    exchanged = remote_python(target, marker_check) == "exchanged"
+                    switch_status = remote_python(target, marker_check)
+                    if switch_status not in ("exchanged", "not-exchanged"):
+                        raise RuntimeError("Invalid switch observation")
+                    exchanged = switch_status == "exchanged"
+                    switch_unknown = False
                 except Exception:
                     raise RuntimeError(
                         "The atomic switch outcome is unknown; preserve the staging directory and backup for recovery."
@@ -540,7 +658,11 @@ print('exchanged' if marker.is_file() and marker.read_text(encoding='ascii') == 
             remote_python(target, remove_marker)
             exchanged = False
             print(json.dumps({"publicVerification": public, "backup": backup_path, "sha256": archive_hash}))
-            cleanup = f"import pathlib, shutil\nshutil.rmtree(pathlib.Path({stage_path!r}))"
+            try:
+                print("ARCHIVE_RETENTION", retire_static_archives(target), flush=True)
+            except Exception as retention_error:
+                print(f"RETENTION_WARNING: published Web is verified; archive cleanup failed: {retention_error}")
+            cleanup = cleanup_stage_source(stage_path)
             try:
                 remote_python(target, cleanup, timeout=90)
                 stage_path = None
@@ -567,12 +689,14 @@ print('rollback-exchange-ok')
         finally:
             if stage_path:
                 if target.get_transport() and target.get_transport().is_active():
-                    if not exchanged:
-                        cleanup = f"import pathlib, shutil\nshutil.rmtree(pathlib.Path({stage_path!r}), ignore_errors=True)"
+                    if not exchanged and not switch_unknown:
+                        cleanup = cleanup_stage_source(stage_path)
                         try:
                             remote_python(target, cleanup, timeout=90)
                         except Exception as cleanup_error:
                             print(f"CLEANUP_WARNING: staging directory retained at {stage_path}: {cleanup_error}")
+                    else:
+                        print(f"RECOVERY_REQUIRED: retained staging at {stage_path}; backup at {backup_path}")
             if target.get_transport() and target.get_transport().is_active():
                 target.close()
             if jump.get_transport() and jump.get_transport().is_active():

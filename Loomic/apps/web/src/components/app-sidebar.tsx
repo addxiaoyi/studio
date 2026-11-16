@@ -98,7 +98,7 @@ function isPathActive(pathname: string, href: string) {
 
 function NavLink({ item, active, compact = false, collapsed = false }: { item: NavItem; active: boolean; compact?: boolean; collapsed?: boolean }) {
   const Icon = item.icon;
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
   // WASM compilation needs document-level COOP/COEP headers, including on entry.
   const Nav = item.href === "/video" || pathname.startsWith("/video") ? "a" : Link;
   return (
@@ -187,13 +187,16 @@ function MobileNavigation({ isAdmin, pathname }: { isAdmin: boolean; pathname: s
 }
 
 export function AppSidebar() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
   const router = useRouter();
   const { session, signOut } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
   const [labelsVisible, setLabelsVisible] = useState(false);
   const [pinned,setPinned]=useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const signOutPending = useRef(false);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
@@ -232,7 +235,15 @@ export function AppSidebar() {
   }, [pathname]);
 
   const labels = t("zh-CN").workspace;
-  async function handleSignOut() { await signOut(); router.replace("/login"); }
+  async function handleSignOut() {
+    if (signOutPending.current) return;
+    signOutPending.current = true;
+    setSigningOut(true);
+    setSignOutError(null);
+    try { await signOut(); router.replace("/login"); }
+    catch (cause) { setSignOutError(cause instanceof Error ? cause.message : "退出登录失败，请重试。"); }
+    finally { signOutPending.current = false; setSigningOut(false); }
+  }
 
   const labelsHidden = collapsed || !labelsVisible;
 
@@ -258,7 +269,7 @@ export function AppSidebar() {
       <AgentBrowserButton compact={labelsHidden}/>
       <div className="space-y-1">{allNavGroups.map((group) => <GroupLinks key={group.id} group={group} pathname={pathname} open={Boolean(openGroups[group.id])} collapsed={labelsHidden} onToggle={() => setOpenGroups((current) => ({ ...current, [group.id]: !current[group.id] }))} />)}</div>
       {isAdmin && <div className="mt-1"><NavLink item={adminItem} active={isPathActive(pathname, adminItem.href)} collapsed={labelsHidden} /></div>}
-      <div className="mt-auto space-y-1">{!labelsHidden && <CreditBalance />}<NavLink item={{ ...settingsItem, label: labels.settings }} active={isPathActive(pathname, settingsItem.href)} collapsed={labelsHidden} /><button type="button" onClick={() => void handleSignOut()} title="退出登录" className={cn("flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground", labelsHidden && "w-10 justify-center px-0")}><LogOut className="size-[18px]" strokeWidth={1.8} />{!labelsHidden && <span>退出登录</span>}</button></div>
+      <div className="mt-auto space-y-1">{!labelsHidden && <CreditBalance />}<NavLink item={{ ...settingsItem, label: labels.settings }} active={isPathActive(pathname, settingsItem.href)} collapsed={labelsHidden} /><button type="button" onClick={handleSignOut} aria-label="退出登录" disabled={signingOut} title="退出登录" className={cn("flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground disabled:opacity-50", labelsHidden && "w-10 justify-center px-0")}><LogOut className="size-[18px]" strokeWidth={1.8} />{!labelsHidden && <span>退出登录</span>}</button>{signOutError ? <p role="alert" className="px-2 text-xs text-destructive">{signOutError}</p> : null}</div>
     </aside>
     <MobileNavigation isAdmin={isAdmin} pathname={pathname} />
   </>;

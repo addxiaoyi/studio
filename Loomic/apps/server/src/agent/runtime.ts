@@ -951,6 +951,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
             "Job creation",
             jobSvc.createJob(user, {
               workspaceId,
+              requiresCreditReservation: Boolean(options.creditService && creditsCost > 0),
               ...(canvasId ? { canvasId } : {}),
               ...(sessionId ? { sessionId } : {}),
               idempotencyKey: buildAgentJobIdempotencyKey(
@@ -991,7 +992,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
 
           // Deduct credits after job creation
           if (
-            (!job.reused || job.reactivated) &&
+            (!job.reused || job.reactivated || job.stage === "awaiting_credit_reservation") &&
             options.creditService &&
             creditsCost > 0
           ) {
@@ -1464,6 +1465,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
 
           const job = await jobSvc.createJob(user, {
             workspaceId,
+            requiresCreditReservation: Boolean(options.creditService && creditsCost > 0),
             ...(canvasId ? { canvasId } : {}),
             ...(sessionId ? { sessionId } : {}),
             idempotencyKey: buildAgentJobIdempotencyKey(
@@ -1492,7 +1494,7 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
 
           // Deduct credits after job creation
           if (
-            (!job.reused || job.reactivated) &&
+            (!job.reused || job.reactivated || job.stage === "awaiting_credit_reservation") &&
             options.creditService &&
             creditsCost > 0
           ) {
@@ -1660,11 +1662,6 @@ export function createAgentRunService(options: CreateAgentRuntimeOptions) {
           if(input.presentation&&(input.mode!=="isolated"||!input.recordVideo||(input.pageLimit??3)>3))throw new Error("多光标网站演示需要隔离模式、开启录制且最多3页。");
           if (!options.localDb || !options.jobService || !userId) {
             throw new Error("网站浏览后台任务当前不可用。");
-          }
-          if (false) {
-            throw new Error(
-              "本地浏览器助手尚未连接；请先选择一次性隔离浏览器。",
-            );
           }
           const { validatePublicHttpUrl } = await import(
             "../features/website-capture/isolated-browser.js"

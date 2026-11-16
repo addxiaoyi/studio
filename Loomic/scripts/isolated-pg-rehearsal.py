@@ -3,11 +3,25 @@
 import argparse
 import os
 from pathlib import Path
-import pwd
 import shutil
 import subprocess
 import tempfile
 from urllib.parse import quote
+
+try:
+    import pwd
+except ImportError:
+    class _PwdUnavailable:
+        @staticmethod
+        def getpwnam(_name):
+            raise RuntimeError("Isolated PostgreSQL rehearsal requires a POSIX postgres account.")
+
+    pwd = _PwdUnavailable()
+
+if not hasattr(os, "geteuid"):
+    os.geteuid = lambda: -1
+if not hasattr(os, "chown"):
+    os.chown = lambda *_args: None
 
 
 def run(command, *, env=None, cwd=None):
@@ -40,9 +54,10 @@ def rehearse(base, dump, server, bin_dir):
     env["PGPORT"] = "5432"
     env["PGUSER"] = "postgres"
     try:
-        run(postgres_command(str(bin_dir / "initdb"), "-D", str(data), "--auth-local=trust", "--auth-host=reject", "--no-instructions"), env=env)
+        run(["node", "--import", "tsx", "--input-type=module", "-e", "import 'pg';"], env=env, cwd=server)
+        run(postgres_command(str(bin_dir / "initdb"), "-D", str(data), "--auth-local=trust", "--auth-host=reject", "--no-instructions"), env=env, cwd=base)
         options = f"-c listen_addresses='' -c unix_socket_directories={socket} -c unix_socket_permissions=0700 -c port=5432"
-        run(postgres_command(str(bin_dir / "pg_ctl"), "-D", str(data), "-l", str(cluster / "postgres.log"), "-o", options, "-w", "start"), env=env)
+        run(postgres_command(str(bin_dir / "pg_ctl"), "-D", str(data), "-l", str(cluster / "postgres.log"), "-o", options, "-w", "start"), env=env, cwd=base)
         identity = subprocess.check_output([str(bin_dir / "psql"), "-X", "-d", "postgres", "-At", "-c", "show data_directory"], env=env, text=True).strip()
         if Path(identity).resolve() != data:
             raise RuntimeError("Refusing to restore: database identity does not match the isolated cluster.")
@@ -54,7 +69,7 @@ def rehearse(base, dump, server, bin_dir):
         run(["node", "--import", "tsx", "./src/local-db/migrate.ts"], env=env, cwd=server)
     finally:
         if (data / "postmaster.pid").exists():
-            run(postgres_command(str(bin_dir / "pg_ctl"), "-D", str(data), "-m", "fast", "-w", "stop"), env=env)
+            run(postgres_command(str(bin_dir / "pg_ctl"), "-D", str(data), "-m", "fast", "-w", "stop"), env=env, cwd=base)
         if (data / "postmaster.pid").exists():
             raise RuntimeError(f"Temporary PostgreSQL might still be running; retained {cluster}")
         shutil.rmtree(cluster)

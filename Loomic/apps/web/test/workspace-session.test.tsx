@@ -1,16 +1,17 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, cleanup } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
 import WorkspaceLayout from "@/app/(workspace)/layout";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   replace: vi.fn(),
   retrySession: vi.fn(),
   user: null as unknown,
   loading: false,
   sessionError: new Error("offline"),
+  path: "/assets/" as string | null,
 }));
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/assets/",
+  usePathname: () => state.path,
   useRouter: () => ({ replace: state.replace }),
 }));
 vi.mock("@/lib/auth-context", () => ({ useAuth: () => state }));
@@ -27,6 +28,18 @@ vi.mock("@/components/page-transition", () => ({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  state.path = "/assets/";
+});
+
+it("keeps session recovery available before the router path is ready", () => {
+  state.path = null;
+  render(
+    <WorkspaceLayout>
+      <p>workspace</p>
+    </WorkspaceLayout>,
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent("登录状态");
+  expect(state.replace).not.toHaveBeenCalled();
 });
 it("offers session retry instead of redirecting unknown login state to sign-in", () => {
   render(

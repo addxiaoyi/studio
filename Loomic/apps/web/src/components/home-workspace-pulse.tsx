@@ -4,8 +4,9 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import type { BackgroundJob } from "@helstera/shared";
+import { projectViewHref, type BackgroundJob, type ProjectContext } from "@helstera/shared";
 import type { ProjectSummary } from "@helstera/shared";
+import { fetchProjectContext } from "@/lib/project-context-api";
 import type { FeedPackageRecord } from "@/lib/server-api";
 import { fetchFeedPackages, fetchJobs } from "@/lib/server-api";
 import { cn } from "@/lib/utils";
@@ -29,9 +30,47 @@ export function HomeWorkspacePulse({ accessToken, projects, projectsLoading,show
   const [state, setState] = useState<PulseState>({ packages: [], jobs: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [recentProject, setRecentProject] = useState<ProjectContext | null>(null);
+  const [resumeLoading, setResumeLoading] = useState(Boolean(accessToken));
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [resumeRetry, setResumeRetry] = useState(0);
+
+  useEffect(() => {
+    if (!accessToken) {
+      setRecentProject(null);
+      setResumeError(null);
+      setResumeLoading(false);
+      return;
+    }
+
+    const request = new AbortController();
+    setRecentProject(null);
+    setResumeError(null);
+    setResumeLoading(true);
+
+    void fetchProjectContext(accessToken, {}, request.signal)
+      .then((context) => {
+        if (!request.signal.aborted) setRecentProject(context);
+      })
+      .catch((cause: unknown) => {
+        if (request.signal.aborted) return;
+        setResumeError(cause instanceof Error ? cause.message : "暂时无法读取最近工程，请重试。");
+        console.warn("[home] failed to load the recent project context", cause);
+      })
+      .finally(() => {
+        if (!request.signal.aborted) setResumeLoading(false);
+      });
+
+    return () => request.abort();
+  }, [accessToken, resumeRetry]);
 
   const load = useCallback(async () => {
-    if (!accessToken) return;
+    if (!accessToken) {
+      setState({ packages: [], jobs: [] });
+      setError(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -47,13 +86,22 @@ export function HomeWorkspacePulse({ accessToken, projects, projectsLoading,show
     }
   }, [accessToken]);
 
+  const refresh = useCallback(() => {
+    void load();
+    setResumeRetry((attempt) => attempt + 1);
+  }, [load]);
+
+  const retryResume = useCallback(() => {
+    setResumeRetry((attempt) => attempt + 1);
+  }, []);
+
   useEffect(() => {
     void load();
   }, [load]);
 
   const activeJobs = state.jobs.filter((job) => activeJobStatuses.has(job.status));
   const attentionJobs = state.jobs.filter((job) => attentionJobStatuses.has(job.status));
-  const hasContent = projects.length > 0 || state.packages.length > 0 || state.jobs.length > 0;
+  const hasContent = projects.length > 0 || state.packages.length > 0 || state.jobs.length > 0 || recentProject !== null;
 
   return (
     <section aria-labelledby="home-workspace-pulse-title" className="my-10 w-full rounded-xl border border-border/70 bg-card/70 p-5 shadow-sm sm:p-7">
@@ -63,10 +111,39 @@ export function HomeWorkspacePulse({ accessToken, projects, projectsLoading,show
           <h2 id="home-workspace-pulse-title" className="mt-2 text-xl font-medium tracking-tight">继续你的工作</h2>
           <p className="mt-1 text-sm text-muted-foreground">从最近项目、内容包或后台任务继续，不需要重新寻找上下文。</p>
         </div>
-        <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-muted disabled:cursor-wait disabled:opacity-60">
+        <button type="button" onClick={refresh} disabled={loading} className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-muted disabled:cursor-wait disabled:opacity-60">
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />刷新状态
         </button>
       </header>
+
+      {resumeLoading && !recentProject && (
+        <div role="status" className="mt-5 h-16 animate-pulse rounded-lg bg-muted/50" aria-label="正在读取最近工程" aria-busy="true" />
+      )}
+
+      {resumeError && (
+        <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          <span>最近工程暂时无法读取：{resumeError}</span>
+          <button type="button" onClick={retryResume} className="font-medium underline underline-offset-2">重试</button>
+        </div>
+      )}
+
+      {!resumeLoading && !resumeError && recentProject && (
+        <Link
+          href={projectViewHref(recentProject, recentProject.view)}
+          className="mt-5 flex min-h-16 items-center justify-between gap-4 rounded-lg border border-border/70 bg-background/70 px-4 py-3 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span className="min-w-0">
+            <span className="block text-[11px] text-muted-foreground">继续上次项目 · {recentProject.canvas.name}</span>
+            <span className="mt-1 block truncate text-sm font-medium">{recentProject.project.name}</span>
+            {recentProject.session && <span className="mt-0.5 block truncate text-xs text-muted-foreground">对话：{recentProject.session.title}</span>}
+          </span>
+          <ArrowRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </Link>
+      )}
+
+      {!resumeLoading && !resumeError && !recentProject && accessToken && (
+        <p className="mt-5 rounded-lg border border-dashed border-border px-4 py-3 text-xs text-muted-foreground">还没有可恢复的工程。打开一个项目后，这里会记住你上次停留的位置。</p>
+      )}
 
       {error && (
         <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -79,7 +156,7 @@ export function HomeWorkspacePulse({ accessToken, projects, projectsLoading,show
         <div className="mt-6 grid gap-3 sm:grid-cols-3" aria-busy="true">
           {[1, 2, 3].map((item) => <div key={item} className="h-28 animate-pulse rounded-lg bg-muted/60" />)}
         </div>
-      ) : !hasContent ? (
+      ) : !hasContent && !resumeLoading && !recentProject && !resumeError ? (
         <div className="mt-6 rounded-lg border border-dashed border-border p-6 text-center">
           <p className="text-sm font-medium">还没有可继续的工作</p>
           <p className="mt-1 text-xs text-muted-foreground">从上方输入创意，或先建立一个品牌规范。</p>

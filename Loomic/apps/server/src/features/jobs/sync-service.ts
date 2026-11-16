@@ -31,6 +31,7 @@ export async function syncGenerationJob(
     `update background_jobs
      set sync_claimed_at = now(), sync_attempt_count = case when $2 then 0 else sync_attempt_count end
      where id = $1 and status in ('sync_pending', 'sync_failed')
+       and (settlement_review is null or settlement_review->>'status'='consumed')
        ${dueFilter}
        and (sync_claimed_at is null or sync_claimed_at < now() - interval '15 minutes')
      returning id, job_type, canvas_id, payload, result, sync_attempt_count`,
@@ -147,6 +148,8 @@ async function markSynced(db: Pool, jobId: string, result: Record<string, unknow
      set status = 'succeeded', result = $2, error_code = null,
          error_message = null, sync_error_code = null,
          sync_error_message = null, next_sync_at = null, sync_claimed_at = null,
+         stage = case when $2::jsonb->'cancellation'->>'requested' = 'true'
+           then 'completed_after_cancel_request' else stage end,
          completed_at = now(), updated_at = now()
      where id = $1 and status in ('sync_pending', 'sync_failed')`,
     [jobId, result],

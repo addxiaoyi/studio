@@ -6,10 +6,19 @@ import { useLocale } from "@/lib/i18n";
 import { StyledSelect } from "./ui/styled-select";
 
 const views: { value: ProjectView; zh: string; en: string }[] = [
+  { value: "fitting", zh: "试穿", en: "Try-on" },
   { value: "canvas", zh: "画布", en: "Canvas" }, { value: "workflow", zh: "工作流", en: "Workflow" },
   { value: "timeline", zh: "时间线", en: "Timeline" }, { value: "video", zh: "视频剪辑", en: "Video" },
   { value: "conversation", zh: "对话", en: "Chat" },
 ];
+const nextView: Record<ProjectView, { zh: string; en: string }> = {
+  fitting: { zh: "视频剪辑", en: "Video" },
+  canvas: { zh: "工作流", en: "Workflow" },
+  workflow: { zh: "时间线", en: "Timeline" },
+  timeline: { zh: "视频剪辑", en: "Video" },
+  video: { zh: "对话", en: "Chat" },
+  conversation: { zh: "画布", en: "Canvas" },
+};
 
 export function ProjectViewNav({ context, current, desktop = false, compact = false, disabled = false, beforeNavigate }: {
   context: ProjectContext; current: ProjectView; desktop?: boolean; compact?: boolean; disabled?: boolean;
@@ -31,8 +40,14 @@ export function ProjectViewNav({ context, current, desktop = false, compact = fa
   }
   const changeView = (view: string) => { void navigate(view as ProjectView); };
   return <nav aria-label={english ? "Project views" : "工程视图"} className="min-w-0 max-w-full">
-    <div className={compact ? "w-36 max-w-full" : "sm:hidden"}>
+    <div className="flex min-w-0 items-center gap-2">
+      <span className="max-w-48 truncate text-sm font-medium" title={context.project.name}>{context.project.name}</span>
+      <span className="hidden max-w-72 truncate text-xs text-muted-foreground md:inline" title={context.nextStep?.label ?? (english ? `Next: ${nextView[current].en}` : `下一步：${nextView[current].zh}`)}>
+        {context.nextStep?.label ?? (english ? `Next: ${nextView[current].en}` : `下一步：${nextView[current].zh}`)}
+      </span>
+      <div className={compact ? "w-36 max-w-full" : "sm:hidden"}>
       <StyledSelect aria-label={english ? "Switch project view" : "切换工程视图"} value={current} options={views.map(view => ({ value:view.value,label:english?view.en:view.zh }))} onChange={changeView} disabled={disabled || busy}/>
+      </div>
     </div>
     {!compact && <div className="hidden flex-wrap items-center gap-1 sm:flex">
       {views.map(view => <a key={view.value} href={projectViewHref(context,view.value,desktop)} data-view={view.value} onClick={visit} aria-current={current===view.value?"page":undefined} aria-disabled={disabled || busy} className={`inline-flex min-h-9 items-center rounded-md px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${current===view.value?"bg-muted font-medium text-foreground":"text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}>

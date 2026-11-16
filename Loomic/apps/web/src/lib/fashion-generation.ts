@@ -13,6 +13,9 @@ export type FashionInput = {
   model: string;
   size: string;
   client_config?: unknown;
+  project_id?: string;
+  canvas_id?: string;
+  session_id?: string;
 };
 export type FashionApproval = {
   approvalId: string;
@@ -43,6 +46,7 @@ export type FashionProgress = {
     | "approval"
     | "queued"
     | "running"
+    | "cancel_requested"
     | "downloading"
     | "completed"
     | "failed"
@@ -90,7 +94,9 @@ export async function cancelFashion(userId: string, token: string) {
   await cancelJob(token, request.jobId);
   const { job } = await fetchJob(token, request.jobId);
   if (job.status === "succeeded")
-    throw new Error("任务已完成，请恢复并取回结果。");
+    throw new Error(job.stage === "completed_after_cancel_request" ? "取消请求到达时任务已完成，结果和费用已保留，请取回结果。" : "任务已完成，请恢复并取回结果。");
+  if (job.stage === "cancel_requested")
+    throw new Error("取消请求已提交，正在等待最终结果；积分暂不退款。请稍后刷新任务状态。");
   if (["failed", "dead_letter", "canceled"].includes(job.status)) {
     finishFashion(userId, request.jobId);
     return;
@@ -176,10 +182,17 @@ async function pollResult(
   while (Date.now() < deadline) {
     signal.throwIfAborted();
     const { job } = await fetchJob(token, jobId, signal);
+    if (job.status === "queued" && job.stage === "awaiting_credit_reservation" && job.error_code === "credit_reservation_failed") {
+      throw new Error("积分预扣未完成，尚未调用试穿模型。补足余额后点击恢复原任务，或取消此任务。");
+    }
     progress({
-      stage: job.status === "queued" ? "queued" : "running",
+      stage: job.cancel_requested_at || job.stage === "cancel_requested" ? "cancel_requested" : job.status === "queued" ? "queued" : "running",
       message:
-        job.status === "queued"
+        job.status === "queued" && job.stage === "awaiting_credit_reservation"
+          ? "正在核对积分预扣，尚未开始调用试穿模型。"
+          : job.cancel_requested_at || job.stage === "cancel_requested"
+          ? "取消请求已提交，正在等待最终结果；积分暂不退款。"
+          : job.status === "queued"
           ? "任务已排队，可离开页面后恢复原任务。"
           : `正在试穿生成${typeof job.progress === "number" ? ` · ${job.progress}%` : ""}，无需再次确认或扣费。`,
       jobId,
@@ -194,7 +207,7 @@ async function pollResult(
       finishFashion(userId, jobId);
       progress({
         stage: job.status === "canceled" ? "canceled" : "failed",
-        message: `${job.error_message || "试穿任务已终止。"} 费用处理请在用量记录中核对。`,
+        message: `${job.cancel_requested_at ? "取消请求期间任务已终止；供应商费用仍需按任务回执核验。" : ""}${job.error_message || "试穿任务已终止。"} 费用处理请在用量记录中核对。`,
         jobId,
         model,
       });
@@ -203,9 +216,12 @@ async function pollResult(
       );
     }
     if (job.status === "succeeded" && job.result) {
+      const completedAfterCancel = job.stage === "completed_after_cancel_request" || (job.result.cancellation as { requested?: unknown } | undefined)?.requested === true;
       progress({
         stage: "downloading",
-        message: "生成完成，正在取回私有结果；下载失败可重试取回。",
+        message: completedAfterCancel
+          ? "取消请求到达时任务已完成，结果和费用已保留，正在取回结果。"
+          : "生成完成，正在取回私有结果；下载失败可重试取回。",
         jobId,
         model,
       });
@@ -232,7 +248,9 @@ async function pollResult(
       const validated = decodeFashionImage(encoded, "try-on");
       progress({
         stage: "completed",
-        message: "试穿完成，结果已回到本页和私有素材库。",
+        message: completedAfterCancel
+          ? "取消请求到达时任务已完成，结果和费用已保留；结果已回到本页和私有素材库。"
+          : "试穿完成，结果已回到本页和私有素材库。",
         jobId,
         model,
       });
@@ -267,6 +285,7 @@ async function continueRequest(
   confirm: Confirm,
   signal: AbortSignal,
   progress: Progress,
+  retryReservation = false,
 ) {
   if (!request.jobId && request.approval) {
     const status = await fetchGenerationApprovalStatus(
@@ -292,6 +311,15 @@ async function continueRequest(
   }
   if (!request.jobId)
     throw new Error("上传尚未完成，请重新选择同一组照片和服装后继续。");
+  if (retryReservation) {
+    const { job } = await fetchJob(token, request.jobId, signal);
+    signal.throwIfAborted();
+    if (job.status === "queued" && job.stage === "awaiting_credit_reservation") {
+      if (!request.approval) throw new Error("原任务缺少费用确认记录，请到活动中恢复原请求，或取消后重新确认。");
+      const restoredId = await confirm(request.approval);
+      if (restoredId !== request.jobId) throw new Error("恢复返回的任务与原任务不一致，请在活动中核对。");
+    }
+  }
   return pollResult(
     userId,
     token,
@@ -311,7 +339,7 @@ export async function resumeFashion(
 ) {
   const request = pendingFashion(userId);
   if (!request) throw new Error("没有待恢复的试穿任务。");
-  return continueRequest(userId, token, request, confirm, signal, progress);
+  return continueRequest(userId, token, request, confirm, signal, progress, true);
 }
 
 export async function generateFashion(
@@ -393,6 +421,9 @@ export async function generateFashion(
         model: input.model,
         aspect_ratio: "2:3",
         input_asset_ids: request.assets,
+        ...(input.project_id ? { project_id: input.project_id } : {}),
+        ...(input.canvas_id ? { canvas_id: input.canvas_id } : {}),
+        ...(input.session_id ? { session_id: input.session_id } : {}),
         prompt:
           "虚拟试穿：第一张是人物照片，第二张是服装参考（可能包含上衣与下装）。保持第一张人物的身份、面部特征、身形和姿态，准确呈现参考服装的版型、材质、图案与颜色，生成完整的自然试穿照片。",
       }),

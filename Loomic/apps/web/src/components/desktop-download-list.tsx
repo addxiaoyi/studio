@@ -1,15 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, MonitorDown, RefreshCw } from "lucide-react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { DesktopEmptyState } from "@/components/desktop-empty-state";
 import { useDesktopToast } from "@/components/desktop-toast";
 import {
-  formatDesktopCopy,
-  useDesktopCopy,
   type DesktopCopy,
   type DesktopLocale,
+  formatDesktopCopy,
+  useDesktopCopy,
 } from "@/lib/desktop-copy";
 
 const PLATFORMS = [
@@ -31,78 +31,138 @@ type DesktopReleaseManifest = {
   publishedAt: string;
 };
 
-function isReleaseManifest(value: unknown, expectedPlatform: PlatformId): value is DesktopReleaseManifest {
+function isReleaseManifest(
+  value: unknown,
+  expectedPlatform: PlatformId,
+): value is DesktopReleaseManifest {
   if (!value || typeof value !== "object") return false;
   const manifest = value as Record<string, unknown>;
-  return manifest.platform === expectedPlatform
-    && typeof manifest.version === "string"
-    && /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(manifest.version)
-    && typeof manifest.fileName === "string"
-    && /^[A-Za-z0-9._-]+$/.test(manifest.fileName)
-    && typeof manifest.sha256 === "string"
-    && /^[a-f0-9]{64}$/i.test(manifest.sha256)
-    && (manifest.portableFileName === undefined || (typeof manifest.portableFileName === "string" && /^[A-Za-z0-9._-]+$/.test(manifest.portableFileName)))
-    && (manifest.portableSha256 === undefined || (typeof manifest.portableSha256 === "string" && /^[a-f0-9]{64}$/i.test(manifest.portableSha256)))
-    && typeof manifest.publishedAt === "string"
-    && Number.isFinite(Date.parse(manifest.publishedAt));
+  return (
+    manifest.platform === expectedPlatform &&
+    typeof manifest.version === "string" &&
+    /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(manifest.version) &&
+    typeof manifest.fileName === "string" &&
+    /^[A-Za-z0-9._-]+$/.test(manifest.fileName) &&
+    typeof manifest.sha256 === "string" &&
+    /^[a-f0-9]{64}$/i.test(manifest.sha256) &&
+    (manifest.portableFileName === undefined ||
+      (typeof manifest.portableFileName === "string" &&
+        /^[A-Za-z0-9._-]+$/.test(manifest.portableFileName))) &&
+    (manifest.portableSha256 === undefined ||
+      (typeof manifest.portableSha256 === "string" &&
+        /^[a-f0-9]{64}$/i.test(manifest.portableSha256))) &&
+    typeof manifest.publishedAt === "string" &&
+    Number.isFinite(Date.parse(manifest.publishedAt))
+  );
 }
 
-async function fetchRelease(platform: PlatformId, copy: DesktopCopy): Promise<DesktopReleaseManifest | null> {
-  const response = await fetch(`/downloads/desktop-release-${platform}.json`, { cache: "no-store" });
+async function fetchRelease(
+  platform: PlatformId,
+  copy: DesktopCopy,
+  signal: AbortSignal,
+): Promise<DesktopReleaseManifest | null> {
+  const response = await fetch(`/downloads/desktop-release-${platform}.json`, {
+    cache: "no-store",
+    signal,
+  });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(copy.downloads.releaseUnavailable);
   const payload: unknown = await response.json();
-  if (!isReleaseManifest(payload, platform)) throw new Error(copy.downloads.manifestInvalid);
+  if (!isReleaseManifest(payload, platform))
+    throw new Error(copy.downloads.manifestInvalid);
   return payload;
 }
 
-export function DesktopDownloadList({ locale }: { locale?: DesktopLocale | null } = {}) {
+export function DesktopDownloadList({
+  locale,
+}: { locale?: DesktopLocale | null } = {}) {
   const { copy } = useDesktopCopy(locale);
   const toast = useDesktopToast();
-  const [releases, setReleases] = useState<Partial<Record<PlatformId, DesktopReleaseManifest>>>({});
+  const [releases, setReleases] = useState<
+    Partial<Record<PlatformId, DesktopReleaseManifest>>
+  >({});
   const [failedPlatforms, setFailedPlatforms] = useState<PlatformId[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const hasLoaded = useRef(false);
+  const currentRead = useRef<AbortController | null>(null);
 
   const loadReleases = useCallback(async () => {
+    currentRead.current?.abort();
+    const abort = new AbortController();
+    currentRead.current = abort;
     setLoading(true);
     setError(null);
-    const results = await Promise.allSettled(PLATFORMS.map(async ({ id }) => ({ id, manifest: await fetchRelease(id, copy) })));
+    const results = await Promise.allSettled(
+      PLATFORMS.map(async ({ id }) => ({
+        id,
+        manifest: await fetchRelease(id, copy, abort.signal),
+      })),
+    );
+    if (abort.signal.aborted || currentRead.current !== abort) return;
     const next: Partial<Record<PlatformId, DesktopReleaseManifest>> = {};
+    const withdrawn = new Set<PlatformId>();
     const failed: PlatformId[] = [];
     // The rejection reason used to be thrown away, so a broken manifest read looked
     // identical to "not published yet". Keep the reason and say it out loud.
     const reasons = new Set<string>();
     for (const [index, result] of results.entries()) {
       if (result.status === "rejected") {
-        failed.push(PLATFORMS[index]!.id);
-        const reason = result.reason instanceof Error ? result.reason.message.trim() : "";
+        const platform = PLATFORMS[index];
+        if (!platform)
+          throw new Error("Unexpected desktop release response index");
+        failed.push(platform.id);
+        const reason =
+          result.reason instanceof Error ? result.reason.message.trim() : "";
         reasons.add(reason || copy.downloads.releaseUnavailable);
         continue;
       }
       if (result.value.manifest) next[result.value.id] = result.value.manifest;
+      else withdrawn.add(result.value.id);
     }
-    setReleases((current) => ({ ...current, ...next }));
+    // A failed read may keep a known download, but an explicit 404 revokes it.
+    setReleases((current) =>
+      Object.fromEntries(
+        Object.entries({ ...current, ...next }).filter(
+          ([id]) => !withdrawn.has(id as PlatformId),
+        ),
+      ),
+    );
     setFailedPlatforms(failed);
     const reasonText = [...reasons].join(copy.downloads.reasonSeparator);
     const allFailed = failed.length === PLATFORMS.length;
-    setError(allFailed
-      ? reasonText
-        ? formatDesktopCopy(copy.downloads.allFailedWithReason, { reason: reasonText })
-        : copy.downloads.allFailed
-      : null);
+    setError(
+      allFailed
+        ? reasonText
+          ? formatDesktopCopy(copy.downloads.allFailedWithReason, {
+              reason: reasonText,
+            })
+          : copy.downloads.allFailed
+        : null,
+    );
     setLoading(false);
 
     if (failed.length > 0) {
       const scope = allFailed
         ? copy.downloads.toastAllFailed
-        : formatDesktopCopy(copy.downloads.toastPartialFailed, { failed: failed.length, total: PLATFORMS.length });
-      toast.push({ tone: "error", message: formatDesktopCopy(copy.downloads.toastFailed, { scope, reason: reasonText }), key: `download:list-failed:${reasonText}` });
+        : formatDesktopCopy(copy.downloads.toastPartialFailed, {
+            failed: failed.length,
+            total: PLATFORMS.length,
+          });
+      toast.push({
+        tone: "error",
+        message: formatDesktopCopy(copy.downloads.toastFailed, {
+          scope,
+          reason: reasonText,
+        }),
+        key: `download:list-failed:${reasonText}`,
+      });
     } else if (hasLoaded.current) {
       toast.push({
         tone: "success",
-        message: formatDesktopCopy(copy.downloads.toastRefreshed, { count: Object.keys(next).length }),
+        message: formatDesktopCopy(copy.downloads.toastRefreshed, {
+          count: Object.keys(next).length,
+        }),
         key: "download:list-refreshed",
       });
     }
@@ -111,23 +171,36 @@ export function DesktopDownloadList({ locale }: { locale?: DesktopLocale | null 
 
   useEffect(() => {
     void loadReleases();
+    return () => currentRead.current?.abort();
   }, [loadReleases]);
 
   return (
     <section aria-labelledby="desktop-platforms-title" className="mt-9">
       <div className="mb-3 flex items-end justify-between gap-3">
         <div>
-          <h2 id="desktop-platforms-title" className="text-sm font-semibold">{copy.downloads.title}</h2>
-          <p className="mt-1 text-xs text-muted-foreground">{copy.downloads.subtitle}</p>
+          <h2 id="desktop-platforms-title" className="text-sm font-semibold">
+            {copy.downloads.title}
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {copy.downloads.subtitle}
+          </p>
         </div>
-        {error ? (
-          <button type="button" onClick={() => void loadReleases()} aria-label={copy.downloads.rereadAria} className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border/60 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        {failedPlatforms.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => void loadReleases()}
+            disabled={loading}
+            aria-label={copy.downloads.rereadAria}
+            className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border/60 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             <RefreshCw className="size-4" aria-hidden="true" />
           </button>
         ) : null}
       </div>
 
-      {!loading && !error && Object.keys(releases).length === 0 ? (
+      {!loading &&
+      failedPlatforms.length === 0 &&
+      Object.keys(releases).length === 0 ? (
         <DesktopEmptyState
           icon={Download}
           title={copy.downloads.emptyTitle}
@@ -147,60 +220,122 @@ export function DesktopDownloadList({ locale }: { locale?: DesktopLocale | null 
           {PLATFORMS.map((platform) => {
             const release = releases[platform.id];
             const failed = failedPlatforms.includes(platform.id);
-            const isPortableWindows = platform.id === "windows-x64" && Boolean(release?.portableFileName);
-            const fileName = release ? (isPortableWindows ? release.portableFileName ?? release.fileName : release.fileName) : null;
+            const isPortableWindows =
+              platform.id === "windows-x64" &&
+              Boolean(release?.portableFileName);
+            const fileName = release
+              ? isPortableWindows
+                ? (release.portableFileName ?? release.fileName)
+                : release.fileName
+              : null;
             const PlatformIcon = platform.icon;
-            const label = copy.downloads.platformLabels[platform.id] ?? platform.id;
-            const cardClass = "group flex min-h-[76px] items-center gap-4 rounded-lg border border-border/70 bg-background px-4 py-3 text-left transition-colors hover:border-foreground/30 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
+            const label =
+              copy.downloads.platformLabels[platform.id] ?? platform.id;
+            const cardClass =
+              "group flex min-h-[76px] items-center gap-4 rounded-lg border border-border/70 bg-background px-4 py-3 text-left transition-colors hover:border-foreground/30 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
             const details = (
-              <>
-                <span className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${isPortableWindows ? "bg-emerald-700 text-white" : "bg-muted text-foreground"}`}>
+              <Fragment key={platform.id}>
+                <span
+                  className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${isPortableWindows ? "bg-emerald-700 text-white" : "bg-muted text-foreground"}`}
+                >
                   <PlatformIcon className="size-[18px]" aria-hidden="true" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold">
                     {label}
-                    {isPortableWindows ? <span className="rounded-sm bg-emerald-700/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">{copy.downloads.portableBadge}</span> : null}
+                    {isPortableWindows ? (
+                      <span className="rounded-sm bg-emerald-700/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
+                        {copy.downloads.portableBadge}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="mt-1 block text-xs text-muted-foreground">
-                    {loading ? copy.downloads.readingVersion : release ? `${platform.architecture} · v${release.version}` : failed ? copy.downloads.versionUnavailable : copy.downloads.notPublished}
+                    {loading
+                      ? copy.downloads.readingVersion
+                      : release
+                        ? `${platform.architecture} · v${release.version}${failed ? ` · ${copy.downloads.versionUnavailable}` : ""}`
+                        : failed
+                          ? copy.downloads.versionUnavailable
+                          : copy.downloads.notPublished}
                   </span>
                 </span>
                 <span className="hidden shrink-0 items-center gap-1.5 text-xs font-medium text-foreground sm:inline-flex">
-                  {release ? copy.downloads.download : failed ? copy.downloads.retry : loading ? copy.downloads.reading : copy.downloads.unpublished}
-                  {release ? <Download className="size-3.5" aria-hidden="true" /> : failed ? <RefreshCw className="size-3.5" aria-hidden="true" /> : null}
+                  {release
+                    ? copy.downloads.download
+                    : failed
+                      ? copy.downloads.retry
+                      : loading
+                        ? copy.downloads.reading
+                        : copy.downloads.unpublished}
+                  {release ? (
+                    <Download className="size-3.5" aria-hidden="true" />
+                  ) : failed ? (
+                    <RefreshCw className="size-3.5" aria-hidden="true" />
+                  ) : null}
                 </span>
-              </>
+              </Fragment>
             );
-  
+
             return release && fileName ? (
               <div key={platform.id} className="space-y-2">
-              {isPortableWindows && <a href={`/downloads/${encodeURIComponent(release.fileName)}`} download className={cardClass}>
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground"><Download className="size-[18px]" aria-hidden="true"/></span>
-                <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{copy.downloads.windowsInstaller}</span><span className="mt-1 block text-xs text-muted-foreground">v{release.version} · {copy.downloads.installerHint}</span></span>
-                <span className="sr-only">SHA-256 {release.sha256}</span>
-              </a>}
-              <a
-                href={`/downloads/${encodeURIComponent(fileName)}`}
-                download
-                className={cardClass}
-                onClick={() => toast.push({
-                  tone: "info",
-                  message: formatDesktopCopy(copy.downloads.startDownload, {
-                    label,
-                    suffix: isPortableWindows
-                      ? copy.downloads.portableSuffix
-                      : formatDesktopCopy(copy.downloads.architectureSuffix, { architecture: platform.architecture }),
-                  }),
-                  key: `download:start:${platform.id}`,
-                })}
-              >
-                {details}
-                <span className="sr-only">SHA-256 {isPortableWindows ? release.portableSha256 ?? release.sha256 : release.sha256}</span>
-              </a>
+                {isPortableWindows && (
+                  <a
+                    href={`/downloads/${encodeURIComponent(release.fileName)}`}
+                    download
+                    className={cardClass}
+                  >
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+                      <Download className="size-[18px]" aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold">
+                        {copy.downloads.windowsInstaller}
+                      </span>
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        v{release.version} · {copy.downloads.installerHint}
+                      </span>
+                    </span>
+                    <span className="sr-only">SHA-256 {release.sha256}</span>
+                  </a>
+                )}
+                <a
+                  href={`/downloads/${encodeURIComponent(fileName)}`}
+                  download
+                  className={cardClass}
+                  onClick={() =>
+                    toast.push({
+                      tone: "info",
+                      message: formatDesktopCopy(copy.downloads.startDownload, {
+                        label,
+                        suffix: isPortableWindows
+                          ? copy.downloads.portableSuffix
+                          : formatDesktopCopy(
+                              copy.downloads.architectureSuffix,
+                              { architecture: platform.architecture },
+                            ),
+                      }),
+                      key: `download:start:${platform.id}`,
+                    })
+                  }
+                >
+                  {details}
+                  <span className="sr-only">
+                    SHA-256{" "}
+                    {isPortableWindows
+                      ? (release.portableSha256 ?? release.sha256)
+                      : release.sha256}
+                  </span>
+                </a>
               </div>
             ) : (
-              <button key={platform.id} type="button" disabled={!failed} onClick={() => void loadReleases()} aria-busy={loading} className={`${cardClass} w-full opacity-75 disabled:cursor-default`}>
+              <button
+                key={platform.id}
+                type="button"
+                disabled={!failed}
+                onClick={() => void loadReleases()}
+                aria-busy={loading}
+                className={`${cardClass} w-full opacity-75 disabled:cursor-default`}
+              >
                 {details}
               </button>
             );
@@ -208,8 +343,12 @@ export function DesktopDownloadList({ locale }: { locale?: DesktopLocale | null 
         </div>
       )}
 
-      <p role={error ? "alert" : "status"} className="mt-3 min-h-5 border-t border-border/60 pt-3 text-xs text-muted-foreground">
-        {error ?? (loading ? copy.downloads.footerLoading : copy.downloads.footerHint)}
+      <p
+        role={error ? "alert" : "status"}
+        className="mt-3 min-h-5 border-t border-border/60 pt-3 text-xs text-muted-foreground"
+      >
+        {error ??
+          (loading ? copy.downloads.footerLoading : copy.downloads.footerHint)}
       </p>
     </section>
   );

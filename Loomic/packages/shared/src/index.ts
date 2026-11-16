@@ -46,3 +46,4 @@ export * from "./workflow-versions.js";
 export * from "./project-backup.js";
 export * from "./project-context.js";
 export * from "./project-video-document.js";
+export * from "./gallery-captions.js";

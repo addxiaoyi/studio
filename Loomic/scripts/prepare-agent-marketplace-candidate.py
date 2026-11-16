@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import subprocess
 import tempfile
 import zipfile
 
@@ -36,6 +37,34 @@ def sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+def materialize_runtime(stage: pathlib.Path) -> pathlib.Path:
+    runtime = stage / "deploy/server-runtime"
+    helper = ROOT / "scripts/server-runtime-lock.mjs"
+    generated = subprocess.run(
+        ["node", str(helper), str(ROOT)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    manifests = json.loads(generated.stdout)
+    for relative, content in manifests.items():
+        target = runtime / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    shared_dist = ROOT / "packages/shared/dist"
+    if not shared_dist.is_dir():
+        raise FileNotFoundError(f"Required shared build output is missing: {shared_dist}")
+    for source in shared_dist.rglob("*"):
+        if source.is_symlink():
+            raise ValueError(f"Symbolic links are not allowed in runtime inputs: {source}")
+        if source.is_file():
+            target = runtime / "packages/shared/dist" / source.relative_to(shared_dist)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
+    return runtime
+
+
 def create_patch_archive(destination: pathlib.Path) -> tuple[str, list[str]]:
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="helstera-agent-marketplace-patch-") as temporary:
@@ -44,11 +73,13 @@ def create_patch_archive(destination: pathlib.Path) -> tuple[str, list[str]]:
         digests: dict[str, str] = {}
         for relative in OVERLAYS:
             source = ROOT / relative
+            if relative == "deploy/server-runtime":
+                source = materialize_runtime(stage)
             sources = sorted(path for path in source.rglob("*") if path.is_file() and not path.is_symlink()) if source.is_dir() else [source]
             if not sources or any(not path.is_file() for path in sources):
                 raise FileNotFoundError(f"Required marketplace source is missing: {source}")
             for source_file in sources:
-                file_relative = source_file.relative_to(ROOT).as_posix()
+                file_relative = f"{relative}/{source_file.relative_to(source).as_posix()}" if source.is_dir() else relative
                 target = stage / file_relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(source_file.read_bytes())

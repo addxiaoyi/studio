@@ -305,8 +305,9 @@ async function createJob(
     idempotencyKey: `agent-workflow:${workflowId}:generate-media`,
     jobType,
     payload: { ...input, model: route.selectedModel, routing: route },
+    requiresCreditReservation: Boolean(context.creditService && creditsCost > 0),
   });
-  if (job.reused) return job;
+  if (job.reused && job.stage !== "awaiting_credit_reservation") return job;
   if (context.creditService && creditsCost > 0) {
     try {
       const transactionId = await context.creditService.deductCredits(context.workspaceId, context.user.id, creditsCost, job.id, `Agent workflow ${jobType === "video_generation" ? "video" : "image"} generation`);

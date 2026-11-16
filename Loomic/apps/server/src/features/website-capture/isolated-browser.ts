@@ -25,6 +25,7 @@ import { CAPTURE_FPS, joinCaptureSegments } from "./video-encoder.js";
 import { closeCaptureContext } from "./capture-teardown.js";
 import { assertConnectorEnabled } from "../agent-goals/connector-gate.js";
 import { withMediaBudget } from "../../runtime/media-admission.js";
+import type { CapacityPolicy } from "../../config/capacity-policy.js";
 import type { Pool, PoolClient } from "pg";
 import type { StorageProvider } from "../../storage/storage-provider.js";
 import type { WebsiteCaptureClaim, WebsiteCaptureEvidence, WebsiteCapturePage, WebsiteCaptureResult } from "@helstera/shared";
@@ -112,6 +113,7 @@ type CaptureOptions = {
   webOrigin: string;
   task: CaptureTask;
   onProgress: CaptureProgress;
+  capacityPolicy?: CapacityPolicy;
   signal?: AbortSignal;
 };
 
@@ -120,6 +122,7 @@ export async function captureIsolatedWebsite(options: CaptureOptions): Promise<W
   return withMediaBudget({
     db: options.db, storageRoot: options.storageRoot, kind: "capture",
     reserveBytes: (options.task.record_video ? 1024 : 256) * 1024 ** 2,
+    ...(options.capacityPolicy ? { capacityPolicy: options.capacityPolicy } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
   }, budget => captureWithBudget({ ...options, signal: budget.signal }, budget.scratchRoot),
   () => options.onProgress(2, "waiting_resources", "正在等待录制资源，原任务和审批仍保留。"));

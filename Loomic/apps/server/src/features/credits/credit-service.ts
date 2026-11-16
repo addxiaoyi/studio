@@ -73,6 +73,7 @@ export type CreditService = {
     amount: number,
     jobId?: string,
     description?: string,
+    approvalId?: string,
   ): Promise<string>;
   refundCredits(
     workspaceId: string,
@@ -84,6 +85,7 @@ export type CreditService = {
   getTransactions(
     workspaceId: string,
     limit?: number,
+    offset?: number,
   ): Promise<CreditTransactionRow[]>;
 
   // New top-up flow
@@ -137,7 +139,7 @@ export function createCreditService(options: {
           .from("credit_transactions")
           .select("amount")
           .eq("workspace_id", workspaceId)
-          .eq("transaction_type", "generation_deduct"),
+          .in("transaction_type", ["generation_deduct", "generation_adjustment", "generation_refund"]),
       ]);
 
       if (balanceResult.error) {
@@ -153,7 +155,7 @@ export function createCreditService(options: {
         0,
       );
       const totalSpent = (deductResult.data ?? []).reduce(
-        (sum, row) => sum + Math.abs(row.amount ?? 0),
+        (sum, row) => sum - Number(row.amount ?? 0),
         0,
       );
 
@@ -164,7 +166,8 @@ export function createCreditService(options: {
       };
     },
 
-    async deductCredits(workspaceId, userId, amount, jobId, description) {
+    async deductCredits(workspaceId, userId, amount, jobId, description, approvalId) {
+      if (approvalId) throw new CreditServiceError("credit_deduct_failed", "费用确认扣款需要事务数据库支持。", 503);
       const admin = options.getAdminClient();
 
       const { data, error } = await admin.rpc("deduct_credits", {
@@ -215,9 +218,9 @@ export function createCreditService(options: {
       return data as string;
     },
 
-    async getTransactions(workspaceId, limit = 20) {
+    async getTransactions(workspaceId, limit = 20, offset = 0) {
       const admin = options.getAdminClient();
-      const safeLimit = Math.min(Math.max(limit, 1), 100);
+      const safeLimit = Math.min(Math.max(limit, 1), 101);
 
       const { data, error } = await admin
         .from("credit_transactions")
@@ -226,7 +229,8 @@ export function createCreditService(options: {
         )
         .eq("workspace_id", workspaceId)
         .order("created_at", { ascending: false })
-        .limit(safeLimit);
+        .order("id", { ascending: false })
+        .range(offset, offset + safeLimit - 1);
 
       if (error) {
         throw new CreditServiceError(

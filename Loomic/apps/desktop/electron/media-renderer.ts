@@ -11,6 +11,15 @@ export type FfmpegOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   spawnProcess?: typeof spawn;
+  onProgress?: (event: FfmpegProgress) => void;
+};
+
+export type FfmpegProgress = {
+  line: string;
+  key?: string;
+  value?: string;
+  outTimeMs?: number;
+  progress?: "continue" | "end";
 };
 
 export type FfmpegResult = {
@@ -19,12 +28,25 @@ export type FfmpegResult = {
   stderr: string;
 };
 
+// H.264 rejects odd frame dimensions; pad after aspect-ratio scaling so portrait
+// and fractional-ratio sources cannot create an empty proxy file.
+export const VIDEO_PREVIEW_FILTER = "scale=854:-2:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2";
+
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const runProbe = promisify(execFile);
 
 function appendOutput(previous: string, chunk: Buffer | string): string {
   return (previous + chunk.toString()).slice(-MAX_OUTPUT_CHARS);
+}
+
+function parseProgressLine(line: string): FfmpegProgress {
+  const separator = line.indexOf("=");
+  const key = separator > 0 ? line.slice(0, separator) : undefined;
+  const value = separator > 0 ? line.slice(separator + 1) : undefined;
+  const outTimeMs = key === "out_time_ms" && value && /^\d+$/.test(value) ? Number(value) : undefined;
+  const progress = value === "continue" || value === "end" ? value : undefined;
+  return { line, ...(key ? { key } : {}), ...(value !== undefined ? { value } : {}), ...(outTimeMs !== undefined ? { outTimeMs } : {}), ...(progress ? { progress } : {}) };
 }
 
 function binaryName(platform: FfmpegPlatform) {
@@ -91,6 +113,7 @@ export function runFfmpeg(args: readonly string[], options: FfmpegOptions = {}):
 
     let stdout = "";
     let stderr = "";
+    let progressBuffer = "";
     let settled = false;
     let stopError: Error | undefined;
     const stop = (error: Error) => {
@@ -107,7 +130,14 @@ export function runFfmpeg(args: readonly string[], options: FfmpegOptions = {}):
     else options.signal?.addEventListener("abort", abort, { once: true });
 
     child.stdout?.on("data", (chunk: Buffer | string) => { stdout = appendOutput(stdout, chunk); });
-    child.stderr?.on("data", (chunk: Buffer | string) => { stderr = appendOutput(stderr, chunk); });
+    child.stderr?.on("data", (chunk: Buffer | string) => {
+      stderr = appendOutput(stderr, chunk);
+      if (!options.onProgress) return;
+      progressBuffer += chunk.toString();
+      const lines = progressBuffer.split(/\r?\n/);
+      progressBuffer = lines.pop() ?? "";
+      for (const line of lines) if (line) options.onProgress(parseProgressLine(line));
+    });
     const events = child as ChildProcess & {
       once(event: "error", listener: (error: Error) => void): void;
       once(event: "close", listener: (code: number | null) => void): void;
@@ -122,6 +152,7 @@ export function runFfmpeg(args: readonly string[], options: FfmpegOptions = {}):
     function finish(error: Error | null, result?: FfmpegResult) {
       if (settled) return;
       settled = true;
+      if (progressBuffer && options.onProgress) options.onProgress(parseProgressLine(progressBuffer));
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
       if (error) reject(error);

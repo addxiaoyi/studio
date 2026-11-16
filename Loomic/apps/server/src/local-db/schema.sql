@@ -257,6 +257,7 @@ alter table generation_approvals add column if not exists consumed_at timestampt
 alter table generation_approvals add column if not exists rejected_at timestamptz;
 alter table generation_approvals add column if not exists context jsonb not null default '{}'::jsonb;
 alter table generation_approvals add column if not exists job_id uuid;
+alter table generation_approvals add column if not exists billing_pricing jsonb;
 create index if not exists generation_approvals_active_idx on generation_approvals(workspace_id,status,expires_at);
 create unique index if not exists generation_approvals_consumed_once_idx
   on generation_approvals(id) where consumed_at is not null;
@@ -531,7 +532,8 @@ create table if not exists background_jobs (
   started_at timestamptz,
   completed_at timestamptz,
   failed_at timestamptz,
-  canceled_at timestamptz
+  canceled_at timestamptz,
+  cancel_requested_at timestamptz
 );
 create index if not exists background_jobs_status_idx on background_jobs(status, created_at desc);
 alter table background_jobs add column if not exists idempotency_key text;
@@ -546,6 +548,12 @@ alter table background_jobs add column if not exists next_sync_at timestamptz;
 alter table background_jobs add column if not exists sync_error_code text;
 alter table background_jobs add column if not exists sync_error_message text;
 alter table background_jobs add column if not exists provider_result jsonb;
+alter table background_jobs add column if not exists billing_receipt jsonb;
+alter table background_jobs add column if not exists billing_pricing jsonb;
+alter table background_jobs add column if not exists billing_required boolean not null default false;
+alter table background_jobs add column if not exists billing_approval_id uuid references generation_approvals(id);
+alter table background_jobs add column if not exists settlement_review jsonb;
+alter table background_jobs add column if not exists cancel_requested_at timestamptz;
 create index if not exists background_jobs_sync_idx
   on background_jobs(status, next_sync_at)
   where status in ('sync_pending', 'sync_failed');
@@ -641,6 +649,7 @@ create table if not exists gallery_items (
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 create index if not exists gallery_public_feed_idx on gallery_items(featured desc, published_at desc) where status = 'published' and deleted_at is null;
+alter table gallery_items add column if not exists caption_snapshot jsonb;
 create table if not exists gallery_likes (
   gallery_id uuid not null references gallery_items(id) on delete cascade, user_id uuid not null references app_users(id) on delete cascade,
   created_at timestamptz not null default now(), primary key(gallery_id, user_id)

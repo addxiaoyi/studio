@@ -1,12 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { loadEnvFile } from "node:process";
+import { loadOptionalTestEnv } from "./test-env";
 import { resolve } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { createEditorBrowserFixture } from "../../server/src/features/video-editor/browser-fixture";
 
-loadEnvFile(resolve("../../.env.local"));
+loadOptionalTestEnv();
 let fixture: Awaited<ReturnType<typeof createEditorBrowserFixture>>;
 let mediaFolder: string;
 test.beforeAll(async () => { fixture = await createEditorBrowserFixture(process.env.DATABASE_URL!, "http://localhost:3219", "{}"); });

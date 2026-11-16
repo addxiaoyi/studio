@@ -42,10 +42,28 @@ export async function verifyLocalCode(email: string, code: string) {
   return (await response.json()) as { access_token: string; user: { id: string; email: string } };
 }
 
-export async function fetchLocalSession() {
-  const response = await localAuthFetch("/api/local-auth/session", { credentials: "include" });
-  if (!response.ok) throw new Error("无法读取登录状态");
-  return (await response.json()) as { session: { access_token: string; user: { id: string; email: string } } | null };
+export class LocalSessionError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+type SessionReply = { session: { access_token: string; user: { id: string; email: string } } | null };
+
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export async function fetchLocalSession(signal?: AbortSignal): Promise<SessionReply> {
+  const response = await localAuthFetch("/api/local-auth/session", { credentials: "include", ...(signal ? { signal } : {}) });
+  if (!response.ok) throw new LocalSessionError("无法读取登录状态", response.status);
+  let body: unknown;
+  try { body = await response.json(); }
+  catch (cause) { throw new Error("登录状态响应格式无效，请重试。", { cause }); }
+  if (object(body) && body.session === null) return { session: null };
+  if (!object(body) || !object(body.session) || typeof body.session.access_token !== "string" || !body.session.access_token.trim() ||
+      !object(body.session.user) || typeof body.session.user.id !== "string" || !body.session.user.id || typeof body.session.user.email !== "string") {
+    throw new Error("登录状态响应格式无效，请重试。");
+  }
+  return { session: { access_token: body.session.access_token, user: { id: body.session.user.id, email: body.session.user.email } } };
 }
 
 export async function exchangeLocalToken(token: string) {
@@ -117,10 +135,11 @@ export async function exchangeDesktopLoginToken(token: string) {
 }
 
 export async function signOutLocal(): Promise<void> {
-  await localAuthFetch("/api/local-auth/sign-out", {
+  const response = await localAuthFetch("/api/local-auth/sign-out", {
     method: "POST",
     credentials: "include",
   });
+  if (!response.ok) throw new LocalSessionError("退出登录失败，请重试。", response.status);
 }
 
 /**

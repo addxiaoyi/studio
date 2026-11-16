@@ -1,33 +1,44 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
-import { readStudioAsset } from "@/lib/studio-media";
+import { preparePrivateMedia } from "@/lib/private-media";
 import {
   timelineVisual,
   type CanvasTimeline,
   type CanvasTimelineItem,
 } from "@/lib/canvas-timeline";
+import { publishTimelineTime, type TimelineUiClock } from "@/lib/timeline-clock";
+
+function privateUploadAssetId(item: CanvasTimelineItem) {
+  return (
+    item.assetId ??
+    item.sourceUrl?.match(
+      /\/api\/uploads\/([a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})\/file(?:[?#]|$)/i,
+    )?.[1]
+  );
+}
 
 function usePreviewSource(item: CanvasTimelineItem | undefined, token: string) {
   const [resolved, setResolved] = useState({ id: "", source: "", error: "" });
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((value) => value + 1), []);
   useEffect(() => {
     setResolved({ id: item?.id ?? "", source: "", error: "" });
     if (!item) return;
-    if (item.dataUrl?.startsWith("data:image/")) {
+    if (item.dataUrl?.startsWith("data:")) {
       setResolved({ id: item.id, source: item.dataUrl, error: "" });
       return;
     }
-    if (!item.assetId) {
+    const assetId = privateUploadAssetId(item);
+    if (!assetId) {
       setResolved({ id: item.id, source: item.sourceUrl ?? "", error: "" });
       return;
     }
     const abort = new AbortController();
-    let url = "";
-    void readStudioAsset(token, item.assetId, abort.signal)
-      .then((file) => {
+    void preparePrivateMedia(assetId, token, AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]))
+      .then((media) => {
         if (abort.signal.aborted) return;
-        url = URL.createObjectURL(file);
-        setResolved({ id: item.id, source: url, error: "" });
+        setResolved({ id: item.id, source: media.path, error: "" });
       })
       .catch((cause) => {
         if (!abort.signal.aborted)
@@ -39,10 +50,14 @@ function usePreviewSource(item: CanvasTimelineItem | undefined, token: string) {
       });
     return () => {
       abort.abort();
-      if (url) URL.revokeObjectURL(url);
     };
-  }, [item?.id, item?.assetId, item?.sourceUrl, item?.dataUrl, token]);
-  return resolved.id === item?.id ? resolved : { source: "", error: "" };
+  }, [item?.id, item?.assetId, item?.sourceUrl, item?.dataUrl, token, attempt]);
+  const current = resolved.id === item?.id ? resolved : { source: "", error: "" };
+  return {
+    ...current,
+    attempt,
+    retry,
+  };
 }
 
 function PreviewAudio({
@@ -56,13 +71,13 @@ function PreviewAudio({
   token: string;
   time: number;
   playing: boolean;
-  onError(message: string): void;
+  onError(message: string, retry: () => void): void;
 }) {
   const audio = useRef<HTMLAudioElement>(null),
-    { source, error } = usePreviewSource(item, token);
+    { source, error, attempt, retry } = usePreviewSource(item, token);
   useEffect(() => {
-    if (error) onError(error);
-  }, [error, onError]);
+    if (error) onError(error, retry);
+  }, [error, onError, retry]);
   useEffect(() => {
     const player = audio.current;
     if (!player || !source) return;
@@ -78,15 +93,18 @@ function PreviewAudio({
       void player
         .play()
         .catch(() =>
-          onError(`无法播放${item.title}，请检查音频或重新点击预览。`),
+          onError(`无法播放${item.title}，请检查音频或重新点击预览。`, retry),
         );
-  }, [time, playing, source, item, onError]);
+  }, [time, playing, source, item, onError, retry]);
   return source ? (
     <audio
+      key={`${item.id}:${attempt}`}
       ref={audio}
       src={source}
-      preload="auto"
+      crossOrigin={privateUploadAssetId(item) ? "use-credentials" : undefined}
+      preload="metadata"
       aria-label={`${item.title}同步音轨`}
+      onError={() => onError(`音频无法读取：${item.title}。请重试或检查原文件。`, retry)}
     />
   ) : null;
 }
@@ -97,22 +115,44 @@ export function CanvasTimelinePreview({
 }: { timeline: CanvasTimeline; token: string }) {
   const [time, setTime] = useState(0),
     [playing, setPlaying] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [retryAction, setRetryAction] = useState<() => void>(() => () => undefined);
   const video = useRef<HTMLVideoElement>(null),
-    clock = useRef({ mediaTime: 0, at: 0 });
+    clock = useRef({ mediaTime: 0, at: 0 }),
+    uiClock = useRef<TimelineUiClock>({ lastAt: 0, lastTime: -1 });
   const visual = timelineVisual(timeline, time),
-    { source, error: sourceError } = usePreviewSource(visual, token);
+    {
+      source,
+      error: sourceError,
+      attempt: sourceAttempt,
+      retry: retrySource,
+    } = usePreviewSource(visual, token);
   const end = visual
     ? visual.start + visual.trimEnd - visual.trimStart
     : timeline.duration;
   useEffect(() => {
     if (sourceError) {
       setError(sourceError);
+      setRetryAction(() => retrySource);
       setPlaying(false);
     }
-  }, [sourceError]);
+  }, [sourceError, retrySource]);
+
+  useEffect(() => {
+    setError("");
+    setRetryAction(() => retrySource);
+  }, [visual?.id, retrySource]);
+
+  const showPreviewError = useCallback(
+    (message: string, retry: () => void) => {
+      setError(message);
+      setRetryAction(() => retry);
+    },
+    [],
+  );
   useEffect(() => {
     setTime((current) => Math.min(current, timeline.duration));
+    uiClock.current = { lastAt: 0, lastTime: -1 };
   }, [timeline.duration]);
   useEffect(() => {
     const player = video.current;
@@ -123,15 +163,15 @@ export function CanvasTimelinePreview({
       player.currentTime = target;
     if (playing)
       void player.play().catch(() => {
-        setError("视频无法播放，请检查素材后重试预览。");
+        showPreviewError("视频无法播放，请检查素材后重试预览。", retrySource);
         setPlaying(false);
       });
     else player.pause();
-  }, [playing, source, visual?.id]);
+  }, [playing, source, visual?.id, retrySource, showPreviewError]);
   useEffect(() => {
     if (!playing || (visual && !source)) return;
     let frame = 0;
-    function tick() {
+    function tick(now: number) {
       const player = video.current;
       let next: number;
       if (visual?.kind === "video") {
@@ -146,11 +186,14 @@ export function CanvasTimelinePreview({
           clock.current.mediaTime +
           (performance.now() - clock.current.at) / 1000;
       if (next >= timeline.duration) {
-        setTime(timeline.duration);
+        if (publishTimelineTime(uiClock.current, timeline.duration, now, true)) {
+          setTime(timeline.duration);
+        }
         setPlaying(false);
         return;
       }
-      setTime(Math.max(0, next));
+      const nextTime = Math.max(0, next);
+      if (publishTimelineTime(uiClock.current, nextTime, now)) setTime(nextTime);
       frame = requestAnimationFrame(tick);
     }
     frame = requestAnimationFrame(tick);
@@ -158,6 +201,7 @@ export function CanvasTimelinePreview({
   }, [playing, source, visual?.id, end, timeline.duration]);
   function seek(value: number) {
     setPlaying(false);
+    uiClock.current = { lastAt: performance.now(), lastTime: value };
     setTime(value);
     const target = timelineVisual(timeline, value);
     if (video.current && target && target.id === visual?.id)
@@ -165,8 +209,16 @@ export function CanvasTimelinePreview({
   }
   function toggle() {
     setError("");
-    if (time >= timeline.duration) setTime(0);
+    if (time >= timeline.duration) {
+      uiClock.current = { lastAt: performance.now(), lastTime: 0 };
+      setTime(0);
+    }
     setPlaying((value) => !value);
+  }
+  function retryPreview() {
+    setError("");
+    setPlaying(false);
+    retryAction();
   }
   const captions = timeline.items.filter(
     (item) =>
@@ -177,29 +229,33 @@ export function CanvasTimelinePreview({
       <div
         className={`relative mx-auto overflow-hidden rounded-lg bg-black ${timeline.format === "portrait" ? "aspect-[9/16] max-h-64 w-36" : "aspect-video max-h-56 w-full"}`}
       >
-        {visual && !source && (
+        {visual && !source && !sourceError && (
           <p role="status" className="p-3 text-sm text-white">
             正在读取预览素材…
           </p>
         )}
         {source && visual?.kind === "video" && (
           <video
+            key={`${visual.id}:${sourceAttempt}`}
             ref={video}
             src={source}
-            preload="auto"
+            crossOrigin={privateUploadAssetId(visual) ? "use-credentials" : undefined}
+            preload="metadata"
             playsInline
             className="h-full w-full object-contain"
             onError={() => {
-              setError("视频无法解码，请更换素材。");
+              showPreviewError("视频无法解码，请更换素材。", retrySource);
               setPlaying(false);
             }}
           />
         )}
         {source && visual?.kind === "image" && (
           <img
+            key={`${visual.id}:${sourceAttempt}`}
             src={source}
             alt={visual.title}
             className="h-full w-full object-contain"
+            onError={() => showPreviewError("图片预览加载失败，请重试或下载原文件。", retrySource)}
           />
         )}
         {captions.map((caption) => (
@@ -220,7 +276,7 @@ export function CanvasTimelinePreview({
             token={token}
             time={time}
             playing={playing}
-            onError={setError}
+            onError={showPreviewError}
           />
         ))}
       <div className="flex items-center gap-3">
@@ -248,9 +304,18 @@ export function CanvasTimelinePreview({
         </span>
       </div>
       {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+          <button
+            type="button"
+            onClick={retryPreview}
+            className="min-h-9 rounded-md border border-border px-3 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            重新获取预览
+          </button>
+        </div>
       )}
     </section>
   );

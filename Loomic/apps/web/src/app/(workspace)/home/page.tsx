@@ -37,6 +37,7 @@ import {
   fetchProjects,
 } from "@/lib/server-api";
 import { formatDate } from "@/lib/utils";
+import { consumeSelectedPrompt } from "@/lib/prompt-selection";
 
 /** Maximum number of recent projects shown on the home page. */
 const RECENT_PROJECTS_LIMIT = 4;
@@ -76,6 +77,7 @@ export default function HomePage() {
 
   const promptRef = useRef<HomePromptHandle>(null);
   const [createError, setCreateError] = useState(false);
+  const [promptRestoreError, setPromptRestoreError] = useState("");
   const lastPromptSubmitRef = useRef<{
     prompt: string;
     attachments?: ReadyAttachment[];
@@ -131,12 +133,18 @@ export default function HomePage() {
 
   useEffect(() => { if(session?.access_token) void loadProjects(); }, [loadProjects,session?.access_token]);
 
-  useEffect(() => {
-    const selectedPrompt = window.sessionStorage.getItem("helstera_selected_prompt");
-    if (!selectedPrompt) return;
-    window.sessionStorage.removeItem("helstera_selected_prompt");
-    promptRef.current?.fill(selectedPrompt);
+  const restoreSelectedPrompt = useCallback(() => {
+    if (!promptRef.current) return;
+    try {
+      const selectedPrompt = consumeSelectedPrompt(window.sessionStorage);
+      if (selectedPrompt) promptRef.current.fill(selectedPrompt);
+      setPromptRestoreError("");
+    } catch (cause) {
+      console.warn("[home] Selected prompt could not be restored", cause);
+      setPromptRestoreError("无法读取选中的提示词，请允许浏览器存储后重试。");
+    }
   }, []);
+  useEffect(() => { if (!creating) restoreSelectedPrompt(); }, [creating, restoreSelectedPrompt]);
 
   useEffect(() => {
     const token = session?.access_token;
@@ -307,6 +315,10 @@ export default function HomePage() {
             selectedSeed={selectedExample}
             onClearSelectedSeed={handleExampleClear}
           />
+          {promptRestoreError ? <div role="alert" className="mt-3 text-sm text-destructive">
+            <p>{promptRestoreError}</p>
+            <button type="button" onClick={restoreSelectedPrompt} className="mt-2 rounded-md border px-3 py-2">重试读取提示词</button>
+          </div> : null}
           {createError && (
             <div
               role="alert"
@@ -498,6 +510,7 @@ export default function HomePage() {
       <HomeFirstRunGuide />
 
       <HomeWorkspacePulse
+        key={session?.user.id ?? "signed-out"}
         accessToken={session?.access_token}
         projects={projects}
         projectsLoading={projectsLoading}

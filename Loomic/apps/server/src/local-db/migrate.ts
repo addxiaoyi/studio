@@ -1,37 +1,116 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) throw new Error("DATABASE_URL is required for local database migration");
-
-/**
- * Checksums must not depend on how git checked the file out.
- *
- * The repository is developed on Windows (CRLF) and deployed to Linux, and the first
- * applyLocalMigrations runs recorded checksums from LF content. Any later checkout that turns
- * the same migration into CRLF changed its hash, so `applyLocalMigrations` aborted the whole
- * chain with "Migration checksum mismatch" and no migration could ever be applied again.
- *
- * Hashing the LF-normalised text keeps one migration = one stable checksum on every platform.
- * The raw text is still what gets executed; Postgres accepts either line ending.
- */
+// Windows checkout line endings must not change the identity of an applied migration.
 export function normalizeForChecksum(sql: string): string {
   return sql.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
 }
 
 export function migrationChecksum(sql: string): string {
-  return createHash("sha256").update(normalizeForChecksum(sql), "utf8").digest("hex");
+  return createHash("sha256")
+    .update(normalizeForChecksum(sql), "utf8")
+    .digest("hex");
 }
 
 export function migrationVersion(fileName: string): string {
   return fileName.replace(/\.sql$/i, "");
 }
 
-export async function applyLocalMigrations(pool: pg.Pool, migrationsDir: string): Promise<string[]> {  const files = (await readdir(migrationsDir, { withFileTypes: true }))
+class MigrationRollbackError extends AggregateError {}
+
+async function assertMigrationScope(
+  client: pg.PoolClient,
+  schema: string,
+  requireLedger: boolean,
+) {
+  const scope = (
+    await client.query<{ schema: string | null; ledger_schema: string | null }>(
+      `select current_schema() as schema,
+      (select n.nspname from pg_class c join pg_namespace n on n.oid=c.relnamespace
+       where c.oid=to_regclass('schema_migrations')) as ledger_schema`,
+    )
+  ).rows[0];
+  if (
+    !scope ||
+    scope.schema !== schema ||
+    (scope.ledger_schema !== null && scope.ledger_schema !== schema) ||
+    (requireLedger && scope.ledger_schema === null)
+  ) {
+    throw new Error(
+      "Migration ledger must belong to the locked target schema; check search_path before retrying",
+    );
+  }
+}
+
+async function withMigrationLock<T>(
+  pool: pg.Pool,
+  work: (client: pg.PoolClient, schema: string) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  let key: string | undefined;
+  let locked = false;
+  let discard: Error | undefined;
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown };
+  try {
+    const scope = (
+      await client.query<{ key: string; schema: string | null }>(
+        "select hashtextextended(current_database() || ':' || current_schema() || ':helstera-local-migrations',0)::text as key,current_schema() as schema",
+      )
+    ).rows[0];
+    key = scope?.key;
+    if (!key || !scope?.schema)
+      throw new Error("Cannot identify the migration database and schema");
+    // A session lock spans per-file commits and keeps bootstrap DDL in the same boundary.
+    await client.query("select pg_advisory_lock($1::bigint)", [key]);
+    locked = true;
+    // Check after waiting: a bootstrapper may have created the ledger while we waited.
+    await assertMigrationScope(client, scope.schema, false);
+    outcome = { ok: true, value: await work(client, scope.schema) };
+  } catch (error) {
+    outcome = { ok: false, error };
+    // A failed rollback can leave transaction state unknown even if unlock later succeeds.
+    if (!locked || error instanceof MigrationRollbackError)
+      discard = error instanceof Error ? error : new Error(String(error));
+  }
+  try {
+    if (locked) {
+      const unlocked = await client.query<{ unlocked: boolean }>(
+        "select pg_advisory_unlock($1::bigint) as unlocked",
+        [key],
+      );
+      if (unlocked.rows[0]?.unlocked !== true)
+        throw new Error("Migration session lock was not held during release");
+    }
+  } catch (error) {
+    // Never return a connection which may still own a session lock to its pool.
+    discard = error instanceof Error ? error : new Error(String(error));
+    outcome = {
+      ok: false,
+      error: outcome.ok
+        ? error
+        : new AggregateError(
+            [outcome.error, error],
+            "Migration and lock release both failed",
+          ),
+    };
+  } finally {
+    client.release(discard);
+  }
+  if (!outcome.ok) throw outcome.error;
+  return outcome.value;
+}
+
+async function applyMigrations(
+  client: pg.PoolClient,
+  migrationsDir: string,
+  schema: string,
+): Promise<string[]> {
+  await assertMigrationScope(client, schema, true);
+  const ledger = `"${schema.replaceAll('"', '""')}".schema_migrations`;
+  const files = (await readdir(migrationsDir, { withFileTypes: true }))
     .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
     .map((entry) => entry.name)
     .sort();
@@ -41,55 +120,106 @@ export async function applyLocalMigrations(pool: pg.Pool, migrationsDir: string)
     const version = migrationVersion(fileName);
     const sql = await readFile(resolve(migrationsDir, fileName), "utf8");
     const checksum = migrationChecksum(sql);
-    const client = await pool.connect();
     try {
       await client.query("begin");
+      await assertMigrationScope(client, schema, true);
       const existing = await client.query<{ checksum: string }>(
-        "select checksum from schema_migrations where version = $1",
+        `select checksum from ${ledger} where version = $1`,
         [version],
       );
       if (existing.rows[0]) {
         if (existing.rows[0].checksum !== checksum) {
-          // The version is already applied, so nothing will be re-executed. A mismatch still
-          // matters — it means this file was edited after it ran, so the schema it produced may
-          // not match what a fresh database would get — but throwing here stops *every* later
-          // migration from ever being applied, which is the worse failure: the chain dies and the
-          // next release ships code that expects columns nobody can create.
-          //
-          // Migrations released before this check have no recoverable original (they were never
-          // committed while they ran), so drift is surfaced loudly and the run continues. Set
-          // MIGRATION_STRICT_CHECKSUM=1 to keep the old hard failure.
+          // Legacy drift remains visible without reapplying SQL or rewriting its receipt.
           const drift = `Migration checksum mismatch for ${version}: applied=${existing.rows[0].checksum} file=${checksum}`;
-          if (process.env.MIGRATION_STRICT_CHECKSUM === "1") throw new Error(drift);
-          console.warn(`[migrate] WARNING ${drift} — already applied, continuing.`);
+          if (process.env.MIGRATION_STRICT_CHECKSUM === "1")
+            throw new Error(drift);
+          console.warn(
+            `[migrate] WARNING ${drift} — already applied, continuing.`,
+          );
         }
         await client.query("commit");
         continue;
       }
       await client.query(sql);
+      await assertMigrationScope(client, schema, true);
       await client.query(
-        "insert into schema_migrations(version, checksum) values($1, $2)",
+        `insert into ${ledger}(version, checksum) values($1, $2)`,
         [version, checksum],
       );
       await client.query("commit");
       applied.push(version);
     } catch (error) {
-      await client.query("rollback");
+      try {
+        await client.query("rollback");
+      } catch (rollbackError) {
+        throw new MigrationRollbackError(
+          [error, rollbackError],
+          `Migration rollback failed for ${version}`,
+        );
+      }
       throw error;
-    } finally {
-      client.release();
     }
   }
   return applied;
 }
 
-const sql = await readFile(resolve(fileURLToPath(new URL("./schema.sql", import.meta.url))), "utf8");
-const pool = new pg.Pool({ connectionString, max: 1 });
-try {
-  await pool.query(sql);
-  const migrationsDir = fileURLToPath(new URL("./migrations/", import.meta.url));
-  const applied = await applyLocalMigrations(pool, migrationsDir);
-  console.log(`Local PostgreSQL schema is up to date. Applied migrations: ${applied.length}.`);
-} finally {
-  await pool.end();
+export async function applyLocalMigrations(
+  pool: pg.Pool,
+  migrationsDir: string,
+): Promise<string[]> {
+  return withMigrationLock(pool, (client, schema) =>
+    applyMigrations(client, migrationsDir, schema),
+  );
+}
+
+export async function applyLocalSchema(
+  pool: pg.Pool,
+  schemaPath: string,
+  migrationsDir: string,
+): Promise<string[]> {
+  const sql = await readFile(schemaPath, "utf8");
+  return withMigrationLock(pool, async (client, schema) => {
+    try {
+      await client.query("begin");
+      await client.query(sql);
+      await assertMigrationScope(client, schema, true);
+      await client.query("commit");
+    } catch (error) {
+      try {
+        await client.query("rollback");
+      } catch (rollbackError) {
+        throw new MigrationRollbackError(
+          [error, rollbackError],
+          "Schema bootstrap rollback failed",
+        );
+      }
+      throw error;
+    }
+    return applyMigrations(client, migrationsDir, schema);
+  });
+}
+
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString)
+    throw new Error("DATABASE_URL is required for local database migration");
+  const pool = new pg.Pool({ connectionString, max: 1 });
+  try {
+    const migrationsDir = fileURLToPath(
+      new URL("./migrations/", import.meta.url),
+    );
+    const applied = await applyLocalSchema(
+      pool,
+      fileURLToPath(new URL("./schema.sql", import.meta.url)),
+      migrationsDir,
+    );
+    console.log(
+      `Local PostgreSQL schema is up to date. Applied migrations: ${applied.length}.`,
+    );
+  } finally {
+    await pool.end();
+  }
 }

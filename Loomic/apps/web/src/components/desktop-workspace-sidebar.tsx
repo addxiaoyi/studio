@@ -22,7 +22,7 @@ const advanced = [
 /** 方向键只在可见项之间移动，顺序与渲染顺序一致：画布、高级能力、进阶项（展开时）、设置。 */
 export function DesktopWorkspaceSidebar() {
   const router = useRouter();
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
   const { copy } = useDesktopCopy();
   const label = copy.chrome.sidebar;
   const currentPath=pathname.replace(/\/$/,"");

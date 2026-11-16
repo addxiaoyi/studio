@@ -8,7 +8,7 @@
  * retry → new request → workspace, 401 → login page.
  */
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockFetchLocalSession, mockSignOutLocal } = vi.hoisted(() => ({
@@ -64,6 +64,7 @@ function renderShell() {
 }
 
 beforeEach(() => {
+  mockFetchLocalSession.mockReset();
   document.documentElement.lang = "zh-CN";
   document.documentElement.dataset.helsteraDesktop = "true";
   Object.defineProperty(window, "electronAPI", {
@@ -96,7 +97,7 @@ describe("desktop shell session failure", () => {
     expect(screen.queryByRole("button", { name: /登录并进入工作台/ })).toBeNull();
     // The banner does not need a socket, so it can speak up on this screen.
     expect(screen.getByText("无法确认登录状态，正在重新连接…")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "重新连接" })).toBeTruthy();
+    expect(within(screen.getByRole("main")).getByRole("button", { name: "重新连接" })).toBeTruthy();
   });
 
   it("re-requests the session on retry and then renders the workspace", async () => {
@@ -108,7 +109,7 @@ describe("desktop shell session failure", () => {
     mockFetchLocalSession.mockResolvedValueOnce({
       session: { access_token: "session-token", user: { id: "user_1", email: "maker@example.com" } },
     });
-    fireEvent.click(screen.getByRole("button", { name: "重新连接" }));
+    fireEvent.click(within(screen.getByRole("main")).getByRole("button", { name: "重新连接" }));
 
     await waitFor(() => expect(mockFetchLocalSession).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("maker@example.com")).toBeTruthy();

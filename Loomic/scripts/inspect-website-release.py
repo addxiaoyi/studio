@@ -61,6 +61,39 @@ def main():
                 except RuntimeError as error:
                     print(str(error), flush=True)
             return
+        if len(sys.argv) > 1 and sys.argv[1] == "stability":
+            failures = []
+            commands = [
+                "df -P / /www /www/helstera /var/lib/postgresql",
+                "pm2 jlist",
+                "nginx -t",
+                "find /www/helstera/.releases -maxdepth 3 -type f \\( -name '*receipt*.json' -o -name 'transaction.json' \\) -printf '%p\\n' 2>/dev/null | sort",
+                "python3 -c " + shlex.quote(
+                    "from pathlib import Path; "
+                    "p=Path('/etc/nginx/sites-enabled/studio.0st.top.conf'); "
+                    "print('ROUTES', '\\n'.join(line.strip() for line in p.read_text(errors='replace').splitlines() "
+                    "if any(token in line for token in ('server_name','proxy_pass','root ','try_files'))))"
+                ),
+            ]
+            for command in commands:
+                try:
+                    output = run(client, command)
+                    if command == "pm2 jlist":
+                        output = json.dumps([
+                            {"name": p["name"], "pid": p.get("pid"), "status": p.get("pm2_env", {}).get("status"),
+                             "cwd": p.get("pm2_env", {}).get("pm_cwd"),
+                             "script": p.get("pm2_env", {}).get("pm_exec_path"),
+                             "version": p.get("pm2_env", {}).get("version"),
+                             "receipt": p.get("pm2_env", {}).get("HELSTERA_PROCESS_RECEIPT")}
+                            for p in json.loads(output) if "helstera" in p.get("name", "")
+                        ])
+                    print(command.split()[0].upper(), output, flush=True)
+                except RuntimeError as error:
+                    failures.append(command.split()[0])
+                    print("CHECK_FAILED", command.split()[0], str(error), flush=True)
+            if failures:
+                raise RuntimeError("Production stability checks failed: " + ", ".join(failures))
+            return
         status = run(client, "pm2 jlist")
         print("SERVICES", json.dumps([
             {"name": p["name"], "pid": p.get("pid"),

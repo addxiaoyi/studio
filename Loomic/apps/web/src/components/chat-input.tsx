@@ -24,9 +24,10 @@ import { AgentModelSelector } from "./agent-model-selector";
 import { ImageAttachmentBar } from "./image-attachment-bar";
 import { ImageModelPreferencePopover } from "./image-model-preference";
 import { useLocale } from "@/lib/i18n";
+import { consumeSelectedPrompt, MAX_SELECTED_PROMPT_LENGTH, PROMPT_RETURN_KEY } from "@/lib/prompt-selection";
 
 /** #27 输入框字数上限，集中定义，textarea 的 maxLength 与剩余字数提示共用同一常量 */
-export const MAX_INPUT_LENGTH = 8000;
+export const MAX_INPUT_LENGTH = MAX_SELECTED_PROMPT_LENGTH;
 
 /** #27 已用字数达到上限的这个比例时开始提示「剩余 N 字」（9000 => 8000 的 90%） */
 export const REMAINING_LENGTH_PROMPT_RATIO = 0.9;
@@ -224,6 +225,20 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
     if ((!trimmed && (!attachments || attachments.length === 0)) || disabled) return;
+    if (trimmed === "/提示词" || trimmed === "/prompts") {
+      pendingSendRef.current = null;
+      if (isUploading) {
+        setDropMessage(english ? "Wait for attachments to finish uploading, then open the prompt library again." : "请等待附件上传完成后，再次打开提示词库。");
+        return;
+      }
+      try {
+        sessionStorage.setItem(PROMPT_RETURN_KEY, window.location.href);
+        router.push("/prompts?pick=1");
+      } catch {
+        setDropMessage(english ? "Browser storage is unavailable. Your draft is preserved; allow storage and retry." : "浏览器存储不可用，草稿已保留。请允许存储后重试。");
+      }
+      return;
+    }
     if (isUploading) {
       pendingSendRef.current = {
         text: trimmed,
@@ -232,13 +247,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       return;
     }
     if (attachments?.some((attachment) => attachment.error)) return;
-    if (trimmed === "/提示词" || trimmed === "/prompts") {
-      sessionStorage.setItem("helstera_prompt_return", window.location.href);
-      router.push("/prompts?pick=1");
-      return;
-    }
     dispatchSend(trimmed);
-  }, [value, disabled, isUploading, attachments, router, dispatchSend]);
+  }, [value, disabled, isUploading, attachments, router, dispatchSend, english]);
 
   useEffect(() => {
     const pending = pendingSendRef.current;
@@ -264,10 +274,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }, [attachments, disabled, isUploading, dispatchSend]);
 
   useEffect(() => {
-    const selected = sessionStorage.getItem("helstera_selected_prompt");
-    if (!selected) return;
-    sessionStorage.removeItem("helstera_selected_prompt");
-    setValue(selected);
+    try {
+      const selected = consumeSelectedPrompt(sessionStorage);
+      if (selected) setValue(selected);
+    } catch (cause) {
+      console.warn("[chat-input] Selected prompt could not be restored", cause);
+      setDropMessage("无法读取选中的提示词，当前草稿已保留。请允许浏览器存储后重试。");
+    }
   }, []);
 
   // #80: the desktop global shortcut (Ctrl+Shift+Space) hands focus to this composer.

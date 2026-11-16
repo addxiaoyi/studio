@@ -34,14 +34,14 @@ import "./image-generation.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
-function makeDb(options: { canvasId?: string | null; payload?: Record<string, unknown>; connectorDisabled?: boolean | (() => boolean) } = {}) {
+function makeDb(options: { canvasId?: string | null; payload?: Record<string, unknown>; createdBy?: string | null; providerResult?: Record<string, unknown>; connectorDisabled?: boolean | (() => boolean) } = {}) {
   const canvasContent = { elements: [] as Record<string, unknown>[] };
   const queries: string[] = [];
-  let providerResult: Record<string, unknown> | null = null;
+  let providerResult: Record<string, unknown> | null = options.providerResult ?? null;
   const client = {
     query: vi.fn(async (sql: string, values?: unknown[]) => {
       queries.push(sql);
-      if (sql.includes("select created_by, workspace_id")) return { rows: [{ created_by: "user-1", workspace_id: "workspace-1", canvas_id: options.canvasId === undefined ? "canvas-1" : options.canvasId, session_id: "session-1", status: "running", payload: options.payload ?? { prompt: "move product", model: "google-vertex/veo-3.1-generate-001", duration: 6 }, provider_result: providerResult }] };
+      if (sql.includes("select created_by, workspace_id")) return { rows: [{ created_by: options.createdBy === undefined ? "user-1" : options.createdBy, workspace_id: "workspace-1", canvas_id: options.canvasId === undefined ? "canvas-1" : options.canvasId, session_id: "session-1", status: "running", payload: options.payload ?? { prompt: "move product", model: "google-vertex/veo-3.1-generate-001", duration: 6 }, provider_result: providerResult }] };
       if (sql.includes("agent_connector_permissions")) {
         const disabled = typeof options.connectorDisabled === "function" ? options.connectorDisabled() : options.connectorDisabled;
         return { rows: disabled ? [{ enabled: false }] : [] };
@@ -76,6 +76,16 @@ function makeContext(db: Pool, storage: { upload: ReturnType<typeof vi.fn>; getP
 }
 
 describe("video generation worker persistence", () => {
+  it("rejects a local job with a malformed provider checkpoint and no owner", async () => {
+    const { db } = makeDb({ canvasId: null, createdBy: null, providerResult: { url: 42 } });
+    const storage = { upload: vi.fn(), getPublicUrl: vi.fn() };
+
+    await expect(
+      getExecutor("video_generation")!("job-missing-owner", {}, makeContext(db, storage)),
+    ).rejects.toThrow("Media job owner or workspace is missing.");
+    expect(generateConfiguredVideoMock).not.toHaveBeenCalled();
+  });
+
   it("persists a provider response when the connector is revoked after submission", async () => {
     let disabled = false;
     const { db, getProviderResult } = makeDb({ canvasId: null, connectorDisabled: () => disabled });
@@ -85,12 +95,12 @@ describe("video generation worker persistence", () => {
     };
     generateConfiguredVideoMock.mockImplementationOnce(async () => {
       disabled = true;
-      return { url: "data:video/mp4;base64,AQID", mimeType: "video/mp4", width: 1280, height: 720, durationSeconds: 6 };
+      return { url: "data:video/mp4;base64,AQID", mimeType: "video/mp4", width: 1280, height: 720, durationSeconds: 6, durationSource: "provider" };
     });
     await expect(getExecutor("video_generation")!("job-in-flight", {}, makeContext(db, storage)))
-      .resolves.toMatchObject({ asset_id: "asset-1" });
+      .resolves.toMatchObject({ asset_id: "asset-1", duration_source: "provider" });
     expect(disabled).toBe(true);
-    expect(getProviderResult()).toMatchObject({ mimeType: "video/mp4" });
+    expect(getProviderResult()).toMatchObject({ mimeType: "video/mp4", durationSource: "provider" });
     expect(storage.upload).toHaveBeenCalledOnce();
     generateConfiguredVideoMock.mockClear();
   });

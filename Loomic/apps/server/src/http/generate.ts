@@ -413,6 +413,7 @@ export async function registerGenerateRoutes(
         workspaceId,
         jobType: "video_generation",
         payload: jobPayload,
+        requiresCreditReservation: Boolean(options.creditService && creditsCost > 0),
       });
 
       // ── Deduct credits BEFORE generation ──

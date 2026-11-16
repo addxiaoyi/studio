@@ -93,7 +93,7 @@ describe("generation approval service", () => {
     });
     expect(query).toHaveBeenCalledTimes(4);
     expect(String(query.mock.calls[3]?.[0])).toContain("status = 'pending'");
-    expect(query.mock.calls[3]?.[1]).toEqual(["workspace-1", "user-1", "video_generation", "minimax-h3", expect.any(String), "canvas-1", "session-1"]);
+    expect(query.mock.calls[3]?.[1]).toEqual(["workspace-1", "user-1", "video_generation", "minimax-h3", expect.any(String), JSON.stringify({ canvasId: "canvas-1", sessionId: "session-1" })]);
   });
 
   it("returns the winner when concurrent identical requests hit the pending unique index", async () => {
@@ -115,11 +115,10 @@ describe("generation approval service", () => {
 
   it("keeps an approved confirmation consumable only once", async () => {
     const query = vi.fn()
-      .mockResolvedValueOnce({ rows: [{ enabled: false }] })
       .mockResolvedValueOnce({ rows: [{ id: "approval-3" }] });
     const service = createGenerationApprovalService({ query } as any);
 
     await expect(service.gate({ ...baseInput, approvalId: "approval-3" })).resolves.toEqual({ state: "approved", approvalId: "approval-3" });
-    expect(String(query.mock.calls[1]?.[0])).toContain("consumed_at = now()");
+    expect(String(query.mock.calls[0]?.[0])).toContain("consumed_at = now()");
   });
 });

@@ -1,9 +1,10 @@
 import { stat } from "node:fs/promises";
 import type { Pool } from "pg";
+import type { CapacityPolicy } from "../../config/capacity-policy.js";
 import { withMediaBudget } from "../../runtime/media-admission.js";
 import { runOneTake } from "./runner.js";
 
-export function budgetedMediaRunner(db: Pool, storageRoot: string) {
+export function budgetedMediaRunner(db: Pool, storageRoot: string, capacityPolicy?: CapacityPolicy) {
   return async (input: Record<string, unknown>, signal?: AbortSignal) => {
     const paths = typeof input.source === "string" ? [input.source] : Array.isArray(input.sources) ? input.sources : [];
     let sourceBytes = 0;
@@ -14,6 +15,7 @@ export function budgetedMediaRunner(db: Pool, storageRoot: string) {
     return withMediaBudget({
       db, storageRoot, kind: "transcode",
       reserveBytes: Math.max(1024 ** 3, sourceBytes * 3 + 256 * 1024 ** 2),
+      ...(capacityPolicy ? { capacityPolicy } : {}),
       ...(signal ? { signal } : {}),
     }, budget => runOneTake(input, budget.signal, budget.scratchRoot));
   };

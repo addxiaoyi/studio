@@ -576,6 +576,15 @@ export async function cancelJob(accessToken: string, jobId: string) {
   return (await response.json()) as { ok: true; job: unknown };
 }
 
+export async function decideJobSettlement(accessToken: string, jobId: string, reviewId: string, decision: "approve" | "reject") {
+  const response = await apiFetch(`${getServerBaseUrl()}/api/jobs/${encodeURIComponent(jobId)}/settlement-review`, {
+    method: "POST", headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
+    body: JSON.stringify({ reviewId, decision }),
+  });
+  if (!response.ok) return handleErrorResponse(response);
+  return await response.json() as { job: import("@helstera/shared").BackgroundJob };
+}
+
 export async function mutateAdminJob(
   accessToken: string,
   jobId: string,
@@ -1706,7 +1715,7 @@ export async function restoreGeneratedAsset(accessToken: string, assetId: string
 export async function publishAsset(
   accessToken: string,
   assetId: string,
-  details?: { title?: string; description?: string },
+  details?: { title?: string; description?: string; caption?: import("@helstera/shared").GalleryCaptionInput },
 ) {
   const response = await apiFetch(
     `${getServerBaseUrl()}/api/gallery/${encodeURIComponent(assetId)}/publish`,

@@ -9,7 +9,7 @@ function storage() {
 describe("generation job synchronization", () => {
   it("claims a pending sync once when concurrent workers race", async () => {
     let claimed = false;
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _values?: unknown[]) => {
       if (sql.startsWith("update background_jobs") && sql.includes("returning id, job_type")) {
         if (claimed) return { rows: [] };
         claimed = true;
@@ -26,6 +26,34 @@ describe("generation job synchronization", () => {
 
     expect(outcomes).toEqual(expect.arrayContaining([{ state: "succeeded" }, { state: "in_progress" }]));
     expect(query.mock.calls.filter(([sql]) => sql.startsWith("update background_jobs") && sql.includes("returning id, job_type"))).toHaveLength(2);
+  });
+
+  it("keeps a late cancellation outcome when Provider success finishes syncing", async () => {
+    const cancellation = {
+      requested: true,
+      outcome: "completed_after_cancel_request",
+      message: "取消请求到达时任务已完成，产物和费用按实际结果保留。",
+    };
+    const query = vi.fn(async (sql: string, _values?: unknown[]) => {
+      if (sql.startsWith("update background_jobs") && sql.includes("returning id, job_type")) {
+        return { rows: [{
+          id: "job-cancel",
+          job_type: "video_generation",
+          canvas_id: null,
+          payload: {},
+          result: { asset_id: "asset-1", cancellation },
+          sync_attempt_count: 0,
+        }] };
+      }
+      return { rows: [] };
+    });
+    const db = { query } as unknown as Pool;
+
+    await expect(syncGenerationJob(db, storage(), "job-cancel")).resolves.toMatchObject({ state: "succeeded" });
+
+    const finalUpdate = query.mock.calls.at(-1);
+    expect(finalUpdate?.[0]).toContain("stage = case when $2::jsonb->'cancellation'->>'requested' = 'true'");
+    expect(finalUpdate?.[1]?.[1]).toMatchObject({ cancellation });
   });
 
   it("schedules retry after transient Canvas synchronization failure", async () => {

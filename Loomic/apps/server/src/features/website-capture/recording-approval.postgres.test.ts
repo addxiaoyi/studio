@@ -40,10 +40,13 @@ describe.skipIf(!enabled)("recording approvals with PostgreSQL", () => {
       create table chat_messages (id uuid primary key default gen_random_uuid(), session_id uuid not null,
         role text not null, content text not null, client_message_id text not null, unique(session_id, client_message_id));
       create table asset_objects (id uuid primary key default gen_random_uuid(), workspace_id uuid not null,
-        bucket text not null, object_path text not null, mime_type text not null, byte_size integer not null, created_by uuid not null);
+        bucket text not null, object_path text not null, mime_type text not null, byte_size integer not null, created_by uuid not null,
+        created_at timestamptz not null default now());
       create table generated_assets (id uuid primary key default gen_random_uuid(), workspace_id uuid not null,
         created_by uuid not null, media_type text not null, object_path text not null, mime_type text not null,
-        title text not null, description text not null, prompt text not null, metadata jsonb, website_capture_task_id uuid);
+        title text not null, description text not null, prompt text not null, metadata jsonb, website_capture_task_id uuid,
+        deleted_at timestamptz, retention_state text not null default 'active',
+        retention_until timestamptz not null default (now() + interval '3 days'));
       create table website_capture_tasks (id uuid primary key, workspace_id uuid not null, created_by uuid not null,
         start_url text not null, mode text not null, page_limit integer not null, follow_external boolean not null,
         session_id uuid, assistant_connection_id uuid, record_video boolean not null, status text not null,
@@ -56,6 +59,7 @@ describe.skipIf(!enabled)("recording approvals with PostgreSQL", () => {
     const migration = await readFile(new URL("../../local-db/migrations/20261103000000_website_recording_approvals.sql", import.meta.url), "utf8");
     await db.query(migration);
     await db.query(migration);
+    await db.query(await readFile(new URL("../../local-db/migrations/20261110000000_media_resource_leases.sql", import.meta.url), "utf8"));
     await db.query(await readFile(new URL("../../local-db/migrations/20261108000000_website_presentations.sql",import.meta.url),"utf8"));
     await db.query(await readFile(new URL("../../local-db/migrations/20261108000001_website_login.sql",import.meta.url),"utf8"));
     await db.query(await readFile(new URL("../../local-db/migrations/20261107000001_agent_browser_views.sql",import.meta.url),"utf8"));

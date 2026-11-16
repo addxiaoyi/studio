@@ -4,15 +4,17 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { fetchFeedPackagesMock, fetchJobsMock } = vi.hoisted(() => ({
+const { fetchFeedPackagesMock, fetchJobsMock, fetchProjectContextMock } = vi.hoisted(() => ({
   fetchFeedPackagesMock: vi.fn(),
   fetchJobsMock: vi.fn(),
+  fetchProjectContextMock: vi.fn(),
 }));
 
 vi.mock("../src/lib/server-api", () => ({
   fetchFeedPackages: fetchFeedPackagesMock,
   fetchJobs: fetchJobsMock,
 }));
+vi.mock("../src/lib/project-context-api", () => ({ fetchProjectContext: fetchProjectContextMock }));
 
 import { HomeWorkspacePulse } from "../src/components/home-workspace-pulse";
 
@@ -20,12 +22,14 @@ afterEach(() => {
   cleanup();
   fetchFeedPackagesMock.mockReset();
   fetchJobsMock.mockReset();
+  fetchProjectContextMock.mockReset();
 });
 
 describe("HomeWorkspacePulse", () => {
   it("shows recent projects, feed packages, and recoverable jobs", async () => {
     fetchFeedPackagesMock.mockResolvedValue([{ id: "package-1", title: "春季商品内容", status: "failed" }]);
     fetchJobsMock.mockResolvedValue({ jobs: [{ id: "job-1", job_type: "video_generation", status: "running", progress: 42, stage: "Provider 请求" }] });
+    fetchProjectContextMock.mockResolvedValue(null);
 
     render(
       <HomeWorkspacePulse
@@ -45,6 +49,7 @@ describe("HomeWorkspacePulse", () => {
   it("shows a clear empty state when there is no work", async () => {
     fetchFeedPackagesMock.mockResolvedValue([]);
     fetchJobsMock.mockResolvedValue({ jobs: [] });
+    fetchProjectContextMock.mockResolvedValue(null);
 
     render(<HomeWorkspacePulse accessToken="token" projects={[]} projectsLoading={false} />);
 

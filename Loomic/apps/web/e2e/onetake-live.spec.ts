@@ -1,9 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import { loadEnvFile } from "node:process";
-import { resolve } from "node:path";
+import { loadOptionalTestEnv } from "./test-env";
 import { createOneTakeBrowserFixture } from "../../server/src/features/onetake/browser-fixture";
 
-loadEnvFile(resolve("../../.env.local"));
+loadOptionalTestEnv();
 test.skip(!process.env.HELSTERA_ONETAKE_PYTHON || !process.env.HELT_ONETAKE_TEST_SOURCE, "Requires the real speech runtime and a local test video.");
 let fixture: Awaited<ReturnType<typeof createOneTakeBrowserFixture>>;
 test.beforeAll(async () => { fixture = await createOneTakeBrowserFixture(process.env.DATABASE_URL!, "http://localhost:3217"); });

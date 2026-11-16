@@ -1,180 +1,194 @@
-import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
+import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 
 import type { HelsteraAgentFactory } from "./agent/deep-agent.js";
 import {
-  createAgentPersistenceService,
   type AgentPersistenceService,
+  createAgentPersistenceService,
 } from "./agent/persistence/index.js";
 import { createAgentRunService } from "./agent/runtime.js";
-import { registerAllProviders } from "./generation/providers/register-all.js";
-import {
-  createViewerService,
-  type ViewerService,
-} from "./features/bootstrap/ensure-user-foundation.js";
-import {
-  createCanvasService,
-  type CanvasService,
-} from "./features/canvas/canvas-service.js";
-import {
-  createBrandKitService,
-  type BrandKitService,
-} from "./features/brand-kit/brand-kit-service.js";
-import {
-  createProjectService,
-  type ProjectService,
-} from "./features/projects/project-service.js";
-import {
-  createChatService,
-  type ChatService,
-} from "./features/chat/chat-service.js";
-import {
-  createThreadService,
-  type ThreadService,
-} from "./features/chat/thread-service.js";
-import {
-  createAgentRunMetadataService,
-  type AgentRunMetadataService,
-} from "./features/agent-runs/agent-run-service.js";
-import {
-  createSettingsService,
-  type SettingsService,
-} from "./features/settings/settings-service.js";
-import {
-  createUploadService,
-  type UploadService,
-} from "./features/uploads/upload-service.js";
+import type { RequestAuthenticator } from "./auth/types.js";
 import {
   type ServerEnv,
   loadServerEnv,
   resolveDefaultAgentModel,
 } from "./config/env.js";
-import { createPgmqClient } from "./queue/pgmq-client.js";
-import { createLocalJobQueue } from "./queue/local-job-queue.js";
-import {
-  createCreditService,
-  type CreditService,
-} from "./features/credits/credit-service.js";
-import {
-  createLocalCostGuard,
-  createTierGuard,
-  type TierGuard,
-} from "./features/credits/tier-guard.js";
-import {
-  createJobService,
-  type JobService,
-} from "./features/jobs/job-service.js";
-import { createLemonSqueezyClient } from "./features/payments/lemon-squeezy-client.js";
-import {
-  createPaymentService,
-  buildVariantMap,
-  type PaymentService,
-} from "./features/payments/payment-service.js";
-import { registerPaymentRoutes } from "./http/payments.js";
-import { registerPaymentWebhookRoute } from "./http/payments-webhook.js";
-import { registerContactSalesRoutes } from "./http/contact-sales.js";
-import { registerLocalContactSalesRoutes } from "./http/local-contact-sales.js";
-import { registerLocalEcomRoutes } from "./http/local-ecom-image.js";
-import { registerLocalTeamRoutes } from "./http/local-team.js";
-import { registerLocalGrowthRoutes, registerPublicGrowthRoutes } from "./http/local-growth.js";
-import { registerOfficialModelPriceRoutes } from "./http/official-model-prices.js";
-import { registerFeedOperationRoutes } from "./http/feed-operations.js";
-import { configureFeedRenderQueue } from "./features/jobs/executors/feed-render.js";
-import { registerEpayRoutes } from "./http/epay.js";
-import { registerAlipayRoutes, registerUnavailableAlipayRoutes } from "./http/alipay.js";
-import { registerLightPayRoutes } from "./http/lightpay.js";
-import { createLightPayClient } from "./features/payments/lightpay-client.js";
-import { registerCreditRoutes } from "./http/credits.js";
-import { registerFontsRoutes } from "./http/fonts.js";
-import { registerJobRoutes } from "./http/jobs.js";
-import { registerGenerationApprovalRoutes } from "./http/generation-approvals.js";
-import { createGenerationApprovalService } from "./features/generation/generation-approval-service.js";
-import { registerBrandKitRoutes } from "./http/brand-kits.js";
-import { registerCanvasRoutes } from "./http/canvases.js";
-import { registerCanvasDecomposeRoutes } from "./http/canvas-decompose.js";
-import { registerChatRoutes } from "./http/chat.js";
-import { registerGenerateRoutes } from "./http/generate.js";
-import { registerHealthRoutes } from "./http/health.js";
-import { probeWritableStorage } from "./runtime/storage-probe.js";
-import { ServiceLifecycle } from "./runtime/lifecycle.js";
-import { registerProjectContextRoutes } from "./http/project-context.js";
-import { registerProjectVideoRoutes } from "./http/project-video-document.js";
-import { PeriodicTasks } from "./runtime/periodic-tasks.js";
-import { registerMetricsRoutes } from "./http/metrics.js";
-import { registerErrorRoutes } from "./http/errors.js";
-import { registerLocalAuthRoutes } from "./http/local-auth.js";
-import { createLocalDbPool } from "./local-db/client.js";
-import { createLocalRequestAuthenticator } from "./local-db/auth.js";
-import { createLocalProjectService } from "./local-db/project-service.js";
-import { createLocalStoryboardService } from "./local-db/storyboard-service.js";
-import { createLocalViewerService } from "./local-db/viewer-service.js";
-import { createLocalCanvasService } from "./local-db/canvas-service.js";
-import { createLocalChatService } from "./local-db/chat-service.js";
-import { createLocalUploadService } from "./local-db/upload-service.js";
-import { createLocalCreditService } from "./local-db/credit-service.js";
-import { createLocalThreadService } from "./local-db/thread-service.js";
-import { createLocalSettingsService } from "./local-db/settings-service.js";
-import { createLocalBrandKitService } from "./local-db/brand-kit-service.js";
-import { createLocalAgentRunMetadataService } from "./local-db/agent-run-service.js";
-import { createLocalJobService } from "./local-db/job-service.js";
-import { registerLocalAssetRoutes } from "./http/local-assets.js";
-import { registerAuthRoutes } from "./http/auth.js";
-import { registerImageProxyRoute } from "./http/image-proxy.js";
-import { registerModelRoutes } from "./http/models.js";
-import { registerImageModelRoutes } from "./http/image-models.js";
-import { registerVideoModelRoutes } from "./http/video-models.js";
-import { registerProjectRoutes } from "./http/projects.js";
-import { registerProjectBackupRoutes } from "./http/project-backups.js";
-import { registerStoryboardRoutes } from "./http/storyboard.js";
-import { registerRunRoutes } from "./http/runs.js";
-import { registerVideoEditorRoutes } from "./http/video-editor.js";
-import { registerOneTakeRoutes } from "./http/onetake.js";
-import { createEditorPlanStore } from "./features/video-editor/plan-store.js";
-import { registerAgentWorkflowRoutes } from "./http/agent-workflows.js";
-import { registerCanvasWorkflowRoutes } from "./http/canvas-workflows.js";
-import { guardWorkflowExecution } from "./features/canvas-workflows/execution-access.js";
-import { registerSettingsRoutes } from "./http/settings.js";
-import { registerAdminProviderRoutes } from "./http/admin-providers.js";
-import { createProviderConfigService } from "./local-db/provider-config-service.js";
-import { registerUploadRoutes } from "./http/uploads.js";
-import { registerPrivateVideoRoutes } from "./http/private-video.js";
-import { registerVideoUploadRoutes } from "./http/video-upload.js";
-import { registerPublicMediaRoutes } from "./http/public-media.js";
-import { loadPublicMedia } from "./storage/public-media.js";
-import { registerSkillRoutes } from "./http/skills.js";
-import { registerLocalSkillRoutes } from "./http/local-skills.js";
-import { registerMarketplaceRoutes } from "./http/skills-marketplace.js";
-import { registerAgentMarketplaceRoutes } from "./http/agent-marketplace.js";
-import { registerViewerRoutes } from "./http/viewer.js";
-import { registerDouyinMcpRoutes } from "./http/douyin-mcp.js";
-import { registerDouyinWebhookRoutes } from "./http/douyin-webhook.js";
-import { registerDouyinOAuthRoutes } from "./http/douyin-oauth.js";
-import { DouyinCredentialManager } from "./features/douyin/douyin-credentials.js";
-import { registerStorageRoutes } from "./http/storage.js";
-import { registerWebsiteCaptureRoutes } from "./http/website-capture.js";
-import { registerAgentBrowserRoutes } from "./http/agent-browser.js";
-import { registerAgentGoalRoutes } from "./http/agent-goals.js";
-import { registerAgentMemoryRoutes } from "./http/agent-memory.js";
-import { registerAgentConnectorRoutes } from "./http/agent-connectors.js";
-import { WebsiteAssistantHub, registerWebsiteAssistantWsRoute } from "./features/website-capture/assistant-hub.js";
+import { createBackgroundGoalExecutor } from "./features/agent-goals/agent-goal-background.js";
 import { AgentGoalEventPublisher } from "./features/agent-goals/agent-goal-events.js";
 import { AgentGoalWorker } from "./features/agent-goals/agent-goal-worker.js";
-import { createBackgroundGoalExecutor } from "./features/agent-goals/agent-goal-background.js";
-import { GoalStepWorker } from "./features/agent-goals/goal-step-worker.js";
 import { createGoalStepExecutor } from "./features/agent-goals/goal-step-executors.js";
-import { createWorkflowAuthor } from "./features/canvas-workflows/author.js";
-import { CanvasEventBuffer } from "./ws/event-buffer.js";
-import { ConnectionManager } from "./ws/connection-manager.js";
-import { registerWsRoute } from "./ws/handler.js";
+import { GoalStepWorker } from "./features/agent-goals/goal-step-worker.js";
 import {
-  createStorageProvider,
-  type StorageProvider,
-} from "./storage/index.js";
+  type AgentRunMetadataService,
+  createAgentRunMetadataService,
+} from "./features/agent-runs/agent-run-service.js";
 import { cleanExpiredGeneratedAssets } from "./features/assets/asset-retention.js";
+import {
+  type ViewerService,
+  createViewerService,
+} from "./features/bootstrap/ensure-user-foundation.js";
+import {
+  type BrandKitService,
+  createBrandKitService,
+} from "./features/brand-kit/brand-kit-service.js";
+import { createWorkflowAuthor } from "./features/canvas-workflows/author.js";
+import { guardWorkflowExecution } from "./features/canvas-workflows/execution-access.js";
+import {
+  type CanvasService,
+  createCanvasService,
+} from "./features/canvas/canvas-service.js";
+import {
+  type ChatService,
+  createChatService,
+} from "./features/chat/chat-service.js";
+import {
+  type ThreadService,
+  createThreadService,
+} from "./features/chat/thread-service.js";
+import {
+  type CreditService,
+  createCreditService,
+} from "./features/credits/credit-service.js";
+import {
+  type TierGuard,
+  createLocalCostGuard,
+  createTierGuard,
+} from "./features/credits/tier-guard.js";
+import { DouyinCredentialManager } from "./features/douyin/douyin-credentials.js";
+import { createGenerationApprovalService } from "./features/generation/generation-approval-service.js";
+import { configureFeedRenderQueue } from "./features/jobs/executors/feed-render.js";
 import { purgeExpiredJobPayloads } from "./features/jobs/job-retention.js";
-import type { RequestAuthenticator } from "./auth/types.js";
+import {
+  type JobService,
+  createJobService,
+} from "./features/jobs/job-service.js";
+import { createLemonSqueezyClient } from "./features/payments/lemon-squeezy-client.js";
+import { createLightPayClient } from "./features/payments/lightpay-client.js";
+import {
+  type PaymentService,
+  buildVariantMap,
+  createPaymentService,
+} from "./features/payments/payment-service.js";
+import {
+  type ProjectService,
+  createProjectService,
+} from "./features/projects/project-service.js";
+import {
+  type SettingsService,
+  createSettingsService,
+} from "./features/settings/settings-service.js";
+import {
+  type UploadService,
+  createUploadService,
+} from "./features/uploads/upload-service.js";
+import { createEditorPlanStore } from "./features/video-editor/plan-store.js";
+import {
+  WebsiteAssistantHub,
+  registerWebsiteAssistantWsRoute,
+} from "./features/website-capture/assistant-hub.js";
+import { registerAllProviders } from "./generation/providers/register-all.js";
+import { registerAdminProviderRoutes } from "./http/admin-providers.js";
+import { registerAgentBrowserRoutes } from "./http/agent-browser.js";
+import { registerAgentConnectorRoutes } from "./http/agent-connectors.js";
+import { registerAgentGoalRoutes } from "./http/agent-goals.js";
+import { registerAgentMarketplaceRoutes } from "./http/agent-marketplace.js";
+import { registerAgentMemoryRoutes } from "./http/agent-memory.js";
+import { registerAgentWorkflowRoutes } from "./http/agent-workflows.js";
+import {
+  registerAlipayRoutes,
+  registerUnavailableAlipayRoutes,
+} from "./http/alipay.js";
+import { registerAuthRoutes } from "./http/auth.js";
+import { registerBrandKitRoutes } from "./http/brand-kits.js";
+import { registerCanvasDecomposeRoutes } from "./http/canvas-decompose.js";
+import { registerCanvasWorkflowRoutes } from "./http/canvas-workflows.js";
+import { registerCanvasRoutes } from "./http/canvases.js";
+import { registerChatRoutes } from "./http/chat.js";
+import { registerContactSalesRoutes } from "./http/contact-sales.js";
+import { registerCreditRoutes } from "./http/credits.js";
+import { registerDouyinMcpRoutes } from "./http/douyin-mcp.js";
+import { registerDouyinOAuthRoutes } from "./http/douyin-oauth.js";
+import { registerDouyinWebhookRoutes } from "./http/douyin-webhook.js";
+import { registerEpayRoutes } from "./http/epay.js";
+import { registerErrorRoutes } from "./http/errors.js";
+import { registerFeedOperationRoutes } from "./http/feed-operations.js";
+import { registerFontsRoutes } from "./http/fonts.js";
+import { registerGalleryMediaRoutes } from "./http/gallery-media.js";
+import { registerGenerateRoutes } from "./http/generate.js";
+import { registerGenerationApprovalRoutes } from "./http/generation-approvals.js";
+import { registerHealthRoutes } from "./http/health.js";
+import { registerImageModelRoutes } from "./http/image-models.js";
+import { registerImageProxyRoute } from "./http/image-proxy.js";
+import { registerJobRoutes } from "./http/jobs.js";
+import { registerLightPayRoutes } from "./http/lightpay.js";
+import { registerLocalAssetRoutes } from "./http/local-assets.js";
+import { registerLocalAuthRoutes } from "./http/local-auth.js";
+import { registerLocalContactSalesRoutes } from "./http/local-contact-sales.js";
+import { registerLocalEcomRoutes } from "./http/local-ecom-image.js";
+import {
+  registerLocalGrowthRoutes,
+  registerPublicGrowthRoutes,
+} from "./http/local-growth.js";
+import { registerLocalSkillRoutes } from "./http/local-skills.js";
+import { registerLocalTeamRoutes } from "./http/local-team.js";
+import { registerMetricsRoutes } from "./http/metrics.js";
+import { registerModelRoutes } from "./http/models.js";
+import { registerOfficialModelPriceRoutes } from "./http/official-model-prices.js";
+import { registerOneTakeRoutes } from "./http/onetake.js";
+import { registerPaymentWebhookRoute } from "./http/payments-webhook.js";
+import { registerPaymentRoutes } from "./http/payments.js";
+import { registerPrivateVideoRoutes } from "./http/private-video.js";
+import { registerProjectBackupRoutes } from "./http/project-backups.js";
+import { registerProjectContextRoutes } from "./http/project-context.js";
+import { registerProjectVideoRoutes } from "./http/project-video-document.js";
+import { registerProjectRoutes } from "./http/projects.js";
+import { registerPublicMediaRoutes } from "./http/public-media.js";
+import { registerRunRoutes } from "./http/runs.js";
+import { registerSettingsRoutes } from "./http/settings.js";
+import { registerMarketplaceRoutes } from "./http/skills-marketplace.js";
+import { registerSkillRoutes } from "./http/skills.js";
+import { registerStorageRoutes } from "./http/storage.js";
+import { registerStoryboardRoutes } from "./http/storyboard.js";
+import { registerUploadRoutes } from "./http/uploads.js";
+import { registerVideoEditorRoutes } from "./http/video-editor.js";
+import { registerVideoModelRoutes } from "./http/video-models.js";
+import { registerVideoUploadRoutes } from "./http/video-upload.js";
+import { registerViewerRoutes } from "./http/viewer.js";
+import { registerWebsiteCaptureRoutes } from "./http/website-capture.js";
+import {
+  createLocalAgentRunMetadataService,
+  recoverExpiredAgentRuns,
+} from "./local-db/agent-run-service.js";
+import { createLocalRequestAuthenticator } from "./local-db/auth.js";
+import { createLocalBrandKitService } from "./local-db/brand-kit-service.js";
+import { createLocalCanvasService } from "./local-db/canvas-service.js";
+import { createLocalChatService } from "./local-db/chat-service.js";
+import { createLocalDbPool } from "./local-db/client.js";
+import { createLocalCreditService } from "./local-db/credit-service.js";
+import { createLocalJobService } from "./local-db/job-service.js";
+import { createLocalProjectService } from "./local-db/project-service.js";
+import { createProviderConfigService } from "./local-db/provider-config-service.js";
+import { createLocalSettingsService } from "./local-db/settings-service.js";
+import { createLocalStoryboardService } from "./local-db/storyboard-service.js";
+import { createLocalThreadService } from "./local-db/thread-service.js";
+import { createLocalUploadService } from "./local-db/upload-service.js";
+import { createLocalViewerService } from "./local-db/viewer-service.js";
+import { createLocalJobQueue } from "./queue/local-job-queue.js";
+import { createPgmqClient } from "./queue/pgmq-client.js";
+import { DrainGate } from "./runtime/drain-gate.js";
+import { ServiceLifecycle, drainInOrder } from "./runtime/lifecycle.js";
+import { PeriodicTasks } from "./runtime/periodic-tasks.js";
+import { probeWritableStorage } from "./runtime/storage-probe.js";
+import {
+  type StorageProvider,
+  createStorageProvider,
+} from "./storage/index.js";
+import { loadPublicMedia } from "./storage/public-media.js";
+import { ConnectionManager } from "./ws/connection-manager.js";
+import { CanvasEventBuffer } from "./ws/event-buffer.js";
+import { registerWsRoute } from "./ws/handler.js";
 
 export type BuildAppOptions = {
   lifecycle?: ServiceLifecycle;
@@ -203,9 +217,18 @@ export type BuildAppOptions = {
 };
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
-  const env = loadServerEnv({ ...options.env, authProvider: "local", storageProvider: "local" });
+  const env = loadServerEnv({
+    ...options.env,
+    authProvider: "local",
+    storageProvider: "local",
+  });
   const lifecycle = options.lifecycle ?? new ServiceLifecycle();
-  if (!env.databaseUrl) throw new Error("DATABASE_URL is required; Supabase runtime support has been removed.");
+  const wsCommands = new DrainGate();
+  const storageRoot = env.storageRoot ?? "/www/helstera/uploads";
+  if (!env.databaseUrl)
+    throw new Error(
+      "DATABASE_URL is required; Supabase runtime support has been removed.",
+    );
 
   // Register generation providers (shared with worker.ts)
   registerAllProviders(env);
@@ -215,65 +238,93 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     bodyLimit: 50 * 1024 * 1024,
   });
   app.addHook("onRequest", async (request, reply) => {
-    if (lifecycle.draining && !request.url.startsWith("/api/health")) return reply.header("Retry-After", "2").code(503).send({ ok: false, error: { code: "service_draining", message: "服务正在切换，请稍后重试。", retryable: true } });
+    if (lifecycle.draining && !request.url.startsWith("/api/health"))
+      return reply
+        .header("Retry-After", "2")
+        .code(503)
+        .send({
+          ok: false,
+          error: {
+            code: "service_draining",
+            message: "服务正在切换，请稍后重试。",
+            retryable: true,
+          },
+        });
   });
   app.removeContentTypeParser("application/json");
-  app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
-    const rawBody = typeof body === "string" ? body : body.toString("utf8");
-    (request as any).rawBody = rawBody;
-    try {
-      done(null, JSON.parse(rawBody));
-    } catch (error) {
-      done(error as Error, undefined);
-    }
-  });
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (request, body, done) => {
+      const rawBody = typeof body === "string" ? body : body.toString("utf8");
+      request.rawBody = rawBody;
+      try {
+        done(null, JSON.parse(rawBody));
+      } catch (error) {
+        done(error as Error, undefined);
+      }
+    },
+  );
   void app.register(multipart, {
     limits: { fileSize: 25 * 1024 * 1024 },
   });
   const localDb = createLocalDbPool(env.databaseUrl);
-  {
-    void localDb.query(
-      `update agent_runs
-       set status = 'failed', completed_at = now(), error_code = 'stale_run',
-           error_message = '生成任务因服务重启中断，请重新提交'
-       where status in ('accepted', 'running')
-         and created_at < now() - interval '15 minutes'`,
-    ).catch((error) => {
-      console.error('[agent-runs] stale-run recovery failed:', error);
-    });
-  }
   const auth = options.auth ?? createLocalRequestAuthenticator(localDb);
-  const viewerService = options.viewerService ?? createLocalViewerService(localDb, env.systemAdminEmails);
-  console.log(
-    "[auth] provider=local database=postgres",
-  );
+  const viewerService =
+    options.viewerService ??
+    createLocalViewerService(localDb, env.systemAdminEmails);
+  console.log("[auth] provider=local database=postgres");
 
   // Storage provider setup
-  const storageProvider = options.storageProvider ?? createStorageProvider({
-    provider: "local",
-    root: env.storageRoot ?? "/www/helstera/uploads",
-    baseUrl: env.webOrigin,
-  });
+  const storageProvider =
+    options.storageProvider ??
+    createStorageProvider({
+      provider: "local",
+      root: env.storageRoot ?? "/www/helstera/uploads",
+      baseUrl: env.webOrigin,
+    });
   console.log(
     `[storage] provider=local root=${env.storageRoot ?? "/www/helstera/uploads"}`,
   );
 
   const projectService =
     options.projectService ??
-    createLocalProjectService(localDb, env.storageRoot ?? "/www/helstera/uploads");
-  const brandKitService = options.brandKitService ?? createLocalBrandKitService(localDb, storageProvider);
-  const canvasService = options.canvasService ?? createLocalCanvasService(localDb);
-  const threadService = options.threadService ?? createLocalThreadService(localDb);
+    createLocalProjectService(
+      localDb,
+      env.storageRoot ?? "/www/helstera/uploads",
+    );
+  const brandKitService =
+    options.brandKitService ??
+    createLocalBrandKitService(localDb, storageProvider);
+  const canvasService =
+    options.canvasService ?? createLocalCanvasService(localDb);
+  const threadService =
+    options.threadService ?? createLocalThreadService(localDb);
   const chatService = options.chatService ?? createLocalChatService(localDb);
-  const agentRunMetadataService = options.agentRunMetadataService ?? createLocalAgentRunMetadataService(localDb);
+  const agentRunMetadataService =
+    options.agentRunMetadataService ??
+    createLocalAgentRunMetadataService(localDb, {
+      onLeaseLost: (runId) => {
+        agentRuns.cancelRun(runId);
+      },
+    });
   const agentPersistenceService =
     options.agentPersistenceService ?? createAgentPersistenceService(env);
-  const settingsService = options.settingsService ?? createLocalSettingsService(localDb);
-  const uploadService = options.uploadService ?? createLocalUploadService(localDb, env.storageRoot ?? "/www/helstera/uploads");
+  const settingsService =
+    options.settingsService ?? createLocalSettingsService(localDb);
+  const uploadService =
+    options.uploadService ??
+    createLocalUploadService(
+      localDb,
+      env.storageRoot ?? "/www/helstera/uploads",
+    );
   const feedDb = localDb;
   configureFeedRenderQueue("local");
-  const jobService = options.jobService ?? createLocalJobService(localDb, createLocalJobQueue(localDb));
-  const creditService = options.creditService ?? createLocalCreditService(localDb);
+  const jobService =
+    options.jobService ??
+    createLocalJobService(localDb, createLocalJobQueue(localDb));
+  const creditService =
+    options.creditService ?? createLocalCreditService(localDb);
   const tierGuard = options.tierGuard ?? createLocalCostGuard(localDb);
 
   // Payment service — only created when Lemon Squeezy is configured
@@ -288,8 +339,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     webOrigin: env.webOrigin,
   });
   const eventBuffer = new CanvasEventBuffer();
-  const maintenance = new PeriodicTasks((name, error) => app.log.error({ err: error, task: name }, "Maintenance task failed"));
-  maintenance.every("event-buffer", 5 * 60 * 1000, async () => eventBuffer.cleanup(), false);
+  const maintenance = new PeriodicTasks((name, error) =>
+    app.log.error({ err: error, task: name }, "Maintenance task failed"),
+  );
+  maintenance.every(
+    "event-buffer",
+    5 * 60 * 1000,
+    async () => eventBuffer.cleanup(),
+    false,
+  );
+  maintenance.every("agent-run-recovery", 10_000, () =>
+    recoverExpiredAgentRuns(localDb),
+  );
   const agentGoalWorker = new AgentGoalWorker(
     localDb,
     websiteAssistantHub,
@@ -301,8 +362,25 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       webOrigin: env.webOrigin,
     }),
   );
-  const agentGoalEvents = new AgentGoalEventPublisher(localDb, connectionManager, eventBuffer);
-  const goalSteps = new GoalStepWorker(localDb, guardWorkflowExecution(localDb, createGoalStepExecutor({ db: localDb, storage: storageProvider, storageRoot: env.storageRoot ?? "/www/helstera/uploads", webOrigin: env.webOrigin, desktop: websiteAssistantHub, author: createWorkflowAuthor(env, settingsService) })));
+  const agentGoalEvents = new AgentGoalEventPublisher(
+    localDb,
+    connectionManager,
+    eventBuffer,
+  );
+  const goalSteps = new GoalStepWorker(
+    localDb,
+    guardWorkflowExecution(
+      localDb,
+      createGoalStepExecutor({
+        db: localDb,
+        storage: storageProvider,
+        storageRoot: env.storageRoot ?? "/www/helstera/uploads",
+        webOrigin: env.webOrigin,
+        desktop: websiteAssistantHub,
+        author: createWorkflowAuthor(env, settingsService),
+      }),
+    ),
+  );
   if (process.env.NODE_ENV !== "test") {
     agentGoalWorker.start();
     agentGoalEvents.start();
@@ -314,7 +392,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (isAssetRetentionRunning) return;
       isAssetRetentionRunning = true;
       try {
-        await cleanExpiredGeneratedAssets({ db: localDb, storage: storageProvider });
+        await cleanExpiredGeneratedAssets({
+          db: localDb,
+          storage: storageProvider,
+        });
       } catch (error) {
         console.error("[asset-retention] cleanup failed:", error);
       } finally {
@@ -347,7 +428,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       : { eventDelayMs: options.mockEventDelayMs }),
     env,
     ...(localDb ? { localDb } : {}),
-    ...(localDb ? { generationApprovalService: createGenerationApprovalService(localDb) } : {}),
+    ...(localDb
+      ? { generationApprovalService: createGenerationApprovalService(localDb) }
+      : {}),
     ...(jobService ? { jobService } : {}),
     creditService,
     tierGuard,
@@ -357,17 +440,27 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   lifecycle.onDrain(async () => {
-    await Promise.all([agentGoalWorker.stop(), goalSteps.stop(), agentRuns.drain(), maintenance.stop()]);
-    await websiteAssistantHub.drain();
-    await agentGoalEvents.stop();
-    await connectionManager.drain();
-    eventBuffer.dispose();
+    const commandsDrained = wsCommands.drain();
+    await drainInOrder([
+      [
+        () => agentGoalWorker.stop(),
+        () => goalSteps.stop(),
+        () => agentRuns.drain(),
+        () => commandsDrained,
+        () => maintenance.stop(),
+      ],
+      [() => websiteAssistantHub.drain()],
+      [() => agentGoalEvents.stop()],
+      [() => connectionManager.drain()],
+      [() => eventBuffer.dispose()],
+    ]);
   });
   app.addHook("preClose", async () => lifecycle.drain());
 
   void app.register(async (instance) => {
     await instance.register(websocket);
     await registerWsRoute(instance, {
+      commandGate: wsCommands,
       agentRuns,
       agentRunMetadataService,
       auth,
@@ -384,13 +477,22 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   app.addHook("onRequest", async (request, reply) => {
     reply.header("x-request-id", request.id);
-    reply.header("access-control-expose-headers", "x-request-id,retry-after,content-range");
+    reply.header(
+      "access-control-expose-headers",
+      "x-request-id,retry-after,content-range",
+    );
     reply.header("x-content-type-options", "nosniff");
     reply.header("x-frame-options", "DENY");
     reply.header("referrer-policy", "strict-origin-when-cross-origin");
-    reply.header("permissions-policy", "camera=(), microphone=(), geolocation=()");
+    reply.header(
+      "permissions-policy",
+      "camera=(), microphone=(), geolocation=()",
+    );
     if (env.webOrigin.startsWith("https://")) {
-      reply.header("strict-transport-security", "max-age=31536000; includeSubDomains");
+      reply.header(
+        "strict-transport-security",
+        "max-age=31536000; includeSubDomains",
+      );
     }
 
     const corsResult = evaluateCors(request, env.webOrigin);
@@ -428,18 +530,26 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     }
   });
 
+  const publicMedia = loadPublicMedia();
   void registerHealthRoutes(app, env, {
-    database: () => localDb.query("select 1 from media_resource_leases limit 0"),
-    storage: () => probeWritableStorage(env.storageRoot!),
+    database: () =>
+      localDb.query("select 1 from media_resource_leases limit 0"),
+    storage: () => probeWritableStorage(storageRoot),
+    ...(publicMedia?.probe ? { publicMedia: publicMedia.probe } : {}),
     draining: () => lifecycle.draining,
   });
   void registerMetricsRoutes(app);
   void registerErrorRoutes(app);
   void registerLocalAuthRoutes(app, { db: localDb, env });
-  void registerLocalAssetRoutes(app, { db: localDb, auth, root: env.storageRoot ?? "/www/helstera/uploads" });
+  void registerLocalAssetRoutes(app, {
+    db: localDb,
+    auth,
+    root: env.storageRoot ?? "/www/helstera/uploads",
+  });
   void registerLocalEcomRoutes(app, { db: localDb, auth, creditService });
   void registerLocalTeamRoutes(app, { db: localDb, auth, viewerService });
   void registerLocalGrowthRoutes(app, { db: localDb, auth, viewerService });
+  registerGalleryMediaRoutes(app, { db: localDb, root: env.storageRoot ?? "" });
   registerOfficialModelPriceRoutes(app, {
     db: localDb,
     autoSync: options.autoSyncOfficialPrices ?? false,
@@ -447,7 +557,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     viewerService,
   });
   if (feedDb) {
-    registerFeedOperationRoutes(app, { db: feedDb, auth, viewerService, storage: storageProvider });
+    registerFeedOperationRoutes(app, {
+      db: feedDb,
+      auth,
+      viewerService,
+      storage: storageProvider,
+    });
     if (feedDb !== localDb) {
       app.addHook("onClose", async () => {
         await feedDb.end();
@@ -467,18 +582,36 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       notifyUrl: `${env.webOrigin}/api/epay/notify`,
     });
   }
-  if (localDb && env.lightpayBaseUrl && env.lightpayApiId && env.lightpayApiSecret) {
+  const lightpayConfig =
+    env.lightpayBaseUrl && env.lightpayApiId && env.lightpayApiSecret
+      ? {
+          baseUrl: env.lightpayBaseUrl,
+          apiId: env.lightpayApiId,
+          apiSecret: env.lightpayApiSecret,
+        }
+      : undefined;
+  if (localDb && lightpayConfig) {
     void app.register(async (lightpayScope) => {
-      lightpayScope.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => done(null, body));
+      lightpayScope.addContentTypeParser(
+        "application/json",
+        { parseAs: "string" },
+        (_request, body, done) => done(null, body),
+      );
       registerLightPayRoutes(lightpayScope, {
         auth,
         creditService,
         viewerService,
-        client: createLightPayClient({ baseUrl: env.lightpayBaseUrl!, apiId: env.lightpayApiId!, apiSecret: env.lightpayApiSecret! }),
+        client: createLightPayClient({
+          ...lightpayConfig,
+        }),
       });
     });
   }
-  if (env.alipayAppId && env.alipayAppPrivateKeyPath && env.alipayPlatformPublicKeyPath) {
+  if (
+    env.alipayAppId &&
+    env.alipayAppPrivateKeyPath &&
+    env.alipayPlatformPublicKeyPath
+  ) {
     try {
       registerAlipayRoutes(app, {
         appId: env.alipayAppId,
@@ -491,7 +624,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         webOrigin: env.webOrigin,
       });
     } catch (error) {
-      console.error("[alipay] disabled: could not load certificate files", error);
+      console.error(
+        "[alipay] disabled: could not load certificate files",
+        error,
+      );
       registerUnavailableAlipayRoutes(app);
     }
   } else {
@@ -507,8 +643,21 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     threadService,
     viewerService,
   });
-  registerVideoEditorRoutes(app, { auth, env, settingsService, viewerService, browserDb:localDb, planStore: createEditorPlanStore(localDb) });
-  registerOneTakeRoutes(app, { auth, viewerService, db: localDb, storage: storageProvider, storageRoot: env.storageRoot ?? "/www/helstera/uploads" });
+  registerVideoEditorRoutes(app, {
+    auth,
+    env,
+    settingsService,
+    viewerService,
+    browserDb: localDb,
+    planStore: createEditorPlanStore(localDb),
+  });
+  registerOneTakeRoutes(app, {
+    auth,
+    viewerService,
+    db: localDb,
+    storage: storageProvider,
+    storageRoot: env.storageRoot ?? "/www/helstera/uploads",
+  });
   registerAgentWorkflowRoutes(app, {
     db: localDb,
     auth,
@@ -517,11 +666,22 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     creditService,
     tierGuard,
   });
-  void registerViewerRoutes(app, { auth, creditService, viewerService, localDb });
+  void registerViewerRoutes(app, {
+    auth,
+    creditService,
+    viewerService,
+    localDb,
+  });
   const douyinCredentials = DouyinCredentialManager.fromEnv(env);
   douyinCredentials.start();
   app.addHook("onClose", async () => douyinCredentials.stop());
-  registerDouyinMcpRoutes(app, { auth, db: localDb, env, viewerService, credentials: douyinCredentials });
+  registerDouyinMcpRoutes(app, {
+    auth,
+    db: localDb,
+    env,
+    viewerService,
+    credentials: douyinCredentials,
+  });
   registerDouyinWebhookRoutes(app, { db: localDb, env });
   registerDouyinOAuthRoutes(app, { auth, db: localDb, env, viewerService });
   void registerBrandKitRoutes(app, {
@@ -573,9 +733,20 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     uploadService,
     viewerService,
   });
-  registerPrivateVideoRoutes(app, { auth, viewerService, db: localDb, storage: storageProvider });
-  void registerVideoUploadRoutes(app, { auth, viewerService, db: localDb, storage: storageProvider, root: env.storageRoot ?? "/www/helstera/uploads" });
-  registerPublicMediaRoutes(app, loadPublicMedia());
+  registerPrivateVideoRoutes(app, {
+    auth,
+    viewerService,
+    db: localDb,
+    storage: storageProvider,
+  });
+  void registerVideoUploadRoutes(app, {
+    auth,
+    viewerService,
+    db: localDb,
+    storage: storageProvider,
+    root: env.storageRoot ?? "/www/helstera/uploads",
+  });
+  registerPublicMediaRoutes(app, publicMedia);
   void registerGenerateRoutes(app, {
     auth,
     creditService,
@@ -602,7 +773,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       storage: storageProvider,
     });
   }
-  registerAgentBrowserRoutes(app, { db: localDb, auth, viewerService, storageRoot: env.storageRoot ?? "/www/helstera/uploads", enabled: process.env.HELSTERA_BROWSER_VIEW_ENABLED === "1" });
+  registerAgentBrowserRoutes(app, {
+    db: localDb,
+    auth,
+    viewerService,
+    storageRoot: env.storageRoot ?? "/www/helstera/uploads",
+    enabled: process.env.HELSTERA_BROWSER_VIEW_ENABLED === "1",
+  });
   registerWebsiteCaptureRoutes(app, {
     auth,
     db: localDb,
@@ -615,13 +792,20 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     tierGuard,
   });
   registerAgentGoalRoutes(app, {
-    env, settingsService,
+    env,
+    settingsService,
     auth,
     db: localDb,
     viewerService,
     assistantHub: websiteAssistantHub,
   });
-  registerCanvasWorkflowRoutes(app, { db: localDb, auth, env, settingsService, storage: storageProvider });
+  registerCanvasWorkflowRoutes(app, {
+    db: localDb,
+    auth,
+    env,
+    settingsService,
+    storage: storageProvider,
+  });
   registerAgentMemoryRoutes(app, {
     auth,
     db: localDb,
@@ -644,7 +828,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   }
 
   // Storage routes - serve local files when using local storage provider
-  void registerStorageRoutes(app, { storageProvider, ...(env.storageRoot ? { storageRoot: env.storageRoot } : {}) });
+  void registerStorageRoutes(app, {
+    storageProvider,
+    ...(env.storageRoot ? { storageRoot: env.storageRoot } : {}),
+  });
 
   void registerLocalSkillRoutes(app, { auth, db: localDb, viewerService });
   const encryptionKey = process.env.PROVIDER_CONFIG_ENCRYPTION_KEY;
@@ -656,14 +843,20 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       service: createProviderConfigService(localDb, encryptionKey),
     });
   } else {
-    console.warn("[admin-providers] disabled: PROVIDER_CONFIG_ENCRYPTION_KEY is not configured");
+    console.warn(
+      "[admin-providers] disabled: PROVIDER_CONFIG_ENCRYPTION_KEY is not configured",
+    );
   }
   void registerMarketplaceRoutes(app, {
     auth,
     viewerService,
     localDb,
   });
-  void registerAgentMarketplaceRoutes(app, { auth, db: localDb, viewerService });
+  void registerAgentMarketplaceRoutes(app, {
+    auth,
+    db: localDb,
+    viewerService,
+  });
 
   // Contact sales — public endpoint, no auth required
   void registerLocalContactSalesRoutes(app, { db: localDb });
@@ -673,9 +866,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   // Payment routes — only registered when Lemon Squeezy is configured
   // Supabase-backed payment routes are disabled in local-only mode.
 
-
   app.addHook("onClose", async () => {
     await agentPersistenceService.close?.();
+    await agentRunMetadataService.close?.();
     await localDb.end();
   });
   return app;
@@ -689,7 +882,10 @@ type CorsResult = {
   isPreflight: boolean;
 };
 
-export function evaluateCors(request: FastifyRequest, webOrigin: string): CorsResult {
+export function evaluateCors(
+  request: FastifyRequest,
+  webOrigin: string,
+): CorsResult {
   const origin = request.headers.origin;
   const isPreflight =
     request.method === "OPTIONS" &&

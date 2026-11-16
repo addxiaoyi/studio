@@ -48,6 +48,7 @@ export type CreateJobInput = {
   idempotencyKey?: string;
   jobType: BackgroundJobType;
   payload: Record<string, unknown>;
+  requiresCreditReservation?: boolean;
 };
 
 export type JobService = {
@@ -75,6 +76,8 @@ export type JobService = {
   incrementAttempt(jobId: string): Promise<{ attempt_count: number; max_attempts: number }>;
   claimJob(jobId: string): Promise<{ attempt_count: number; max_attempts: number } | null>;
   updateProgress(jobId: string, progress: number, stage: string): Promise<void>;
+  markShutdownRequested(jobId: string, stage: string): Promise<void>;
+  markCancellationOutcomeUnknown(jobId: string, message: string): Promise<boolean>;
 };
 
 export function createJobService(options: {
@@ -108,6 +111,7 @@ export function createJobService(options: {
       completed_at: (row.completed_at as string) ?? null,
       failed_at: (row.failed_at as string) ?? null,
       canceled_at: (row.canceled_at as string) ?? null,
+      cancel_requested_at: (row.cancel_requested_at as string) ?? null,
       sync_attempt_count: Number(row.sync_attempt_count ?? 0),
       next_sync_at: (row.next_sync_at as string) ?? null,
       sync_error_code: (row.sync_error_code as string) ?? null,
@@ -116,7 +120,7 @@ export function createJobService(options: {
   }
 
   const SELECT_COLS =
-    "id, workspace_id, project_id, canvas_id, session_id, thread_id, idempotency_key, queue_name, job_type, status, payload, result, error_code, error_message, progress, stage, attempt_count, max_attempts, created_by, created_at, updated_at, started_at, completed_at, failed_at, canceled_at, sync_attempt_count, next_sync_at, sync_error_code, sync_error_message";
+    "id, workspace_id, project_id, canvas_id, session_id, thread_id, idempotency_key, queue_name, job_type, status, payload, result, error_code, error_message, progress, stage, attempt_count, max_attempts, created_by, created_at, updated_at, started_at, completed_at, failed_at, canceled_at, cancel_requested_at, sync_attempt_count, next_sync_at, sync_error_code, sync_error_message";
 
   async function findIdempotentJob(
     client: DataClient,
@@ -299,13 +303,27 @@ export function createJobService(options: {
         .from("background_jobs")
         .update({ status: "canceled", canceled_at: new Date().toISOString() })
         .eq("id", jobId)
-        .in("status", ["queued", "running"])
+        .eq("status", "queued")
         .select(SELECT_COLS)
         .maybeSingle();
 
       if (error) {
         throw new JobServiceError("job_cancel_failed", "Failed to cancel job.", 500);
       }
+      if (job) return mapJobRow(job as unknown as Record<string, unknown>);
+
+      const { data: requested, error: requestError } = await client
+        .from("background_jobs")
+        .update({ cancel_requested_at: new Date().toISOString(), stage: "cancel_requested", error_code: "cancel_requested", error_message: "取消请求已提交，正在等待任务结果。", updated_at: new Date().toISOString() })
+        .eq("id", jobId)
+        .eq("status", "running")
+        .select(SELECT_COLS)
+        .maybeSingle();
+      if (requestError) {
+        throw new JobServiceError("job_cancel_failed", "Failed to request cancellation.", 500);
+      }
+      if (requested) return mapJobRow(requested as unknown as Record<string, unknown>);
+
       if (!job) {
         throw new JobServiceError(
           "job_not_found",
@@ -475,6 +493,27 @@ export function createJobService(options: {
     },
     async updateProgress(jobId, progress, stage) {
       await (options.getAdminClient() as any).from("background_jobs").update({ progress: Math.max(0, Math.min(100, progress)), stage }).eq("id", jobId);
+    },
+    async markShutdownRequested(jobId, stage) {
+      const { error } = await (options.getAdminClient() as any)
+        .from("background_jobs")
+        .update({ stage })
+        .eq("id", jobId)
+        .eq("status", "running");
+      if (error) throw new Error(`Failed to checkpoint shutdown for job ${jobId}: ${error.message}`);
+    },
+    async markCancellationOutcomeUnknown(jobId, message) {
+      const admin = options.getAdminClient();
+      const { data, error } = await admin
+        .from("background_jobs")
+        .update({ status: "dead_letter", error_code: "cancel_outcome_unknown", error_message: message, stage: "cancel_outcome_unknown", failed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq("id", jobId)
+        .eq("status", "running")
+        .not("cancel_requested_at", "is", null)
+        .select("id")
+        .maybeSingle();
+      if (error) throw new Error(`Failed to retain the uncertain cancellation outcome for job ${jobId}: ${error.message}`);
+      return Boolean(data);
     },
   };
 }

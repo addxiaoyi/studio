@@ -6,9 +6,10 @@ import { motion } from "framer-motion";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { ToolBlock, WebsiteCaptureTask } from "@helstera/shared";
+import type { SettlementReview, ToolBlock, WebsiteCaptureTask } from "@helstera/shared";
 import { useAuth } from "../../lib/auth-context";
 import { approveWebsiteCaptureAction, cancelJob, cancelWebsiteCapture, decideWebsiteRecording, exportJob, fetchJob, fetchJobs, fetchJobTimeline, fetchWebsiteCapture, fetchWebsiteCaptureActions, prepareWebsitePromo, rejectWebsiteCaptureAction, retryWebsiteCapture, syncJob, type PendingWebsiteAction, type RecordingApproval } from "../../lib/server-api";
+import { JobSettlementReview } from "../job-settlement-review";
 import { canRetryGeneration, formatGenerationError, shouldFailoverVideoError } from "../../lib/generation-error-policy";
 import { ChatImage } from "./image-lightbox";
 import { DesktopAgentProgressCard as DesktopAgentTaskCard } from "./desktop-agent-progress-card";
@@ -148,6 +149,7 @@ function findSidebarRect(el: HTMLElement | null): DOMRect | null {
 }
 
 type GenerationJob = {
+  settlement_review?: SettlementReview | null;
   id: string;
   status: "queued" | "running" | "succeeded" | "failed" | "sync_pending" | "sync_failed" | "canceled" | "dead_letter";
   job_type: "image_generation" | "video_generation";
@@ -276,15 +278,23 @@ function useGenerationJobStatus(
 /*  ToolBlockView — main card in chatbar + floating detail panel       */
 /* ------------------------------------------------------------------ */
 
-export const ToolBlockView = React.memo(function ToolBlockView({
-  block,
-  hideApprovalCard = false,
-  hideDuplicateJob = false,
-}: {
+type ToolBlockViewProps = {
   block: ToolBlock;
   hideApprovalCard?: boolean | undefined;
   hideDuplicateJob?: boolean | undefined;
-}) {
+};
+
+export const ToolBlockView = React.memo(function ToolBlockView(props: ToolBlockViewProps) {
+  const { session } = useAuth();
+  const account = JSON.stringify([session?.user?.id, session?.access_token, props.block.toolCallId]);
+  return <AccountToolBlock key={account} {...props} />;
+});
+
+const AccountToolBlock = React.memo(function AccountToolBlock({
+  block,
+  hideApprovalCard = false,
+  hideDuplicateJob = false,
+}: ToolBlockViewProps) {
   const { session } = useAuth();
   const [panelOpen, setPanelOpen] = useState(false);
   const [timeline, setTimeline] = useState<Array<{ key: string; label: string; status: "done" | "active" | "failed" | "pending"; at?: string; id?: string; detail?: string }>>([]);
@@ -472,6 +482,15 @@ export const ToolBlockView = React.memo(function ToolBlockView({
           pollingState={pollingState}
         />
       )}
+      {isMediaTool && backgroundPending && hasDetails && (
+        <button
+          type="button"
+          onClick={handleOpenPanel}
+          className="min-h-9 rounded-md border border-border/70 px-2.5 py-1.5 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          Open task details
+        </button>
+      )}
 
       {isWebsiteTool && websiteTaskId ? <><AgentBrowserButton taskId={websiteTaskId}/><WebsiteCaptureProgressCard taskId={websiteTaskId} /></> : null}
       {exportedAssetId && session?.access_token ? <AuthenticatedRecording assetId={exportedAssetId} accessToken={session.access_token} maxBytes={250 * 1024 * 1024} label="视频成片" /> : null}
@@ -559,6 +578,7 @@ export const ToolBlockView = React.memo(function ToolBlockView({
             <button
               type="button"
               onClick={handleOpenPanel}
+              aria-label="Open task details"
               className="mt-2 flex items-center gap-0.5 text-[12px] text-muted-foreground hover:text-foreground transition-all duration-300 cursor-pointer"
             >
               <svg
@@ -1169,6 +1189,7 @@ function ToolDetailPanel({
   const [busyAction, setBusyAction] = useState<"cancel" | "sync" | "export" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [currentJob, setCurrentJob] = useState(job);
+  const mounted = useRef(false);
   const { session } = useAuth();
   const hasInput = block.input && Object.keys(block.input).length > 0;
   const config = getToolConfig(block.toolName);
@@ -1176,6 +1197,11 @@ function ToolDetailPanel({
   const jobId = job?.id ?? (typeof output?.jobId === "string" ? output.jobId : undefined);
   const canCancel = currentJob?.status === "queued" || currentJob?.status === "running";
   const canSync = currentJob?.status === "sync_failed";
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     setCurrentJob(job);
@@ -1201,29 +1227,35 @@ function ToolDetailPanel({
     try {
       if (action === "cancel") {
         const canceled = await cancelJob(session.access_token, jobId);
+        if (!mounted.current) return;
         const updatedJob = canceled.job as GenerationJob;
         setCurrentJob(updatedJob);
         await onRefreshJob(updatedJob);
       }
       if (action === "sync") {
         const synced = await syncJob(session.access_token, jobId);
+        if (!mounted.current) return;
         const updatedJob = synced.job as GenerationJob;
         setCurrentJob(updatedJob);
         await onRefreshJob(updatedJob);
       }
       if (action === "export") {
         const blob = await exportJob(session.access_token, jobId);
+        if (!mounted.current) return;
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
         anchor.href = url;
         anchor.download = `task-${jobId}.json`;
-        anchor.click();
-        URL.revokeObjectURL(url);
+        try {
+          anchor.click();
+        } finally {
+          URL.revokeObjectURL(url);
+        }
       }
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Task action failed");
+      if (mounted.current) setActionError(error instanceof Error ? error.message : "Task action failed");
     } finally {
-      setBusyAction(null);
+      if (mounted.current) setBusyAction(null);
     }
   }, [busyAction, jobId, onRefreshJob, session?.access_token]);
 
@@ -1373,11 +1405,21 @@ function ToolDetailPanel({
                 </span>
               </div>
               {timeline.length > 0 ? <JobTimeline events={timeline} /> : <p className="text-xs text-muted-foreground">Timeline is not available yet.</p>}
+              {currentJob?.settlement_review && session?.access_token && <JobSettlementReview userId={session.user.id} token={session.access_token} jobId={jobId} review={currentJob.settlement_review} onUpdated={async () => {
+                const latest = (await fetchJob(session.access_token, jobId)).job as GenerationJob;
+                if (!mounted.current) return;
+                setCurrentJob(latest); await onRefreshJob(latest);
+              }} />}
               <div className="flex flex-wrap gap-2">
                 {canCancel ? <button type="button" onClick={() => void runAction("cancel")} disabled={busyAction !== null} className="rounded-md border border-destructive/30 px-2.5 py-1.5 text-xs text-destructive disabled:cursor-wait disabled:opacity-50">{busyAction === "cancel" ? "Canceling..." : "Cancel task"}</button> : null}
                 {canSync ? <button type="button" onClick={() => void runAction("sync")} disabled={busyAction !== null} className="rounded-md border border-border/70 px-2.5 py-1.5 text-xs disabled:cursor-wait disabled:opacity-50">{busyAction === "sync" ? "Syncing..." : "Retry sync"}</button> : null}
                 <button type="button" onClick={() => void runAction("export")} disabled={busyAction !== null} className="rounded-md border border-border/70 px-2.5 py-1.5 text-xs disabled:cursor-wait disabled:opacity-50">{busyAction === "export" ? "Exporting..." : "Export JSON"}</button>
               </div>
+              {currentJob?.stage === "cancel_requested" ? (
+                <output className="block text-xs text-muted-foreground">
+                  Cancellation request submitted. Waiting for the task result; credits have not been refunded.
+                </output>
+              ) : null}
               {actionError ? <p role="alert" className="text-xs text-destructive">{actionError}</p> : null}
             </section>
           ) : null}

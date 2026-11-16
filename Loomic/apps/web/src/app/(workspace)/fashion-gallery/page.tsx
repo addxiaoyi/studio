@@ -7,10 +7,16 @@ import { FashionWorkspace } from "@/components/fashion-workspace";
 import { LegacyFashionGallery } from "@/components/legacy-fashion-gallery";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ProjectViewNav } from "@/components/project-view-nav";
+import { useProjectContext } from "@/hooks/use-project-context";
+import { useAuth } from "@/lib/auth-context";
 
 export default function FashionGalleryPage() {
+  const { session } = useAuth();
   const [canvasMode, setCanvasMode] = useState(false);
+  const [address] = useState(() => typeof location === "undefined" ? "https://helstera.invalid/fashion-gallery/" : location.href);
   const { resolvedTheme, setTheme } = useTheme();
+  const project = useProjectContext({ userId: session?.user.id, token: session?.access_token, address, view: "fitting" });
   const openWorkspace = () => setCanvasMode(false);
   const openCanvas = () => setCanvasMode(true);
   const toggleTheme = () => setTheme(resolvedTheme === "dark" ? "light" : "dark");
@@ -29,8 +35,13 @@ export default function FashionGalleryPage() {
         </nav>
         <Button type="button" variant="ghost" size="icon" onClick={toggleTheme} aria-label={resolvedTheme === "dark" ? "切换为浅色主题" : "切换为深色主题"} title="切换主题">{resolvedTheme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}</Button>
       </div>
+      {project.context && <div className="mt-4 flex min-w-0 flex-wrap items-center gap-3 border-t border-border pt-3">
+        <span className="max-w-52 truncate text-sm font-medium" title={project.context.project.name}>{project.context.project.name}</span>
+        <ProjectViewNav context={project.context} current="fitting" beforeNavigate={view => project.saveLocation(view)} />
+      </div>}
+      {project.error && <p role="alert" className="mt-3 text-xs text-destructive">{project.error}</p>}
     </header>
-    <div hidden={canvasMode} inert={canvasMode}><FashionWorkspace /></div>
+    <div hidden={canvasMode} inert={canvasMode}><FashionWorkspace project={project.context} /></div>
     {canvasMode && <LegacyFashionGallery />}
   </div>;
 }

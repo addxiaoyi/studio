@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
+import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerLocalAssetRoutes } from "./local-assets.js";
 
@@ -104,6 +105,9 @@ describe("local project thumbnail route", () => {
     const resumed = await app.inject({ url: "/api/uploads/object-1/file", headers: { range: "bytes=5-", "if-range": original.headers.etag! } });
     expect(resumed.statusCode).toBe(206);
     expect(resumed.body).toBe("56789");
+    const originalDownload = await app.inject({ url: "/api/uploads/object-1/file?download=1" });
+    expect(originalDownload.statusCode).toBe(200);
+    expect(originalDownload.headers["content-disposition"]).toContain("object-1.webm");
     await writeFile(join(root, "project-assets", objectPath), "abcdefghij");
     const replaced = await app.inject({ url: "/api/uploads/object-1/file", headers: { range: "bytes=5-", "if-range": original.headers.etag! } });
     expect(replaced.statusCode).toBe(200);
@@ -116,6 +120,45 @@ describe("local project thumbnail route", () => {
     query.mockResolvedValueOnce({ rows: [] });
     const forbidden = await app.inject({ method: "GET", url: "/api/uploads/object-1/file", headers: { range: "bytes=0-1" } });
     expect(forbidden.statusCode).toBe(404);
+  });
+
+  it.each(["project-assets", "private-try-on"])("keeps %s previews separate from downloads and preserves cache policy on revalidation", async (bucket) => {
+    const root = await mkdtemp(join(tmpdir(), "helstera-media-preview-"));
+    const objectPath = "workspace-1/generated/image.png";
+    const original = await sharp({
+      create: { width: 4, height: 4, channels: 3, background: { r: 20, g: 40, b: 60 } },
+    }).png().toBuffer();
+    await mkdir(join(root, bucket, "workspace-1", "generated"), { recursive: true });
+    await writeFile(join(root, bucket, objectPath), original);
+    const query = vi.fn().mockResolvedValue({ rows: [{ bucket, object_path: objectPath, mime_type: "image/png" }] });
+    const app = Fastify();
+    apps.push(app);
+    registerLocalAssetRoutes(app, { db: { query } as never, auth: { authenticate: vi.fn().mockResolvedValue({ id: "user-1" }) } as never, root });
+    await app.ready();
+
+    const preview = await app.inject({ method: "GET", url: "/api/uploads/object-1/file?preview=1" });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.headers["content-type"]).toContain("image/webp");
+    expect(preview.headers["x-media-preview"]).toBe("generated");
+    expect(preview.headers.etag).toMatch(/^W\/\"preview-[a-f0-9]+\"$/);
+    expect(preview.rawPayload).not.toEqual(original);
+    const previewEtag = preview.headers.etag;
+    if (!previewEtag) throw new Error("Preview response did not include an ETag.");
+
+    const revalidated = await app.inject({
+      method: "GET",
+      url: "/api/uploads/object-1/file?preview=1",
+      headers: { "if-none-match": previewEtag },
+    });
+    expect(revalidated.statusCode).toBe(304);
+    expect(revalidated.headers["cache-control"]).toBe(bucket === "private-try-on" ? "private, no-store" : "private, max-age=86400");
+    expect(revalidated.headers.vary).toBe("Authorization, Cookie");
+
+    const download = await app.inject({ method: "GET", url: "/api/uploads/object-1/file?download=1" });
+    expect(download.statusCode).toBe(200);
+    expect(download.headers["content-type"]).toContain("image/png");
+    expect(download.headers["content-disposition"]).toContain("attachment");
+    expect(download.rawPayload).toEqual(original);
   });
 
   it("does not serve an unregistered legacy thumbnail", async () => {

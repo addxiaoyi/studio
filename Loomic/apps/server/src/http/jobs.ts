@@ -34,6 +34,10 @@ import type { RequestAuthenticator } from "../auth/types.js";
 import type { StorageProvider } from "../storage/index.js";
 import { syncGenerationJob } from "../features/jobs/sync-service.js";
 import { cancelUnstartedJob } from "../features/jobs/cancel-unstarted-job.js";
+import { assertGenerationReplay, loadGenerationReplay } from "../features/jobs/generation-replay.js";
+import { decideSettlementReview } from "../features/jobs/settlement-review.js";
+import { GenerationSettlementError } from "../local-db/generation-settlement.js";
+import { z } from "zod";
 import { resolveConfiguredModel } from "./model-availability.js";
 import { isRemovedImageModelId } from "../generation/removed-models.js";
 import { approvalRequiredResponse } from "./generation-approvals.js";
@@ -59,6 +63,20 @@ export async function registerJobRoutes(
   const approvalService = options.localDb
     ? createGenerationApprovalService(options.localDb)
     : undefined;
+  app.post<{ Params: { jobId: string } }>("/api/jobs/:jobId/settlement-review", async (request, reply) => {
+    const user = await options.auth.authenticate(request);
+    if (!user) return sendUnauthenticated(reply);
+    if (!options.localDb) return reply.code(503).send({ error: { code: "settlement_unavailable", message: "费用确认暂不可用。" } });
+    const body = z.object({ reviewId: z.string().uuid(), decision: z.enum(["approve", "reject"]) }).strict().safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: { code: "invalid_settlement_review", message: "费用确认参数无效。" } });
+    try {
+      await decideSettlementReview(options.localDb, request.params.jobId, user.id, body.data.reviewId, body.data.decision);
+      return reply.send(jobResponseSchema.parse({ job: await options.jobService.getJob(user, request.params.jobId) }));
+    } catch (error) {
+      if (error instanceof GenerationSettlementError) return reply.code(409).send({ error: { code: error.code, message: error.message } });
+      return sendJobError(error, reply, "job_query_failed");
+    }
+  });
   // POST /api/jobs/image-generation — create image generation job
   app.post("/api/jobs/image-generation", async (request, reply) => {
     try {
@@ -78,17 +96,19 @@ export async function registerJobRoutes(
       const idempotencyKey = typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"].trim().slice(0, 160) : undefined;
       const viewer = await options.viewerService.ensureViewer(user);
       if (options.localDb) await assertConnectorEnabled(options.localDb, viewer.workspace.id, user.id, "media-generation");
-      if (options.localDb && idempotencyKey) {
-        const existing = await options.localDb.query("select id from background_jobs where created_by=$1 and idempotency_key=$2", [user.id, idempotencyKey]);
-        if (existing.rows[0]) return reply.code(200).send(jobResponseSchema.parse({ job: await options.jobService.getJob(user, existing.rows[0].id) }));
+      const replay = options.localDb && idempotencyKey
+        ? await loadGenerationReplay(options.localDb, user.id, viewer.workspace.id, "image_generation", idempotencyKey, payload) : null;
+      if (replay && !replay.pending) return reply.code(200).send(jobResponseSchema.parse({ job: await options.jobService.getJob(user, replay.id) }));
+      if (replay && (!options.creditService || !options.tierGuard)) {
+        throw new JobServiceError("job_create_failed", "费用服务暂不可用，任务保留待确认状态。", 503);
       }
 
       // Credit checks (skip if credit system not configured)
-      const requestedModel = payload.model ?? "black-forest-labs/flux-kontext-pro";
+      const requestedModel = (replay?.payload.model as string | undefined) ?? payload.model ?? "black-forest-labs/flux-kontext-pro";
       const routedModel = options.localDb
         ? await resolveConfiguredModel(options.localDb, "image", requestedModel, {
             requiresInputImage: Boolean(payload.input_asset_ids?.length || payload.input_images?.length),
-            strictRequested: Boolean(payload.model),
+            strictRequested: Boolean(replay || payload.model),
             allowUnverified: Boolean(payload.model),
             excludeModelIds: [
                 "nano-banana-2-1k",
@@ -139,7 +159,7 @@ export async function registerJobRoutes(
         }
       }
 
-      const jobPayload = {
+      const jobPayload = replay?.payload ?? {
         ...(payload.purpose ? { purpose: payload.purpose } : {}),
         prompt: payload.prompt,
         model,
@@ -160,11 +180,16 @@ export async function registerJobRoutes(
           payload: jobPayload,
           estimatedCredits: creditsCost,
           forceConfirmation: payload.purpose === "try-on",
+          deferConsumption: true,
+          ...(replay ? { jobId: replay.id } : {}),
+          ...(idempotencyKey ? { idempotencyKey } : {}),
           context: {
             ...(payload.canvas_id ? { canvasId: payload.canvas_id } : {}),
             ...(payload.session_id ? { sessionId: payload.session_id } : {}),
             ...(payload.thread_id ? { threadId: payload.thread_id } : {}),
             ...(payload.project_id ? { projectId: payload.project_id } : {}),
+            ...(idempotencyKey ? { requestKey: idempotencyKey } : {}),
+            ...(replay ? { reservationJobId: replay.id } : {}),
           },
           ...(request.headers["x-generation-approval"]
             ? { approvalId: request.headers["x-generation-approval"] as string }
@@ -190,18 +215,18 @@ export async function registerJobRoutes(
         ...(payload.thread_id !== undefined
           ? { threadId: payload.thread_id }
           : {}),
-        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...((idempotencyKey || approvalId) ? { idempotencyKey: idempotencyKey ?? `approval:${approvalId}` } : {}),
         jobType: "image_generation",
         payload: jobPayload,
+        requiresCreditReservation: Boolean(approvalId || (options.creditService && creditsCost > 0)),
       });
 
-      if (job.reused && !job.reactivated) {
-        if (approvalId) {
-          const attachedJobId = await approvalService!.attachJob(approvalId, job.id);
-          if (!attachedJobId || attachedJobId !== job.id) {
-            throw new GenerationApprovalError("generation_approval_invalid", "This confirmation is already linked to another job.");
-          }
-        }
+      if (job.reused) assertGenerationReplay(job, viewer.workspace.id, "image_generation", payload);
+      if (approvalId) {
+        const attached = await approvalService!.attachJob(approvalId, job.id);
+        if (attached !== job.id) throw new GenerationApprovalError("generation_approval_invalid", "该确认已关联另一任务，请打开原任务查看。");
+      }
+      if (job.reused && !job.reactivated && job.stage !== "awaiting_credit_reservation") {
         return reply.code(200).send(jobResponseSchema.parse({ job }));
       }
 
@@ -214,22 +239,17 @@ export async function registerJobRoutes(
             creditsCost,
             job.id,
             "Image generation",
+            approvalId,
           );
           await options.jobService.setCreditsInfo(job.id, creditsCost, txId);
         } catch (deductError) {
-          // Deduction failed — cancel the job and re-throw
-          await options.jobService.cancelJob(user, job.id).catch(() => {});
+          if (options.localDb) await options.localDb.query(`update background_jobs set error_code='credit_reservation_failed',
+            error_message='积分预扣未完成，请重试或取消任务。',updated_at=now()
+            where id=$1 and status='queued' and stage='awaiting_credit_reservation'`, [job.id]);
           throw deductError;
         }
       }
-      if (approvalId) {
-        const attachedJobId = await approvalService!.attachJob(approvalId, job.id);
-        if (!attachedJobId || attachedJobId !== job.id) {
-          throw new GenerationApprovalError("generation_approval_invalid", "This confirmation is already linked to another job.");
-        }
-      }
-
-      return reply.code(201).send(jobResponseSchema.parse({ job }));
+      return reply.code(job.reused ? 200 : 201).send(jobResponseSchema.parse({ job: await options.jobService.getJob(user, job.id) }));
     } catch (error) {
       if (isZodError(error)) {
         return reply
@@ -252,16 +272,18 @@ export async function registerJobRoutes(
       const idempotencyKey = typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"].trim().slice(0, 160) : undefined;
       const viewer = await options.viewerService.ensureViewer(user);
       if (options.localDb) await assertConnectorEnabled(options.localDb, viewer.workspace.id, user.id, "media-generation");
-      if (options.localDb && idempotencyKey) {
-        const existing = await options.localDb.query("select id from background_jobs where created_by=$1 and idempotency_key=$2", [user.id, idempotencyKey]);
-        if (existing.rows[0]) return reply.code(200).send(jobResponseSchema.parse({ job: await options.jobService.getJob(user, existing.rows[0].id) }));
+      const replay = options.localDb && idempotencyKey
+        ? await loadGenerationReplay(options.localDb, user.id, viewer.workspace.id, "video_generation", idempotencyKey, payload) : null;
+      if (replay && !replay.pending) return reply.code(200).send(jobResponseSchema.parse({ job: await options.jobService.getJob(user, replay.id) }));
+      if (replay && (!options.creditService || !options.tierGuard)) {
+        throw new JobServiceError("job_create_failed", "费用服务暂不可用，任务保留待确认状态。", 503);
       }
 
       // Credit checks (skip if credit system not configured)
       const resolvedModel = options.localDb
-          ? await resolveConfiguredModel(options.localDb, "video", payload.model, {
+          ? await resolveConfiguredModel(options.localDb, "video", (replay?.payload.model as string | undefined) ?? payload.model, {
             requiresInputImage: Boolean(payload.input_images?.length || payload.input_asset_ids?.length),
-            strictRequested: Boolean(payload.model),
+            strictRequested: Boolean(replay || payload.model),
             allowUnverified: Boolean(payload.model),
             ...(payload.duration != null ? { requiredDuration: payload.duration } : {}),
           })
@@ -318,7 +340,7 @@ export async function registerJobRoutes(
         );
       }
 
-      const jobPayload = {
+      const jobPayload = replay?.payload ?? {
         prompt: payload.prompt,
         model,
         ...(routing ? { routing } : {}),
@@ -337,6 +359,9 @@ export async function registerJobRoutes(
           userId: user.id,
           jobType: "video_generation",
           forceConfirmation:requireConfirmation,
+          deferConsumption: true,
+          ...(replay ? { jobId: replay.id } : {}),
+          ...(idempotencyKey ? { idempotencyKey } : {}),
           model,
           payload: jobPayload,
           estimatedCredits: creditsCost,
@@ -345,6 +370,8 @@ export async function registerJobRoutes(
             ...(payload.session_id ? { sessionId: payload.session_id } : {}),
             ...(payload.thread_id ? { threadId: payload.thread_id } : {}),
             ...(payload.project_id ? { projectId: payload.project_id } : {}),
+            ...(idempotencyKey ? { requestKey: idempotencyKey } : {}),
+            ...(replay ? { reservationJobId: replay.id } : {}),
           },
           ...(request.headers["x-generation-approval"]
             ? { approvalId: request.headers["x-generation-approval"] as string }
@@ -370,18 +397,18 @@ export async function registerJobRoutes(
         ...(payload.thread_id !== undefined
           ? { threadId: payload.thread_id }
           : {}),
-        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...((idempotencyKey || approvalId) ? { idempotencyKey: idempotencyKey ?? `approval:${approvalId}` } : {}),
         jobType: "video_generation",
         payload: jobPayload,
+        requiresCreditReservation: Boolean(approvalId || (options.creditService && creditsCost > 0)),
       });
 
-      if (job.reused && !job.reactivated) {
-        if (approvalId) {
-          const attachedJobId = await approvalService!.attachJob(approvalId, job.id);
-          if (!attachedJobId || attachedJobId !== job.id) {
-            throw new GenerationApprovalError("generation_approval_invalid", "This confirmation is already linked to another job.");
-          }
-        }
+      if (job.reused) assertGenerationReplay(job, viewer.workspace.id, "video_generation", payload);
+      if (approvalId) {
+        const attached = await approvalService!.attachJob(approvalId, job.id);
+        if (attached !== job.id) throw new GenerationApprovalError("generation_approval_invalid", "该确认已关联另一任务，请打开原任务查看。");
+      }
+      if (job.reused && !job.reactivated && job.stage !== "awaiting_credit_reservation") {
         return reply.code(200).send(jobResponseSchema.parse({ job }));
       }
 
@@ -394,21 +421,17 @@ export async function registerJobRoutes(
             creditsCost,
             job.id,
             "Video generation",
+            approvalId,
           );
           await options.jobService.setCreditsInfo(job.id, creditsCost, txId);
         } catch (deductError) {
-          await options.jobService.cancelJob(user, job.id).catch(() => {});
+          if (options.localDb) await options.localDb.query(`update background_jobs set error_code='credit_reservation_failed',
+            error_message='积分预扣未完成，请重试或取消任务。',updated_at=now()
+            where id=$1 and status='queued' and stage='awaiting_credit_reservation'`, [job.id]);
           throw deductError;
         }
       }
-      if (approvalId) {
-        const attachedJobId = await approvalService!.attachJob(approvalId, job.id);
-        if (!attachedJobId || attachedJobId !== job.id) {
-          throw new GenerationApprovalError("generation_approval_invalid", "This confirmation is already linked to another job.");
-        }
-      }
-
-      return reply.code(201).send(jobResponseSchema.parse({ job }));
+      return reply.code(job.reused ? 200 : 201).send(jobResponseSchema.parse({ job: await options.jobService.getJob(user, job.id) }));
     } catch (error) {
       if (isZodError(error)) {
         return reply
@@ -434,8 +457,41 @@ export async function registerJobRoutes(
       const providerTaskId = firstString(result, ["provider_task_id", "providerTaskId", "task_id", "taskId"]) ?? firstString((job.payload ?? {}) as Record<string, unknown>, ["provider_task_id", "providerTaskId", "task_id", "taskId"]);
       const events: Array<{ key: string; label: string; status: "done" | "active" | "failed" | "pending"; at?: string; id?: string; detail?: string }> = [];
       events.push({ key: "request", label: "Request received", status: "done", at: job.created_at });
+      if (job.billing_receipt) {
+        const receipt = job.billing_receipt;
+        const delta = receipt.balanceDelta;
+        events.push({ key: "settlement", label: "费用结算", status: "done", at: receipt.settledAt,
+          ...(receipt.adjustmentTransactionId ? { id: receipt.adjustmentTransactionId } : {}),
+          detail: `预扣 ${receipt.reservedCredits} 积分，结算 ${receipt.settledCredits} 积分；${delta > 0 ? `退回差额 ${delta}` : delta < 0 ? `补扣差额 ${-delta}` : "无差额"}。`,
+        });
+      }
       if (approval.rows[0]) events.push({ key: "approval", label: "Credit approval", status: approval.rows[0].status === "rejected" || approval.rows[0].status === "expired" ? "failed" : approval.rows[0].consumed_at ? "done" : "active", at: approval.rows[0].approved_at ?? approval.rows[0].expires_at, id: approval.rows[0].id, detail: approval.rows[0].status });
-      events.push({ key: "job", label: "Job queue", status: job.status === "failed" || job.status === "dead_letter" || job.status === "canceled" ? "failed" : job.status === "queued" ? "active" : "done", at: job.started_at ?? job.created_at, id: job.id, detail: job.status });
+      const cancellation = result.cancellation as { requested?: unknown; outcome?: unknown; message?: unknown } | undefined;
+      if (job.cancel_requested_at || cancellation?.requested === true) {
+        const cancellationStatus = cancellation?.requested === true
+          ? "done"
+          : job.status === "failed" || job.status === "dead_letter"
+            ? "failed"
+            : job.status === "canceled"
+              ? "done"
+              : "active";
+        events.push({
+          key: "cancellation",
+          label: "Cancellation request",
+          status: cancellationStatus,
+          at: job.cancel_requested_at ?? job.updated_at,
+          detail: typeof cancellation?.message === "string"
+            ? cancellation.message
+            : cancellationStatus === "active"
+              ? "已发出取消请求，正在等待任务结果。"
+              : cancellationStatus === "failed"
+                ? "任务已失败；供应商是否完成及最终费用仍需按任务凭证核验。"
+                : job.status === "canceled"
+                  ? "任务在供应商开始前取消，已按未开始规则处理费用。"
+                  : "取消请求到达时任务已完成，产物和费用按实际结果保留。",
+        });
+      }
+      events.push({ key: "job", label: "Job queue", status: job.status === "failed" || job.status === "dead_letter" || job.status === "canceled" ? "failed" : job.status === "queued" || job.stage === "cancel_requested" ? "active" : "done", at: job.started_at ?? job.created_at, id: job.id, detail: job.stage ?? job.status });
       events.push({ key: "provider", label: "Provider task", status: job.status === "succeeded" ? "done" : job.status === "failed" || job.status === "dead_letter" ? "failed" : "active", ...(providerTaskId ? { id: providerTaskId } : {}), detail: providerTaskId ? "providerTaskId recorded" : "Waiting for Provider task ID" });
       events.push({ key: "asset", label: "Asset saved", status: assets.rows[0] ? "done" : job.status === "failed" || job.status === "dead_letter" ? "failed" : "pending", ...(assets.rows[0]?.created_at ? { at: assets.rows[0].created_at } : {}), ...(assets.rows[0]?.id ? { id: assets.rows[0].id } : {}) });
       events.push({ key: "canvas", label: "Canvas writeback", status: canvas.rows[0] ? "done" : job.status === "succeeded" ? "failed" : "pending", ...(canvas.rows[0]?.id ? { id: canvas.rows[0].id } : {}), ...(canvas.rows[0] ? { detail: "Canvas element found by jobId" } : {}) });
@@ -505,8 +561,7 @@ export async function registerJobRoutes(
       const { jobId } = request.params as { jobId: string };
       const currentJob = await options.jobService.getJob(user, jobId);
       if (options.localDb && options.creditService && ["image_generation", "video_generation"].includes(currentJob.job_type)) {
-        const billing = await cancelUnstartedJob(options.localDb, jobId, user.id);
-        if (billing.amount > 0) await options.creditService.refundCredits(billing.workspaceId, user.id, billing.amount, jobId, "任务开始前取消，释放预占积分");
+        await cancelUnstartedJob(options.localDb, jobId, user.id);
         const job = await options.jobService.getJob(user, jobId);
         return reply.code(200).send(jobResponseSchema.parse({ job }));
       }
@@ -541,6 +596,7 @@ function sendJobError(
   reply: FastifyReply,
   fallbackCode: JobErrorFallbackCode,
 ) {
+  if (error instanceof GenerationSettlementError) return reply.code(409).send({ error: { code: error.code, message: error.message } });
   if (error instanceof ConnectorDisabledError) {
     return reply.code(403).send({ error: { code: "connector_disabled", message: error.message } });
   }

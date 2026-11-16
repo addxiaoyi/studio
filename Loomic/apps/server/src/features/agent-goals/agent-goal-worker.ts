@@ -166,6 +166,7 @@ export class AgentGoalWorker {
   private timer: ReturnType<typeof setInterval> | undefined;
   private stopped = false;
   private current: Promise<void> | undefined;
+  private readonly unsettled = new Map<string, unknown>();
 
   constructor(
     private readonly db: Pool,
@@ -187,6 +188,9 @@ export class AgentGoalWorker {
     clearInterval(this.timer);
     this.timer = undefined;
     await this.current;
+    if (this.unsettled.size) {
+      throw new AggregateError([...this.unsettled.values()], "Agent goal work did not drain safely");
+    }
   }
 
   tick(): Promise<void> {
@@ -214,32 +218,46 @@ export class AgentGoalWorker {
         if (this.stopped) break;
         const client = await this.db.connect();
         let locked = false;
+        let verified = false;
         let releaseError: Error | undefined;
+        const failures: unknown[] = [];
         try {
           const lock = await client.query<{ locked: boolean }>(
             "select pg_try_advisory_lock(hashtextextended($1, 0)) as locked",
             [`agent-goal:${goal.id}`],
           );
           locked = lock.rows[0]?.locked === true;
-          if (!locked) continue;
-          // Recheck after locking: another worker or the user may have changed it.
-          const current = await client.query<GoalRow>(
-            "select * from agent_goals where id=$1 and status in ('running','waiting_desktop','waiting_approval') and execution_policy='approval_required'",
-            [goal.id],
-          );
-          if (current.rows[0] && !this.stopped) {
-            await new GoalExecution(client, this.dispatcher, this.backgroundExecutor).process(current.rows[0]);
+          if (locked) {
+            // Recheck after locking: another worker or the user may have changed it.
+            const current = await client.query<GoalRow>(
+              "select * from agent_goals where id=$1 and status in ('running','waiting_desktop','waiting_approval') and execution_policy='approval_required'",
+              [goal.id],
+            );
+            if (current.rows[0] && !this.stopped) {
+              await new GoalExecution(client, this.dispatcher, this.backgroundExecutor).process(current.rows[0]);
+              verified = true;
+            }
+            if (!current.rows[0]) verified = true;
           }
+        } catch (error) {
+          failures.push(error);
         } finally {
           try {
             if (locked) await client.query("select pg_advisory_unlock(hashtextextended($1, 0))", [`agent-goal:${goal.id}`]);
           } catch (error) {
             releaseError = error instanceof Error ? error : new Error(String(error));
-            throw error;
-          } finally {
-            client.release(releaseError);
+            failures.push(error);
           }
+          try { client.release(releaseError); }
+          catch (error) { failures.push(error); }
         }
+        if (failures.length) {
+          const failure = failures.length === 1 ? failures[0] : new AggregateError(failures, "Agent goal execution and cleanup failed");
+          this.unsettled.set(goal.id, failure);
+          throw failure;
+        }
+        // Only a completed scan under the lock can clear an earlier unsafe outcome.
+        if (verified) this.unsettled.delete(goal.id);
       }
     } catch (error) {
       console.error("[agent-goal-worker] tick failed:", error);

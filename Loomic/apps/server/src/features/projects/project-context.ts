@@ -30,11 +30,24 @@ export async function loadProjectContext(db: Database, userId: string, query: Pr
     where canvas_id=$1 and created_by=$2 and ($3::uuid is null or id=$3)
     order by (id=$4::uuid) desc nulls last,updated_at desc limit 1`, [row.canvas_id,userId,query.sessionId ?? null,row.session_id ?? null]);
   if (query.sessionId && !sessions.rows.length) throw new ProjectContextError(404, "session_context_unavailable", "对话不属于当前工程画布，无法切换。");
+  const activeGoal = await db.query<{ id: string; goal: string; status: "draft" | "running" | "waiting_approval" | "waiting_desktop" | "paused" }>(
+    `select id,goal,status from agent_goals
+      where created_by=$1 and workspace_id=$2 and (canvas_id=$3 or canvas_id is null)
+        and status in ('draft','running','waiting_approval','waiting_desktop','paused')
+      order by (canvas_id=$3) desc nulls last, updated_at desc limit 1`,
+    [userId, row.workspace_id, row.canvas_id],
+  );
   return projectContextSchema.parse({
     project: { id: row.id, name: row.name, workspaceId: row.workspace_id },
     canvas: { id: row.canvas_id, name: row.canvas_name },
     session: sessions.rows[0] ?? null,
     view: row.view ?? "canvas", compositionId: row.composition_id ?? null,
+    nextStep: activeGoal.rows[0] ? {
+      kind: "agent_goal",
+      label: `继续：${activeGoal.rows[0].goal.trim().slice(0, 140)}`,
+      goalId: activeGoal.rows[0].id,
+      status: activeGoal.rows[0].status,
+    } : null,
     revision: Number(row.revision ?? 0), updatedAt: new Date(row.updated_at ?? row.project_updated_at).toISOString(),
   });
 }

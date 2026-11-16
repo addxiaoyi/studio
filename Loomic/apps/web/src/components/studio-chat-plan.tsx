@@ -11,6 +11,13 @@ export function StudioChatPlan({flow,locked}:{flow:ReturnType<typeof useStudioAi
   if(!flow.plan)return null;
   return <section data-testid="studio-ai-plan" className="space-y-3 rounded-xl border bg-background p-3">
     <h3 className="text-sm font-semibold">{copy(flow.completelyUndone?"本次修改已全部撤销":flow.applied?"修改已应用":"确认这些修改")}</h3>
+    {flow.previewProgress && <output aria-live="polite" className={flow.previewProgress.state === "failed" ? "block rounded border border-destructive/40 px-3 py-2 text-xs text-destructive" : "block rounded border px-3 py-2 text-xs text-muted-foreground"}>
+      {flow.previewProgress.state === "starting" && copy("正在准备低分辨率预览…")}
+      {flow.previewProgress.state === "running" && `${copy("正在生成预览，已编码")} ${((flow.previewProgress.outTimeMs ?? 0) / 1_000_000).toFixed(1)} ${copy("秒")}`}
+      {flow.previewProgress.state === "completed" && copy("预览生成完成。")}
+      {flow.previewProgress.state === "failed" && (flow.previewProgress.error || copy("预览生成失败，请检查本地磁盘空间后重试。"))}
+    </output>}
+    {flow.previewProgress && ["starting", "running"].includes(flow.previewProgress.state) && <Button className="w-full" variant="outline" onClick={() => void flow.cancelPreview()}>{copy("取消预览生成")}</Button>}
     <p className="text-xs leading-5 text-muted-foreground">{flow.plan.summary}</p>
     <StudioTimelineDiff plan={flow.plan} undone={flow.undoneActions} applied={Boolean(flow.applied)}/>
     <ol className="space-y-3">{flow.plan.actions.map((action,index)=>{

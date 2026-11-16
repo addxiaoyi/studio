@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { Pool, PoolClient } from "pg";
 import type { FastifyRequest } from "fastify";
 import type { AuthenticatedUser, RequestAuthenticator } from "../auth/types.js";
+import { readSessionToken } from "../auth/session-token.js";
 
 const TOKEN_TTL_MS = 15 * 60 * 1000;
 const CODE_TTL_MS = 10 * 60 * 1000;
@@ -23,6 +24,8 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 export async function verifyPassword(password: string, encoded: string): Promise<boolean> {
+  // Buffer.from(hex) silently truncates invalid input, including to an empty digest.
+  if (!/^[a-f\d]{32}:[a-f\d]{128}$/i.test(encoded)) return false;
   const [salt, expectedHex] = encoded.split(":");
   if (!salt || !expectedHex) return false;
   const expected = Buffer.from(expectedHex, "hex");
@@ -147,6 +150,25 @@ export async function registerWithVerificationCode(db: Pool, email: string, code
   } finally { client.release(); }
 }
 
+export async function resetPasswordWithVerificationCode(db: Pool, email: string, code: string, passwordHash: string) {
+  const client = await db.connect();
+  try {
+    await client.query("begin");
+    const row = await lockVerificationCode(client, email, code);
+    if (!row) { await client.query("commit"); return null; }
+    await client.query("update app_users set password_hash=$1,updated_at=now() where id=$2", [passwordHash, row.user_id]);
+    await client.query("update email_verification_codes set used_at=now() where id=$1", [row.code_id]);
+    const token = randomBytes(32).toString("base64url");
+    await client.query("insert into sessions(user_id,token_hash,expires_at) values($1,$2,$3)",
+      [row.user_id, hashToken(token), new Date(Date.now() + SESSION_TTL_MS)]);
+    await client.query("commit");
+    return { token, userId: row.user_id, email: row.email };
+  } catch (cause) {
+    await client.query("rollback");
+    throw cause;
+  } finally { client.release(); }
+}
+
 export async function exchangeLoginToken(db: Pool, token: string, options: { allowReplayGrace?: boolean } = {}) {
   const client = await db.connect();
   try {
@@ -223,14 +245,4 @@ export async function getLocalSession(db: Pool, token: string) {
 
 export async function revokeLocalSession(db: Pool, token: string) {
   await db.query("delete from sessions where token_hash = $1", [hashToken(token)]);
-}
-
-function readSessionToken(authorization: string | string[] | undefined, cookie: string | undefined) {
-  const cookieMatch = cookie?.match(/(?:^|;\s*)helstera_session=([^;]+)/);
-  if (cookieMatch?.[1]) return cookieMatch[1];
-  if (typeof authorization === "string") {
-    const [scheme, token] = authorization.trim().split(/\s+/, 2);
-    if (scheme?.toLowerCase() === "bearer" && token) return token;
-  }
-  return null;
 }

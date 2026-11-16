@@ -5,10 +5,13 @@ import type { StudioRuntime } from "./visualforge-runtime";
 import { saveStudioExport, type StudioExport } from "./visualforge-storage";
 
 type DesktopExport = { id: string; path: string; createdAt: string };
+export type VideoPreviewProgress = { state: "starting" | "running" | "completed" | "failed"; sourceBytes?: number; outTimeMs?: number; error?: string };
 type ExportBridge = {
   exportVideo(input: { format: StudioCut["format"]; clips: Array<{ name: string; mimeType: string; bytes: ArrayBuffer; startMs: number; endMs: number }>; captions?: StudioCut["captions"]; audio?: Array<{ name: string; mimeType: string; bytes: ArrayBuffer; startMs: number; volume: number }> }): Promise<{ path: string; previewId?: string; cleanupWarnings?: string[]; previewWarning?: boolean } | null>;
+  cancelVideoPreview?: () => Promise<{ canceled: boolean }>;
   readExportPreview(id: string): Promise<ArrayBuffer>;
   listExportPreviews(): Promise<DesktopExport[]>;
+  onVideoPreviewProgress?: (callback: (event: VideoPreviewProgress) => void) => () => void;
 };
 export function desktopVideoBridge(): ExportBridge | undefined {
   const bridge = (window as Window & { electronAPI?: Partial<ExportBridge> }).electronAPI;

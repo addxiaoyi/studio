@@ -6,7 +6,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import subprocess
 import zipfile
 
@@ -27,6 +27,14 @@ INCLUDE_TREES = (
 INCLUDE_FILES = (
     "apps/server/package.json", "apps/server/tsconfig.json", "apps/desktop/package.json",
     "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.base.json",
+)
+CREATIVE_RUNTIME_FILES = (
+    "creative/fashion.mjs", "creative/fashion-LICENSE.txt", "creative/fashion-source.json",
+    "creative/visualforge/entry.mjs", "creative/visualforge/browser-studio-vendor-entry.mjs",
+    "creative/visualforge/browser-studio-worker.mjs", "creative/visualforge/browser-studio-transformers-entry.mjs",
+    "creative/visualforge/wasi-worker-browser.mjs", "creative/visualforge/rspack.wasm32-wasi.wasm",
+    "creative/visualforge/LICENSE.md", "creative/visualforge/source.json",
+    "fashion-gallery/catalog.json", "fashion-gallery/LICENSE",
 )
 
 
@@ -83,10 +91,84 @@ def verify_build_inputs(source: Path, build: Path) -> None:
             raise ValueError(f"Build input differs: {relative}")
 
 
+def require_runtime_file(directory: Path, relative: str) -> Path:
+    path = directory
+    for part in PurePosixPath(relative).parts:
+        path = path / part
+        if path.is_symlink():
+            raise ValueError(f"Symbolic links are not allowed in creative runtime inputs: {path}")
+    if not path.is_file() or path.stat().st_size == 0:
+        raise FileNotFoundError(f"Creative runtime is missing or empty: {path}")
+    return path
+
+
+def fashion_asset_paths(catalog: object) -> list[str]:
+    if not isinstance(catalog, list) or not catalog:
+        raise ValueError("Fashion runtime catalog is empty or invalid.")
+    assets: list[str] = []
+    for item in catalog:
+        for key in ("image", "thumb"):
+            value = item.get(key) if isinstance(item, dict) else None
+            if not isinstance(value, str) or not value or "\\" in value or ":" in value:
+                raise ValueError(f"Fashion catalog has an invalid {key} path.")
+            relative = PurePosixPath(value)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError(f"Fashion catalog path escapes its asset directory: {value}")
+            assets.append(f"fashion-gallery/{relative}")
+    return assets
+
+
+def verify_archived_creative_runtime(source: Path, bundle: zipfile.ZipFile, files: dict[str, zipfile.ZipInfo]) -> None:
+    prefix = "apps/web/out/"
+    if not any(name.startswith(prefix) for name in files):
+        return
+
+    def require(relative: str) -> zipfile.ZipInfo:
+        entry = files.get(prefix + relative)
+        if entry is None or entry.file_size == 0:
+            raise ValueError(f"Archived creative runtime is missing or empty: {relative}")
+        return entry
+
+    for relative in (*CREATIVE_RUNTIME_FILES, "index.html", "video/index.html", "fashion-gallery/index.html"):
+        require(relative)
+    pins = json.loads((source / "scripts/creative-sources.json").read_text(encoding="utf-8"))
+    for name, relative in (("fashion", "creative/fashion-source.json"), ("video", "creative/visualforge/source.json")):
+        provenance = json.loads(bundle.read(require(relative)))
+        if not isinstance(provenance, dict) or any(provenance.get(key) != pins[name][key] for key in ("repository", "commit")):
+            raise ValueError(f"Archived creative runtime does not match the pinned source: {relative}")
+    for relative in fashion_asset_paths(json.loads(bundle.read(require("fashion-gallery/catalog.json")))):
+        require(relative)
+
+
+def verify_creative_runtime(source: Path, output: Path) -> None:
+    public = source / "apps/web/public"
+    for relative in CREATIVE_RUNTIME_FILES:
+        require_runtime_file(public, relative)
+        require_runtime_file(output, relative)
+
+    pins = json.loads((source / "scripts/creative-sources.json").read_text(encoding="utf-8"))
+    for name, relative in (("fashion", "creative/fashion-source.json"), ("video", "creative/visualforge/source.json")):
+        provenance = json.loads((public / relative).read_text(encoding="utf-8"))
+        if not isinstance(provenance, dict) or any(provenance.get(key) != pins[name][key] for key in ("repository", "commit")):
+            raise ValueError(f"Creative runtime does not match the pinned source: {relative}")
+
+    catalog = json.loads((public / "fashion-gallery/catalog.json").read_text(encoding="utf-8"))
+    for relative in fashion_asset_paths(catalog):
+        require_runtime_file(public, relative)
+
+    # These modules load at runtime, so a successful Next build cannot prove they were exported.
+    for relative in ("creative", "fashion-gallery"):
+        for name, path in files_under(public / relative).items():
+            exported = output / relative / name
+            if not exported.is_file() or exported.is_symlink() or sha256(path) != sha256(exported):
+                raise ValueError(f"Exported creative runtime differs or is missing: {relative}/{name}")
+
+
 def create_candidate(source: Path, build: Path, destination: Path) -> str:
     if destination.exists():
         raise FileExistsError(destination)
     verify_build_inputs(source, build)
+    verify_creative_runtime(source, build / "apps/web/out")
     paths: dict[str, Path | bytes] = {}
     for relative, origin in INCLUDE_TREES:
         root = (source if origin == "source" else build) / relative

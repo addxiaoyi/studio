@@ -85,6 +85,7 @@ export function formatModelDisplayName(model: string): string {
 }
 
 export function formatPublicTransactionDescription(description: string | null, transactionType: string): string {
+  if (transactionType === "generation_adjustment") return "Generation usage settlement";
   const raw = description?.trim() ?? "";
   const looksCorrupted = /[\uFFFD\u25C6\u25A1]/u.test(raw) || /(?:Ã.|Â.|ï¿½|â€)/u.test(raw);
   const exposesModelId = /(codex-auto-review|(?:video_generation|image_generation|generation)\s*:\s*\S+|\b[a-z0-9]+(?:[_/-][a-z0-9.-]+){2,}\b)/i.test(raw);

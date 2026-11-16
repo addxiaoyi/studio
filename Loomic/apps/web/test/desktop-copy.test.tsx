@@ -271,8 +271,8 @@ const chromeEnKeys = Object.keys(enFlat).filter((key) => key.startsWith("chrome.
 describe("桌面壳层文案 chrome 分组", () => {
   it("zh-CN 与 en-US 键集合一致，英文值非空且不含中文", () => {
     // 键数先钉死：新增壳层文案必须显式更新这条断言，删键则直接红。
-    // 53 includes the fashion gallery and video studio navigation labels.
-    expect(chromeZhKeys).toHaveLength(53);
+    // Includes the marketplace and task history navigation labels.
+    expect(chromeZhKeys).toHaveLength(55);
     expect(chromeEnKeys).toEqual(chromeZhKeys);
 
     const offenders = chromeZhKeys
@@ -289,7 +289,7 @@ describe("桌面壳层文案 chrome 分组", () => {
     render(<DesktopWorkspaceSidebar />);
 
     expect(screen.getByRole("navigation", { name: "桌面模块" })).toBeInTheDocument();
-    expect(screen.getByText("WORKSPACE")).toBeInTheDocument();
+    expect(screen.getByText("工作区")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "画布" })).toHaveAttribute("title", "画布");
     const advancedToggle = screen.getByRole("button", { name: "高级能力" });
     expect(advancedToggle).toHaveAttribute("title", "高级能力");
@@ -363,6 +363,7 @@ describe("桌面壳层文案 chrome 分组", () => {
     );
     expect(screen.getByRole("button", { name: "Canvas" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Agent browser" })).toHaveAttribute("title", "Open Agent browser");
     expect(screen.getByRole("banner", { name: "Helstera desktop navigation" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Minimize" })).toBeInTheDocument();
