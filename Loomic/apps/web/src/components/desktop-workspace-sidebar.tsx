@@ -3,7 +3,7 @@
 import { ChevronDown, ChevronRight, FolderKanban, Images, Settings, Wrench } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import type { FocusEvent, KeyboardEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { useDesktopCopy } from "@/lib/desktop-copy";
 
@@ -21,7 +21,6 @@ export function DesktopWorkspaceSidebar() {
   const pathname = usePathname();
   const { copy } = useDesktopCopy();
   const label = copy.chrome.sidebar;
-  const [mode, setMode] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const containerRef = useRef<HTMLElement>(null);
   // roving tabindex：同一时刻只有一项能被 Tab 命中，其余为 -1。
@@ -31,21 +30,13 @@ export function DesktopWorkspaceSidebar() {
   // 折叠进阶项后索引可能越界，这里收敛到最后一个可见项，避免整组都没有 tabindex=0。
   const rovingIndex = Math.min(activeIndex, itemCount - 1);
 
-  useEffect(() => {
-    const syncMode = () => { const segment = window.location.pathname.split("/").filter(Boolean).pop() ?? ""; setMode(segment === "desktop-app" ? "" : segment); };
-    syncMode();
-    window.addEventListener("popstate", syncMode);
-    window.addEventListener("desktop:route-changed", syncMode);
-    return () => {
-      window.removeEventListener("popstate", syncMode);
-      window.removeEventListener("desktop:route-changed", syncMode);
-    };
-  }, []);
-
   function openMode(nextMode: string) {
     router.push(`/desktop-app/${nextMode}/`);
-    setMode(nextMode);
-    window.dispatchEvent(new Event("desktop:route-changed"));
+  }
+
+  function isCurrentMode(targetMode: string) {
+    const route = `/desktop-app/${targetMode}`;
+    return pathname === route || pathname === `/${targetMode}` || pathname?.startsWith(`${route}/`) || pathname?.startsWith(`/${targetMode}/`);
   }
 
   /** 每次按键都重新取可见项：进阶项是条件渲染的，索引不能跨渲染缓存。 */
@@ -97,17 +88,16 @@ export function DesktopWorkspaceSidebar() {
   }
 
   return (
-    <aside
+    <nav
       ref={containerRef}
       className="desktop-workspace-sidebar"
       aria-label={label.ariaLabel}
-      role="navigation"
       onKeyDown={handleKeyDown}
       onFocus={handleFocus}
     >
       <div className="desktop-workspace-sidebar__section">
         <span className="desktop-workspace-sidebar__label">{label.group}</span>
-        <button type="button" tabIndex={rovingIndex === 0 ? 0 : -1} className="desktop-workspace-sidebar__item" aria-current={pathname.startsWith("/desktop-app/canvas") ? "page" : undefined} title={label.canvas} onClick={() => router.replace("/desktop-app/canvas/")}>
+        <button type="button" tabIndex={rovingIndex === 0 ? 0 : -1} className="desktop-workspace-sidebar__item" aria-current={isCurrentMode("canvas") ? "page" : undefined} title={label.canvas} onClick={() => router.push("/desktop-app/canvas/")}>
           <FolderKanban aria-hidden="true" /><span>{label.canvas}</span>
         </button>
         <button type="button" tabIndex={rovingIndex === 1 ? 0 : -1} className="desktop-workspace-sidebar__item" aria-expanded={advancedOpen} title={label.advanced} onClick={() => setAdvancedOpen((open) => !open)}>
@@ -116,15 +106,15 @@ export function DesktopWorkspaceSidebar() {
         {advancedOpen ? advanced.map(({ mode: itemMode, icon: Icon }, index) => {
           const itemLabel = label[itemMode];
           return (
-            <button key={itemMode} type="button" tabIndex={rovingIndex === 2 + index ? 0 : -1} className="desktop-workspace-sidebar__item" aria-current={pathname === "/desktop" && mode === itemMode ? "page" : undefined} title={itemLabel} onClick={() => openMode(itemMode)}>
+            <button key={itemMode} type="button" tabIndex={rovingIndex === 2 + index ? 0 : -1} className="desktop-workspace-sidebar__item" aria-current={isCurrentMode(itemMode) ? "page" : undefined} title={itemLabel} onClick={() => openMode(itemMode)}>
               <Icon aria-hidden="true" /><span>{itemLabel}</span>
             </button>
           );
         }) : null}
       </div>
-      <button type="button" tabIndex={rovingIndex === settingsIndex ? 0 : -1} className="desktop-workspace-sidebar__settings" title={label.settings} onClick={() => router.replace("/settings/")}>
+      <button type="button" tabIndex={rovingIndex === settingsIndex ? 0 : -1} className="desktop-workspace-sidebar__settings" aria-current={isCurrentMode("settings") ? "page" : undefined} title={label.settings} onClick={() => router.push("/desktop-app/settings/")}>
         <Settings aria-hidden="true" /><span>{label.settings}</span>
       </button>
-    </aside>
+    </nav>
   );
 }

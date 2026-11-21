@@ -202,6 +202,8 @@ export default function AssetsPage() {
 
   const openEditor = useCallback(async (asset: GeneratedAsset) => {
     if (!session?.access_token || !asset.url) return;
+    setError("");
+    setErrorAction(null);
     setOpeningId(asset.id);
     try {
       const { project } = await createProject(
@@ -217,7 +219,7 @@ export default function AssetsPage() {
     } finally {
       setOpeningId(null);
     }
-  }, [router, session?.access_token]);
+  }, [pathname, router, session?.access_token]);
 
   const load = useCallback(async () => {
     if (!session?.access_token) return;

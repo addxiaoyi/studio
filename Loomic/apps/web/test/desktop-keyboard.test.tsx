@@ -5,10 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DesktopWorkspaceSidebar } from "@/components/desktop-workspace-sidebar";
 
-const { mockReplace } = vi.hoisted(() => ({ mockReplace: vi.fn() }));
+const { mockReplace, mockPathname } = vi.hoisted(() => ({
+  mockReplace: vi.fn(),
+  mockPathname: { value: "/desktop-app/canvas" },
+}));
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/desktop-app/canvas",
+  usePathname: () => mockPathname.value,
   useRouter: () => ({ replace: mockReplace, push: mockReplace }),
 }));
 
@@ -16,6 +19,7 @@ const scrollIntoView = vi.fn();
 
 beforeEach(() => {
   mockReplace.mockClear();
+  mockPathname.value = "/desktop-app/canvas";
   scrollIntoView.mockClear();
   // jsdom 不实现 scrollIntoView，这里装一个探针，既避免真实调用也用来断言调用参数。
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -152,7 +156,7 @@ describe("DesktopWorkspaceSidebar 键盘导航", () => {
 
     expect(document.activeElement).toBe(item("高级能力"));
     expect(item("高级能力").tabIndex).toBe(0);
-    // 折叠态仍保留原按钮与既有可访问属性，只是视觉上只显示图标。
+    // 折叠态保留完整 accessible name 和悬停标题，视觉上只显示图标。
     expect(item("高级能力").title).toBe("高级能力");
     expect(item("高级能力").getAttribute("aria-expanded")).toBe("false");
   });
@@ -163,11 +167,32 @@ describe("DesktopWorkspaceSidebar 键盘导航", () => {
 
     item("设置").focus();
     await user.keyboard("{Enter}");
-    expect(mockReplace).toHaveBeenCalledWith("/settings/");
+    expect(mockReplace).toHaveBeenCalledWith("/desktop-app/settings/");
 
     mockReplace.mockClear();
     item("画布").focus();
     await user.keyboard(" ");
     expect(mockReplace).toHaveBeenCalledWith("/desktop-app/canvas/");
+  });
+
+  it("侧栏资源入口使用与标题栏相同的桌面路由", async () => {
+    const user = userEvent.setup();
+    render(<DesktopWorkspaceSidebar />);
+
+    await user.click(item("高级能力"));
+    await user.click(item("项目"));
+
+    expect(mockReplace).toHaveBeenCalledWith("/desktop-app/projects/");
+    expect(mockReplace).not.toHaveBeenCalledWith("/desktop/?mode=projects");
+  });
+
+  it("统一桌面路由下为当前侧栏页面设置 aria-current", async () => {
+    mockPathname.value = "/desktop-app/projects";
+    render(<DesktopWorkspaceSidebar />);
+
+    await userEvent.click(item("高级能力"));
+
+    expect(item("项目").getAttribute("aria-current")).toBe("page");
+    expect(item("画布").hasAttribute("aria-current")).toBe(false);
   });
 });
