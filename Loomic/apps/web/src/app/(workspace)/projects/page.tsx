@@ -1,4 +1,5 @@
 "use client";
+import styles from "@/components/collection-layout.module.css";
 
 import type { WorkspaceSummary, ProjectSummary } from "@helstera/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -96,7 +97,7 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="px-4 py-6 sm:px-6 md:p-8">
+    <div className={styles.page}>
       <ProjectList
         projects={projects}
         highlightId={highlightId}

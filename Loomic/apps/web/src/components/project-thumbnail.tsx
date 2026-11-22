@@ -10,7 +10,7 @@ type PreviewState = "loading" | "ready" | "fallback";
 type ProjectThumbnailProps = {
   src?: string | null;
   alt: string;
-  className?: string;
+  className?: string | undefined;
 };
 
 export function ProjectThumbnail({ src, alt, className }: ProjectThumbnailProps) {

@@ -1,7 +1,8 @@
 "use client";
 
 import type { ProjectSource, ProjectSummary } from "@helstera/shared";
-import { Search, Trash2, X } from "lucide-react";
+import { Plus, Search, Trash2, X } from "lucide-react";
+import styles from "./collection-layout.module.css";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -68,56 +69,31 @@ export function ProjectList({
   useEffect(() => setPage((current) => Math.min(current, pageCount)), [pageCount]);
 
   return (
-    <div>
+    <div className={styles.collection}>
       {/* Header */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className={styles.header}>
         <div>
-          <div className="flex items-center gap-3">
+          <div className={styles.heading}>
             <h1 className="text-xl font-semibold text-foreground">{copy.title}</h1>
             {desktopMode ? null : <Link href="/projects/archived" className="text-xs text-muted-foreground underline underline-offset-4">回收站</Link>}
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">共 {projects.length} 个项目，当前显示 {filtered.length} 个</p>
+          <p className={styles.subtitle}>共 {projects.length} 个项目，当前显示 {filtered.length} 个</p>
         </div>
-        <div className="relative block w-full sm:max-w-xs">
+        <div className={styles.headerTools}><button type="button" onClick={onCreateClick} className={styles.create}><Plus size={16} aria-hidden="true" />{copy.create}</button><div className={styles.search}>
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <input aria-label="搜索项目名称或描述" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索项目名称" className="h-10 w-full rounded-lg border border-border/60 bg-background pl-9 pr-10 text-sm outline-none focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10" />
           {query && <button type="button" onClick={() => setQuery("")} aria-label="清除项目搜索" className="absolute right-2 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"><X className="size-4" /></button>}
-        </div>
+        </div></div>
       </div>
 
       {/* Card grid */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {/* "+ 新建项目" card */}
-        <button
-          type="button"
-          onClick={onCreateClick}
-          className="group min-h-[180px] cursor-pointer rounded-2xl border border-dashed border-border/60 p-3 transition-all duration-300 hover:border-foreground/30 hover:bg-foreground/[0.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-[208px]"
-        >
-          <div className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-xl">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 14 14"
-              className="size-5 text-muted-foreground transition-all duration-300 group-hover:text-foreground"
-            >
-              <path
-                fill="currentColor"
-                fillRule="evenodd"
-                d="M6.417 2.917a.583.583 0 0 1 1.166 0v3.5h3.5a.583.583 0 0 1 0 1.166h-3.5v3.5a.583.583 0 1 1-1.166 0v-3.5h-3.5a.583.583 0 1 1 0-1.166h3.5z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <span className="text-xs text-muted-foreground transition-all duration-300 group-hover:text-foreground">
-              {copy.create}
-            </span>
-          </div>
-        </button>
+      <div className={styles.grid}>
 
         {/* Project cards */}
         {visibleProjects.map((project) => (
           <article
             key={project.id}
-            className={`group relative min-h-[180px] rounded-2xl glass-soft p-3 transition-all duration-300 hover:glass sm:min-h-[208px]${
+            className={`${styles.projectCard}${
               highlightId === project.id ? " ring-2 ring-ring" : ""
             }`}
           >
@@ -130,33 +106,33 @@ export function ProjectList({
                 requestDelete(project.id);
               }}
               aria-label={`${copy.delete} ${project.name}`}
-              className="absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background/90 text-muted-foreground opacity-0 shadow-sm transition-all duration-200 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={styles.delete}
             >
               <Trash2 size={13} strokeWidth={1.5} />
             </button>
 
             {/* Thumbnail */}
-            <Link href={`${desktopMode ? "/desktop-app/canvas" : "/canvas"}?id=${project.primaryCanvas.id}`} aria-label={`打开项目 ${project.name}`} className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <Link href={`${desktopMode ? "/desktop-app/canvas" : "/canvas"}?id=${project.primaryCanvas.id}`} aria-label={`打开项目 ${project.name}`} className={styles.projectLink}>
             <ProjectThumbnail
               src={project.thumbnailUrl ?? null}
               alt={`${project.name} 预览`}
-              className="aspect-[395/227] w-full rounded-xl border border-border/40"
+              className={styles.projectPreview}
             />
 
             {/* Info */}
-            <div className="mt-3">
-              <p className="truncate text-xs text-foreground leading-tight">
+            <div className={styles.projectInfo}>
+              <p className={styles.projectName} title={project.name}>
                 {project.name}
               </p>
-              <div className="mt-1 flex items-center gap-1.5">
-                <span className="shrink-0 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+              <div className={styles.projectMeta}>
+                <span className={styles.sourceBadge}>
                   {projectSourceLabel(project.source)}
                 </span>
-                <span className="truncate text-[11px] text-muted-foreground">
+                <span>
                   创建 {formatDate(project.createdAt)}
                 </span>
               </div>
-              <p className="mt-1 text-[11px] text-muted-foreground/70">
+              <p className={styles.updated}>
                 更新 {formatDate(project.updatedAt)}
               </p>
             </div>
