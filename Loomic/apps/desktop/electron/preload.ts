@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // App info
   getAppVersion: () => ipcRenderer.invoke("app-version"),
   getPlatform: () => process.platform,
+  getNativePermissions: () => ipcRenderer.invoke("desktop.native-permissions"),
   getUpdateState: () => ipcRenderer.invoke("desktop.update-state"),
   checkForUpdates: () => ipcRenderer.invoke("desktop.check-updates"),
   installUpdate: () => ipcRenderer.invoke("desktop.install-update"),
@@ -124,10 +125,88 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("assistant.disconnect-embedded"),
   closeEmbeddedBrowser: () => ipcRenderer.invoke("assistant.close-embedded"),
   selectWorkspace: () => ipcRenderer.invoke("workspace.select"),
+  getCurrentWorkspace: () => ipcRenderer.invoke("workspace.current"),
+  getDesktopSetup: () => ipcRenderer.invoke("desktop.setup-state"),
+  chooseDesktopWorkspace: () => ipcRenderer.invoke("desktop.setup-choose"),
+  completeDesktopSetup: (options: { autoBackup: boolean; agentAccess: boolean }) => ipcRenderer.invoke("desktop.setup-complete", options),
+  openDesktopSetup: () => ipcRenderer.invoke("desktop.setup-open"),
+  enterDesktopWorkspace: () => ipcRenderer.invoke("desktop.setup-enter"),
+  openDesktopWorkspaceFolder: () => ipcRenderer.invoke("desktop.workspace-folder"),
+  getCloudBackup: (accountId: string) => ipcRenderer.invoke("desktop.backup-state", accountId),
+  runCloudBackup: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.backup-run", credentials),
+  saveCloudAsset: (credentials: { accessToken: string; accountId: string }, asset: { assetId: string; name: string; mediaType: "image" | "video" }) => ipcRenderer.invoke("desktop.backup-asset", credentials, asset),
+  cancelCloudBackup: () => ipcRenderer.invoke("desktop.backup-cancel"),
+  inspectLocalProject: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-inspect", credentials),
+  restoreLocalProject: (id: string, credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-apply", id, credentials),
+  listLocalSnapshots: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.snapshot-list", credentials),
+  getLocalSnapshotOverview: (id: string, accountId: string, baseline?: string) => ipcRenderer.invoke("desktop.snapshot-overview", id, accountId, baseline),
+  previewSnapshotMedia: (id: string, accountId: string, assetId: string) => ipcRenderer.invoke("desktop.snapshot-media", id, accountId, assetId),
+  getSnapshotThumbnail: (id: string, accountId: string, assetId: string) => ipcRenderer.invoke("desktop.snapshot-thumbnail", id, accountId, assetId),
+  getThumbnailUsage: (accountId: string) => ipcRenderer.invoke("desktop.thumbnail-usage", accountId),
+  clearThumbnailCache: (accountId: string) => ipcRenderer.invoke("desktop.thumbnail-clear", accountId),
+  configureThumbnailCache: (accountId: string, input: { capacityMiB: number }) => ipcRenderer.invoke("desktop.thumbnail-configure", accountId, input),
+  getWorkspaceUsage: (accountId: string, duplicates: boolean) => ipcRenderer.invoke("desktop.workspace-usage", accountId, duplicates),
+  cancelWorkspaceScan: () => ipcRenderer.invoke("desktop.workspace-scan-cancel"),
+  getWorkspaceScanState: (accountId: string) => ipcRenderer.invoke("desktop.workspace-scan-state", accountId),
+  getWorkspaceScanSettings: () => ipcRenderer.invoke("desktop.workspace-scan-settings"),
+  configureWorkspaceScan: (input: { rateMiB: number }) => ipcRenderer.invoke("desktop.workspace-scan-configure", input),
+  clearWorkspaceScan: (accountId: string) => ipcRenderer.invoke("desktop.workspace-scan-clear", accountId),
+  onWorkspaceScan: (callback: (state: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state);
+    ipcRenderer.on("desktop:scan-state", listener);
+    return () => ipcRenderer.removeListener("desktop:scan-state", listener);
+  },
+  revealWorkspaceFile: (id: string) => ipcRenderer.invoke("desktop.workspace-reveal", id),
+  chooseRelinkMedia: (accountId: string, assetId: string) => ipcRenderer.invoke("desktop.media-relink-choose", accountId, assetId),
+  applyMediaRelink: (id: string) => ipcRenderer.invoke("desktop.media-relink-apply", id),
+  chooseRelinkDirectory: (accountId: string) => ipcRenderer.invoke("desktop.media-batch-choose", accountId),
+  cancelRelinkDirectory: () => ipcRenderer.invoke("desktop.media-batch-cancel"),
+  resumeRelinkDirectory: (accountId: string) => ipcRenderer.invoke("desktop.media-batch-resume", accountId),
+  saveRelinkSelection: (id: string, selections: Array<{ assetId: string; candidateId: string }>) => ipcRenderer.invoke("desktop.media-batch-selection", id, selections),
+  discardRelinkDirectory: (accountId: string) => ipcRenderer.invoke("desktop.media-batch-clear", accountId),
+  applyRelinkDirectory: (id: string, selections: Array<{ assetId: string; candidateId: string }>) => ipcRenderer.invoke("desktop.media-batch-apply", id, selections),
+  previewMediaMerge: (accountId: string, keepId: string, sourceIds: string[]) => ipcRenderer.invoke("desktop.media-merge-preview", accountId, keepId, sourceIds),
+  applyMediaMerge: (id: string, accepted: boolean) => ipcRenderer.invoke("desktop.media-merge-apply", id, accepted),
+  getLocalProjects: (accountId: string) => ipcRenderer.invoke("desktop.local-projects", accountId),
+  previewLocalCleanup: (accountId: string, projectId: string) => ipcRenderer.invoke("desktop.cleanup-preview", accountId, projectId),
+  applyLocalCleanup: (id: string) => ipcRenderer.invoke("desktop.cleanup-apply", id),
+  getLocalCloudCopies: (credentials: { accountId: string; accessToken: string }) => ipcRenderer.invoke("desktop.cloud-copies", credentials),
+  previewCloudRelease: (id: string, credentials: { accountId: string; accessToken: string }) => ipcRenderer.invoke("desktop.cloud-release-preview", id, credentials),
+  applyCloudRelease: (id: string, credentials: { accountId: string; accessToken: string }) => ipcRenderer.invoke("desktop.cloud-release-apply", id, credentials),
+  getLocalSnapshotAccounts: () => ipcRenderer.invoke("desktop.snapshot-accounts"),
+  queueLocalSnapshot: (id: string, accountId: string) => ipcRenderer.invoke("desktop.snapshot-queue", id, accountId),
+  openOfflineSnapshots: () => ipcRenderer.invoke("desktop.offline-open"),
+  getRestoreTasks: (credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-tasks", credentials),
+  previewRestoreTask: (id: string, credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-task-preview", id, credentials),
+  clearRestoreTask: (id: string, credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.restore-task-clear", id, credentials),
+  previewLocalSnapshot: (id: string, credentials: { accessToken: string; accountId: string }) => ipcRenderer.invoke("desktop.snapshot-preview", id, credentials),
+  cancelProjectRestore: () => ipcRenderer.invoke("desktop.restore-cancel"),
+  onProjectRestore: (callback: (state: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state);
+    ipcRenderer.on("desktop:restore-state", listener);
+    return () => ipcRenderer.removeListener("desktop:restore-state", listener);
+  },
+  onCloudBackup: (callback: (state: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state);
+    ipcRenderer.on("desktop:backup-state", listener);
+    return () => ipcRenderer.removeListener("desktop:backup-state", listener);
+  },
   selectDirectory: (title?: string) => ipcRenderer.invoke("dialog.select-directory", title),
   selectAssetFolder: () => ipcRenderer.invoke("assets.select-folder"),
+  getAssetFolderStatus: () => ipcRenderer.invoke("assets.folder-status"),
+  openAssetFolder: () => ipcRenderer.invoke("assets.open-folder"),
+  clearAssetFolder: () => ipcRenderer.invoke("assets.clear-folder"),
   writeAssetToLocal: (input: { directory: string; fileName: string; bytes: ArrayBuffer }) =>
     ipcRenderer.invoke("assets.write-local", input),
+  exportVideo: (input: { format: "portrait" | "landscape"; clips: Array<{ name: string; mimeType: string; bytes: ArrayBuffer; startMs: number; endMs: number }>; captions?: Array<{ text: string; startMs: number; endMs: number }>; audio?: Array<{ name: string; mimeType: string; bytes: ArrayBuffer; startMs: number; volume: number }> }) => ipcRenderer.invoke("video.export", input),
+  cancelVideoPreview: () => ipcRenderer.invoke("video.cancel-preview"),
+  readExportPreview: (id: string) => ipcRenderer.invoke("video.read-export-preview", id),
+  listExportPreviews: () => ipcRenderer.invoke("video.list-export-previews"),
+  onVideoPreviewProgress: (callback: (event: { state: "starting" | "running" | "completed" | "failed"; sourceBytes?: number; outTimeMs?: number; error?: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: { state: "starting" | "running" | "completed" | "failed"; sourceBytes?: number; outTimeMs?: number; error?: string }) => callback(value);
+    ipcRenderer.on("desktop:video-preview-progress", listener);
+    return () => ipcRenderer.removeListener("desktop:video-preview-progress", listener);
+  },
   getWorkspaceTree: () => ipcRenderer.invoke("workspace.tree"),
   readWorkspaceFile: (path: string) => ipcRenderer.invoke("workspace.read", path),
   writeWorkspaceFile: (input: { path: string; content: string }) => ipcRenderer.invoke("workspace.write", input),
@@ -138,6 +217,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   runWorkspaceScript: (name: string) => ipcRenderer.invoke("workspace.run-script", name),
   cancelWorkspaceScript: (runId: string) => ipcRenderer.invoke("workspace.cancel-script", runId),
   getMcpServers: () => ipcRenderer.invoke("mcp.list"),
+  onMcpDisconnected: (callback: (id: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, id: string) => callback(id);
+    ipcRenderer.on("desktop:mcp-disconnected", listener);
+    return () => ipcRenderer.removeListener("desktop:mcp-disconnected", listener);
+  },
   getDesktopExtensions: () => ipcRenderer.invoke("desktop.extensions.list"),
   syncDesktopExtensions: (input: DesktopExtensionSyncInput[]) => ipcRenderer.invoke("desktop.extensions.sync", input),
   setDesktopExtensionEnabled: (input: { itemId: string; enabled: boolean }) => ipcRenderer.invoke("desktop.extensions.set-enabled", input),
@@ -251,6 +335,9 @@ declare global {
       onExportCanvas: (callback: () => void) => void;
       minimizeWindow: () => Promise<void>;
       maximizeWindow: () => Promise<{ isMaximized: boolean }>;
+      windowFullscreen: () => Promise<{ isFullScreen: boolean }>;
+      getFullscreenState: () => Promise<{ isFullScreen: boolean }>;
+      onFullscreenState: (callback: (state: { isFullScreen: boolean }) => void) => () => void;
       closeWindow: () => Promise<void>;
       isBrowserLoginAvailable: () => Promise<boolean>;
       getBrowserLoginStatus: () => Promise<{ status: DesktopLoginStatus }>;
@@ -280,6 +367,7 @@ declare global {
       ) => () => void;
       getAppVersion: () => Promise<string>;
       getPlatform: () => string;
+      getNativePermissions: () => Promise<{ backend: string; supported: boolean; permission: string; accessibility: string; screenCapture: string; reason?: string }>;
       getUpdateState: () => Promise<DesktopUpdateState>;
       checkForUpdates: () => Promise<DesktopUpdateState>;
       installUpdate: () => Promise<{ ok: boolean }>;
@@ -305,6 +393,7 @@ declare global {
       runWorkspaceScript: (name: string) => Promise<{ runId: string }>;
       cancelWorkspaceScript: (runId: string) => Promise<{ canceled: boolean }>;
       getMcpServers: () => Promise<McpServer[]>;
+      onMcpDisconnected: (callback: (id: string) => void) => () => void;
       getDesktopExtensions: () => Promise<DesktopExtension[]>;
       syncDesktopExtensions: (input: DesktopExtensionSyncInput[]) => Promise<DesktopExtension[]>;
       setDesktopExtensionEnabled: (input: { itemId: string; enabled: boolean }) => Promise<DesktopExtension[]>;
@@ -320,6 +409,11 @@ declare global {
       callMcpTool: (input: { id: string; name: string; arguments: string }) => Promise<string>;
       onWorkspaceScriptOutput: (callback: (event: { runId: string; chunk: string }) => void) => () => void;
       onWorkspaceScriptFinished: (callback: (event: { runId: string; ok: boolean; exitCode?: number; message?: string }) => void) => () => void;
+      onVideoPreviewProgress: (callback: (event: { state: "starting" | "running" | "completed" | "failed"; sourceBytes?: number; outTimeMs?: number; error?: string }) => void) => () => void;
+      cancelVideoPreview: () => Promise<{ canceled: boolean }>;
+      selectAssetFolder: () => Promise<{ path: string; name: string } | null>;
+      writeAssetToLocal: (input: { directory: string; fileName: string; bytes: ArrayBuffer }) => Promise<{ path: string }>;
+      onFocusAgentInput: (callback: () => void) => () => void;
       onAgentEvent: (callback: (event: Record<string, unknown>) => void) => () => void;
     };
   }

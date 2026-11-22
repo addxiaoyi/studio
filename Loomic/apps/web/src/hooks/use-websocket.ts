@@ -209,9 +209,18 @@ export function useWebSocket(
     connect();
     return () => {
       disposed.current = true;
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      wsRef.current?.close();
-      wsRef.current = null;
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
+      const socket = wsRef.current;
+      if (socket) {
+        socket.onclose = null;
+        socket.close();
+        wsRef.current = null;
+        setConnected(false);
+        publishRealtimeStatus("disconnected");
+      }
     };
   }, [connect]);
 

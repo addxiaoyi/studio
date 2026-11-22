@@ -116,6 +116,24 @@ function contrastRatio(foreground: string, background: string) {
 }
 
 test.describe("UX 100 visual safeguards", () => {
+  test("desktop sidebar keeps full accessible labels in its collapsed icon rail", async ({ page }) => {
+    await mockWorkspace(page);
+    await page.setViewportSize({ width: 1280, height: 844 });
+    await page.goto("/projects");
+    await page.evaluate(() => {
+      document.documentElement.dataset.helsteraDesktop = "true";
+      document.documentElement.dataset.sidebarCollapsed = "true";
+    });
+
+    const sidebar = page.getByRole("navigation", { name: "桌面模块" });
+    await expect(sidebar).toBeVisible();
+    const projectButton = sidebar.getByRole("button", { name: "项目" });
+    await sidebar.getByRole("button", { name: "高级能力" }).click();
+    await expect(projectButton).toHaveAttribute("title", "项目");
+    await expect(projectButton).toHaveAccessibleName("项目");
+    await expect.poll(() => projectButton.locator("span").evaluate((label) => label.getBoundingClientRect().width)).toBe(1);
+  });
+
   test("workspace reflows at a 200% viewport proxy and preserves route context", async ({
     page,
   }) => {
@@ -317,10 +335,19 @@ test.describe("UX 100 visual safeguards", () => {
       if (projectAttempts === 1) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { message: "编辑器项目创建失败" } }) });
       return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ project: { id: "editor-project", name: "编辑测试资产", primaryCanvas: { id: "editor-canvas", name: "主画布", isPrimary: true } } }) });
     });
+    await page.route("**/api/canvases/editor-canvas", (route: Route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ canvas: { id: "editor-canvas", name: "主画布", projectId: "editor-project", content: { elements: [], appState: {}, files: {} } } }) }),
+    );
+    await page.route("**/api/projects/editor-project", (route: Route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ project: { id: "editor-project", name: "编辑测试资产", brand_kit_id: null } }) }),
+    );
+    await page.route("**/api/workspace/settings", (route: Route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ settings: { defaultModel: "auto", autoDeleteEmptyCanvas: false } }) }),
+    );
 
     await page.goto("/assets");
     await page.getByRole("button", { name: "在画布中编辑 编辑测试资产" }).click();
-    await expect(page.getByRole("alert").filter({ hasText: "编辑器项目创建失败" })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "服务器处理这次请求时出错了" })).toBeVisible();
     await page.getByRole("button", { name: "重试打开画布" }).click();
     await expect.poll(() => projectAttempts).toBe(2);
     await expect(page).toHaveURL(/\/canvas\/?\?id=editor-canvas/, { timeout: 15_000 });
@@ -346,7 +373,7 @@ test.describe("UX 100 visual safeguards", () => {
 
     await page.goto("/assets");
     await page.getByRole("button", { name: "公开作品" }).click();
-    await expect(page.getByRole("alert").filter({ hasText: "作品库暂时不可用" })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "服务器处理这次请求时出错了" })).toBeVisible();
     await page.getByRole("button", { name: "重试公开作品" }).click();
     await expect(page.getByRole("status").filter({ hasText: "作品已公开到作品库" })).toBeVisible();
     expect(publishAttempts).toBe(2);

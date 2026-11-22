@@ -5,16 +5,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DesktopWorkspaceSidebar } from "@/components/desktop-workspace-sidebar";
 
-const { mockReplace } = vi.hoisted(() => ({ mockReplace: vi.fn() }));
+const { mockReplace, openVideo, route } = vi.hoisted(() => ({ mockReplace: vi.fn(), openVideo: vi.fn(), route: { pathname: "/desktop-app/canvas" as string | null } }));
+
+vi.mock("@/lib/video-navigation", () => ({ openVideoWorkspace: openVideo }));
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/desktop-app/canvas",
+  usePathname: () => route.pathname,
   useRouter: () => ({ replace: mockReplace, push: mockReplace }),
 }));
 
 const scrollIntoView = vi.fn();
 
 beforeEach(() => {
+  route.pathname = "/desktop-app/canvas";
   mockReplace.mockClear();
   scrollIntoView.mockClear();
   // jsdom 不实现 scrollIntoView，这里装一个探针，既避免真实调用也用来断言调用参数。
@@ -61,10 +64,17 @@ describe("DesktopWorkspaceSidebar 键盘导航", () => {
     render(<DesktopWorkspaceSidebar />);
 
     const canvas = item("画布");
+    const fashion = item("女装试穿");
+    const video = item("视频创作");
     const advancedToggle = item("高级能力");
     canvas.focus();
     expect(document.activeElement).toBe(canvas);
 
+    await user.keyboard("{ArrowDown}");
+
+    expect(document.activeElement).toBe(fashion);
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(video);
     await user.keyboard("{ArrowDown}");
 
     expect(document.activeElement).toBe(advancedToggle);
@@ -74,10 +84,23 @@ describe("DesktopWorkspaceSidebar 键盘导航", () => {
 
     await user.keyboard("{ArrowUp}");
 
+    expect(document.activeElement).toBe(video);
+    await user.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(fashion);
+    await user.keyboard("{ArrowUp}");
+
     expect(document.activeElement).toBe(canvas);
     expect(canvas.tabIndex).toBe(0);
     expect(advancedToggle.tabIndex).toBe(-1);
     expect(tabbableItems()).toHaveLength(1);
+  });
+
+  it("opens the video studio with a document navigation for isolation", async () => {
+    const user = userEvent.setup();
+    render(<DesktopWorkspaceSidebar />);
+    await user.click(item("视频创作"));
+    expect(openVideo).toHaveBeenCalledOnce();
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it("用 Home/End 跳到首尾，且两端不回绕", async () => {
@@ -123,6 +146,12 @@ describe("DesktopWorkspaceSidebar 键盘导航", () => {
     expect(document.activeElement).toBe(item("本地开发"));
 
     await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(item("扩展市场"));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(item("任务历史"));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(item("展开 Agent 浏览器"));
+    await user.keyboard("{ArrowDown}");
     expect(document.activeElement).toBe(item("设置"));
     expect(tabbableItems()).toHaveLength(1);
   });
@@ -150,6 +179,11 @@ describe("DesktopWorkspaceSidebar 键盘导航", () => {
     item("画布").focus();
     await user.keyboard("{ArrowDown}");
 
+    expect(document.activeElement).toBe(item("女装试穿"));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(item("视频创作"));
+    await user.keyboard("{ArrowDown}");
+
     expect(document.activeElement).toBe(item("高级能力"));
     expect(item("高级能力").tabIndex).toBe(0);
     // 折叠态仍保留原按钮与既有可访问属性，只是视觉上只显示图标。
@@ -163,11 +197,29 @@ describe("DesktopWorkspaceSidebar 键盘导航", () => {
 
     item("设置").focus();
     await user.keyboard("{Enter}");
-    expect(mockReplace).toHaveBeenCalledWith("/settings/");
+    expect(mockReplace).toHaveBeenCalledWith("/desktop-app/settings/");
 
     mockReplace.mockClear();
     item("画布").focus();
     await user.keyboard(" ");
     expect(mockReplace).toHaveBeenCalledWith("/desktop-app/canvas/");
   });
+
+  it("keeps navigation usable while the router pathname is unavailable", async () => {
+    route.pathname = null;
+    const user = userEvent.setup();
+    render(<DesktopWorkspaceSidebar />);
+    expect(item("画布").getAttribute("aria-current")).toBeNull();
+    await user.click(item("设置"));
+    expect(mockReplace).toHaveBeenCalledWith("/desktop-app/settings/");
+  });
+  it("uses the desktop projects route and marks nested project pages current", async () => {
+    route.pathname = "/desktop-app/projects/detail/";
+    render(<DesktopWorkspaceSidebar />);
+    expect(item("项目").getAttribute("aria-current")).toBe("page");
+    await userEvent.click(item("项目"));
+    expect(mockReplace).toHaveBeenCalledWith("/desktop-app/projects/");
+    expect(item("画布").getAttribute("aria-current")).toBeNull();
+  });
+
 });
