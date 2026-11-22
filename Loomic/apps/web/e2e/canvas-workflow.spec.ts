@@ -68,9 +68,10 @@ test("edits, confirms and executes a visual workflow with durable node receipts 
     .getByRole("button", { name: /浏览与录制 读取网页与截图/ })
     .click();
   await workspace.getByRole("button", { name: "断开site到capture" }).click();
-  await expect(
-    workspace.getByRole("button", { name: "运行流程", exact: true }),
-  ).toBeDisabled();
+  await workspace.getByRole("button", { name: "运行流程", exact: true }).click();
+  const blockedRun = page.getByRole("dialog", { name: /确认运行/ });
+  await expect(blockedRun.getByRole("button", { name: "确认运行已保存版本" })).toBeDisabled();
+  await blockedRun.getByRole("button", { name: "返回编辑", exact: true }).click();
   await workspace.getByRole("combobox", { name: "连接上游节点" }).click();
   await page.getByRole("option", { name: "目标网址", exact: true }).click();
   await workspace

@@ -184,9 +184,10 @@ test("curved wires follow node drags, survive reload and preserve native undo an
       .getByRole("button", { name: /浏览与录制 读取网页与截图/ })
       .click();
     await dock.getByRole("button", { name: "断开site到capture" }).click();
-    await expect(
-      dock.getByRole("button", { name: "运行流程", exact: true }),
-    ).toBeDisabled();
+    await dock.getByRole("button", { name: "运行流程", exact: true }).click();
+    const blockedRun = page.getByRole("dialog", { name: /确认运行/ });
+    await expect(blockedRun.getByRole("button", { name: "确认运行已保存版本" })).toBeDisabled();
+    await blockedRun.getByRole("button", { name: "返回编辑", exact: true }).click();
     await dock.getByRole("button", { name: "撤销工作流修改" }).click();
     await expect(
       dock.getByRole("button", { name: "断开site到capture" }),

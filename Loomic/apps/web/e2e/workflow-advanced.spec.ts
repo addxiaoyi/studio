@@ -228,7 +228,7 @@ test("Switch, batch checkpoints and version restore work in the real workspace",
     await expect(
       dock.getByRole("region", { name: "工作流运行记录" }),
     ).toContainText("全部完成", { timeout: 45000 });
-    await expect(dock).toContainText("DEFAULT 1. ALPHA");
+    await expect(dock).toContainText("DEFAULT 1. ALPHA", { timeout: 45000 });
     const latest = (
       await service.runs(fixture.userId, fixture.canvasId, flow.id)
     )[0]!;
