@@ -56,7 +56,7 @@ export function isWithinPublicModelPriceLimit(row: AvailableProviderModel): bool
   return isWithinPublicUnitPriceLimit(row.billing_unit, priceCny);
 }
 
-async function recoverTransientModelStates(db: Pool) {
+async function recoverTransientModelStates(db: Pick<Pool, "query">) {
   await db.query(
     `update provider_models
      set health_status='degraded', failure_count=least(failure_count, 2), cooldown_until=null, updated_at=now()
@@ -71,11 +71,11 @@ async function recoverTransientModelStates(db: Pool) {
   );
 }
 export async function listHealthyModels(
-  db: Pool,
+  db: Pick<Pool, "query">,
   mediaType: "image" | "video",
-  options?: { requireBilling?: boolean; requireInputImage?: boolean; allowUnverified?: boolean; allowDegraded?: boolean },
+  options?: { requireBilling?: boolean; requireInputImage?: boolean; allowUnverified?: boolean; allowDegraded?: boolean; readOnly?: boolean; includeInvalidPrices?: boolean },
 ) {
-  await recoverTransientModelStates(db);
+  if (!options?.readOnly) await recoverTransientModelStates(db);
   const allowDegraded = options?.allowDegraded ?? mediaType !== "image";
   const { rows } = await db.query<AvailableProviderModel>(
     `select * from (
@@ -116,7 +116,7 @@ export async function listHealthyModels(
     : !isRemovedModelId(row.model_id));
   const priceEligibleRows = activeRows
     .filter((row) => mediaType !== "video" || row.billing_unit !== "per_million_tokens")
-    .filter(isWithinPublicModelPriceLimit);
+    .filter(row => options?.includeInvalidPrices || isWithinPublicModelPriceLimit(row));
   return options?.requireBilling === false ? priceEligibleRows : priceEligibleRows.filter(hasValidBilling);
 }
 
@@ -178,7 +178,7 @@ function publicAvailabilityReason(model: AvailableProviderModel) {
 }
 
 export async function resolveConfiguredModel(
-  db: Pool,
+  db: Pick<Pool, "query">,
   mediaType: "image" | "video",
   requestedModel?: string,
   options?: {
@@ -188,12 +188,16 @@ export async function resolveConfiguredModel(
     excludeModelIds?: string[];
     allowedModelIds?: string[];
     strictRequested?: boolean;
+    readOnly?: boolean;
+    includeInvalidPrices?: boolean;
   },
 ) {
   // Generation availability is independent from display pricing metadata.
   // A missing price must not prevent a configured upstream model from running.
   const models = await listHealthyModels(db, mediaType, {
     requireBilling: false,
+    ...(options?.readOnly ? { readOnly: true } : {}),
+    ...(options?.includeInvalidPrices ? { includeInvalidPrices: true } : {}),
     ...(options?.requiresInputImage !== undefined
       ? { requireInputImage: options.requiresInputImage }
       : {}),

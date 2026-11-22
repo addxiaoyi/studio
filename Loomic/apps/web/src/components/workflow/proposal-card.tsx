@@ -22,7 +22,14 @@ import { Button } from "@/components/ui/button";
 import "./assistant.css";
 import {workflowFieldNames,formatWorkflowValue} from "./config-values";
 import { WorkflowProposalRun } from "./proposal-run";
+import { resolveWorkflowEdits, selectWorkflowEdits, toggleWorkflowEdit, workflowEdits } from "@helstera/shared";
+import { WorkflowEditSelection } from "./edit-selection";
 import { WorkflowBudgetField, validWorkflowBudget } from "./budget-field";
+function editSummary(status: WorkflowProposal["status"], selected: number, total: number): string {
+  if (status === "applied") return `已应用 ${selected} 项修改`;
+  if (status === "pending") return `已选 ${selected}/${total} 项修改`;
+  return `${total} 项未应用的修改`;
+}
 export function WorkflowProposalCard({
   canvasId,
   id,
@@ -41,6 +48,7 @@ export function WorkflowProposalCard({
   const [now, setNow] = useState(Date.now()),
     [retry, setRetry] = useState(0);
   const [budget,setBudget] = useState("0");
+  const [editChoice, setEditChoice] = useState<{ id: string; requested: string[]; deletionConfirmed: boolean } | null>(null);
   useEffect(()=>setBudget("0"),[id]);
   useEffect(() => {
     if (initial) setProposal(initial);
@@ -74,6 +82,7 @@ export function WorkflowProposalCard({
         id,
         decision,
         decision === "confirm" && proposal?.action === "run" ? Number(budget) : undefined,
+        decision === "confirm" && proposal?.action === "edit" && selectedEdit ? { selectedChanges: selectedEdit.selectedChanges, deletionConfirmed: editChoice?.id === proposal.id && editChoice.deletionConfirmed } : undefined,
       );
       setProposal(next);
       if (next.status === "applied") {
@@ -118,6 +127,28 @@ export function WorkflowProposalCard({
   const expired = Date.parse(proposal.expiresAt) <= now,
     changes = workflowChanges(proposal.before, proposal.graph),
     issues = proposal.graph ? validateWorkflow(proposal.graph) : [];
+  let editError = "";
+  let availableEdits: ReturnType<typeof workflowEdits> = [];
+  let selectedEdit: ReturnType<typeof selectWorkflowEdits> | null = null;
+  let requested: string[] = [];
+  if (proposal.action === "edit" && proposal.graph) {
+    try {
+      availableEdits = workflowEdits(proposal.before, proposal.graph);
+      const stored = Array.isArray(proposal.result?.selectedChanges) && proposal.result.selectedChanges.every(id => typeof id === "string") ? proposal.result.selectedChanges as string[] : null;
+      requested = editChoice?.id === proposal.id ? editChoice.requested : stored ?? availableEdits.map(edit => edit.id);
+      selectedEdit = selectWorkflowEdits(proposal.before, proposal.graph, requested);
+    } catch (cause) { editError = cause instanceof Error ? cause.message : "所选改动无法应用。"; }
+  }
+  const selectedIds = resolveWorkflowEdits(availableEdits, requested);
+  const proposalId = proposal.id;
+  const previewGraph = proposal.status === "rejected" ? proposal.graph : selectedEdit?.graph ?? proposal.graph;
+  const changesSummary = proposal.action === "edit" && availableEdits.length ? editSummary(proposal.status, selectedIds.length, availableEdits.length) : changes.length ? `${changes.length} 项修改` : "操作说明";
+  function toggleEdit(id: string, checked: boolean) {
+    setEditChoice({ id: proposalId, requested: toggleWorkflowEdit(availableEdits, requested, id, checked), deletionConfirmed: false });
+  }
+  function confirmDeletion(checked: boolean) { setEditChoice({ id: proposalId, requested, deletionConfirmed: checked }); }
+  function selectAllEdits() { setEditChoice({ id: proposalId, requested: availableEdits.map(edit => edit.id), deletionConfirmed: false }); }
+  function clearEdits() { setEditChoice({ id: proposalId, requested: [], deletionConfirmed: false }); }
   let scopeSteps:string[]=[];
   let scopeError="";
   if(proposal.targetNodeId){
@@ -142,11 +173,11 @@ export function WorkflowProposalCard({
         </span>
       </header>
       {proposal.targetNodeId&&<div className="workflow-partial-scope"><strong>执行到：{proposal.before?.nodes.find(node=>node.id===proposal.targetNodeId)?.title??proposal.targetNodeId}</strong><p>仅运行以下步骤，未固定上游会重新执行；固定结果复用，生成费用仍逐次确认。</p><ol>{scopeSteps.map((title,index)=><li key={index}>{title}</li>)}</ol>{scopeError&&<p role="alert">{scopeError}</p>}</div>}
-      {proposal.graph && (
-        <strong className="text-xs">{productLabel(proposal.graph.title)}</strong>
+      {previewGraph && (
+        <strong className="text-xs">{productLabel(previewGraph.title)}</strong>
       )}
       <details className="workflow-proposal-details" open={proposal.status === "pending" || proposal.action === "inspect"}>
-      <summary><span>{changes.length ? `${changes.length} 项修改` : "操作说明"}</span><ChevronDown size={14} aria-hidden /></summary>
+      <summary><span>{changesSummary}</span><ChevronDown size={14} aria-hidden /></summary>
       <div className="workflow-proposal-summary"><MarkdownRenderer text={proposal.summary} /></div>
       {proposal.revision !== null && (
         <p className="workflow-proposal-version">
@@ -154,7 +185,7 @@ export function WorkflowProposalCard({
           {proposal.before ? ` · ${productLabel(proposal.before.title)}` : ""}
         </p>
       )}
-      {!!changes.length && (
+      {proposal.action === "edit" && proposal.status !== "rejected" && availableEdits.length > 0 ? <WorkflowEditSelection edits={availableEdits} selected={selectedIds} requested={requested} deletionConfirmed={editChoice?.id === proposal.id && editChoice.deletionConfirmed} disabled={busy || expired || proposal.status !== "pending"} pending={proposal.status === "pending"} toggle={toggleEdit} confirmDeletion={confirmDeletion} selectAll={selectAllEdits} clear={clearEdits} /> : !!changes.length && (
         <ul className="workflow-change-list">
           {changes.map((change, index) => (
             <li key={index} data-kind={change.kind}>
@@ -173,10 +204,11 @@ export function WorkflowProposalCard({
           ))}
         </ul>
       )}
+      {editError && <p role="alert" className="text-xs text-destructive">{editError}</p>}
       {proposal.graph && (
         <details>
           <summary>检查节点参数与输入</summary>
-          {proposal.graph.nodes.map((node) => (
+          {(previewGraph ?? proposal.graph).nodes.map((node) => (
             <div className="workflow-proposal-node" key={node.id}>
               <strong>{node.title}</strong>
               <dl>
@@ -232,7 +264,7 @@ export function WorkflowProposalCard({
         <footer>
           <Button
             size="sm"
-            disabled={busy || expired || Boolean(scopeError)}
+            disabled={busy || expired || Boolean(scopeError) || Boolean(editError) || (proposal.action === "edit" && (!selectedEdit?.selectedChanges.length || (selectedEdit.destructive.length > 0 && !(editChoice?.id === proposal.id && editChoice.deletionConfirmed))))}
             onClick={() => void decide("confirm")}
           >
             {busy

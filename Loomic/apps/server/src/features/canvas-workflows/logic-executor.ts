@@ -1,4 +1,4 @@
-import { evaluateWorkflowCondition, readWorkflowField } from "@helstera/shared";
+import { evaluateWorkflowBranches, readWorkflowField } from "@helstera/shared";
 import {
   StepWaiting,
   type StepExecution,
@@ -39,26 +39,21 @@ export async function executeLogicNode(
     return { json: value, text: JSON.stringify(value, null, 2) };
   }
   if (c.executor === "flow.if") {
-    const source = read(c.fromStep),
-      matches = c.conditions.map((rule) =>
-        evaluateWorkflowCondition(source, rule),
-      );
+    const source = read(c.fromStep);
+    const { branches } = evaluateWorkflowBranches(source, {
+      kind: "condition", conditions: c.conditions, match: c.match,
+    });
     return {
       ...source,
-      condition:
-        c.match === "all" ? matches.every(Boolean) : matches.some(Boolean),
+      condition: branches[0] === "true",
     };
   }
   if (c.executor === "flow.switch") {
-    const source = read(c.fromStep), branches: string[] = [];
-    for (const route of c.cases) {
-      const matches = route.conditions.map(rule => evaluateWorkflowCondition(source, rule));
-      if (route.match === "all" ? matches.every(Boolean) : matches.some(Boolean)) {
-        branches.push(route.id);
-        if (c.mode === "first") break;
-      }
-    }
-    return { ...source, branches: branches.length ? branches : ["default"] };
+    const source = read(c.fromStep);
+    const { branches } = evaluateWorkflowBranches(source, {
+      kind: "switch", cases: c.cases, mode: c.mode,
+    });
+    return { ...source, branches };
   }
   if (c.executor === "data.split" || c.executor === "flow.batch") return executeBatchNode(input, read(c.fromStep));
   if (c.executor === "text.transform") {

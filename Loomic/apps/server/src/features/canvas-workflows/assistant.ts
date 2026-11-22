@@ -5,6 +5,7 @@ import {
   workflowGraphSchema,
   compileWorkflow,
   workflowRunGraph,
+  selectWorkflowEdits,
   type WorkflowAssistantPlan,
   type WorkflowProposal,
 } from "@helstera/shared";
@@ -16,6 +17,7 @@ import {
 import { AgentGoalService } from "../agent-goals/agent-goal-service.js";
 import { assertWorkflowMaterials } from "./materials.js";
 import { assertWorkflowPins } from "./pins.js";
+import type { WorkflowAuthorCheck } from "./author-health.js";
 
 type ProposalRow = {
   id: string;
@@ -60,7 +62,7 @@ const view = (row: ProposalRow) =>
 const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
 export class WorkflowAssistantService {
-  constructor(private readonly db: Pool) {}
+  constructor(private readonly db: Pool, private readonly authorCheck?: WorkflowAuthorCheck) {}
   async request(userId:string,canvasId:string,requestKey:string){
     await assertWorkflowCanvas(this.db,userId,canvasId);
     const row=(await this.db.query<ProposalRow>("select * from canvas_workflow_proposals where canvas_id=$1 and created_by=$2 and request_key=$3",[canvasId,userId,requestKey])).rows[0];
@@ -214,6 +216,7 @@ export class WorkflowAssistantService {
     decision: "confirm" | "reject",
     executionEnabled: boolean,
     budgetCredits?: number,
+    editSelection?: { selectedChanges?: string[] | undefined; deletionConfirmed?: boolean | undefined },
   ) {
     const client = await this.db.connect();
     try {
@@ -226,7 +229,14 @@ export class WorkflowAssistantService {
         )
       ).rows[0];
       if (!row) throw new WorkflowError("AI 操作不存在。", 404);
+      if (editSelection && row.action !== "edit") throw new WorkflowError("只有修改流程可以选择部分改动。");
+      const selection = decision === "confirm" && row.action === "edit" && row.graph
+        ? selectWorkflowEdits(row.before_graph ? workflowGraphSchema.parse(row.before_graph) : null, workflowGraphSchema.parse(row.graph), editSelection?.selectedChanges)
+        : null;
       if (row.status !== "pending") {
+        if (row.status === "applied" && selection && Array.isArray(row.result?.selectedChanges) && JSON.stringify(row.result.selectedChanges) !== JSON.stringify(selection.selectedChanges)) {
+          throw new WorkflowError("这项操作已按其他改动选择应用，请查看结果或重新生成方案。", 409);
+        }
         await client.query("commit");
         return view(row);
       }
@@ -245,13 +255,16 @@ export class WorkflowAssistantService {
           "这项 AI 操作已过期，请重新生成；没有执行。",
           409,
         );
-      const workflows = new CanvasWorkflowService(this.db);
+      const workflows = new CanvasWorkflowService(this.db, this.authorCheck);
       const current = row.workflow_id
         ? await workflows.get(userId, canvasId, row.workflow_id)
         : null;
       let receipt: Record<string, unknown>;
       if (row.action === "edit") {
-        const graph = workflowGraphSchema.parse(row.graph);
+        if (!selection) throw new WorkflowError("缺少可应用的工作流方案。");
+        if (!selection.selectedChanges.length) throw new WorkflowError("请选择至少一项改动后再应用。");
+        if (selection.destructive.length && editSelection?.deletionConfirmed !== true) throw new WorkflowError("请单独确认删除选中的节点后再应用。");
+        const graph = selection.graph;
         await assertWorkflowMaterials(client, graph, {
           canvasId,
           workspaceId,
@@ -279,6 +292,7 @@ export class WorkflowAssistantService {
             : await workflows.create(userId, canvasId, graph, row.id);
           receipt = { workflowId: document.id, revision: document.revision };
         }
+        receipt.selectedChanges = selection.selectedChanges;
       } else if (row.action === "run") {
         if (!executionEnabled)
           throw new WorkflowError("工作流执行服务尚未启用。", 503);

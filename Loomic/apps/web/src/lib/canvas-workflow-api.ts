@@ -7,6 +7,7 @@ import {
   type WorkflowGraph,
   workflowProposalSchema,
   workflowVersionSchema,
+  workflowPreflightSchema,
 } from "@helstera/shared";
 import { getServerBaseUrl } from "./env";
 
@@ -16,6 +17,7 @@ async function workflowRequest(
   suffix: string,
   method = "GET",
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   const response = await fetch(
     `${getServerBaseUrl()}/api/canvases/${encodeURIComponent(canvasId)}/workflows${suffix}`,
@@ -28,7 +30,7 @@ async function workflowRequest(
         ...(body ? { "content-type": "application/json" } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(125_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(125_000),
     },
   );
   const reply = (await response.json()) as {
@@ -116,6 +118,14 @@ export async function runCanvasWorkflow(
     ...(budgetCredits !== undefined ? {budgetCredits} : {}),
   })) as { goalId: string; reused: boolean };
 }
+export async function inspectCanvasWorkflow(
+  token: string, canvasId: string, id: string, revision: number,
+  graph: WorkflowGraph, targetNodeId?: string, signal?: AbortSignal,
+) {
+  return workflowPreflightSchema.parse(await workflowRequest(token, canvasId, `/${id}/preflight`, "POST", {
+    revision, graph, ...(targetNodeId ? { targetNodeId } : {}),
+  }, signal));
+}
 export function openCanvasWorkflow(id?: string) {
   window.dispatchEvent(
     new CustomEvent("loomic:workflow-open", { detail: { id } }),
@@ -147,5 +157,5 @@ export async function fetchWorkflowRuns(
 export async function listWorkflowProposals(token:string,canvasId:string,workflowId?:string){return workflowProposalSchema.array().parse(await workflowRequest(token,canvasId,`/assistant${workflowId?`?workflowId=${encodeURIComponent(workflowId)}`:""}`));}
 export async function askWorkflowAssistant(token:string,canvasId:string,input:{prompt:string;requestKey:string;workflowId?:string;sessionId?:string;selectedNodeIds?:string[];referenceElementIds?:string[]}){return workflowProposalSchema.parse(await workflowRequest(token,canvasId,"/assistant","POST",input));}
 export async function getWorkflowProposal(token:string,canvasId:string,id:string){return workflowProposalSchema.parse(await workflowRequest(token,canvasId,`/assistant/${id}`));}
-export async function decideWorkflowProposal(token:string,canvasId:string,id:string,decision:"confirm"|"reject",budgetCredits?:number){return workflowProposalSchema.parse(await workflowRequest(token,canvasId,`/assistant/${id}/${decision}`,"POST",budgetCredits===undefined?{}:{budgetCredits}));}
+export async function decideWorkflowProposal(token:string,canvasId:string,id:string,decision:"confirm"|"reject",budgetCredits?:number,selection?:{selectedChanges:string[];deletionConfirmed:boolean}){return workflowProposalSchema.parse(await workflowRequest(token,canvasId,`/assistant/${id}/${decision}`,"POST",{...(budgetCredits===undefined?{}:{budgetCredits}),...(selection??{})}));}
 export function notifyWorkflowChanged(id:string,goalId?:string){window.dispatchEvent(new CustomEvent("loomic:workflow-changed",{detail:{id,goalId}}));}

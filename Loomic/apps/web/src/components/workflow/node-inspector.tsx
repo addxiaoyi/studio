@@ -12,6 +12,7 @@ import { StyledSelect } from "@/components/ui/styled-select";
 import { CreativeInspector } from "./creative-inspector";
 import { workflowInputReferences } from "./material-references";
 import { LogicInspector } from "./logic-inspector";
+import { workflowFieldSample } from "./upstream-fields";
 type Props = {
   node: WorkflowNode;
   graph: WorkflowGraph;
@@ -26,6 +27,9 @@ type Props = {
   onBindMaterial?: (()=>void)|undefined;
   referenceEditor?: ReactNode;
   onBranch?:((id:string,branch:string)=>void)|undefined;
+  fieldOutputs?: Record<string, Record<string, unknown>> | undefined;
+  fieldRunGraph?: WorkflowGraph | undefined;
+  onLocateFieldSource?: ((id: string) => void) | undefined;
 };
 export function NodeInspector({
   node,
@@ -38,6 +42,7 @@ export function NodeInspector({
   onReorder,
   onPromptLibrary,materials=[],onBindMaterial,referenceEditor,
   onBranch,
+  fieldOutputs, fieldRunGraph, onLocateFieldSource,
 }: Props) {
   const config = node.config;
   const disabled=busy||Boolean(node.pin);
@@ -84,7 +89,7 @@ export function NodeInspector({
         </label>
       )}
       <CreativeInspector node={node} disabled={disabled} onChange={onChange} referenceCount={workflowInputReferences(graph,node.id).length} />
-      <LogicInspector node={node} disabled={disabled} onChange={onChange}/>
+      <LogicInspector node={node} disabled={disabled} onChange={onChange} sample={workflowFieldSample(graph, node.id, fieldOutputs, fieldRunGraph)} locateSource={onLocateFieldSource}/>
       <details className="workflow-node-notes"><summary>节点备注{node.note?" · 已填写":""}</summary><label>备注<textarea className={field} rows={3} maxLength={2000} value={node.note??""} disabled={busy} onChange={event=>onChange({...node,note:event.target.value})}/></label></details>
       {referenceEditor}
       {["text","write","generate"].includes(config.kind)&&onPromptLibrary&&<Button size="sm" variant="outline" disabled={disabled} onClick={onPromptLibrary}>提示词库 · 保存与套用</Button>}

@@ -30,8 +30,9 @@ import { workflowStepState } from "./step-state";
 import { useSceneContext, type CanvasReference } from "./use-scene-context";
 import { useWorkflowMaterialDrop } from "./use-material-drop";
 import { embedWorkflowMaterials, removeWorkflowReference } from "./material-inputs";
-import { nextNodePosition } from "./graph-state";
+import { nextNodePosition, workflowGraphKey } from "./graph-state";
 import { validWorkflowBudget } from "./budget-field";
+import { useWorkflowPreflight } from "./use-preflight";
 export type CanvasWorkflowProps = {
   token: string;
   canvasId: string;
@@ -94,6 +95,10 @@ export function useWorkflowController({
   const [insertingEdge,setInsertingEdge]=useState<string|null>(null);
   const [runTarget,setRunTarget]=useState<string|null>(null);
   const [budget, setBudget] = useState("0");
+  const preflight = useWorkflowPreflight({ open: confirmRun, token, canvasId,
+    workflowId: flow.selected?.id, revision: flow.selected?.revision, graph: flow.graph,
+    targetNodeId: runTarget ?? undefined });
+  const latestGraph = useRef(flow.graph); latestGraph.current = flow.graph;
   const [materials, setMaterials] = useState<WorkflowNode[]>([]);
   const [history, setHistory] = useState<
     Awaited<ReturnType<typeof fetchWorkflowRuns>>
@@ -216,6 +221,10 @@ export function useWorkflowController({
     const asset = assets?.find(item=>typeof item.id==="string" && ["image","video"].includes(String(item.mediaType)));
     return [step.stepId,{...(typeof step.output?.text==="string"?{text:step.output.text.slice(0,300)}:{}),...(asset?{assetId:String(asset.id),mediaType:asset.mediaType as "image"|"video"}:{})}];
   })),[run.goal,currentRun]);
+  const fieldOutputs = useMemo(() => Object.fromEntries((viewedRun && viewedRun.goalId === run.goal?.id && viewedRun.revision === flow.selected?.revision ? run.goal?.executionSteps ?? [] : [])
+    .filter(step => step.state === "succeeded" && step.output && step.output.skipped !== true)
+    .map(step => [step.stepId, step.output as Record<string, unknown>])), [viewedRun, flow.selected?.revision, run.goal]);
+  function locateFieldSource(id: string) { setSelectedId(id); setTab("nodes"); scene.focus(id); }
   const materialDrop = useWorkflowMaterialDrop({ api, workflowId: flow.selected?.id, graph: flow.graph, locked, edit: flow.edit, select: id => { setSelectedId(id); setTab("nodes"); }, error: flow.setError });
   const embedMaterials = (elementIds: string[]) => {
     if (!api || !selected || locked) return;
@@ -436,19 +445,25 @@ export function useWorkflowController({
   }
   async function startRun() {
     if (!validWorkflowBudget(budget)) { flow.setError("请填写有效的流程预算上限。"); return; }
-    setConfirmRun(false);
+    if (preflight.checking || !preflight.report?.ready || preflight.error) return;
+    const checkedGraph = workflowGraphKey(flow.graph);
+    setSaving(true);
     try {
       await saveCanvas();
-      if(await flow.start(sessionId,runTarget??undefined,Number(budget)))setTab("runs");
+      if (workflowGraphKey(latestGraph.current) !== checkedGraph) throw new Error("检查期间草稿已变化，请重新检查后运行。");
+      if(await flow.start(sessionId,runTarget??undefined,Number(budget))) { setConfirmRun(false); setTab("runs"); }
+      else preflight.retry();
     } catch (cause) {
       flow.setError(cause instanceof Error ? cause.message : "画布保存失败。");
-    }
+    } finally { setSaving(false); }
   }
   async function prepareRun(targetId?:string){
     if(locked)return;
-    try {compileWorkflow(workflowRunGraph(flow.graph,targetId));}catch(cause){flow.setError(cause instanceof Error?cause.message:"节点参数未完善。");return;}
-    if(flow.dirty&&!(await save()))return;
     setBudget("0");setRunTarget(targetId??null);setConfirmRun(true);
+  }
+  function locatePreflightIssue(nodeId: string | null) {
+    setConfirmRun(false); setTab("nodes");
+    if (nodeId) { setSelectedId(nodeId); scene.focus(nodeId); }
   }
   let confirmationPlan:ReturnType<typeof compileWorkflow>|null=null;
   try{confirmationPlan=compileWorkflow(workflowRunGraph(flow.graph,runTarget??undefined));}catch{/* Keep the draft editable until required inputs are present. */}
@@ -490,6 +505,6 @@ export function useWorkflowController({
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
     materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
     pendingSwitch,setPendingSwitch,requestSwitch,confirmSwitch,editNode,deselectNode,disconnect,prepareRun,addingAfter,setAddingAfter,
-    prepareAssistant,askNode,insertingEdge,setInsertingEdge,runTarget,confirmationPlan,viewedRun,budget,setBudget,
+    prepareAssistant,askNode,insertingEdge,setInsertingEdge,runTarget,confirmationPlan,viewedRun,budget,setBudget,preflight,locatePreflightIssue,fieldOutputs,locateFieldSource,
   };
 }

@@ -236,12 +236,14 @@ export function useCanvasWorkflow(
   }
   async function start(sessionId?: string, targetNodeId?: string, budgetCredits?: number) {
     return run(async () => {
-      if (!selected || dirty) throw new Error("请先保存当前流程。");
+      if (!selected) throw new Error("请先选择当前流程。");
+      const document = dirty ? await saveCanvasWorkflow(token, canvasId, selected.id, selected.revision, graph) : selected;
+      if (dirty) setSelected(document);
       const receipt = await runCanvasWorkflow(
         token,
         canvasId,
-        selected.id,
-        selected.revision,
+        document.id,
+        document.revision,
         key.current,
         sessionId,
         targetNodeId,

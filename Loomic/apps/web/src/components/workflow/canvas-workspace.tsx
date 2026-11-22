@@ -83,7 +83,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
     compareOpen,setCompareOpen,reuseResult,bindSelectedMaterial,
     materialDrop,embedMaterials,removeReference,setReferenceFrame,previews,
     pendingSwitch,setPendingSwitch,requestSwitch,confirmSwitch,editNode,deselectNode,disconnect,prepareRun,addingAfter,setAddingAfter,
-    prepareAssistant,askNode,insertingEdge,setInsertingEdge,runTarget,confirmationPlan,viewedRun,budget,setBudget,
+    prepareAssistant,askNode,insertingEdge,setInsertingEdge,runTarget,confirmationPlan,viewedRun,budget,setBudget,preflight,locatePreflightIssue,fieldOutputs,locateFieldSource,
   } = useWorkflowController(props);
   const bodyRef=useRef<HTMLDivElement>(null),inspectorRef=useRef<HTMLDivElement>(null);
   const revealInspector=()=>{const body=bodyRef.current,editor=inspectorRef.current;if(body&&editor)body.scrollTop=editor.offsetTop;};
@@ -357,6 +357,9 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
                     })
                   }
                   onConnect={connect}
+                  fieldOutputs={fieldOutputs}
+                  fieldRunGraph={viewedRun?.graph}
+                  onLocateFieldSource={locateFieldSource}
                   onPromptLibrary={()=>openLibrary(true)}
                   materials={materials}
                   onBindMaterial={bindSelectedMaterial}
@@ -470,7 +473,7 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
           </span>
           <Button
             size="sm"
-            disabled={locked || !plan || !flow.selected || !flow.enabled}
+            disabled={locked || !flow.selected || !flow.enabled}
             onClick={() => void prepareRun()}
           >
             <Play size={14} />
@@ -486,6 +489,10 @@ export function WorkflowWorkspace(props: CanvasWorkflowProps) {
         plan={confirmationPlan}
         budget={budget}
         setBudget={setBudget}
+        draft={flow.dirty}
+        preflight={preflight}
+        locateIssue={locatePreflightIssue}
+        submissionError={flow.error}
         targetTitle={runTarget?flow.graph.nodes.find(node=>node.id===runTarget)?.title:undefined}
         confirmRun={confirmRun}
         busy={locked}

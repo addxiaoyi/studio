@@ -11,8 +11,9 @@ import {
   buildWebsiteIntroduction,
 } from "../website-capture/isolated-browser.js";
 import { guardWorkflowExecution } from "./execution-access.js";
+import type { WorkflowAuthorCheck } from "./author-health.js";
 
-export async function createWorkflowFixture(database: string, origin: string) {
+export async function createWorkflowFixture(database: string, origin: string, options: { authorCheck?: WorkflowAuthorCheck } = {}) {
   let worker: GoalStepWorker | undefined;
   const fixture = await createPresentationFixture(
     database,
@@ -45,6 +46,7 @@ export async function createWorkflowFixture(database: string, origin: string) {
         );
       registerCanvasWorkflowRoutes(ctx.app, {
         ...ctx,
+        authorCheck: options.authorCheck ?? (async () => ({ ready: true, message: "隔离测试编剧可用。" })),
         env: {} as never,
         settingsService: {} as never,
         enabled: () => true,

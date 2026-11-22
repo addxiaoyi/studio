@@ -37,6 +37,27 @@ test("IF routes real text, groups survive collapse, and pinned output is reused"
     await dock.getByRole("button",{name:"展开分组输入判断",exact:true}).click();
     await dock.getByRole("button",{name:/IF 条件分支 条件检查/}).click();
     await expect(dock.getByRole("textbox",{name:"条件1字段",exact:true})).toHaveValue("text");
+    await dock.getByText("样本演算",{exact:true}).click();
+    await dock.getByRole("textbox",{name:"上游输出样本（JSON）",exact:true}).fill('{"text":"hello"}');
+    await dock.getByRole("button",{name:"演算条件",exact:true}).click();
+    await expect(dock.getByText("命中出口：是",{exact:true})).toBeVisible();
+    expect(await service.runs(fixture.userId,fixture.canvasId,flow.id)).toEqual([]);
+    expect((await fixture.db.query("select count(*)::int as n from background_jobs")).rows[0].n).toBe(0);
+    const previewSample=dock.getByRole("textbox",{name:"上游输出样本（JSON）",exact:true});
+    for(const width of [320,640,1700]){
+      await page.setViewportSize({width,height:1000});
+      await previewSample.scrollIntoViewIfNeeded();
+      await expect(previewSample).toBeVisible();
+      const bounds=await previewSample.boundingBox();
+      if(!bounds)throw new Error("The branch sample input has no visible bounds.");
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.x+bounds.width).toBeLessThanOrEqual(width);
+      await previewSample.focus();await page.keyboard.press("Tab");
+      await expect(dock.getByRole("button",{name:"演算条件",exact:true})).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(dock.getByText("命中出口：是",{exact:true})).toBeVisible();
+      await page.screenshot({path:info.outputPath(`if-sample-preview-${width}.png`)});
+    }
     await dock.getByText("节点备注 · 已填写",{exact:true}).click();await expect(dock.getByRole("textbox",{name:"备注",exact:true})).toHaveValue("仅处理包含 hello 的内容");
     await dock.getByRole("button",{name:"保存并运行",exact:true}).click();await page.getByRole("button",{name:"确认运行已保存版本",exact:true}).click();
     await expect(dock.getByRole("region",{name:"工作流运行记录",exact:true})).toContainText("全部完成",{timeout:30000});

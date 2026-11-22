@@ -174,6 +174,14 @@ test("Switch, batch checkpoints and version restore work in the real workspace",
     await expect(
       dock.getByRole("spinbutton", { name: "每批处理项数" }),
     ).toHaveValue("1");
+    await dock.getByRole("button", { name: /Switch 多路分支 分类选择/ }).click();
+    await dock.getByText("样本演算", { exact: true }).click();
+    await dock.getByRole("textbox", { name: "上游输出样本（JSON）" }).fill('{"text":"1. ALPHA"}');
+    await dock.getByRole("button", { name: "演算条件", exact: true }).click();
+    await expect(dock.getByText("命中出口：含 ALPHA", { exact: true })).toBeVisible();
+    expect(await service.runs(fixture.userId, fixture.canvasId, flow.id)).toEqual([]);
+    expect((await fixture.db.query("select count(*)::int as n from background_jobs")).rows[0].n).toBe(0);
+    await page.screenshot({ path: info.outputPath("switch-sample-preview.png") });
     await dock.getByRole("button", { name: "运行流程", exact: true }).click();
     await page
       .getByRole("button", { name: "确认运行已保存版本", exact: true })
@@ -209,6 +217,10 @@ test("Switch, batch checkpoints and version restore work in the real workspace",
     await dock
       .getByRole("textbox", { name: "比较值", exact: true })
       .fill("NOT_FOUND");
+    await dock.getByText("样本演算", { exact: true }).click();
+    await dock.getByRole("textbox", { name: "上游输出样本（JSON）" }).fill('{"text":"1. ALPHA"}');
+    await dock.getByRole("button", { name: "演算条件", exact: true }).click();
+    await expect(dock.getByText("命中出口：默认出口", { exact: true })).toBeVisible();
     await dock.getByRole("button", { name: "保存并运行", exact: true }).click();
     await page
       .getByRole("button", { name: "确认运行已保存版本", exact: true })

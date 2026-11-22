@@ -3,9 +3,11 @@ import {
   WORKFLOW_LABELS,
   type GoalExecutionPlan,
   type WorkflowGraph,
+  type WorkflowPreflight,
 } from "@helstera/shared";
 import { Button } from "@/components/ui/button";
 import { WorkflowBudgetField, validWorkflowBudget } from "./budget-field";
+import { WorkflowPreflightList } from "./preflight-list";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +31,10 @@ type Props = {
   targetTitle?:string|undefined;
   budget: string;
   setBudget(value:string):void;
+  draft?: boolean;
+  preflight: { report: WorkflowPreflight | null; error: string; checking: boolean; retry(): void };
+  locateIssue(nodeId: string | null): void;
+  submissionError?: string;
 };
 export function WorkflowDialogs({
   proposal,
@@ -44,6 +50,7 @@ export function WorkflowDialogs({
   targetTitle,
   budget,
   setBudget,
+  draft, preflight, locateIssue, submissionError,
 }: Props) {
   return (
     <>
@@ -84,11 +91,11 @@ export function WorkflowDialogs({
         </DialogContent>
       </Dialog>
       <Dialog open={confirmRun} onOpenChange={setConfirmRun}>
-        <DialogContent>
+        <DialogContent aria-label={targetTitle ? `执行到「${targetTitle}」` : `确认运行「${title}」`}>
           <DialogHeader>
             <DialogTitle>{targetTitle?`执行到「${targetTitle}」`:`确认运行「${title}」`}</DialogTitle>
             <DialogDescription>
-              执行已保存的第 {revision} 版。录制、剪辑与生成费用仍需逐项确认。
+              {draft ? `确认后先保存当前草稿为第 ${(revision ?? 0) + 1} 版，再开始执行。` : `执行已保存的第 ${revision} 版。`}录制、剪辑与生成费用仍需逐项确认。
             </DialogDescription>
           </DialogHeader>
           {targetTitle&&<p className="text-sm">仅执行目标节点及所需上游，并保存本次结果。未固定的上游会重新执行；固定节点使用已验证结果，未命中的分支不会执行。</p>}
@@ -109,11 +116,13 @@ export function WorkflowDialogs({
             素材会重新验证权限。图片和视频生成会在执行到该节点时展示实际模型、参数和费用，确认后才扣费。
           </p>
           <WorkflowBudgetField value={budget} onChange={setBudget} disabled={busy}/>
+          <WorkflowPreflightList {...preflight} locate={locateIssue} />
+          {submissionError && <p role="alert" className="text-sm text-destructive">{submissionError}</p>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmRun(false)}>
               返回编辑
             </Button>
-            <Button disabled={busy || !validWorkflowBudget(budget)} onClick={run}>
+            <Button disabled={busy || preflight.checking || !preflight.report?.ready || Boolean(preflight.error) || !validWorkflowBudget(budget)} onClick={run}>
               确认运行已保存版本
             </Button>
           </DialogFooter>

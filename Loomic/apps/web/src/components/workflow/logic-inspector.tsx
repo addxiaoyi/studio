@@ -3,20 +3,53 @@ import type { WorkflowNode } from "@helstera/shared";
 import { StyledSelect } from "@/components/ui/styled-select";
 import { Button } from "@/components/ui/button";
 import { CollectionInspector } from "./collection-inspector";
+import { BranchPreview } from "./branch-preview";
+import { WorkflowFieldPicker } from "./field-picker";
+import type { WorkflowFieldSample } from "./upstream-fields";
 export function LogicInspector({
   node,
   disabled,
   onChange,
   branchHint = true,
+  sample = null, locateSource,
 }: {
   node: WorkflowNode;
   disabled: boolean;
   onChange(node: WorkflowNode): void;
   branchHint?: boolean;
+  sample?: WorkflowFieldSample | null | undefined;
+  locateSource?: ((id: string) => void) | undefined;
 }) {
   const c = node.config,
     field = "workflow-field";
-  if (["switch","split","batch"].includes(c.kind)) return <CollectionInspector config={c} disabled={disabled} onChange={config=>onChange({...node,config})} renderFields={(config,change)=><LogicInspector node={{...node,config}} disabled={disabled} branchHint={false} onChange={next=>change(next.config)}/>}/>;
+  if (["switch", "split", "batch"].includes(c.kind)) {
+    const items = sample?.output?.items;
+    const operationSample = c.kind !== "batch" ? sample : sample && Array.isArray(items) && items.length
+      ? { ...sample, title: `${sample.title} · 第1项`, output: { json: items[0] }, error: "" }
+      : sample ? { ...sample, output: null, error: "上游列表尚无成功样本，请先运行列表拆分节点。" } : null;
+    return (
+      <>
+        <CollectionInspector
+          config={c}
+          disabled={disabled}
+          sample={sample}
+          locateSource={locateSource}
+          onChange={config => onChange({ ...node, config })}
+          renderFields={(config, change) => (
+            <LogicInspector
+              node={{ ...node, config }}
+              disabled={disabled}
+              branchHint={false}
+              sample={operationSample}
+              locateSource={locateSource}
+              onChange={next => change(next.config)}
+            />
+          )}
+        />
+        {c.kind === "switch" && branchHint && <BranchPreview key={node.id} config={c} />}
+      </>
+    );
+  }
   if (c.kind === "condition")
     return (
       <div className="workflow-conditions">
@@ -63,6 +96,7 @@ export function LogicInspector({
                   onChange={(event) => change({ field: event.target.value })}
                 />
               </label>
+              <WorkflowFieldPicker sample={sample} value={rule.field} label={`条件${index + 1}`} disabled={disabled} onChange={path => change({ field: path })} locate={locateSource} />
               <StyledSelect
                 aria-label={`条件${index + 1}比较`}
                 value={rule.operator}
@@ -133,6 +167,7 @@ export function LogicInspector({
         {branchHint&&<p className="node-data-caption">
           从“是 / 否”出口连接后续节点，未命中的分支不会执行。
         </p>}
+        {branchHint && <BranchPreview key={node.id} config={c} />}
       </div>
     );
   if (c.kind === "transform")
@@ -209,6 +244,7 @@ export function LogicInspector({
     );
   if (c.kind === "extract")
     return (
+      <>
       <label>
         字段路径
         <input
@@ -221,6 +257,8 @@ export function LogicInspector({
           }
         />
       </label>
+      <WorkflowFieldPicker sample={sample} value={c.path} label="提取" disabled={disabled} jsonOnly onChange={path => onChange({ ...node, config: { ...c, path } })} locate={locateSource} />
+      </>
     );
   if (c.kind === "template")
     return (

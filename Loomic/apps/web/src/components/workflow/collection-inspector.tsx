@@ -3,6 +3,8 @@ import { useId, type ReactNode } from "react";
 import type { WorkflowNode } from "@helstera/shared";
 import { Button } from "@/components/ui/button";
 import { StyledSelect } from "@/components/ui/styled-select";
+import { WorkflowFieldPicker } from "./field-picker";
+import type { WorkflowFieldSample } from "./upstream-fields";
 
 type Config = WorkflowNode["config"];
 type Props = {
@@ -10,6 +12,8 @@ type Props = {
   disabled: boolean;
   onChange(config: Config): void;
   renderFields(config: Config, change: (config: Config) => void): ReactNode;
+  sample?: WorkflowFieldSample | null | undefined;
+  locateSource?: ((id: string) => void) | undefined;
 };
 function moveUp<T>(items: T[], index: number): T[] {
   const prior = items[index - 1];
@@ -25,6 +29,7 @@ export function CollectionInspector({
   disabled,
   onChange,
   renderFields,
+  sample = null, locateSource,
 }: Props) {
   const controlId = useId();
   if (c.kind === "switch")
@@ -191,6 +196,7 @@ export function CollectionInspector({
           />
         </label>
         {c.source === "json" ? (
+          <>
           <label>
             数组字段路径
             <input
@@ -201,6 +207,8 @@ export function CollectionInspector({
               onChange={(event) => onChange({ ...c, path: event.target.value })}
             />
           </label>
+          <WorkflowFieldPicker sample={sample} value={c.path} label="数组" disabled={disabled} jsonOnly onChange={path => onChange({ ...c, path })} locate={locateSource} />
+          </>
         ) : (
           <label>
             拆分分隔符

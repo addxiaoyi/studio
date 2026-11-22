@@ -40,6 +40,19 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
+it("applies only selected edits and keeps the chosen graph visible after reload", async () => {
+  const position = { x: 0, y: 0 };
+  const before = { title: "原流程", nodes: [{ id: "source", title: "输入", position, config: { kind: "text" as const, role: "story" as const, text: "hello" } }, { id: "output", title: "输出", position, config: { kind: "deliver" as const } }], edges: [{ id: "edge", source: "source", target: "output" }] };
+  const graph = { ...before, title: "AI 新名称", nodes: before.nodes.map(node => node.id === "source" ? { ...node, title: "改后输入" } : node) };
+  const pending = { ...proposal, workflowId: "flow", revision: 1, before, graph };
+  requests.getWorkflowProposal.mockResolvedValue(pending);
+  requests.decideWorkflowProposal.mockResolvedValue({ ...pending, status: "applied", result: { workflowId: "flow", selectedChanges: ["node-change:source"] } });
+  render(<WorkflowProposalCard canvasId={pending.canvasId} id={pending.id} initial={pending} />);
+  await waitFor(() => expect(requests.getWorkflowProposal).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("checkbox", { name: /流程名称与分组/ }));
+  fireEvent.click(screen.getByRole("button", { name: "应用到画布" }));
+  await waitFor(() => expect(requests.decideWorkflowProposal).toHaveBeenCalledWith("token", pending.canvasId, pending.id, "confirm", undefined, { selectedChanges: ["node-change:source"], deletionConfirmed: false }));
+});
 it("shows nested batch and Switch rules as readable parameters before confirmation",async()=>{
   const pending={...proposal,graph:{title:"批量",nodes:[{id:"batch",title:"批量整理",position:{x:0,y:0},config:{kind:"batch" as const,maxItems:3,batchSize:1,operations:[{kind:"transform" as const,operation:"uppercase" as const,search:"",replacement:""}]}}],edges:[]}};
   requests.getWorkflowProposal.mockResolvedValue(pending);

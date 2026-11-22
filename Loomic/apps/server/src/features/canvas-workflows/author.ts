@@ -3,6 +3,7 @@ import { storyboardOutputSchema, type GoalCommand } from "@helstera/shared";
 import { createStreamingChatModel } from "../../agent/deep-agent.js";
 import type { ServerEnv } from "../../config/env.js";
 import type { SettingsService } from "../settings/settings-service.js";
+import { inspectConfiguredAuthor } from "./author-health.js";
 
 type WriteCommand = Extract<GoalCommand, { executor: "ai.write" }>;
 export type WorkflowAuthor = (input: {
@@ -21,6 +22,8 @@ export function createWorkflowAuthor(
       { id: userId, email: "", accessToken: "", userMetadata: {} },
       workspaceId,
     );
+    const health = await inspectConfiguredAuthor(env, config);
+    if (!health.ready) throw new Error(health.message);
     const model = createStreamingChatModel(
       config.model,
       env,

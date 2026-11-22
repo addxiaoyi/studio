@@ -40,6 +40,10 @@ export const workflowSwitchSettings = {
   mode: z.enum(["first", "all"]),
   cases: z.array(z.object({ id: workflowBranchSchema, title: z.string().min(1).max(40), ...condition }).strict()).min(1).max(6),
 };
+export const workflowBranchConfigSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("switch"), ...workflowSwitchSettings }).strict(),
+  z.object({ kind: z.literal("condition"), ...condition }).strict(),
+]);
 const transform = {
   operation: z.enum(["trim", "uppercase", "lowercase", "replace"]),
   search: z.string().max(1000),
@@ -47,8 +51,7 @@ const transform = {
 };
 export const logicNodeConfigs = [
   ...batchNodeConfigs,
-  z.object({ kind: z.literal("switch"), ...workflowSwitchSettings }).strict(),
-  z.object({ kind: z.literal("condition"), ...condition }).strict(),
+  ...workflowBranchConfigSchema.options,
   z.object({ kind: z.literal("transform"), ...transform }).strict(),
   z
     .object({ kind: z.literal("template"), template: z.string().max(12000) })

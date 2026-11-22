@@ -1,8 +1,9 @@
 import { act, renderHook, waitFor, cleanup } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { websiteWorkflow, type WorkflowDocument } from "@helstera/shared";
 import { useCanvasWorkflow } from "@/components/workflow/use-workflow";
 import {nextNodePosition,workflowGraphKey} from "@/components/workflow/graph-state";
+import { createRequire } from "node:module";
 const api = vi.hoisted(() => ({
   listCanvasWorkflows: vi.fn(),
   saveCanvasWorkflow: vi.fn(),
@@ -21,10 +22,29 @@ const doc: WorkflowDocument = {
   activeGoalId: null,
   updatedAt: "2026-11-08",
 };
+// Newer Node versions expose a separate localStorage; these tests need the browser's storage.
+const { JSDOM } = createRequire(import.meta.url)("jsdom") as {
+  JSDOM: new (html: string, options: { url: string }) => { window: { localStorage: Storage } };
+};
+const browserStorage = new JSDOM("", { url: "http://localhost/" }).window.localStorage;
+beforeEach(() => vi.stubGlobal("localStorage", browserStorage));
 afterEach(() => {
   cleanup();
   localStorage.clear();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
+});
+it("saves the confirmed draft before starting its exact saved revision", async () => {
+  api.listCanvasWorkflows.mockResolvedValue({ workflows: [doc], executionEnabled: true });
+  const hook = renderHook(() => useCanvasWorkflow("token", doc.canvasId, "user"));
+  await waitFor(() => expect(hook.result.current.selected).toBeTruthy());
+  const graph = { ...doc.graph, title: "Checked draft" };
+  act(() => hook.result.current.edit(graph));
+  api.saveCanvasWorkflow.mockResolvedValue({ ...doc, revision: 2, graph });
+  api.runCanvasWorkflow.mockResolvedValue({ goalId: "goal", reused: false });
+  await act(async () => { await hook.result.current.start(undefined, undefined, 0); });
+  expect(api.runCanvasWorkflow).toHaveBeenCalledWith("token", doc.canvasId, doc.id, 2, expect.any(String), undefined, undefined, 0);
+  expect(api.saveCanvasWorkflow.mock.invocationCallOrder[0]).toBeLessThan(api.runCanvasWorkflow.mock.invocationCallOrder[0] ?? 0);
 });
 it("clears a stale local draft after undo returns to the saved workflow",async()=>{
   api.listCanvasWorkflows.mockResolvedValue({workflows:[doc],executionEnabled:true});

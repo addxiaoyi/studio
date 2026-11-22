@@ -109,6 +109,11 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
       "insert into workspace_members(workspace_id,user_id) values($1,$2)",
       [workspace, user],
     );
+    const provider = randomUUID();
+    await db.query("insert into provider_configs(id,workspace_id,label,base_url,key_ciphertext,key_last4,health_status) values($1,$2,'workflow-fixture','https://provider.test.invalid','fixture','test','healthy')", [provider, workspace]);
+    for (const model of ["budget-model", "chosen-model", "fixture", "test"]) {
+      await db.query("insert into provider_models(provider_id,model_id,display_name,media_type,billing_unit,price_credits,health_status,supports_input_image) values($1,$2,$2,'image','per_generation',1,'healthy',true)", [provider, model]);
+    }
     await db.query(
       "insert into projects(id,workspace_id,created_by,name,slug) values($1,$2,$3,'workflow','workflow')",
       [project, workspace, user],
@@ -122,10 +127,92 @@ describe.skipIf(!connectionString)("canvas workflows with PostgreSQL", () => {
       [session, canvas, user, session],
     );
   });
+  it("aggregates incomplete input, missing private media, unavailable models and invalid pricing", async () => {
+    await db.query("insert into provider_models(provider_id,model_id,display_name,media_type,billing_unit,price_credits,health_status) select id,'preflight-price','price','image','per_generation',999,'healthy' from provider_configs where workspace_id=$1", [workspace]);
+    const position = { x: 0, y: 0 };
+    const generate = { kind: "generate", mediaType: "image", prompt: "tree", aspectRatio: "16:9", duration: 5, resolution: "720p" } as const;
+    const graph: WorkflowGraph = { title: "检查问题", nodes: [
+      { id: "empty", title: "空资料", position, config: { kind: "text", role: "story", text: "" } },
+      { id: "asset", title: "失效素材", position, config: { kind: "asset", mediaType: "image", assetId: randomUUID(), elementId: "missing" } },
+      { id: "missing", title: "缺少模型", position, config: { ...generate, model: "not-configured" } },
+      { id: "price", title: "无效价格", position, config: { ...generate, model: "preflight-price" } },
+      { id: "output", title: "交付", position, config: { kind: "deliver" } },
+    ], edges: ["empty", "asset", "missing", "price"].map(id => ({ id: `edge-${id}`, source: id, target: "output" })) };
+    const draft = await service.create(user, canvas, graph, randomUUID());
+    const before = (await db.query("select count(*)::int as n from agent_goals")).rows[0].n;
+    const report = await service.preflight(user, canvas, draft.id, draft.revision);
+    expect(report.ready).toBe(false);
+    expect(report.issues.map(issue => issue.code)).toEqual(["structure", "material", "model", "price"]);
+    expect(report.issues.every(issue => issue.nodeId && issue.action)).toBe(true);
+    expect((await db.query("select count(*)::int as n from agent_goals")).rows[0].n).toBe(before);
+    expect(await service.runs(user, canvas, draft.id)).toEqual([]);
+    await expect(service.preflight(randomUUID(), canvas, draft.id, 1)).rejects.toThrow("权限");
+    await expect(service.preflight(user, canvas, draft.id, 99)).rejects.toThrow("版本已变化");
+    const fixed: WorkflowGraph = { title: graph.title, nodes: graph.nodes.map(node => node.id === "empty" ? { ...node, config: { kind: "text", role: "story", text: "ready" } } : node), edges: graph.edges };
+    expect((await service.preflight(user, canvas, draft.id, 1, fixed, "empty")).ready).toBe(true);
+  });
+  it("rechecks model changes before creating a goal and leaves health state untouched", async () => {
+    const graph: WorkflowGraph = { title: "价格检查", nodes: [
+      { id: "image", title: "图片", position: { x: 0, y: 0 }, config: { kind: "generate", mediaType: "image", model: "fixture", prompt: "tree", aspectRatio: "16:9", duration: 5, resolution: "720p" } },
+      { id: "output", title: "交付", position: { x: 400, y: 0 }, config: { kind: "deliver" } },
+    ], edges: [{ id: "edge", source: "image", target: "output" }] };
+    const draft = await service.create(user, canvas, graph, randomUUID());
+    expect((await service.preflight(user, canvas, draft.id, 1)).quotes).toEqual([expect.objectContaining({ nodeId: "image", credits: 1 })]);
+    const before = (await db.query("select count(*)::int as n from agent_goals")).rows[0].n;
+    await db.query("update provider_models set health_status='unhealthy',failure_count=3,last_error='timeout' where model_id='fixture'");
+    try {
+      expect((await service.preflight(user, canvas, draft.id, 1)).ready).toBe(false);
+      expect((await db.query("select health_status,failure_count from provider_models where model_id='fixture'")).rows[0]).toEqual({ health_status: "unhealthy", failure_count: 3 });
+      await expect(service.run(user, canvas, draft.id, 1, randomUUID())).rejects.toThrow("模型不可用");
+      expect((await db.query("select count(*)::int as n from agent_goals")).rows[0].n).toBe(before);
+      expect(await service.runs(user, canvas, draft.id)).toEqual([]);
+    } finally {
+      await db.query("update provider_models set health_status='healthy',failure_count=0,last_error=null where model_id='fixture'");
+    }
+  });
   afterAll(async () => {
     await db.end();
     await admin.query(`drop schema ${schema} cascade`);
     await admin.end();
+  });
+  it("applies selected AI changes once and rejects a different retry selection", async () => {
+    const position = { x: 0, y: 0 };
+    const graph: WorkflowGraph = { title: "原流程", nodes: [
+      { id: "source", title: "输入", position, config: { kind: "text", role: "story", text: "hello" } },
+      { id: "output", title: "输出", position, config: { kind: "deliver" } },
+    ], edges: [{ id: "edge", source: "source", target: "output" }] };
+    const draft = await service.create(user, canvas, graph, randomUUID());
+    const proposed = { ...graph, title: "新名称", nodes: graph.nodes.map(node => node.id === "source" ? { ...node, title: "新输入" } : node) };
+    const assistant = new WorkflowAssistantService(db);
+    const proposal = await assistant.propose(user, canvas, { plan: { action: "edit", summary: "修改名称", graph: proposed }, prompt: "修改", requestKey: randomUUID(), workflowId: draft.id, revision: 1 });
+    const beforeGoals = (await db.query("select count(*)::int as n from agent_goals")).rows[0].n;
+    await expect(assistant.decide(user, canvas, proposal.id, "confirm", false, undefined, { selectedChanges: ["node-change:forged"] })).rejects.toThrow("不存在");
+    const selection = { selectedChanges: ["node-change:source"], deletionConfirmed: false };
+    const receipt = await assistant.decide(user, canvas, proposal.id, "confirm", false, undefined, selection);
+    expect(receipt.result?.selectedChanges).toEqual(selection.selectedChanges);
+    const saved = await service.get(user, canvas, draft.id);
+    expect(saved.revision).toBe(2); expect(saved.graph.title).toBe("原流程"); expect(saved.graph.nodes[0]?.title).toBe("新输入");
+    await assistant.decide(user, canvas, proposal.id, "confirm", false, undefined, selection);
+    expect((await service.get(user, canvas, draft.id)).revision).toBe(2);
+    await expect(assistant.decide(user, canvas, proposal.id, "confirm", false, undefined, { selectedChanges: ["graph-change"] })).rejects.toThrow("其他改动选择");
+    expect((await db.query("select count(*)::int as n from agent_goals")).rows[0].n).toBe(beforeGoals);
+  });
+  it("requires separate deletion consent and keeps node/edge dependencies coherent", async () => {
+    const position = { x: 0, y: 0 };
+    const graph: WorkflowGraph = { title: "删除确认", nodes: [
+      { id: "source", title: "输入", position, config: { kind: "text", role: "story", text: "hello" } },
+      { id: "trim", title: "清理", position, config: { kind: "transform", operation: "trim", search: "", replacement: "" } },
+      { id: "output", title: "输出", position, config: { kind: "deliver" } },
+    ], edges: [{ id: "a", source: "source", target: "trim" }, { id: "b", source: "trim", target: "output" }] };
+    const draft = await service.create(user, canvas, graph, randomUUID());
+    const proposed = { ...graph, nodes: graph.nodes.filter(node => node.id !== "trim"), edges: [{ id: "a", source: "source", target: "output" }] };
+    const assistant = new WorkflowAssistantService(db);
+    const proposal = await assistant.propose(user, canvas, { plan: { action: "edit", summary: "删除清理", graph: proposed }, prompt: "删除", requestKey: randomUUID(), workflowId: draft.id, revision: 1 });
+    await expect(assistant.decide(user, canvas, proposal.id, "confirm", false, undefined, { selectedChanges: ["node-remove:trim"], deletionConfirmed: false })).rejects.toThrow("单独确认删除");
+    expect((await service.get(user, canvas, draft.id)).revision).toBe(1);
+    const applied = await assistant.decide(user, canvas, proposal.id, "confirm", false, undefined, { selectedChanges: ["node-remove:trim"], deletionConfirmed: true });
+    expect(applied.result?.selectedChanges).toEqual(["edge-change:a", "edge-order", "edge-remove:b", "node-remove:trim"]);
+    expect((await service.get(user, canvas, draft.id)).graph.edges).toEqual(proposed.edges);
   });
   it("persists an incomplete draft without creating a goal", async () => {
     const draft = await service.create(

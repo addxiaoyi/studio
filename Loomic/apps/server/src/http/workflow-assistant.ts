@@ -10,6 +10,7 @@ import { planWorkflowConversation } from "../features/canvas-workflows/assistant
 import { workflowReferences } from "../features/canvas-workflows/references.js";
 import { listHealthyModels } from "./model-availability.js";
 import { WorkflowError } from "../features/canvas-workflows/service.js";
+import { createWorkflowAuthorCheck, type WorkflowAuthorCheck } from "../features/canvas-workflows/author-health.js";
 const askSchema = z
   .object({
     prompt: z.string().trim().min(1).max(3000),
@@ -21,6 +22,7 @@ const askSchema = z
   })
   .strict();
 export type WorkflowAssistantOptions = {
+  authorCheck?: WorkflowAuthorCheck;
   db: Pool;
   auth: RequestAuthenticator;
   env: ServerEnv;
@@ -34,7 +36,7 @@ export function registerWorkflowAssistantRoutes(
   app: FastifyInstance,
   options: WorkflowAssistantOptions,
 ) {
-  const service = new WorkflowAssistantService(options.db),
+  const service = new WorkflowAssistantService(options.db, options.authorCheck ?? createWorkflowAuthorCheck(options.env, options.settingsService)),
     enabled =
       options.enabled ?? (() => process.env.HELSTERA_GOAL_STEPS === "1");
   for (const operation of [
@@ -69,15 +71,22 @@ export function registerWorkflowAssistantRoutes(
               canvasId,
               z.string().uuid().parse(id),
             );
-          if (operation === "confirm" || operation === "reject")
+          if (operation === "confirm" || operation === "reject") {
+            const body = z.object({
+              budgetCredits: z.number().finite().min(0).max(100000).optional(),
+              selectedChanges: z.array(z.string().min(1).max(150)).max(512).optional(),
+              deletionConfirmed: z.boolean().optional(),
+            }).strict().parse(request.body ?? {});
             data = await service.decide(
               user.id,
               canvasId,
               z.string().uuid().parse(id),
               operation,
               enabled(),
-              z.object({budgetCredits:z.number().finite().min(0).max(100000).optional()}).strict().parse(request.body ?? {}).budgetCredits,
+              body.budgetCredits,
+              body.selectedChanges !== undefined || body.deletionConfirmed !== undefined ? { selectedChanges: body.selectedChanges, deletionConfirmed: body.deletionConfirmed } : undefined,
             );
+          }
           if (operation === "ask") {
             const body = askSchema.parse(request.body),
               context = await service.context(

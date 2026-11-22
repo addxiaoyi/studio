@@ -13,6 +13,9 @@ import { executableGoalPlan } from "../agent-goals/goal-planner.js";
 import { assertWorkflowMaterials } from "./materials.js";
 import { assertWorkflowPins } from "./pins.js";
 import { workflowBudget } from "./budget.js";
+import { inspectWorkflow } from "./preflight.js";
+import { createWorkflowAuthorCheck, type WorkflowAuthorCheck } from "./author-health.js";
+import { createLocalSettingsService } from "../../local-db/settings-service.js";
 
 type Store = Pick<Pool, "query">;
 type WorkflowRow = {
@@ -58,7 +61,13 @@ export async function assertWorkflowCanvas(
 }
 
 export class CanvasWorkflowService {
-  constructor(private readonly db: Pool) {}
+  private readonly authorCheck: WorkflowAuthorCheck;
+  constructor(private readonly db: Pool, authorCheck?: WorkflowAuthorCheck) {
+    this.authorCheck = authorCheck ?? createWorkflowAuthorCheck({
+      openAIApiBase: process.env.OPENAI_API_BASE ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
+      ...(process.env.OPENAI_API_KEY ? { openAIApiKey: process.env.OPENAI_API_KEY } : {}),
+    }, createLocalSettingsService(db));
+  }
   async list(userId: string, canvasId: string) {
     await assertWorkflowCanvas(this.db, userId, canvasId);
     return (
@@ -208,6 +217,8 @@ export class CanvasWorkflowService {
         throw new WorkflowError("聊天会话不属于当前画布。", 403);
       const executionGraph = prunePinnedAncestors(workflowRunGraph(row.graph,targetNodeId));
       const compiled = compileWorkflow(executionGraph);
+      const preflight = await inspectWorkflow(client, row.graph, { canvasId, workspaceId, userId, workflowId: id }, revision, targetNodeId, this.authorCheck);
+      if (!preflight.ready) throw new WorkflowError(`运行前还有 ${preflight.issues.length} 项问题：${preflight.issues.slice(0,3).map(issue => `${issue.title}：${issue.message}`).join("；")}`, 409);
       await assertWorkflowMaterials(client, executionGraph, { canvasId, workspaceId, userId });
       await assertWorkflowPins(client,executionGraph,{workflowId:id,userId,workspaceId});
       const input = agentGoalCreateRequestSchema.parse({
@@ -250,6 +261,12 @@ export class CanvasWorkflowService {
         [id],
       )
     ).rows;
+  }
+  async preflight(userId: string, canvasId: string, id: string, revision: number, graph?: WorkflowGraph, targetNodeId?: string) {
+    const document = await this.get(userId, canvasId, id);
+    if (document.revision !== revision) throw new WorkflowError("流程版本已变化，请刷新后重新检查。", 409);
+    const workspaceId = await assertWorkflowCanvas(this.db, userId, canvasId);
+    return inspectWorkflow(this.db, graph ?? document.graph, { canvasId, workspaceId, userId, workflowId: id }, revision, targetNodeId, this.authorCheck);
   }
   async versions(userId: string, canvasId: string, id: string, before?: number) {
     await this.get(userId, canvasId, id);

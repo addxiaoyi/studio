@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import type { WorkflowGraph } from "@helstera/shared";
+import { WorkflowResourceError } from "./resource-error.js";
 
 type Source = {
   canvasId: string | null;
@@ -13,7 +14,7 @@ export async function readWorkflowMaterial(
   db: Pick<Pool, "query">,
   source: Source,
 ) {
-  if (!source.canvasId) throw new Error("素材输入需要关联画布。");
+  if (!source.canvasId) throw new WorkflowResourceError("素材输入需要关联画布。");
   const row = (
     await db.query<{ id: string; bucket: string; object_path: string }>(
       `
@@ -39,7 +40,7 @@ export async function readWorkflowMaterial(
     )
   ).rows[0];
   if (!row)
-    throw new Error("画布素材已删除、到期或无访问权限。请重新选择并保存画布。");
+    throw new WorkflowResourceError("画布素材已删除、到期或无访问权限。请重新选择并保存画布。");
   return row;
 }
 export async function assertWorkflowMaterials(

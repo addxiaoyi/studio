@@ -108,7 +108,7 @@ export function createCostGuard(options: {
   };
 }
 
-export function createLocalCostGuard(db: Pool): CostGuard {
+export function createLocalCostGuard(db: Pick<Pool, "query">): CostGuard {
   return {
     async checkModelAccess() {
       // Package/tier restrictions are removed. Provider health and balance

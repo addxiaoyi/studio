@@ -18,7 +18,7 @@ function focusPressedOption(event: PointerEvent<HTMLDivElement>) {
   }
 }
 export type StyledSelectProps = {
-  value: string;
+  value: string | null;
   options: SelectOption[];
   onChange(value: string): void;
   disabled?: boolean | undefined;

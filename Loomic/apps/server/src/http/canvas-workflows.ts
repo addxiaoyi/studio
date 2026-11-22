@@ -23,6 +23,7 @@ import { registerCreativeLibraryRoutes } from "./creative-library.js";
 import { workflowReferences } from "../features/canvas-workflows/references.js";
 import type { StorageProvider } from "../storage/storage-provider.js";
 import {registerWorkflowAssistantRoutes,type WorkflowAssistantOptions} from "./workflow-assistant.js";
+import { createWorkflowAuthorCheck, type WorkflowAuthorCheck } from "../features/canvas-workflows/author-health.js";
 
 const paramsSchema = z.object({
   canvasId: z.string().uuid(),
@@ -35,6 +36,7 @@ const createSchema = z
   .object({ graph: z.unknown(), requestKey: z.string().uuid() })
   .strict();
 type Options = {
+  authorCheck?: WorkflowAuthorCheck;
   assistantPlan?:WorkflowAssistantOptions["assistantPlan"];
   db: Pool;
   auth: RequestAuthenticator;
@@ -69,9 +71,10 @@ export function registerCanvasWorkflowRoutes(
   app: FastifyInstance,
   options: Options,
 ) {
-  const service = new CanvasWorkflowService(options.db);
+  const authorCheck = options.authorCheck ?? createWorkflowAuthorCheck(options.env, options.settingsService);
+  const service = new CanvasWorkflowService(options.db, authorCheck);
   registerCreativeLibraryRoutes(app,options);
-  registerWorkflowAssistantRoutes(app,options);
+  registerWorkflowAssistantRoutes(app,{ ...options, authorCheck });
   const enabled =
     options.enabled ?? (() => process.env.HELSTERA_GOAL_STEPS === "1");
   for (const operation of [
@@ -80,6 +83,7 @@ export function registerCanvasWorkflowRoutes(
     "get",
     "save",
     "run",
+    "preflight",
     "runs",
     "versions",
     "restore",
@@ -165,6 +169,14 @@ export function registerCanvasWorkflowRoutes(
               body.budgetCredits,
             );
           }
+          if (operation === "preflight") {
+            const body = z.object({
+              revision: z.number().int().positive(),
+              graph: z.unknown().optional(),
+              targetNodeId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
+            }).strict().parse(request.body);
+            data = await service.preflight(user.id, canvasId, id!, body.revision, body.graph === undefined ? undefined : workflowGraphSchema.parse(body.graph), body.targetNodeId);
+          }
           if (operation === "runs")
             data = await service.runs(user.id, canvasId, id!);
           if (operation === "versions") {
@@ -231,6 +243,10 @@ export function registerCanvasWorkflowRoutes(
           }
           return reply.send({ ok: true, data });
         } catch (error) {
+          if (operation === "preflight" && !(error instanceof WorkflowError) && !(error instanceof z.ZodError)) {
+            request.log.error({ err: error }, "Workflow preflight failed");
+            return reply.code(503).send({ ok: false, error: { code: "preflight_unavailable", message: "运行前检查暂时不可用，请重试。" } });
+          }
           return failed(error, reply);
         }
       },
