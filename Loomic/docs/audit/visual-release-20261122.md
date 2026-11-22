@@ -28,6 +28,6 @@ Shared/Web 隔离生产构建完成，68 个页面导出；Server 与 Web 类型
 
 ## CI 与运维证据
 
-浏览器 CI 发现两处旧的运行按钮禁用断言及第二次运行结果的等待竞争。修复仅修改 E2E 测试，已推送 `af79079bfd29c64469ed4b13923863155a0cece5`；本地相关 7 个场景均通过。该提交的数据库/合约任务和可视化工作流浏览器步骤通过；[Agent Closure CI](https://github.com/addxiaoyi/studio/actions/runs/45015904706) 的其余步骤仍在执行，不将整条 CI 记为已完成。
+浏览器 CI 发现两处旧的运行按钮禁用断言及第二次运行结果的等待竞争。修复仅修改 E2E 测试，已推送 `af79079bfd29c64469ed4b13923863155a0cece5`；本地相关 7 个场景均通过。该提交的数据库/合约任务通过；记录时可视化工作流浏览器步骤仍待执行。[Agent Closure CI](https://github.com/addxiaoyi/studio/actions/runs/45015904706) 尚未完成，不将整条 CI 记为通过。
 
 本机证据目录为 `M:/loomic-builds/deploy-019cdba7/`；远端证据目录为 `/www/helstera/.ops-visual-019cdba7`，包含源码快照、依赖安装、候选验收、切流和最终状态记录。第一次公网版本即时检查触发回退；增加有界的重载等待后成功切流。当前 Nginx/Worker/静态树的回退逻辑和原始配置均保留在该目录的运维脚本与记录中。
