@@ -17,7 +17,6 @@ async function fileHash(path) {
 const [configPath, action, ...args] = process.argv.slice(2);
 const config = JSON.parse(await readFile(configPath, 'utf8'));
 const env = parseEnv(await readFile(config.envFile, 'utf8'));
-if (config.storageCredentialsFile) Object.assign(env, parseEnv(await readFile(config.storageCredentialsFile, 'utf8')));
 const require = createRequire(join(config.server, 'package.json'));
 
 async function databaseSummary() {
@@ -35,7 +34,8 @@ async function databaseSummary() {
   } finally { await db.end(); }
 }
 
-function storage() {
+async function storage() {
+  if (config.storageCredentialsFile) Object.assign(env, parseEnv(await readFile(config.storageCredentialsFile, 'utf8')));
   const sdk = require('@aws-sdk/client-s3');
   const settings = storageSettings(config, env);
   const client = new sdk.S3Client({ endpoint: settings.endpoint,
@@ -47,7 +47,7 @@ function storage() {
 
 async function uploadEncrypted(file, key) {
   if (!key.startsWith(config.storagePrefix) || !key.endsWith('.enc')) throw new Error('Invalid backup object key');
-  const { client, sdk, Bucket } = storage();
+  const { client, sdk, Bucket } = await storage();
   const bytes = (await stat(file)).size;
   const sha256 = await fileHash(file);
   try {
@@ -100,7 +100,7 @@ async function execute() {
   if (action === 'upload') return uploadEncrypted(args[0], args[1]);
   if (action === 'download') {
     if (!args[0].startsWith(config.storagePrefix)) throw new Error('Invalid backup object key');
-    const { client, sdk, Bucket } = storage();
+    const { client, sdk, Bucket } = await storage();
     const pending = args[1] + '.partial';
     let output;
     try {
@@ -121,7 +121,7 @@ async function execute() {
     }
   }
   if (action === 'prune') {
-    const { client, sdk, Bucket } = storage();
+    const { client, sdk, Bucket } = await storage();
     if (config.storageVersioned) {
       try { return await pruneBackupVersions(client, sdk, Bucket, config.storagePrefix, config.offsiteKeep || 14); }
       finally { client.destroy(); }
