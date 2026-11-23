@@ -135,6 +135,9 @@ jobs:
       - name: Deployment recovery gates on Linux
         run: |
           python3 -m pip install -r scripts/requirements-desktop-release.txt
+          python3 -m pip install -r scripts/requirements-ops.txt
+          python3 -m unittest scripts.test_ops_readiness -v
+          node --check scripts/ops-runtime.mjs
           node --test scripts/server-runtime-lock.test.mjs
           python3 -m unittest scripts.test_deploy_web_static -q
           python3 -m unittest scripts.test_deploy_production_candidate scripts.test_prepare_production_candidate scripts.test_isolated_pg_rehearsal scripts.test_apply_studio_nginx scripts.test_validate_studio_nginx -q

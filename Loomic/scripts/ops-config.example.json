@@ -1,0 +1,15 @@
+{
+  "root": "/www/helstera/ops",
+  "backupRoot": "/www/helstera/backups/automatic",
+  "envFile": "/www/.env.local",
+  "server": "/www/helstera/.releases/current/apps/server",
+  "pgBin": "/usr/lib/postgresql/18/bin",
+  "publicKey": "/www/helstera/ops/backup-public.pem",
+  "storagePrefix": "helstera-backups/v1/",
+  "localKeep": 7,
+  "offsiteKeep": 14,
+  "offsiteEnabled": false,
+  "alertsEnabled": false,
+  "alertEmail": "",
+  "healthUrl": "https://studio.0st.top/api/health/ready"
+}

@@ -226,6 +226,7 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
           {selectedAdvice && <p className="font-medium text-foreground">{selectedAdvice.badge} · {selectedAdvice.note}</p>}
           <p className="mt-1 text-muted-foreground">{selectedModel.description}</p>
           <p className="mt-1 font-medium text-foreground">{imageRate ? `${imageRate.resolution} · ${imageRate.priceCredits} 积分/张` : getModelPricingLabel(selectedModel, isVideo ? "video" : "image")}</p>
+          {imageRate?.resolution === "4K" && <p className="mt-1 text-muted-foreground">4K 为模型的分辨率档位，像素随画幅变化：1:1 为 2880 × 2880，16:9 为 3840 × 2160。</p>}
         </div>}
         {error && <p role="alert" className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
         {approval && <div className="mt-4"><GenerationApprovalCard key={approval.approvalId} {...approval} onJobCreated={jobCreated} onClosed={closeApproval} /></div>}
