@@ -1,8 +1,7 @@
 const baseUrl = (process.argv[2] ?? "http://127.0.0.1:3000").replace(/\/$/, "");
 const expected = new Set([
-  "gpt-image-2", "gpt-image-2-1k", "gpt-image-2-2k",
-  "gpt-image-2-4k", "gpt-image-2-4k-超分", "gpt-image-2.5-1k",
-  "gpt-image-2.5-2k", "gpt-image-2.5-4k",
+  "gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.6-flare",
+  "gpt-image-2.5-sunburst", "gpt-image-2.6-sunburst",
 ]);
 
 const response = await fetch(`${baseUrl}/api/image-models`);

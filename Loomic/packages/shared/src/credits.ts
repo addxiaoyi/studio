@@ -1,5 +1,6 @@
 // @credits-system — Top-up credit system: model-based pricing + transaction history
 import { z } from "zod";
+import { getKuaipaoImagePrice } from "./kuaipao-images.js";
 
 // ── Transaction types ──────────────────────────────────────
 
@@ -189,13 +190,10 @@ export const CONFIGURED_IMAGE_COSTS: Readonly<Record<string, number>> = {
   "nano-banana-2-1k": 0.1,
   "nano-banana-2-2k": 0.2,
   "gpt-image-2": 0.05,
-  "gpt-image-2-1k": 0.05,
-  "gpt-image-2-2k": 0.08,
-  "gpt-image-2-4k": 0.3,
-  "gpt-image-2-4k-超分": 0.2,
-  "gpt-image-2.5-1k": 0.04,
-  "gpt-image-2.5-2k": 0.08,
-  "gpt-image-2.5-4k": 0.2,
+  "gpt-image-2.5-flare": 0.05,
+  "gpt-image-2.6-flare": 0.05,
+  "gpt-image-2.5-sunburst": 0.05,
+  "gpt-image-2.6-sunburst": 0.05,
 };
 
 export const CONFIGURED_VIDEO_COSTS: Readonly<Record<string, number>> = {
@@ -339,6 +337,8 @@ export function calculateImageCost(
   modelId: string,
   quality: ImageQualityLevel = "standard",
 ): number {
+  const kuaipaoPrice = getKuaipaoImagePrice(modelId, quality);
+  if (kuaipaoPrice !== null) return kuaipaoPrice;
   const upstream = getUpstreamCost(modelId);
   if (upstream) {
     return upstream.unit === "per_million_tokens" ? TOKEN_BILLING_RESERVE_CREDITS : getUpstreamSellPrice(modelId)!;

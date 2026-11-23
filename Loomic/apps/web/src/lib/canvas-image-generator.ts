@@ -1,4 +1,5 @@
 import { getViewportCenter } from "./canvas-elements";
+import type { CreationApproval } from "./creation-approval";
 
 // Aspect ratio to pixel dimensions mapping (at 1K base)
 const RATIO_DIMENSIONS: Record<string, { w: number; h: number }> = {
@@ -19,7 +20,9 @@ export type ImageGeneratorData = {
   aspectRatio: string;
   quality: string;
   inputImages?: string[];
-  errorMessage?: string;
+  errorMessage?: string | undefined;
+  approval?: CreationApproval | undefined;
+  jobId?: string | undefined;
 };
 
 function generateId(): string {

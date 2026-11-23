@@ -39,7 +39,10 @@ export function getPublicModelPresentation(modelId: string, displayName: string,
   if (mediaType === "video") return videoPresentation(modelId, displayName);
   if (identity.includes("gpt-image")) {
     const name = isGarbageLabel(displayName) ? modelId : displayName || modelId;
-    return { displayName: name, description: "Configured image generation model" };
+    const description = modelId.endsWith("-flare") ? "快速出图，适合日常设计、批量素材与创意测试。"
+      : modelId.endsWith("-sunburst") ? "精细创作，注重画面细节、复杂场景与图片编辑。"
+      : "均衡图片生成，适合海报设计、图片编辑与日常创作。";
+    return { displayName: name, description };
   }
   return { displayName: displayName || modelId, description: "Configured image generation model" };
 }

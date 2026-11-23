@@ -122,7 +122,7 @@ export async function registerGenerateRoutes(
       if (options.localDb) await assertConnectorEnabled(options.localDb, viewer.workspace.id, user.id, "media-generation");
       if (options.creditService && options.tierGuard) {
         // Top-up credit system: no plan-based restrictions.
-        const quality: ImageQualityLevel = payload.quality ?? "hd";
+        const quality: ImageQualityLevel = payload.quality ?? "standard";
         await options.tierGuard.checkModelAccess(model);
         options.tierGuard.checkResolution(quality);
         await options.tierGuard.checkConcurrency(viewer.workspace.id);
@@ -134,7 +134,7 @@ export async function registerGenerateRoutes(
         model,
         aspectRatio: payload.aspectRatio ?? "1:1",
         ...(payload.inputImages?.length ? { inputImages: payload.inputImages } : {}),
-        ...(payload.quality ? { quality: payload.quality } : {}),
+        quality: payload.quality ?? "standard",
       };
       if (approvalService && creditsCost > 0) {
         const gate = await approvalService.gate({
@@ -142,7 +142,7 @@ export async function registerGenerateRoutes(
           userId: user.id,
           jobType: "image_generation",
           model,
-          payload: params,
+          payload: { ...params, routing: { requestedModels: [model] } },
           estimatedCredits: creditsCost,
           ...(request.headers["x-generation-approval"]
             ? { approvalId: request.headers["x-generation-approval"] as string }

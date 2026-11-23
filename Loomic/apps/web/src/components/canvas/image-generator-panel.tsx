@@ -5,7 +5,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { ImageModelInfo } from "../../lib/server-api";
-import { fetchImageModels, generateImageDirect, uploadFile } from "../../lib/server-api";
+import { ApiApplicationError, fetchImageModels, generateImageDirect, uploadFile } from "../../lib/server-api";
+import { GenerationApprovalCard } from "../chat/generation-approval-card";
+import { parseCreationApproval, type CreationApproval } from "../../lib/creation-approval";
+import { useCreationJob, type CreatedMedia } from "../../hooks/use-creation-job";
+import { useCanvasPanelPosition } from "../../hooks/use-canvas-panel-position";
 import { t, useLocale } from "../../lib/i18n";
 import { getModelPricingLabel } from "../../lib/model-pricing";
 import { formatModelDisplayName } from "../chat/utils";
@@ -59,6 +63,10 @@ export function ImageGeneratorPanel({
   const [quality, setQuality] = useState(data.quality);
   const [loading, setLoading] = useState(data.status === "generating");
   const [error, setError] = useState<string | null>(data.errorMessage ?? null);
+  const [approval, setApproval] = useState<CreationApproval | null>(data.approval ?? null);
+  const [jobId, setJobId] = useState<string | undefined>(data.jobId);
+  const job = useCreationJob(accessToken, jobId, data.prompt || prompt);
+  const submitting = useRef(false);
   const [models, setModels] = useState<ImageModelInfo[]>([]);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showRatioDropdown, setShowRatioDropdown] = useState(false);
@@ -122,8 +130,47 @@ export function ImageGeneratorPanel({
   const { scrollX, scrollY, zoom } = canvasScrollZoom;
   const screenX = (elementBounds.x + scrollX) * zoom;
   const screenY = (elementBounds.y + elementBounds.height + scrollY) * zoom + 8;
+  const panelPosition = useCanvasPanelPosition(panelRef, screenX, screenY);
 
   const currentModel = models.find((m) => m.id === model);
+  const currentRate = currentModel?.imageRates?.find((rate) => rate.quality === quality);
+  const closeApproval = useCallback(() => {
+    setApproval(null);
+    if (!jobId) setLoading(false);
+    updateImageGeneratorElement(excalidrawApi, elementId, { approval: undefined, ...(!jobId ? { status: "idle" } : {}) });
+  }, [elementId, excalidrawApi, jobId]);
+  const jobCreated = useCallback((id: string) => {
+    setJobId(id);
+    setLoading(true);
+    updateImageGeneratorElement(excalidrawApi, elementId, { jobId: id, status: "generating" });
+  }, [elementId, excalidrawApi]);
+  const placeImage = useCallback(async (media: CreatedMedia, signal?: AbortSignal) => {
+    const dataURL = await fetchAsDataURL(media.url);
+    if (signal?.aborted) return;
+    const elements = excalidrawApi.getSceneElements();
+    if (!elements.some((element: { id: string; isDeleted?: boolean }) => element.id === elementId && !element.isDeleted)) return;
+    const fileId = generateId();
+    excalidrawApi.addFiles([{ id: fileId, dataURL, mimeType: media.mimeType, created: Date.now() }]);
+    const imageElement = createExcalidrawImageElement({ fileId, ...elementBounds, title: media.prompt.slice(0, 60) });
+    excalidrawApi.updateScene({ elements: [...elements.map((element: { id: string }) => element.id === elementId ? { ...element, isDeleted: true } : element), imageElement], captureUpdate: "IMMEDIATELY" });
+    onClose();
+  }, [elementId, excalidrawApi, elementBounds.x, elementBounds.y, elementBounds.width, elementBounds.height, onClose]);
+  useEffect(() => {
+    if (!job.finished) return;
+    const controller = new AbortController();
+    setLoading(false);
+    setApproval(null);
+    if (job.media) {
+      void placeImage(job.media, controller.signal).catch((cause) => {
+        console.error("[image-gen] Could not place completed image", cause);
+        setError("图片已生成，画布插入失败。请到我的资产找回结果，请勿重复生成。");
+      });
+    } else {
+      setError(job.message);
+      updateImageGeneratorElement(excalidrawApi, elementId, { status: "error", errorMessage: job.message, approval: undefined });
+    }
+    return () => controller.abort();
+  }, [job.finished, job.media, job.message, placeImage, excalidrawApi, elementId]);
 
   const handleAspectRatioChange = useCallback(
     (ratio: string) => {
@@ -156,7 +203,9 @@ export function ImageGeneratorPanel({
   );
 
   const handleGenerate = useCallback(async () => {
-    if (!prompt.trim() || loading) return;
+    if (!prompt.trim() || loading || approval || submitting.current) return;
+    submitting.current = true;
+    setJobId(undefined);
 
     // Cancel any previous in-flight request
     abortRef.current?.abort();
@@ -171,6 +220,8 @@ export function ImageGeneratorPanel({
       model,
       aspectRatio,
       quality,
+      approval: undefined,
+      jobId: undefined,
     });
 
     try {
@@ -196,43 +247,23 @@ export function ImageGeneratorPanel({
       // Check if this generation was cancelled while awaiting
       if (controller.signal.aborted) return;
 
-      // Download and insert as real image element at same position
-      const dataURL = await fetchAsDataURL(result.url);
-      if (controller.signal.aborted) return;
-
-      const fileId = generateId();
-      excalidrawApi.addFiles([
-        {
-          id: fileId,
-          dataURL,
-          mimeType: result.mimeType,
-          created: Date.now(),
-        },
-      ]);
-
-      const imageElement = createExcalidrawImageElement({
-        fileId,
-        x: elementBounds.x,
-        y: elementBounds.y,
-        width: elementBounds.width,
-        height: elementBounds.height,
-        title: prompt.trim().slice(0, 60),
-      });
-
-      // Replace: delete placeholder, add image
-      const elements = excalidrawApi.getSceneElements().map((el: any) => {
-        if (el.id === elementId) return { ...el, isDeleted: true };
-        return el;
-      });
-      excalidrawApi.updateScene({
-        elements: [...elements, imageElement],
-        captureUpdate: "IMMEDIATELY",
-      });
-
-      onClose();
+      await placeImage(result, controller.signal);
     } catch (err) {
       // Ignore aborted requests (user cancelled or component unmounted)
       if (controller.signal.aborted) return;
+      if (err instanceof ApiApplicationError && err.code === "generation_confirmation_required") {
+        try {
+          const quote = parseCreationApproval(err.details);
+          setApproval(quote);
+          setLoading(false);
+          updateImageGeneratorElement(excalidrawApi, elementId, { status: "idle", approval: quote, errorMessage: undefined });
+        } catch (invalid) {
+          console.error("[image-gen] Invalid approval", invalid);
+          setError("无法读取图片费用确认，请重新获取报价。");
+          setLoading(false);
+        }
+        return;
+      }
 
       console.error("[image-gen] Generation error:", err);
       const handled = handleGenerationError(err);
@@ -244,10 +275,13 @@ export function ImageGeneratorPanel({
         status: "error",
         errorMessage: copy.failed,
       });
-    }
+    } finally { submitting.current = false; }
   }, [
     prompt,
     loading,
+    approval,
+    placeImage,
+    refImages,
     model,
     aspectRatio,
     quality,
@@ -262,8 +296,8 @@ export function ImageGeneratorPanel({
     <div
       ref={panelRef}
       data-canvas-floating-panel="image-generator"
-      style={{ left: screenX, top: screenY }}
-      className="fixed z-[100] w-[450px] rounded-2xl border border-border/60 glass-soft p-2 shadow-card-hover backdrop-blur-lg"
+      style={panelPosition}
+      className="fixed z-[100] max-h-[calc(100dvh-32px)] w-[450px] max-w-[calc(100vw-32px)] overflow-y-auto rounded-2xl border border-border/60 glass-soft p-2 shadow-card-hover backdrop-blur-lg"
       onKeyDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
@@ -279,7 +313,7 @@ export function ImageGeneratorPanel({
           }
         }}
         placeholder={copy.prompt}
-        disabled={loading}
+        disabled={loading || Boolean(approval)}
         style={{ scrollbarWidth: "none" }}
         className="min-h-[74px] max-h-[140px] w-full resize-none border-none bg-transparent p-1 text-[14px] leading-[18px] text-foreground placeholder:text-muted-foreground focus:outline-none [&::-webkit-scrollbar]:hidden"
       />
@@ -290,6 +324,9 @@ export function ImageGeneratorPanel({
         </div>
       )}
 
+      {approval && <div className="mb-2"><GenerationApprovalCard key={approval.approvalId} {...approval} onJobCreated={jobCreated} onClosed={closeApproval} /></div>}
+      {jobId && <p role="status" className="mb-2 text-xs text-muted-foreground">{job.message}</p>}
+      {currentRate && <p className="mb-2 text-xs text-muted-foreground">{currentRate.resolution} · {currentRate.priceCredits} 积分/张</p>}
       {/* Bottom toolbar */}
       <div className="mt-1 flex items-center justify-between">
         {/* Left: model + ref image */}
@@ -502,7 +539,7 @@ export function ImageGeneratorPanel({
           <button
             type="button"
             onClick={() => void handleGenerate()}
-            disabled={!prompt.trim() || loading}
+            disabled={!prompt.trim() || loading || Boolean(approval)}
             className="flex h-8 min-w-12 items-center justify-center gap-1 rounded-full bg-primary p-2 text-primary-foreground transition-all duration-300 hover:bg-primary/80 hover:accent-glow disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
           >
             {loading ? (

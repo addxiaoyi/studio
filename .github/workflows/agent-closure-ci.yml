@@ -104,6 +104,9 @@ jobs:
           pnpm --filter @helstera/web exec vitest run test/canvas-asset-import.test.tsx test/canvas-timeline.test.ts test/canvas-timeline-panel.test.tsx test/video-player-panel.test.tsx test/studio-project-key.test.ts test/studio-brand.test.ts test/studio-display-name.test.ts
       - name: Try-on billing and shared form regressions
         run: |
+          pnpm --filter @helstera/shared exec vitest run src/kuaipao-images.test.ts
+          pnpm --filter @helstera/web exec vitest run test/canvas-image-approval.test.tsx
+          pnpm --filter @helstera/server exec vitest run src/local-db/kuaipao-image-request.test.ts
           pnpm --filter @helstera/server exec vitest run src/http/video-first-frame.test.ts src/http/video-models-route.test.ts
           pnpm --filter @helstera/web exec vitest run test/canvas-video-approval.test.tsx
           pnpm --filter @helstera/server exec vitest run src/local-db/image-request-error.test.ts src/local-db/provider-http.test.ts

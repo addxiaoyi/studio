@@ -68,17 +68,16 @@ describe("configured model billing catalog", () => {
   });
 
   it("uses one catalog for image, video, and token billed models", () => {
-    expect(getConfiguredBilling("gpt-image-2-1k")).toMatchObject({
+    expect(getConfiguredBilling("gpt-image-2.5-flare")).toMatchObject({
       billingUnit: "per_generation",
     });
-    expect(getConfiguredBilling("gpt-image-2-1k")?.creditCost).toBeCloseTo(0.2);
+    expect(getConfiguredBilling("gpt-image-2.5-flare")?.creditCost).toBeCloseTo(0.2);
     expect(getConfiguredBilling("gpt-image-2")?.creditCost).toBeCloseTo(0.2);
-    expect(getConfiguredBilling("gpt-image-2-2k")?.creditCost).toBeCloseTo(0.32);
-    expect(getConfiguredBilling("gpt-image-2-4k")?.creditCost).toBeCloseTo(1.2);
-    expect(getConfiguredBilling("gpt-image-2-4k-超分")?.creditCost).toBeCloseTo(0.8);
-    expect(getConfiguredBilling("gpt-image-2.5-1k")?.creditCost).toBeCloseTo(0.16);
-    expect(getConfiguredBilling("gpt-image-2.5-2k")?.creditCost).toBeCloseTo(0.32);
-    expect(getConfiguredBilling("gpt-image-2.5-4k")?.creditCost).toBeCloseTo(0.8);
+    expect(getConfiguredBilling("gpt-image-2.6-flare")?.creditCost).toBeCloseTo(0.2);
+    expect(getConfiguredBilling("gpt-image-2.5-sunburst")?.creditCost).toBeCloseTo(0.2);
+    expect(getConfiguredBilling("gpt-image-2.6-sunburst")?.creditCost).toBeCloseTo(0.2);
+    expect(getConfiguredBilling("gpt-image-2-2k")).toBeNull();
+    expect(getConfiguredBilling("gpt-image-2.5-4k")).toBeNull();
     expect(getConfiguredBilling("sora-2-12s")).toMatchObject({
       billingUnit: "per_generation",
     });

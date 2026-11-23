@@ -32,6 +32,7 @@ export const imageGenerationPayloadSchema = z.object({
   prompt: z.string().min(1),
   model: z.string().optional(),
   aspect_ratio: z.string().optional(),
+  quality: z.enum(["standard", "hd", "ultra"]).optional(),
 });
 export type ImageGenerationPayload = z.infer<typeof imageGenerationPayloadSchema>;
 
@@ -126,6 +127,7 @@ export const createImageJobRequestSchema = z.object({
   prompt: z.string().min(1),
   model: z.string().optional(),
   aspect_ratio: z.string().optional(),
+  quality: z.enum(["standard", "hd", "ultra"]).optional(),
   input_images: z.array(z.string().trim().min(1).max(12_000_000)).max(14).optional(),
   input_asset_ids: z.array(z.string().uuid()).max(14).optional(),
 });

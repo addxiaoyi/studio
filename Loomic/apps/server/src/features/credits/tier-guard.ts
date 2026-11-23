@@ -14,6 +14,7 @@ import {
   getConfiguredBilling,
   getConfiguredVideoPriceRates,
   TOKEN_BILLING_RESERVE_CREDITS,
+  getKuaipaoImagePrice,
 } from "@helstera/shared";
 
 import type { DataAdminClient } from "../../auth/types.js";
@@ -150,6 +151,8 @@ export function createLocalCostGuard(db: Pick<Pool, "query">): CostGuard {
       );
       const row = rows[0];
       if (!row) throw new TierGuardError("model_not_accessible", "当前模型没有可用报价，请刷新模型列表。", 422);
+      const imagePrice = jobType === "image_generation" ? getKuaipaoImagePrice(modelId, params?.quality) : null;
+      if (imagePrice !== null) return imagePrice;
       if (row.billing_unit === "per_million_tokens") return TOKEN_BILLING_RESERVE_CREDITS;
       if (row.billing_unit === "per_second") {
         if (getConfiguredVideoPriceRates(modelId).length) {

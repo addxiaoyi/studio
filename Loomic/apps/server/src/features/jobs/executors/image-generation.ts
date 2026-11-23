@@ -43,20 +43,24 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
     prompt: string;
     model?: string;
     aspect_ratio?: string;
+    aspectRatio?: string;
+    quality?: "standard" | "hd" | "ultra";
     title?: string;
     input_asset_ids?: string[];
     input_images?: string[];
+    inputImages?: string[];
     purpose?: "try-on";
     routing?: Record<string, unknown>;
     workflow_step_id?: string;
   };
 
   if (!payload.prompt) throw new Error(`Job ${jobId} has no prompt in payload`);
+  const aspectRatio = payload.aspect_ratio ?? payload.aspectRatio;
 
   const providerCheckpoint = jobRow.provider_result as (GeneratedImage & { model?: string }) | null;
   const createdBy: string | null = jobRow.created_by ?? null;
   const workspaceId: string = jobRow.workspace_id ?? jobId;
-  const inputImages = providerCheckpoint ? [] : await resolveFeedInputImages(ctx, payload.input_asset_ids, payload.input_images, workspaceId);
+  const inputImages = providerCheckpoint ? [] : await resolveFeedInputImages(ctx, payload.input_asset_ids, payload.input_images ?? payload.inputImages, workspaceId);
 
   // Resolve provider dynamically from model ID via registry
   const requestedModel = payload.model ?? "black-forest-labs/flux-kontext-pro";
@@ -116,7 +120,8 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
         ? await generateConfiguredImage(ctx.localDb, model, {
             prompt: payload.prompt,
             model,
-            ...(payload.aspect_ratio !== undefined ? { aspectRatio: payload.aspect_ratio } : {}),
+            ...(aspectRatio !== undefined ? { aspectRatio } : {}),
+            quality: payload.quality ?? "standard",
             ...(inputImages?.length ? { inputImages } : {}),
           }, {
             allowUnverified: isManualSelection,
@@ -139,7 +144,8 @@ registerExecutor("image_generation", async (jobId, _rawPayload, ctx: ExecutorCon
         : await generateImage(providerName, {
         prompt: payload.prompt,
         model,
-        ...(payload.aspect_ratio !== undefined ? { aspectRatio: payload.aspect_ratio } : {}),
+        ...(aspectRatio !== undefined ? { aspectRatio } : {}),
+        quality: payload.quality ?? "standard",
         ...(inputImages?.length ? { inputImages } : {}),
         });
       if (!generated) throw new Error(`图片模型 ${model} 当前没有可调用渠道：请检查渠道启用状态、健康状态和冷却时间。这不代表参考图不兼容。`);

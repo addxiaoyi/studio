@@ -21,8 +21,8 @@ describe.skipIf(!databaseUrl)("configured price selection in PostgreSQL", () => 
         priority int, health_status text, failure_count int, cooldown_until timestamptz, last_error text);
       insert into provider_configs values (1,true,'healthy',1000),(2,true,'healthy',100);
       insert into provider_models values
-        (1,'gpt-image-2','image',true,'per_generation',0.10,null,null,1,'unknown',0,null,null),
-        (2,'gpt-image-2','image',true,'per_generation',0.05,null,null,100,'healthy',0,null,null);
+        (1,'image-routing-fixture','image',true,'per_generation',0.10,null,null,1,'unknown',0,null,null),
+        (2,'image-routing-fixture','image',true,'per_generation',0.05,null,null,100,'healthy',0,null,null);
     `);
   });
   afterAll(async () => {
@@ -32,7 +32,7 @@ describe.skipIf(!databaseUrl)("configured price selection in PostgreSQL", () => 
 
   it("quotes the verified image provider even when an unverified row has higher priority", async () => {
     const guard = createLocalCostGuard(db);
-    await expect(guard.calculateCreditCost("gpt-image-2", "image_generation", { quality: "hd" })).resolves.toBe(0.05);
+    await expect(guard.calculateCreditCost("image-routing-fixture", "image_generation", { quality: "hd" })).resolves.toBe(0.05);
   });
 
   it("does not quote a failed or cooling provider ahead of an eligible video provider", async () => {

@@ -8,6 +8,7 @@ type ModelPricing = {
   providerInputTokenPriceCny?: number;
   providerOutputTokenPriceCny?: number;
   resolutionRates?: Array<{ resolution: string; priceCnyPerSecond: number }>;
+  imageRates?: Array<{ resolution: string; priceCredits: number }>;
 };
 
 export type RuntimePriceModel = {
@@ -54,6 +55,9 @@ function yuan(value: number) {
 }
 
 export function getModelPricingLabel(model: ModelPricing, mediaType: "image" | "video") {
+  if (mediaType === "image" && model.imageRates?.length) {
+    return model.imageRates.map((rate) => `${rate.resolution} ${yuan(rate.priceCredits)}`).join(" · ");
+  }
   const rates = model.resolutionRates?.length
     ? model.resolutionRates
     : model.billingUnit === "per_second" && model.id

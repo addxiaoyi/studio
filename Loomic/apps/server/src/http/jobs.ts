@@ -123,7 +123,7 @@ export async function registerJobRoutes(
 
       if (options.creditService && options.tierGuard) {
         // Top-up credit system: no plan-based restrictions.
-        const quality: ImageQualityLevel = "hd";
+        const quality: ImageQualityLevel = payload.quality ?? "standard";
         await options.tierGuard.checkModelAccess(model);
         await options.tierGuard.checkConcurrency(viewer.workspace.id);
         if (payload.purpose === "try-on" && routedModel) {
@@ -141,6 +141,7 @@ export async function registerJobRoutes(
 
       const jobPayload = {
         ...(payload.purpose ? { purpose: payload.purpose } : {}),
+        quality: payload.quality ?? "standard",
         prompt: payload.prompt,
         model,
         ...(routing ? { routing } : {}),

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isKuaipaoImageModel, kuaipaoImageResolution, type ImageQualityLevel } from "@helstera/shared";
 import type { Pool } from "pg";
 import { assertWorkflowGenerationActive } from "../canvas-workflows/approval-access.js";
 import { workflowBudgetError } from "../canvas-workflows/budget.js";
@@ -304,6 +305,7 @@ function toRequest(input: GateInput, payloadFingerprint: string, approvalId: str
     model: input.model,
     ...(typeof input.payload.duration === "number" ? { duration: input.payload.duration } : {}),
     ...(typeof input.payload.resolution === "string" ? { resolution: input.payload.resolution } : {}),
+    ...(input.jobType === "image_generation" && isKuaipaoImageModel(input.model) ? { resolution: kuaipaoImageResolution(input.payload.quality as ImageQualityLevel | undefined) } : {}),
     hasReferenceImage: hasReferenceImage(input.payload),
     estimatedCredits: input.estimatedCredits,
     payloadFingerprint,
@@ -320,6 +322,7 @@ function toRequestFromRow(row: ApprovalRow): GenerationApprovalRequest {
     model: row.model,
     ...(typeof row.payload.duration === "number" ? { duration: row.payload.duration } : {}),
     ...(typeof row.payload.resolution === "string" ? { resolution: row.payload.resolution } : {}),
+    ...(row.job_type === "image_generation" && isKuaipaoImageModel(row.model) ? { resolution: kuaipaoImageResolution(row.payload.quality as ImageQualityLevel | undefined) } : {}),
     hasReferenceImage: hasReferenceImage(row.payload),
     estimatedCredits: Number(row.estimated_credits),
     payloadFingerprint: row.payload_fingerprint,
@@ -331,7 +334,7 @@ function toRequestFromRow(row: ApprovalRow): GenerationApprovalRequest {
 }
 
 function hasReferenceImage(payload: Record<string, unknown>) {
-  return ["input_images", "input_asset_ids", "input_video", "reference_image", "first_frame"]
+  return ["input_images", "inputImages", "input_asset_ids", "input_video", "reference_image", "first_frame"]
     .some((key) => Array.isArray(payload[key]) ? payload[key].length > 0 : Boolean(payload[key]));
 }
 

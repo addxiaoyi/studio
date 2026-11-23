@@ -43,7 +43,7 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
   const [model, setModel] = useState("");
   const [models, setModels] = useState<Array<ImageModelInfo | VideoModelInfo>>([]);
   const [ratio, setRatio] = useState("1:1");
-  const [quality, setQuality] = useState("hd");
+  const [quality, setQuality] = useState("standard");
   const [duration, setDuration] = useState(5);
   const [loadingModels, setLoadingModels] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -127,6 +127,11 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
     ? getModelAdvice(selectedModel as VideoModelInfo)
     : null;
   const videoModel = isVideo ? selectedModel as VideoModelInfo | undefined : undefined;
+  const imageRates = !isVideo ? (selectedModel as ImageModelInfo | undefined)?.imageRates : undefined;
+  const imageRate = imageRates?.find((rate) => rate.quality === quality);
+  const qualityOptions = imageRates?.length
+    ? imageRates.map((rate) => ({ value: rate.quality, label: `${rate.resolution} · ${rate.priceCredits} 积分/张` }))
+    : ["standard", "hd", "ultra"].map((value) => ({ value, label: value }));
   const durations = videoModel?.limits?.allowedDurations?.length
     ? videoModel.limits.allowedDurations
     : [4, 5, 6, 8, 10].filter((seconds) => seconds <= (videoModel?.limits?.maxDuration ?? 10));
@@ -212,7 +217,7 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
             <StyledSelect value={ratio} onChange={setRatio} disabled={locked} aria-label="画幅" options={ratios.map((item) => ({ value: item, label: item }))} />
           </Field>
           <Field label={isVideo ? "清晰度" : "质量"}>
-            <StyledSelect value={isVideo ? selectedResolution : quality} onChange={setQuality} disabled={locked} aria-label={isVideo ? "清晰度" : "质量"} options={(isVideo ? resolutions : ["standard", "hd", "ultra"]).map((item) => ({ value: item, label: item }))} />
+            <StyledSelect value={isVideo ? selectedResolution : quality} onChange={setQuality} disabled={locked} aria-label={isVideo ? "清晰度" : "质量"} options={isVideo ? resolutions.map((item) => ({ value: item, label: item })) : qualityOptions} />
           </Field>
           {isVideo && <Field label="时长"><StyledSelect value={String(selectedDuration)} onChange={(item) => setDuration(Number(item))} disabled={locked} aria-label="时长" options={durations.map((item) => ({ value: String(item), label: `${item} 秒` }))} /></Field>}
         </div>
@@ -220,7 +225,7 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
         {selectedModel && <div className="mt-4 rounded-xl border border-border/60 bg-muted/30 p-3 text-xs leading-5">
           {selectedAdvice && <p className="font-medium text-foreground">{selectedAdvice.badge} · {selectedAdvice.note}</p>}
           <p className="mt-1 text-muted-foreground">{selectedModel.description}</p>
-          <p className="mt-1 font-medium text-foreground">{getModelPricingLabel(selectedModel, isVideo ? "video" : "image")}</p>
+          <p className="mt-1 font-medium text-foreground">{imageRate ? `${imageRate.resolution} · ${imageRate.priceCredits} 积分/张` : getModelPricingLabel(selectedModel, isVideo ? "video" : "image")}</p>
         </div>}
         {error && <p role="alert" className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
         {approval && <div className="mt-4"><GenerationApprovalCard key={approval.approvalId} {...approval} onJobCreated={jobCreated} onClosed={closeApproval} /></div>}

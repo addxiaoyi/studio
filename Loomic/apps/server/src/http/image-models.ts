@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
-import { CONFIGURED_PRICE_MULTIPLIER, getImageCreditCost, getConfiguredBilling } from "@helstera/shared";
+import { CONFIGURED_PRICE_MULTIPLIER, getImageCreditCost, getConfiguredBilling, getKuaipaoImagePrice, getKuaipaoImageRates } from "@helstera/shared";
 import type { ViewerService } from "../features/bootstrap/ensure-user-foundation.js";
 import type { CreditService } from "../features/credits/credit-service.js";
 import { getAvailableImageModels } from "../generation/providers/registry.js";
@@ -18,7 +18,7 @@ export async function registerImageModelRoutes(app: FastifyInstance, options: {
 }) {
   app.get("/api/image-models", async (request, reply) => {
     let authenticated = false; let balance = 0;
-    const configured = options.localDb ? await listHealthyModels(options.localDb, "image") : [];
+    const configured = options.localDb ? await listHealthyModels(options.localDb, "image", { allowUnverified: true }) : [];
     const availability = options.localDb ? await listModelAvailability(options.localDb, "image") : [];
     try {
       const user = await options.auth.authenticate(request);
@@ -34,8 +34,10 @@ export async function registerImageModelRoutes(app: FastifyInstance, options: {
         };
         return [{
         id: row.model_id, displayName: presentation.displayName, description: presentation.description, iconUrl: "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/openai.svg", provider: "configured",
-        billingUnit: row.billing_unit, creditCost: row.billing_unit === "per_million_tokens" ? undefined : Number(row.price_credits) * CONFIGURED_PRICE_MULTIPLIER,
-        providerPriceCny: row.billing_unit === "per_million_tokens" ? undefined : Number(row.price_credits) * CONFIGURED_PRICE_MULTIPLIER,
+        billingUnit: row.billing_unit, creditCost: row.billing_unit === "per_million_tokens" ? undefined : getKuaipaoImagePrice(row.model_id) ?? Number(row.price_credits) * CONFIGURED_PRICE_MULTIPLIER,
+        providerPriceCny: row.billing_unit === "per_million_tokens" ? undefined : getKuaipaoImagePrice(row.model_id) ?? Number(row.price_credits) * CONFIGURED_PRICE_MULTIPLIER,
+        imageRates: getKuaipaoImageRates(row.model_id),
+        availability: row.health_status === "unknown" ? "unverified" : "available",
         providerInputTokenPriceCny: row.billing_unit === "per_million_tokens" ? Number(row.input_token_price_cny) : undefined,
         providerOutputTokenPriceCny: row.billing_unit === "per_million_tokens" ? Number(row.output_token_price_cny) : undefined,
         capabilities: { imageToImage: Boolean(row.supports_input_image) },

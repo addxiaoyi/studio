@@ -1741,6 +1741,7 @@ export async function unpublishAsset(
 }
 
 export type ImageModelInfo = {
+  imageRates?: Array<{ quality: "standard" | "hd" | "ultra"; resolution: "1K" | "2K" | "4K"; priceCredits: number }>;
   id: string;
   displayName: string;
   description: string;
