@@ -1,33 +1,48 @@
-# Backblaze B2 接入进度
+# Backblaze B2 接入验收
 
-2026-11-23，Asia/Shanghai。用户指定 Backblaze B2 替代此前待办的七牛异机备份，并选择「先保留 3 份，控制在免费存储内」。
+2026-11-23，Asia/Shanghai。用户授权使用 B2 替代当前无法写入的七牛异机备份，保留三份，并选择在免费额度内分三天下载验证。充值仍暂停；本次没有绑定付款方式或提高支出上限。
 
-## 已完成
+## 已验证的生产状态
 
-- 已在现有账号创建专用桶 `helstera-studio-backups-20261123`，bucket ID `2ae9cd0fb16f0684a32d0317`。
-- 控制台确认类型 Private、服务端加密 Enabled、Object Lock Disabled，endpoint 为 `s3.us-east-005.backblazeb2.com`。
-- 最新生产加密归档为 `20261123T130859Z.tar.enc`，2,276,957,011 字节，三份同等大小归档约 6.83 GB。
-- 本地代码新增独立 B2 凭据配置、版本完整删除和分页、上传前容量检查（包括旧版本和未完成分片）、相同对象重复提交复用、完整下载 SHA-256 校验与禁止覆盖已有恢复文件。
-- B2 容量限制设为 10,000,000,000 字节，保留三份；上传成功后才删除过期归档，暂时需要容纳第四份。超出预算则停止上传并由既有监控告警。B2 免费容量按账号合计，其他桶增量需要相应扣减预算。
-- 新增六项 S3 配置/清理/分页/容量回归通过，既有五项加密与监控回归通过，脚本语法检查通过。
+- 私有桶 `helstera-studio-backups-20261123`，endpoint `https://s3.us-east-005.backblazeb2.com`，region `us-east-005`。SSE-B2 开启，Object Lock 关闭。
+- 应用密钥限定该桶和 `helstera-backups/v1/` 前缀，使用 Read and Write 预设，没有创建、重置或使用 Master Key；未启用列举所有桶名。生产密钥文件 `/www/helstera/ops/b2.env` 权限为 0600，密钥不入库、不进命令行、不出现在验收输出。
+- 生产已启用 `offsiteEnabled=true`、`offsiteKeep=3`、`storageVersioned=true`、`storageMaxBytes=10000000000`。本机每日备份、每周隔离恢复和故障监控继续执行。
+- `20261123T130859Z.tar.enc` 于 2026-11-23 14:57:45 UTC 上传完成，共 2,276,957,011 字节。生产 `latest.json` 和归档收据均已有 `offsite`、`offsiteCompletedAt`；任务正常退出。
+- 源归档与远端对象 metadata SHA-256 一致：`2fcd08a9a7f01a68849221d2ba4496999e7c10cd82fa98f3387d17d94f687ab7`。这是上传与对象元数据核验；完整下载后的内容哈希仍待三日任务完成。
+- 匿名 HEAD 返回 401，S3 HeadObject 显示 `AES256`；当前 1 个正式对象版本、0 个删除标记、占用 2,276,957,011 字节。
 
-## 尚未执行
+## 三份保留与免费边界
 
-- 创建仅作用于该桶及 `helstera-backups/v1/` 前缀的读写应用密钥，存入服务端 mode-0600 文件；不得使用或重新生成 Master Key。
-- 部署代码与 B2 配置，设置 `offsiteKeep=3`、`offsiteEnabled=true`、`storageVersioned=true`、`storageMaxBytes=10000000000`。
-- 上传既有加密归档，验证匿名不可读、对象大小、SHA-256、版本清理权限。
-- 完整下载、解密、恢复验证，更新 offsite 成功收据并复核监控恢复。
+在专用测试前缀 `helstera-backups/v1/retention-check-20261123/` 实际创建四个归档名称、旧名称的第二个版本及删除标记，再执行保留三份。旧名称的两个版本和删除标记全部删除，三个最新归档保留，无关测试文件保留。验证后删除所有测试版本，测试前缀已空。没有删除正式备份。
 
-生产仍保持此前的本机备份及监控配置；B2 尚未接入、尚未上传文件，不能将本次桶创建视为异机备份完成。`M:/loomic-builds/launch-20261123/configure-b2-backup.py` 已准备好后续配置，但没有执行。
+目前同等大小的三份归档约占 6.83 GB；上传第四份再清理时约占 9.11 GB。容量检查包含所有历史版本和未完成分片，预计超过 10 GB 时停止上传并由监控报告，不先删除可靠副本。实际数据库增长可能触发此保护，不能将当前大小当作永久保证。
 
-## 中断原因
+B2 控制台账号支出上限保持 $0：存储 10 GB、下载每日 1 GB；未绑定付款方式。免费空间按账号合计，其他现有桶 `addxiaoyi` 检查时为 0 bytes。备份前缀容量保护之外，账号上限负责阻止额外收费。
 
-Backblaze 的 Application Keys 页面可见且账号已登录，但桌面控制工具反复失去窗口状态，最终自动终止本轮 Computer Use：无法可靠确认当前 Windows 浏览器 URL，无法执行权限校验。受限应用密钥尚未生成，未读取、保存或导出任何 B2 密钥。后续应从该页面继续，不能重复创建桶。
+## 分三天下载和恢复
 
-## 官方依据
+固定验证上述归档，每个 UTC 日最多请求 900,000,000 字节，每段先落盘预算再请求；失败请求同样占用预算，SDK 自动重试关闭。同日重复启动不会重新获得额度。服务器必须返回准确的 HTTP 206 和 Content-Range，否则停止。固定 VersionId，保留断点和预算，完整下载后才公布文件并校验 SHA-256。
 
-- [B2 定价](https://www.backblaze.com/cloud-storage/pricing)：前 10 GB 存储免费，公开按量价格 $6.95/TB/30 天；免费流量依据月均存储量计算，不能把免费存储等同于无限免费流量。
-- [创建应用密钥](https://www.backblaze.com/docs/cloud-storage-create-and-manage-app-keys)：可限定桶、前缀和读写权限，密钥正文只显示一次。
-- [S3 兼容权限](https://www.backblaze.com/docs/cloud-storage-s3-compatible-app-keys)：按名称删除与永久删除版本需要不同权限，永久清理必须包含版本 ID。
+- 11 月 23 日：首段下载已启动，最多 900,000,000 字节。
+- 11 月 24 日 10:30 Asia/Shanghai：计划续传最多 900,000,000 字节。
+- 11 月 25 日 10:30 Asia/Shanghai：计划下载剩余 476,957,011 字节，然后解密并恢复验证。
 
-本地临时 SSH 凭据收尾删除；既有加密备份私钥继续保留，不应随临时凭据清理。
+Windows 任务 `Helstera-B2-Free-Recovery-20261123` 已注册，启用错过后补跑、唤醒及防重入。必须让当前电脑开机且当前 Windows 用户已登录；未执行的计划不等于完成。若停机错过任务，应尽快检查，因为正式三份保留会在后续备份中清理该固定旧归档。
+
+任务完成下载后，使用仅在用户电脑保存的 DPAPI 私钥验证 AES-GCM 解密及数据库 dump SHA-256，再恢复到独立的 PostgreSQL 17 实例（127.0.0.1:56997），校验用户、工作区、项目、Google 身份和迁移表。成功后停库、删除临时明文及临时本机 B2 凭据，保留收据和永久恢复私钥，并禁用这项一次性任务。
+
+**当前完整下载、解密与数据库恢复尚未完成，不能据此宣称异机灾备恢复已验收。** 本机隔离恢复的既有结果不替代这次 B2 下载恢复证明。
+
+本机证据目录：`M:/loomic-builds/launch-20261123/`，仅当前用户、SYSTEM 和管理员可访问。主要收据：`b2-remote-check.json`、`b2-retention-check.json`、`b2-schedule-check.json`、`b2-recovery-job.json`；后续完成时生成 `b2-download-check.json`、`b2-decryption-check.json`、`b2-restore-check.json`。
+
+## 代码与 CI
+
+独立 B2 凭据、版本清理和容量保护提交 `3c36312b`；凭据缺失不阻断本机备份及告警提交 `a1e97899`。两次提交的 Desktop Candidate 和 Agent Closure CI 均已通过。
+
+本轮增加四并行分片上传和免费分日下载，并把下载测试加入 Agent Closure CI。相关本地测试共 21 项通过（16 Node、5 Python），覆盖短 read 完整读取、分片顺序和失败收尾、三天续传、同日重复执行、截断响应、忽略 Range、版本变化及额度损坏。新增提交的 CI 需单独核对，旧 CI 结果不能替代。
+
+## 后续收尾
+
+三日任务结束后查看完整恢复收据与明文清理结果。永久恢复密钥 `backup-private-key.dpapi` 及其 Windows 用户配置必须保留；它不是临时 SSH 凭据。告警邮件的最终收件与暂停的真实充值验收仍保持原先待办状态。
+
+参考：[B2 价格](https://www.backblaze.com/cloud-storage/pricing)、[应用密钥](https://www.backblaze.com/docs/cloud-storage-create-and-manage-app-keys)、[S3 权限](https://www.backblaze.com/docs/cloud-storage-s3-compatible-app-keys)。

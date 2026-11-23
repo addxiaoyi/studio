@@ -78,3 +78,32 @@ export async function checkStorageCapacity(client, sdk, bucket, bytes, limit, pr
   if (usedBytes + bytes > limit) throw new Error('Backup upload would exceed the approved free-storage limit');
   return { usedBytes, uploadBytes: bytes, limitBytes: limit };
 }
+
+export async function uploadMultipartParts(handle, size, sendPart, { partBytes = 16 * 1024 * 1024, concurrency = 4 } = {}) {
+  if (!Number.isSafeInteger(size) || size < 1 || !Number.isSafeInteger(partBytes) || partBytes < 1 || !Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) {
+    throw new Error('Invalid multipart upload size or concurrency');
+  }
+  const count = Math.ceil(size / partBytes), parts = [];
+  let nextPart = 1, failure;
+  async function worker() {
+    while (!failure && nextPart <= count) {
+      const number = nextPart++;
+      const position = (number - 1) * partBytes;
+      const body = Buffer.alloc(Math.min(partBytes, size - position));
+      try {
+        let filled = 0;
+        while (filled < body.length) {
+          const { bytesRead } = await handle.read(body, filled, body.length - filled, position + filled);
+          if (!bytesRead) throw new Error('Backup file ended during multipart upload');
+          filled += bytesRead;
+        }
+        const ETag = await sendPart(number, body);
+        if (!ETag) throw new Error('Backup upload returned no part checksum');
+        parts.push({ PartNumber: number, ETag });
+      } catch (error) { failure ||= error; }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, count) }, worker));
+  if (failure) throw failure;
+  return parts.sort((a, b) => a.PartNumber - b.PartNumber);
+}

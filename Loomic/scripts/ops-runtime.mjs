@@ -3,7 +3,7 @@ import { readFile, open, stat, link, unlink } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { parseEnv } from 'node:util';
 import { join } from 'node:path';
-import { storageSettings, pruneBackupVersions, checkStorageCapacity } from './ops-storage.mjs';
+import { storageSettings, pruneBackupVersions, checkStorageCapacity, uploadMultipartParts } from './ops-storage.mjs';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
@@ -66,17 +66,11 @@ async function uploadEncrypted(file, key) {
   if (config.storageMaxBytes) await checkStorageCapacity(client, sdk, Bucket, bytes, config.storageMaxBytes, config.storagePrefix);
   const { UploadId } = await client.send(new sdk.CreateMultipartUploadCommand({ Bucket, Key: key, ContentType: 'application/octet-stream', Metadata: { sha256 } }));
   const handle = await open(file, 'r');
-  const parts = [];
   try {
-    const buffer = Buffer.alloc(16 * 1024 * 1024);
-    let position = 0;
-    for (let part = 1; ; part++) {
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
-      if (!bytesRead) break;
-      const { ETag } = await client.send(new sdk.UploadPartCommand({ Bucket, Key: key, UploadId, PartNumber: part, Body: buffer.subarray(0, bytesRead), ContentLength: bytesRead }));
-      parts.push({ ETag, PartNumber: part });
-      position += bytesRead;
-    }
+    const parts = await uploadMultipartParts(handle, bytes, async (PartNumber, Body) => {
+      const { ETag } = await client.send(new sdk.UploadPartCommand({ Bucket, Key: key, UploadId, PartNumber, Body, ContentLength: Body.length }));
+      return ETag;
+    });
     await client.send(new sdk.CompleteMultipartUploadCommand({ Bucket, Key: key, UploadId, MultipartUpload: { Parts: parts } }));
     const head = await client.send(new sdk.HeadObjectCommand({ Bucket, Key: key }));
     if (head.ContentLength !== bytes || head.Metadata?.sha256 !== sha256) throw new Error('Backup size or checksum metadata mismatch');

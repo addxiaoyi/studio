@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { storageSettings, expiredBackupVersions, pruneBackupVersions, checkStorageCapacity } from './ops-storage.mjs';
+import { storageSettings, expiredBackupVersions, pruneBackupVersions, checkStorageCapacity, uploadMultipartParts } from './ops-storage.mjs';
 
 test('uses explicit S3 backup credentials without falling back to the public-media account', () => {
   const settings = storageSettings({ storageEndpoint: 'https://s3.us-east-005.backblazeb2.com', storageRegion: 'us-east-005', storageBucket: 'private-backups' }, {
@@ -73,4 +73,38 @@ test('includes unfinished multipart bytes in the free-storage limit', async () =
     return { Parts: [{ Size: 1_000_000_000 }] };
   } };
   await assert.rejects(checkStorageCapacity(client, sdk, 'backups', 2_300_000_000, 10_000_000_000), /free-storage limit/);
+});
+
+test('parallel upload preserves every byte and orders completed parts for assembly', async () => {
+  const source = Buffer.from('A'.repeat(23) + 'B'.repeat(23) + 'C'.repeat(15));
+  const received = [];
+  let active = 0, peak = 0;
+  const handle = { async read(buffer, offset, length, position) {
+    const size = Math.min(length, 7, source.length - position);
+    source.copy(buffer, offset, position, position + size);
+    return { bytesRead: size };
+  } };
+  const parts = await uploadMultipartParts(handle, source.length, async (part, body) => {
+    peak = Math.max(peak, ++active);
+    await new Promise(resolve => setTimeout(resolve, part === 1 ? 10 : 1));
+    received.push({ part, body: Buffer.from(body) });
+    active--;
+    return 'etag-' + part;
+  }, { partBytes: 23, concurrency: 3 });
+  assert.equal(peak, 3);
+  assert.deepEqual(parts.map(part => part.PartNumber), [1, 2, 3]);
+  assert.deepEqual(Buffer.concat(received.sort((a,b) => a.part-b.part).map(part => part.body)), source);
+});
+
+test('waits for active parts to settle before allowing an upload abort', async () => {
+  let stillRunning = false;
+  const handle = { async read(buffer, offset, length) { buffer.fill(1); return { bytesRead: length }; } };
+  await assert.rejects(uploadMultipartParts(handle, 12, async part => {
+    if (part === 1) throw new Error('upload failed');
+    stillRunning = true;
+    await new Promise(resolve => setTimeout(resolve, 5));
+    stillRunning = false;
+    return 'ok';
+  }, { partBytes: 4, concurrency: 2 }), /upload failed/);
+  assert.equal(stillRunning, false);
 });
