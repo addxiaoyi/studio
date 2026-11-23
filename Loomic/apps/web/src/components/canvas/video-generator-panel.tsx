@@ -12,7 +12,10 @@ import {
   updateVideoGeneratorElement,
 } from "../../lib/canvas-video-generator";
 import type { VideoModelInfo } from "../../lib/server-api";
-import { fetchVideoModels, generateVideoDirect, uploadFile } from "../../lib/server-api";
+import { ApiApplicationError, fetchVideoModels, generateVideoDirect, uploadFile } from "../../lib/server-api";
+import { GenerationApprovalCard } from "../chat/generation-approval-card";
+import { parseCreationApproval, type CreationApproval } from "../../lib/creation-approval";
+import { useCreationJob, type CreatedMedia } from "../../hooks/use-creation-job";
 import { t, useLocale } from "../../lib/i18n";
 import { getModelPricingLabel } from "../../lib/model-pricing";
 import { formatModelDisplayName } from "../chat/utils";
@@ -74,6 +77,10 @@ export function VideoGeneratorPanel({
   const [resolution, setResolution] = useState(data.resolution);
   const [loading, setLoading] = useState(data.status === "generating");
   const [error, setError] = useState<string | null>(data.errorMessage ?? null);
+  const [approval, setApproval] = useState<CreationApproval | null>(data.approval ?? null);
+  const [jobId, setJobId] = useState<string | undefined>(data.jobId);
+  const job = useCreationJob(accessToken, jobId, data.prompt || prompt);
+  const submitting = useRef(false);
   const [models, setModels] = useState<VideoModelInfo[]>([]);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showParamsPopover, setShowParamsPopover] = useState(false);
@@ -171,12 +178,61 @@ export function VideoGeneratorPanel({
     (rate) => rate.resolution === resolution,
   );
   const currentCreditCost = useMemo(() => {
+    const rate = currentConfiguredRate?.priceCnyPerSecond
+      ?? (currentModel?.billingUnit === "per_second" ? currentModel.providerPriceCny ?? currentModel.creditCost : undefined);
+    if (typeof rate === "number") return Number((rate * duration).toFixed(4));
     try {
-      return getVideoCreditCost(model, duration, resolution as VideoResolution);
+      return Number(getVideoCreditCost(model, duration, resolution as VideoResolution).toFixed(4));
     } catch {
       return undefined;
     }
-  }, [duration, model, resolution]);
+  }, [currentConfiguredRate, currentModel, duration, model, resolution]);
+
+  const closeApproval = useCallback(() => {
+    setApproval(null);
+    if (!jobId) setLoading(false);
+    updateVideoGeneratorElement(excalidrawApi, elementId, { approval: undefined, ...(!jobId ? { status: "idle" } : {}) });
+  }, [elementId, excalidrawApi, jobId]);
+
+  const jobCreated = useCallback((id: string) => {
+    setJobId(id);
+    setLoading(true);
+    updateVideoGeneratorElement(excalidrawApi, elementId, { status: "generating", jobId: id });
+  }, [elementId, excalidrawApi]);
+
+  const placeVideo = useCallback(async (media: CreatedMedia, signal?: AbortSignal) => {
+    const { convertToExcalidrawElements } = await import("@excalidraw/excalidraw");
+    if (signal?.aborted) return;
+    const elements = excalidrawApi.getSceneElements();
+    if (!elements.some((element: { id: string; isDeleted?: boolean }) => element.id === elementId && !element.isDeleted)) return;
+    const video = convertToExcalidrawElements([{
+      type: "embeddable", link: media.url, x: elementBounds.x, y: elementBounds.y,
+      width: elementBounds.width, height: elementBounds.height,
+      customData: { isVideo: true, mimeType: media.mimeType, durationSeconds: duration, title: media.prompt.slice(0, 60), prompt: media.prompt },
+    } as any]);
+    excalidrawApi.updateScene({
+      elements: [...elements.map((element: { id: string }) => element.id === elementId ? { ...element, isDeleted: true } : element), ...video],
+      captureUpdate: "IMMEDIATELY",
+    });
+    onClose();
+  }, [duration, elementBounds.x, elementBounds.y, elementBounds.width, elementBounds.height, elementId, excalidrawApi, onClose]);
+
+  useEffect(() => {
+    if (!job.finished) return;
+    const controller = new AbortController();
+    setLoading(false);
+    setApproval(null);
+    if (job.media) {
+      void placeVideo(job.media, controller.signal).catch((cause) => {
+        console.error("[video-gen] Could not place completed video", cause);
+        setError("视频已生成，画布插入失败。请到我的资产找回结果，请勿重复生成。");
+      });
+    } else {
+      setError(job.message);
+      updateVideoGeneratorElement(excalidrawApi, elementId, { status: "error", errorMessage: job.message, approval: undefined });
+    }
+    return () => controller.abort();
+  }, [job.finished, job.media, job.message, placeVideo, excalidrawApi, elementId]);
 
   const handleAspectRatioChange = useCallback(
     (ratio: string) => {
@@ -269,7 +325,9 @@ export function VideoGeneratorPanel({
   );
 
   const handleGenerate = useCallback(async () => {
-    if (!prompt.trim() || loading) return;
+    if (!prompt.trim() || loading || approval || submitting.current) return;
+    submitting.current = true;
+    setJobId(undefined);
 
     // Cancel any previous in-flight request
     abortRef.current?.abort();
@@ -285,6 +343,8 @@ export function VideoGeneratorPanel({
       aspectRatio,
       duration,
       resolution,
+      jobId: undefined,
+      approval: undefined,
     });
 
     try {
@@ -319,46 +379,24 @@ export function VideoGeneratorPanel({
       // Check if this generation was cancelled while awaiting
       if (controller.signal.aborted) return;
 
-      // Create embeddable element for inline video playback on canvas.
-      // Dynamic import -- excalidraw is client-only.
-      const { convertToExcalidrawElements } = await import(
-        "@excalidraw/excalidraw"
-      );
-      if (controller.signal.aborted) return;
-
-      const newElements = convertToExcalidrawElements([
-        {
-          type: "embeddable",
-          link: result.url,
-          x: elementBounds.x,
-          y: elementBounds.y,
-          width: elementBounds.width,
-          height: elementBounds.height,
-          customData: {
-            isVideo: true,
-            mimeType: result.mimeType,
-            durationSeconds: result.durationSeconds,
-            title: prompt.trim().slice(0, 60),
-            prompt: prompt.trim(),
-          },
-        } as any,
-      ]);
-
-      // Replace generator placeholder with video embeddable element
-      const elements = excalidrawApi
-        .getSceneElements()
-        .map((el: any) =>
-          el.id === elementId ? { ...el, isDeleted: true } : el,
-        );
-      excalidrawApi.updateScene({
-        elements: [...elements, ...newElements],
-        captureUpdate: "IMMEDIATELY",
-      });
-
-      onClose();
+      await placeVideo(result, controller.signal);
     } catch (err) {
       // Ignore aborted requests (user cancelled or component unmounted)
       if (controller.signal.aborted) return;
+
+      if (err instanceof ApiApplicationError && err.code === "generation_confirmation_required") {
+        try {
+          const quote = parseCreationApproval(err.details);
+          setApproval(quote);
+          setLoading(false);
+          updateVideoGeneratorElement(excalidrawApi, elementId, { status: "idle", approval: quote, errorMessage: undefined });
+        } catch (invalid) {
+          console.error("[video-gen] Invalid approval details", invalid);
+          setError("无法读取视频费用确认，请重新获取报价。");
+          setLoading(false);
+        }
+        return;
+      }
 
       console.error("[video-gen] Generation error:", err);
       const handled = handleGenerationError(err);
@@ -370,10 +408,12 @@ export function VideoGeneratorPanel({
         status: "error",
         errorMessage: copy.failed,
       });
-    }
+    } finally { submitting.current = false; }
   }, [
     prompt,
     loading,
+    approval,
+    placeVideo,
     model,
     aspectRatio,
     duration,
@@ -473,7 +513,7 @@ export function VideoGeneratorPanel({
             }
           }}
           placeholder={copy.prompt}
-          disabled={loading}
+          disabled={loading || Boolean(approval)}
           style={{ scrollbarWidth: "none" }}
           className="min-h-[44px] max-h-[140px] w-full resize-none border-none bg-transparent text-[14px] leading-[22px] text-foreground placeholder:text-muted-foreground focus:outline-none [&::-webkit-scrollbar]:hidden"
         />
@@ -484,6 +524,9 @@ export function VideoGeneratorPanel({
           {error}
         </div>
       )}
+
+      {approval && <div className="mx-4 mb-3"><GenerationApprovalCard key={approval.approvalId} {...approval} onJobCreated={jobCreated} onClosed={closeApproval} /></div>}
+      {jobId && <p role="status" className="mx-4 mb-3 text-xs text-muted-foreground">{job.message}</p>}
 
       {currentConfiguredRate ? (
         <div className="mx-4 mb-2 text-[10px] tabular-nums text-muted-foreground">
@@ -672,7 +715,7 @@ export function VideoGeneratorPanel({
           <button
             type="button"
             onClick={() => void handleGenerate()}
-            disabled={!prompt.trim() || loading}
+            disabled={!prompt.trim() || loading || Boolean(approval)}
             className="flex h-8 items-center justify-center gap-1 rounded-full bg-primary px-3 text-primary-foreground transition-all duration-300 hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
           >
             {loading ? (

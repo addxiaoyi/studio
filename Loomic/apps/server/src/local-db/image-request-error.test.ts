@@ -1,6 +1,12 @@
 import { expect, it } from "vitest";
 import { imageOutcomeUnknown, imageRequestRejection } from "./image-request-error.js";
 
+it("treats a structured no-channel rejection as definite even when the gateway uses 503", () => {
+  const failure = new Error('image provider returned 503: {"error":{"code":"model_not_found","message":"No available channel for model gpt-image-2","type":"new_api_error"}}');
+  expect(imageRequestRejection(failure)).toMatchObject({ code: "model_not_found" });
+  expect(imageOutcomeUnknown(failure)).toBeNull();
+});
+
 it.each(["provider returned 504: timeout", "provider returned 502: gateway", "fetch failed", "provider returned no image"])("does not retry an uncertain result: %s", (message) => {
   expect(imageOutcomeUnknown(new Error(message))).toMatchObject({ code: "upstream_outcome_unknown" });
 });

@@ -1,4 +1,5 @@
 import { getViewportCenter } from "./canvas-elements";
+import type { CreationApproval } from "./creation-approval";
 
 // Aspect ratio to pixel dimensions mapping (video ratios only)
 const RATIO_DIMENSIONS: Record<string, { w: number; h: number }> = {
@@ -18,6 +19,8 @@ export type VideoGeneratorData = {
   resolution: string;
   inputImages?: string[];
   errorMessage?: string;
+  approval?: CreationApproval;
+  jobId?: string;
 };
 
 function generateId(): string {

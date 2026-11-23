@@ -544,7 +544,12 @@ export async function generateConfiguredImage(
       throw new Error("provider returned no image");
     } catch (error) {
       const rejection = imageRequestRejection(error);
-      if (rejection) throw rejection;
+      if (rejection) {
+        if ((rejection as Error & { code?: string }).code === "model_not_found") {
+          await markModelFailed(db, row.provider_model_id ?? row.id, error instanceof Error ? error.message : String(error));
+        }
+        throw rejection;
+      }
       const errorCode = (error as { code?: string })?.code;
       const message = error instanceof Error ? error.message : String(error);
       console.warn("[image-provider] request failed", JSON.stringify({
