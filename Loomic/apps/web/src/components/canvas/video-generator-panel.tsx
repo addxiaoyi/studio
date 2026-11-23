@@ -16,6 +16,7 @@ import { ApiApplicationError, fetchVideoModels, generateVideoDirect, uploadFile 
 import { GenerationApprovalCard } from "../chat/generation-approval-card";
 import { parseCreationApproval, type CreationApproval } from "../../lib/creation-approval";
 import { useCreationJob, type CreatedMedia } from "../../hooks/use-creation-job";
+import { useCanvasPanelPosition } from "../../hooks/use-canvas-panel-position";
 import { t, useLocale } from "../../lib/i18n";
 import { getModelPricingLabel } from "../../lib/model-pricing";
 import { formatModelDisplayName } from "../chat/utils";
@@ -162,6 +163,7 @@ export function VideoGeneratorPanel({
   const { scrollX, scrollY, zoom } = canvasScrollZoom;
   const screenX = (elementBounds.x + scrollX) * zoom;
   const screenY = (elementBounds.y + elementBounds.height + scrollY) * zoom + 8;
+  const panelPosition = useCanvasPanelPosition(panelRef, screenX, screenY);
 
   const currentModel = models.find((m) => m.id === model);
   const durationOptions = currentModel?.limits?.allowedDurations ?? DURATIONS;
@@ -434,8 +436,8 @@ export function VideoGeneratorPanel({
     <div
       ref={panelRef}
       data-canvas-floating-panel="video-generator"
-      style={{ left: screenX, top: screenY }}
-      className="fixed z-[100] w-[520px] rounded-[24px] border border-border/60 glass-soft shadow-card-hover backdrop-blur-lg"
+      style={panelPosition}
+      className="fixed z-[100] max-h-[calc(100dvh-32px)] w-[520px] max-w-[calc(100vw-32px)] overflow-y-auto rounded-[24px] border border-border/60 glass-soft shadow-card-hover backdrop-blur-lg"
       onKeyDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
