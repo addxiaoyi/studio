@@ -133,11 +133,23 @@ export function createLocalCostGuard(db: Pick<Pool, "query">): CostGuard {
     },
     async calculateCreditCost(modelId, jobType, params) {
       const { rows } = await db.query<{ billing_unit: string; price_credits: number; input_token_price_cny: number | null; output_token_price_cny: number | null }>(
-        "select pm.billing_unit,pm.price_credits::float8,pm.input_token_price_cny::float8,pm.output_token_price_cny::float8 from provider_models pm join provider_configs pc on pc.id=pm.provider_id where pm.model_id=$1 and pm.enabled=true and pc.enabled=true and pc.health_status='healthy' order by pm.priority,pc.latency_ms nulls last limit 1",
-        [modelId],
+        `select pm.billing_unit, pm.price_credits::float8,
+                pm.input_token_price_cny::float8, pm.output_token_price_cny::float8
+         from provider_models pm join provider_configs pc on pc.id=pm.provider_id
+         where pm.model_id=$1 and pm.media_type=$2 and pm.enabled=true
+           and pc.enabled=true and pc.health_status='healthy'
+           and (pm.health_status in ('healthy','unknown') or ($2='video' and pm.health_status='degraded'))
+           and pm.failure_count < 3
+           and (pm.cooldown_until is null or pm.cooldown_until <= now())
+           and coalesce(pm.last_error, '') not ilike '%model_not_found%'
+           and coalesce(pm.last_error, '') not ilike '%no available channel%'
+         order by case pm.health_status when 'healthy' then 0 when 'degraded' then 1 else 2 end,
+                  pm.priority, pm.failure_count, pc.latency_ms nulls last
+         limit 1`,
+        [modelId, jobType === "video_generation" ? "video" : "image"],
       );
       const row = rows[0];
-      if (!row) return 1;
+      if (!row) throw new TierGuardError("model_not_accessible", "当前模型没有可用报价，请刷新模型列表。", 422);
       if (row.billing_unit === "per_million_tokens") return TOKEN_BILLING_RESERVE_CREDITS;
       if (row.billing_unit === "per_second") {
         if (getConfiguredVideoPriceRates(modelId).length) {
