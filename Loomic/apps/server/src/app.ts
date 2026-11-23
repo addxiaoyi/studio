@@ -665,8 +665,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
   void registerAgentMarketplaceRoutes(app, { auth, db: localDb, viewerService });
 
-  // Contact sales — public endpoint, no auth required
-  void registerLocalContactSalesRoutes(app, { db: localDb });
+  void registerLocalContactSalesRoutes(app, { db: localDb, auth });
 
   // Supabase-backed ecommerce routes are disabled in local-only mode.
 

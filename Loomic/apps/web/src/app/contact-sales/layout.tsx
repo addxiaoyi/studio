@@ -2,16 +2,16 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "企业销售咨询",
+  title: "联系与咨询",
   description:
-    "联系 Helstera 企业销售 — 定制 SLA、专属客户经理、私有化部署、数据驻留方案、SSO 集成。",
-  keywords: ["Helstera 销售", "企业方案", "私有化部署", "SLA"],
+    "联系 Helstera 运营者，咨询使用方法、充值账单、退款与团队需求。",
+  keywords: ["Helstera", "客服", "充值咨询", "团队需求"],
   alternates: { canonical: "/contact-sales" },
   robots: { index: true, follow: true },
   openGraph: {
-    title: "联系 Helstera 企业销售",
+    title: "联系 Helstera",
     description:
-      "定制 SLA、专属客户经理、私有化部署、SSO 集成。24 小时内回复。",
+      "提交使用问题、订单编号和团队需求，保留咨询编号以便跟进。",
     url: "/contact-sales",
   },
 };

@@ -1,88 +1,16 @@
-"use client";
-
 import Link from "next/link";
-import { HelsteraLogo } from "@/components/icons/helstera-logo";
+import { OperatorContact } from "@/components/operator-contact";
+import { PublicInformationPage } from "@/components/public-information-page";
 
 export default function TermsPage() {
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 glass-strong">
-        <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-6">
-          <Link href="/" className="flex items-center gap-2">
-            <HelsteraLogo className="text-base" />
-          </Link>
-          <Link
-            href="/login"
-            className="inline-flex items-center px-4 h-8 rounded-full border border-border/40 text-foreground text-sm font-medium glass-soft hover:glass transition-all"
-          >
-            登录
-          </Link>
-        </div>
-      </header>
-
-      <main>
-
-      <div className="mx-auto max-w-4xl px-6 py-32">
-        <p className="eyebrow">法律文档</p>
-        <h1 className="display-lg mt-5 text-foreground">服务条款</h1>
-        <p className="text-sm text-muted-foreground/80 font-light mt-5">
-          更新日期：2026 年 1 月 1 日
-        </p>
-
-        <div className="prose prose-neutral max-w-none space-y-12 mt-16">
-          <section>
-            <h2 className="text-lg font-medium text-foreground tracking-tight mb-4">
-              1. 服务说明
-            </h2>
-            <p className="text-muted-foreground leading-relaxed font-light">
-              Helstera 是一个企业级 AI 设计平台，提供品牌管理、画布协作和多模态内容生成服务。我们持续改进服务，保留在不事先通知的情况下调整功能、价格和配额的权利。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">2. 账户与使用</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              您需保证账户信息的准确性和安全性。企业用户须确保获得使用 AI 工具的合法授权。您同意不利用服务从事任何违法、侵权或损害第三方利益的活动。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">3. 知识产权</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              您保留对您通过 Helstera 创建的品牌套件、画布内容和提示词的所有权。AI 生成内容的使用权以适用法律和具体服务说明为准。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">4. 积分与计费</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              积分用于兑换 AI 生成服务，不可转让、退款或兑换现金。积分充值为一次性购买，到账后永久有效。退款按照页面公布的退款规则处理。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">5. 水印</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              AI 生成内容是否包含水印以生成页面的实际提示为准。额度充值本身不代表特定的企业授权或水印权益。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">6. 免责声明</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              Helstera 按「现状」提供服务，不对生成内容的准确性、适用性或版权合规性作出保证。您在使用 AI 生成内容时须自行承担合规审查责任。因不可抗力导致的服务中断，我们不承担责任。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">7. 联系我们</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              如有疑问，请联系：<a href="mailto:legal@helstera.com" className="text-accent underline">legal@helstera.com</a>
-            </p>
-          </section>
-        </div>
-        </div>
-      </main>
-    </div>
+    <PublicInformationPage title="服务条款" summary="使用 Helstera 前，请了解创作、计费、保存和问题处理规则。">
+      <section><h2>1. 服务范围</h2><p>Helstera 提供画布、工作流及图片、视频创作工具。具体功能、可选模型和限制以当前页面与<Link href="/docs/">使用说明</Link>为准；企业定制、服务等级和其他特殊安排需另行确认。</p></section>
+      <section><h2>2. 账号与内容</h2><p>请妥善保管账号，确保上传素材和提示词具有使用授权，不使用服务从事违法、侵权或损害他人权益的活动。您保留原有内容的权利；AI 生成结果的使用需遵守适用法律及相应模型的使用条件，发布前请自行检查内容质量与权利。</p></section>
+      <section><h2>3. 积分与费用</h2><p>积分用于支付平台内的创作服务。充值兑换、模型价格和计费单位以支付及确认页面为准；按次、按秒和按实际 Token 用量的计费方式不同。付费生成在确认后执行，费用变化可能需要重新确认。任务取消或失败不必然意味着供应商未产生费用，争议按<Link href="/refund-policy/">退款与充值争议规则</Link>处理。</p></section>
+      <section><h2>4. 素材保存与恢复</h2><p>请在页面显示的保留期限内下载重要素材。云端生成素材通常保留 3 天；本机副本与云端副本分别管理。工程恢复可能需要原始媒体文件，无法访问或已到期的素材不会因恢复工程描述而自动恢复。</p></section>
+      <section><h2>5. 服务变化与故障</h2><p>模型能力和可用性可能受供应商及设备条件影响。遇到故障时请保留工程、订单或任务编号并联系客服。价格或功能调整以更新后的页面说明为准，已确认任务按对应记录核对处理。</p></section>
+      <section><h2>6. 联系与反馈</h2><OperatorContact /><p className="mt-4">个人信息处理方式见<Link href="/privacy/">隐私政策</Link>。</p></section>
+    </PublicInformationPage>
   );
 }

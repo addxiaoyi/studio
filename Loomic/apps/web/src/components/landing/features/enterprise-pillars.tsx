@@ -16,18 +16,18 @@ interface Pillar {
 const PILLARS: Pillar[] = [
   {
     icon: Users,
-    title: "团队实时协作",
-    desc: "多光标、评论、版本历史——团队成员在同一画布上同步编辑。",
+    title: "按工程整理",
+    desc: "把画布、素材和工作流放在同一个工程中，继续已有的创作。",
   },
   {
     icon: Lock,
-    title: "企业级安全合规",
-    desc: "SOC 2 Type II、GDPR、CCPA、SSO/SCIM，私有化部署可选购。",
+    title: "私有资源访问",
+    desc: "登录后访问自己的工程与素材，公开作品由发布操作控制。",
   },
   {
     icon: Workflow,
-    title: "完整 API & 集成",
-    desc: "接入 Figma、Slack、Notion、Jira，资产自动同步到企业知识库。",
+    title: "可视化工作流",
+    desc: "连接输入、生成与交付节点，运行前检查问题并确认费用。",
   },
 ];
 

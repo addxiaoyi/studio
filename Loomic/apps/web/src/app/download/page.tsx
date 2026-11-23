@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Download, Laptop, Puzzle, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowLeft, Laptop, Puzzle, ShieldCheck, Sparkles } from "lucide-react";
 
 import { DesktopDownloadList } from "@/components/desktop-download-list";
 import { DesktopToastProvider } from "@/components/desktop-toast";
@@ -39,12 +39,9 @@ export default function DownloadPage() {
               <div className="flex items-start gap-3">
                 <Puzzle className="mt-0.5 size-4 shrink-0 text-sky-700" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
-                  <h2 id="browser-assistant-title" className="text-sm font-medium">Edge / Chrome 浏览器助手 0.2.0</h2>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">首次使用需在浏览器扩展页加载一次。安装后可由 Helstera Desktop 一键配对；扩展只处理当前活动标签，不读取 Cookie 或密码。</p>
-                  <a href="/downloads/helstera-local-browser-assistant-0.2.0.zip" download className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-md border border-border/70 px-3 text-xs font-medium text-foreground hover:bg-muted">
-                    <Download className="size-3.5" aria-hidden="true" />下载扩展 ZIP
-                  </a>
-                  <p className="mt-3 break-all font-mono text-[10px] leading-5 text-muted-foreground">SHA-256: DED3BF3B7F8FB7BEC7E014298CA04B88264C721DF9ED0D7E108E75191846F2B2</p>
+                  <h2 id="browser-assistant-title" className="text-sm font-medium">Edge / Chrome 浏览器助手</h2>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">扩展安装包暂不可下载。您可以先使用网页工作区；需要浏览器助手时，请通过客服渠道了解当前可用版本。</p>
+                  <Link href="/contact-sales/" className="mt-3 inline-flex min-h-11 items-center rounded-md border border-border/70 px-3 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">咨询可用版本</Link>
                 </div>
               </div>
             </section>

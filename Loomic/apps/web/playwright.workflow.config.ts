@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["feed-resume.spec.ts", "canvas-closure.spec.ts", "canvas-workflow.spec.ts", "workflow-materials.spec.ts", "workflow-curves.spec.ts", "workflow-interactions.spec.ts", "workflow-drag-recovery.spec.ts", "workflow-ai.spec.ts", "workflow-context-menu.spec.ts", "workflow-node-workbench.spec.ts", "workflow-logic.spec.ts", "workflow-advanced.spec.ts", "workflow-preflight.spec.ts", "workflow-fields.spec.ts", "workflow-edit-selection.spec.ts", "workflow-author-health.spec.ts", "home-design.spec.ts", "collections-design.spec.ts", "ui-polish.spec.ts"],
+  testMatch: ["feed-resume.spec.ts", "canvas-closure.spec.ts", "canvas-workflow.spec.ts", "workflow-materials.spec.ts", "workflow-curves.spec.ts", "workflow-interactions.spec.ts", "workflow-drag-recovery.spec.ts", "workflow-ai.spec.ts", "workflow-context-menu.spec.ts", "workflow-node-workbench.spec.ts", "workflow-logic.spec.ts", "workflow-advanced.spec.ts", "workflow-preflight.spec.ts", "workflow-fields.spec.ts", "workflow-edit-selection.spec.ts", "workflow-author-health.spec.ts", "home-design.spec.ts", "collections-design.spec.ts", "launch-information.spec.ts", "ui-polish.spec.ts"],
   workers: 1,
   timeout: 180000,
   outputDir: "../../.creative-test-results/workflow",

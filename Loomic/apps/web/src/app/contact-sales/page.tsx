@@ -1,428 +1,78 @@
 "use client";
 
-import { useState } from "react";
-import { motion } from "framer-motion";
-import {
-  Send,
-  Building2,
-  Phone,
-  Mail,
-  CheckCircle,
-  ArrowRight,
-  Sparkles,
-  AlertCircle,
-} from "lucide-react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { HelsteraLogo } from "@/components/icons/helstera-logo";
-import { fadeUp } from "@/components/landing/motion";
-import { cn } from "@/lib/utils";
-import { StyledSelect } from "@/components/ui/styled-select";
+import { OperatorContact } from "@/components/operator-contact";
+import { PublicInformationPage } from "@/components/public-information-page";
 
-type SubmitState =
-  | { kind: "idle" }
-  | { kind: "submitting" }
-  | { kind: "success"; id: string }
-  | { kind: "error"; message: string };
-
-const PLANS = [
-  {
-    name: "团队版",
-    price: "¥3,980",
-    period: "/月",
-    description: "适合 10 人以内的设计团队",
-    features: [
-      "10 位团队成员",
-      "无限品牌套件",
-      "优先生成队列",
-      "标准 API 调用",
-      "邮件支持",
-    ],
-  },
-  {
-    name: "企业版",
-    price: "¥9,800",
-    period: "/月",
-    description: "适合中大型组织的完整解决方案",
-    features: [
-      "无限团队成员",
-      "私有化部署选项",
-      "专属客户成功经理",
-      "无限 API 调用",
-      "SLA 保障 + 24/7 支持",
-      "SSO / SAML",
-      "审计日志",
-    ],
-    highlighted: true,
-  },
-  {
-    name: "定制版",
-    price: "来电询价",
-    period: "",
-    description: "满足特殊合规和安全要求",
-    features: [
-      "私有云 / 本地部署",
-      "定制 AI 模型接入",
-      "专属研发支持",
-      "定制 SLA 协议",
-      "数据驻留方案",
-    ],
-  },
-];
+type InquiryForm = { name: string; email: string; company: string; phone: string; message: string };
+type Submission = { kind: "idle" | "submitting" } | { kind: "success"; id: string } | { kind: "error"; message: string };
+const inputClass = "mt-2 min-h-11 w-full min-w-0 rounded-lg border border-border bg-background px-3 py-2 text-base text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 export default function ContactSalesPage() {
-  const [state, setState] = useState<SubmitState>({ kind: "idle" });
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    company: "",
-    phone: "",
-    teamSize: "",
-    message: "",
-  });
+  const [form, setForm] = useState<InquiryForm>({ name: "", email: "", company: "", phone: "", message: "" });
+  const [submission, setSubmission] = useState<Submission>({ kind: "idle" });
+  const outcome = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (submission.kind === "success" || submission.kind === "error") outcome.current?.focus();
+  }, [submission.kind]);
 
-  function update(field: keyof typeof form) {
-    return (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-      setForm((prev) => ({ ...prev, [field]: e.target.value }));
+  function updateField(field: keyof InquiryForm) {
+    return (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const value = event.target.value;
+      setForm(previous => ({ ...previous, [field]: value }));
+    };
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setState({ kind: "submitting" });
+  async function submitInquiry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submission.kind === "submitting") return;
+    setSubmission({ kind: "submitting" });
     try {
-      const res = await fetch("/api/contact-sales", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          source: "pricing-page",
-        }),
+      const response = await fetch("/api/contact-sales", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, source: "contact-page" }),
+        signal: AbortSignal.timeout(20000),
       });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as {
-          error?: { message?: string };
-        };
-        throw new Error(err.error?.message ?? "提交失败");
-      }
-      const data = (await res.json()) as { id: string };
-      setState({ kind: "success", id: data.id });
-    } catch (err) {
-      setState({
-        kind: "error",
-        message: err instanceof Error ? err.message : "提交失败，请稍后重试。",
-      });
+      const reply = await response.json() as { id?: unknown; error?: { message?: string } };
+      if (!response.ok) throw new Error(reply.error?.message ?? "咨询暂时无法提交，请稍后重试或通过邮箱联系。");
+      if (typeof reply.id !== "string" || !reply.id) throw new Error("暂未收到咨询编号，请通过客服邮箱核实后再重试。");
+      setSubmission({ kind: "success", id: reply.id });
+    } catch (error) {
+      const timedOut = error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name);
+      setSubmission({ kind: "error", message: timedOut ? "提交超时，内容已保留。请通过客服邮箱核实是否收到，避免重复提交。" : error instanceof Error ? error.message : "咨询暂时无法提交，内容已保留。" });
     }
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Nav — glass */}
-      <header className="fixed top-0 inset-x-0 z-50 glass-strong">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <Link href="/" className="flex items-center gap-2">
-            <HelsteraLogo className="text-base" />
-          </Link>
-          <nav className="flex items-center gap-6 text-sm">
-            <Link
-              href="/pricing"
-              className="text-muted-foreground hover:text-foreground transition-all duration-300"
-            >
-              定价
-            </Link>
-            <Link
-              href="/security"
-              className="text-muted-foreground hover:text-foreground transition-all duration-300"
-            >
-              安全合规
-            </Link>
-            <Link
-              href="/login"
-              className="inline-flex items-center px-4 h-8 rounded-full bg-foreground text-background text-sm font-medium transition-all hover:scale-[1.02]"
-            >
-              登录
-            </Link>
-          </nav>
-        </div>
-      </header>
-
-      {/* Atmospheric glow */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[60vh] -z-10 overflow-hidden">
-        <div
-          className="absolute -top-1/4 left-1/2 w-[80vw] h-[80vw] -translate-x-1/2 rounded-full opacity-40"
-          style={{
-            background:
-              "radial-gradient(ellipse at center, oklch(var(--primary) / 0.08) 0%, transparent 65%)",
-          }}
-        />
-      </div>
-
-      <main className="pt-36 pb-32">
-        <div className="mx-auto max-w-6xl px-6">
-          {/* Section Header — Editorial style. h1 stays outside motion.div
-              so screen readers + axe see a visible level-one heading. */}
-          <span className="eyebrow">企业咨询</span>
-          <h1 className="display-lg mt-5 text-foreground">
-            与企业销售团队对话
-          </h1>
-          <motion.div
-            variants={fadeUp}
-            initial="hidden"
-            animate="visible"
-            className="mt-6"
-          >
-            <p className="body-relaxed max-w-2xl">
-              告诉我们您的团队规模和需求，我们将在 24 小时内为您定制最合适的
-              Helstera 方案——从私有化部署到定制 AI 模型。
-            </p>
-          </motion.div>
-
-          <div className="grid gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
-            {/* Left: Plans + Contact */}
-            <div className="space-y-4">
-              {PLANS.map((plan) => (
-                <motion.div
-                  key={plan.name}
-                  variants={fadeUp}
-                  initial="hidden"
-                  animate="visible"
-                  className={cn(
-                    "rounded-[1.5rem] p-7 transition-all duration-500",
-                    plan.highlighted
-                      ? "glass border border-foreground/20 shadow-card"
-                      : "glass-soft border border-border/40",
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h3 className="text-base font-medium text-foreground tracking-tight">
-                        {plan.name}
-                      </h3>
-                      <p className="mt-1 text-sm text-muted-foreground font-light">
-                        {plan.description}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-2xl font-light text-foreground tabular-nums tracking-tight">
-                        {plan.price}
-                      </div>
-                      {plan.period && (
-                        <div className="text-xs text-muted-foreground mt-0.5">
-                          {plan.period}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <ul className="mt-6 space-y-3">
-                    {plan.features.map((f) => (
-                      <li
-                        key={f}
-                        className="flex items-start gap-3 text-sm text-foreground/80 font-light"
-                      >
-                        <CheckCircle
-                          className="size-3.5 text-accent shrink-0 mt-0.5"
-                          strokeWidth={2}
-                        />
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-                </motion.div>
-              ))}
-
-              {/* Contact info — glass card */}
-              <motion.div
-                variants={fadeUp}
-                initial="hidden"
-                animate="visible"
-                className="mt-6 rounded-[1.5rem] glass-soft border border-border/40 p-7"
-              >
-                <h3 className="text-sm font-medium text-foreground tracking-tight">
-                  其他联系方式
-                </h3>
-                <div className="mt-5 space-y-4">
-                  <a
-                    href="mailto:enterprise@helstera.com"
-                    className="flex items-center gap-3 text-sm text-muted-foreground hover:text-foreground transition-all duration-300"
-                  >
-                    <Mail className="size-4 opacity-60" strokeWidth={1.5} />
-                    enterprise@helstera.com
-                  </a>
-                  <a
-                    href="tel:+86-400-888-9999"
-                    className="flex items-center gap-3 text-sm text-muted-foreground hover:text-foreground transition-all duration-300"
-                  >
-                    <Phone className="size-4 opacity-60" strokeWidth={1.5} />
-                    400-888-9999
-                  </a>
-                  <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                    <Building2 className="size-4 opacity-60" strokeWidth={1.5} />
-                    北京市朝阳区光华路 10 号院
-                  </div>
-                </div>
-              </motion.div>
+    <PublicInformationPage title="联系与咨询" summary="可以咨询使用方法、充值账单或团队需求。请描述具体问题，便于核对和回复。">
+      <div className="grid min-w-0 gap-10 lg:grid-cols-[0.85fr_1.15fr]">
+        <section><h2>直接联系我们</h2><OperatorContact /><p className="mt-5">充值与退款问题请附订单号；生成问题请附任务编号。请勿提供密码、验证码或完整支付账户信息。</p><p className="mt-4">企业定制、报价和服务时限需按需求另行确认。</p><p className="mt-5"><Link href="/refund-policy/">退款与争议处理</Link> · <Link href="/docs/">首发支持范围</Link></p></section>
+        <section className="min-w-0">
+          <h2>提交咨询</h2>
+          {submission.kind === "success" ? (
+            <div ref={outcome} role="status" tabIndex={-1} className="rounded-xl border border-border bg-card p-5 focus-visible:outline-2 focus-visible:outline-ring">
+              <h3 className="text-lg font-semibold">咨询已保存</h3><p className="mt-3">我们会通过您填写的邮箱回复，请保留以下咨询编号。</p><p className="mt-3 break-all font-mono text-sm">咨询编号：{submission.id}</p>
             </div>
-
-            {/* Right: Form — glass card */}
-            <motion.div variants={fadeUp} initial="hidden" animate="visible">
-              <div className="rounded-[1.5rem] glass border border-border/40 p-8 sticky top-28">
-                {state.kind === "success" ? (
-                  <div className="flex flex-col items-center gap-5 py-16 text-center">
-                    <div className="rounded-full glass-soft border border-accent/30 p-4 accent-glow">
-                      <CheckCircle
-                        className="size-8 text-accent"
-                        strokeWidth={1.5}
-                      />
-                    </div>
-                    <div>
-                      <h2 className="display-sm text-foreground">已收到您的请求</h2>
-                      <p className="mt-3 text-muted-foreground text-sm font-light leading-relaxed max-w-sm mx-auto">
-                        企业销售团队将在 24 小时内通过邮件联系您，请注意查收。
-                      </p>
-                    </div>
-                    <Link
-                      href="/"
-                      className="mt-2 inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium glass-soft hover:glass border border-border/40 transition-all"
-                    >
-                      返回首页
-                      <ArrowRight className="size-3.5" />
-                    </Link>
-                  </div>
-                ) : (
-                  <>
-                    {/* Eyebrow */}
-                    <div className="flex items-center gap-2 mb-3">
-                      <Sparkles className="size-3.5 text-accent" strokeWidth={1.5} />
-                      <span className="eyebrow">开始咨询</span>
-                    </div>
-                    <h2 className="display-sm text-foreground">填写咨询表单</h2>
-                    <p className="mt-3 text-sm text-muted-foreground font-light">
-                      所有信息保密，仅用于为您设计专属方案。
-                    </p>
-
-                    <form onSubmit={handleSubmit} className="mt-8 space-y-5">
-                      <div className="grid gap-5 sm:grid-cols-2">
-                        <div className="space-y-2.5">
-                          <Label htmlFor="name">姓名</Label>
-                          <Input
-                            id="name"
-                            required
-                            value={form.name}
-                            onChange={update("name")}
-                            placeholder="您的姓名"
-                          />
-                        </div>
-                        <div className="space-y-2.5">
-                          <Label htmlFor="email">工作邮箱</Label>
-                          <Input
-                            id="email"
-                            type="email"
-                            required
-                            value={form.email}
-                            onChange={update("email")}
-                            placeholder="you@company.com"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid gap-5 sm:grid-cols-2">
-                        <div className="space-y-2.5">
-                          <Label htmlFor="company">公司名称</Label>
-                          <Input
-                            id="company"
-                            required
-                            value={form.company}
-                            onChange={update("company")}
-                            placeholder="公司全称"
-                          />
-                        </div>
-                        <div className="space-y-2.5">
-                          <Label htmlFor="phone">联系电话</Label>
-                          <Input
-                            id="phone"
-                            type="tel"
-                            value={form.phone}
-                            onChange={update("phone")}
-                            placeholder="+86 xxx xxxx xxxx"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2.5">
-                        <Label htmlFor="teamSize">团队规模</Label>
-                        <StyledSelect
-                          value={form.teamSize}
-                          onChange={(value) => setForm((prev) => ({ ...prev, teamSize: value }))}
-                          aria-label="团队规模"
-                          options={[{ value: "", label: "请选择" }, { value: "1-10", label: "1-10 人" }, { value: "11-50", label: "11-50 人" }, { value: "51-200", label: "51-200 人" }, { value: "201-500", label: "201-500 人" }, { value: "500+", label: "500 人以上" }]}
-                        />
-                      </div>
-
-                      <div className="space-y-2.5">
-                        <Label htmlFor="message">您的需求</Label>
-                        <Textarea
-                          id="message"
-                          value={form.message}
-                          onChange={update("message")}
-                          placeholder="请描述您的团队规模、使用场景、具体需求…"
-                          rows={4}
-                        />
-                      </div>
-
-                      <button
-                        type="submit"
-                        disabled={state.kind === "submitting"}
-                        className={cn(
-                          "mt-2 w-full inline-flex items-center justify-center gap-2 rounded-full bg-foreground text-background h-10 px-5 text-sm font-medium transition-all duration-300 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60 disabled:hover:scale-100",
-                        )}
-                      >
-                        {state.kind === "submitting" ? (
-                          <>
-                            <span className="size-3.5 rounded-full border-2 border-background/30 border-t-background animate-spin" />
-                            正在提交...
-                          </>
-                        ) : (
-                          <>
-                            <Send className="size-3.5" strokeWidth={1.5} />
-                            提交咨询
-                          </>
-                        )}
-                      </button>
-
-                      {state.kind === "error" && (
-                        <div
-                          role="alert"
-                          className="mt-2 flex items-start gap-2 rounded-2xl glass-soft border border-destructive/30 px-4 py-3 text-sm text-destructive"
-                        >
-                          <AlertCircle
-                            className="size-4 shrink-0 mt-0.5"
-                            strokeWidth={1.5}
-                          />
-                          <span className="font-light leading-relaxed">
-                            {state.message}
-                          </span>
-                        </div>
-                      )}
-
-                      <p className="text-center text-xs text-muted-foreground/80 font-light">
-                        提交即表示您同意我们的{" "}
-                        <Link
-                          href="/privacy"
-                          className="underline hover:text-foreground transition-all duration-300 underline-offset-2"
-                        >
-                          隐私政策
-                        </Link>
-                      </p>
-                    </form>
-                  </>
-                )}
+          ) : (
+            <form onSubmit={submitInquiry} className="space-y-5" aria-busy={submission.kind === "submitting"}>
+              <div className="grid gap-5 sm:grid-cols-2">
+                <label className="block text-sm font-medium">姓名<input name="name" autoComplete="name" required maxLength={100} value={form.name} onChange={updateField("name")} className={inputClass} /></label>
+                <label className="block text-sm font-medium">联系邮箱<input name="email" autoComplete="email" type="email" required maxLength={254} value={form.email} onChange={updateField("email")} className={inputClass} /></label>
               </div>
-            </motion.div>
-          </div>
-        </div>
-      </main>
-    </div>
+              <div className="grid gap-5 sm:grid-cols-2">
+                <label className="block text-sm font-medium">公司或团队（选填）<input name="company" autoComplete="organization" maxLength={200} value={form.company} onChange={updateField("company")} className={inputClass} /></label>
+                <label className="block text-sm font-medium">电话（选填）<input name="phone" autoComplete="tel" type="tel" maxLength={50} value={form.phone} onChange={updateField("phone")} className={inputClass} /></label>
+              </div>
+              <label className="block text-sm font-medium">问题或需求<textarea name="message" required minLength={10} maxLength={2000} rows={6} aria-describedby="inquiry-help" value={form.message} onChange={updateField("message")} className={inputClass} /></label>
+              <p id="inquiry-help" className="text-sm">请填写 10–2000 字，可附订单号、任务编号和问题发生时间。</p>
+              {submission.kind === "error" && <div ref={outcome} role="alert" tabIndex={-1} className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive focus-visible:outline-2 focus-visible:outline-ring">{submission.message}</div>}
+              <button type="submit" disabled={submission.kind === "submitting"} className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-foreground px-4 py-3 text-base font-medium text-background disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">{submission.kind === "submitting" ? "正在提交…" : "提交咨询"}</button>
+              <p className="text-sm">提交的信息仅用于处理咨询，详见<Link href="/privacy/">隐私政策</Link>。</p>
+            </form>
+          )}
+        </section>
+      </div>
+    </PublicInformationPage>
   );
 }

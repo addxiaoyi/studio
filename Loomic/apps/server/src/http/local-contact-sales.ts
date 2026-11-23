@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { z } from "zod";
 import { applicationErrorResponseSchemaLoose } from "@helstera/shared";
+import type { RequestAuthenticator } from "../auth/types.js";
 
 const contactInquirySchema = z.object({
   name: z.string().min(1, "请填写姓名").max(100),
@@ -19,10 +20,10 @@ export type ContactInquiryInput = z.infer<typeof contactInquirySchema>;
 
 export async function registerLocalContactSalesRoutes(
   app: FastifyInstance,
-  options: { db: Pool },
+  options: { db: Pool; auth: RequestAuthenticator },
 ) {
   // POST /api/contact-sales — submit an enterprise sales inquiry
-  app.post("/api/contact-sales", async (request, reply) => {
+  app.post("/api/contact-sales", { bodyLimit: 16 * 1024 }, async (request, reply) => {
     const body = request.body as unknown;
     const parsed = contactInquirySchema.safeParse(body);
 
@@ -62,6 +63,7 @@ export async function registerLocalContactSalesRoutes(
       );
 
       const inquiryId = rows[0]?.id;
+      if (!inquiryId) throw new Error("Contact inquiry insert returned no reference");
 
       // 2. Notify sales team (best-effort, don't block the response)
       notifySalesTeam(input, inquiryId).catch((err) => {
@@ -71,7 +73,7 @@ export async function registerLocalContactSalesRoutes(
       return reply.code(201).send({
         success: true,
         id: inquiryId,
-        message: "我们已收到您的咨询，将在 24 小时内联系您。",
+        message: "您的咨询已保存，请保留咨询编号。我们会通过您填写的邮箱回复。",
       });
     } catch (error) {
       console.error("[ContactSales] DB insert failed:", error);
@@ -89,6 +91,12 @@ export async function registerLocalContactSalesRoutes(
   // GET /api/contact-sales/inquiries — list inquiries (admin only, for future admin dashboard)
   app.get("/api/contact-sales/inquiries", async (request, reply) => {
     try {
+      const user = await options.auth.authenticate(request);
+      if (!user) return reply.code(401).send({ error: { code: "unauthorized", message: "请先登录。" } });
+      const role = await options.db.query("select system_role from app_users where id=$1", [user.id]);
+      if (role.rows[0]?.system_role !== "admin") {
+        return reply.code(403).send({ error: { code: "forbidden", message: "需要系统管理员权限。" } });
+      }
       const { rows } = await options.db.query(
         `select id, name, email, company, phone, team_size, message, plan, source, status, created_at
          from contact_inquiries
@@ -96,7 +104,7 @@ export async function registerLocalContactSalesRoutes(
          limit 50`,
       );
 
-      return reply.send({ inquiries: rows });
+      return reply.header("Cache-Control", "private, no-store").send({ inquiries: rows });
     } catch (error) {
       console.error("[ContactSales] Query failed:", error);
       return reply.code(500).send(
@@ -117,12 +125,6 @@ async function notifySalesTeam(
   // Log to console so the sales team can be alerted via log monitoring
   console.log("[ContactSales] New inquiry", {
     id: inquiryId,
-    name: input.name,
-    email: input.email,
-    company: input.company,
-    teamSize: input.teamSize,
-    plan: input.plan,
-    source: input.source,
   });
 
   // Optional: Send Slack webhook if configured (SSRF guard)

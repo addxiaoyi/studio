@@ -92,7 +92,7 @@ export function LandingFooter() {
             </p>
 
             <div className="mt-4 flex flex-wrap gap-1.5">
-              {["SOC 2", "GDPR", "ISO 27001"].map((badge) => (
+              {["画布", "工作流", "本地保存"].map((badge) => (
                 <span
                   key={badge}
                   className="inline-flex items-center rounded-full border border-border/40 px-2 py-0.5 text-[10px] tracking-wider text-muted-foreground/70 font-light"

@@ -12,7 +12,7 @@ import type { RequestAuthenticator } from "../auth/types.js";
 
 const createSchema = z.object({
   packageId: z.string().min(1).optional(),
-  amountCnyFen: z.number().int().min(1000).max(5000000).optional(),
+  amountCnyFen: z.number().int().min(1000).max(5000000).multipleOf(100).optional(),
   type: z.enum(["alipay", "wxpay", "qqpay"]).default("alipay"),
 });
 
@@ -69,7 +69,7 @@ export function registerEpayRoutes(
         .send({
           error: {
             code: "invalid_request",
-            message: "Invalid top-up request.",
+            message: "请选择充值套餐，或输入 ¥10 至 ¥50,000 的整数金额。",
           },
         });
 
@@ -112,7 +112,7 @@ export function registerEpayRoutes(
     const payload = { ...query, ...body };
     if (!verifyEpaySign(payload, options.md5Key))
       return reply.code(401).send("fail");
-    if (payload.pid && payload.pid !== options.merchantId) return reply.code(401).send("fail");
+    if (payload.pid !== options.merchantId) return reply.code(401).send("fail");
     if (!payload.out_trade_no) return reply.code(400).send("fail");
     if (!payload.money) return reply.code(400).send("fail");
     if (
@@ -126,6 +126,7 @@ export function registerEpayRoutes(
     );
     if (!order || order.status === "expired")
       return reply.code(404).send("fail");
+    if (order.provider !== "epay") return reply.code(400).send("fail");
     if (
       Number(payload.money).toFixed(2) !== (order.amountCnyFen / 100).toFixed(2)
     )

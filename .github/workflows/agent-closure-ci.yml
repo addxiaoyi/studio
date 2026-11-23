@@ -69,6 +69,10 @@ jobs:
           pnpm --filter @helstera/web exec vitest run test/register.test.tsx test/login.test.tsx test/local-auth-network-error.test.ts
       - name: Structured model planning deadlines
         run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/goal-planner.test.ts src/features/agent-goals/goal-plan-timeout.test.ts src/features/video-editor/planner.test.ts
+      - name: Payment callback and private inquiry launch checks
+        run: |
+          node scripts/test-local-postgres.mjs src/http/epay.postgres.test.ts
+          pnpm --filter @helstera/server exec vitest run src/http/epay.test.ts src/http/local-contact-sales.test.ts
       - name: Private Agent browser access and controls
         run: |
           node scripts/test-local-postgres.mjs src/features/agent-browser/browser-view.postgres.test.ts src/features/agent-browser/engine.test.ts src/features/agent-browser/observer.test.ts

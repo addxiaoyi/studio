@@ -13,6 +13,7 @@ function makeApp() {
     outTradeNo: "order-1",
     amountCnyFen: 10000,
     status: "pending",
+    provider: "epay",
   });
   const app = Fastify();
   registerEpayRoutes(app, {

@@ -9,10 +9,10 @@ import { fadeUp } from "@/components/landing/motion";
  * CTAs. Pure motion + text, no images, so it stays tiny and pure.
  */
 const TRUST = [
-  "SOC 2 Type II",
-  "GDPR / CCPA",
-  "SSO / SCIM",
-  "私有化部署",
+  "画布与工作流",
+  "费用逐次确认",
+  "云端素材限期保留",
+  "支持本地保存",
 ];
 
 export function HeroTrustStrip() {

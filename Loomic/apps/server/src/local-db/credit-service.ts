@@ -106,16 +106,18 @@ export function createLocalCreditService(db: Pool): CreditService {
       };
     },
     async createCustomTopupOrder(workspaceId, amountCnyFen, provider) {
-      if (!Number.isInteger(amountCnyFen) || amountCnyFen < 1000 || amountCnyFen > 5000000) throw new CreditServiceError("topup_failed", "充值金额需为 ¥10 至 ¥50,000 的整数金额。", 400);
+      if (!Number.isInteger(amountCnyFen) || amountCnyFen % 100 !== 0 || amountCnyFen < 1000 || amountCnyFen > 5000000) throw new CreditServiceError("topup_failed", "充值金额需为 ¥10 至 ¥50,000 的整数金额。", 400);
       const outTradeNo = `HT${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-      const now = Date.now(); const expiredAt = now + 30 * 60 * 1000; const creditsGranted = Math.floor(amountCnyFen / 100);
+      const now = Date.now(); const expiredAt = now + 30 * 60 * 1000; const creditsGranted = amountCnyFen / 100;
       await db.query("insert into credit_topups (out_trade_no, workspace_id, package_id, amount_cny_fen, amount_usd_cents, credits_granted, provider, expired_at, created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)", [outTradeNo, workspaceId, "custom", amountCnyFen, 0, creditsGranted, provider, expiredAt, now]);
       return { outTradeNo, workspaceId, packageId: "custom", amountCnyFen, amountUsdCents: 0, creditsGranted, status: "pending", provider, qrCodeUrl: null, expiredAt, paidAt: null, createdAt: now };
     },
     async getTopupOrder(outTradeNo, workspaceId) {
       const { rows } = await db.query(
-        "select * from credit_topups where out_trade_no = $1 and workspace_id = $2",
-        [outTradeNo, workspaceId],
+        workspaceId === undefined
+          ? "select * from credit_topups where out_trade_no = $1"
+          : "select * from credit_topups where out_trade_no = $1 and workspace_id = $2",
+        workspaceId === undefined ? [outTradeNo] : [outTradeNo, workspaceId],
       );
       const row = rows[0];
       if (!row) return null;

@@ -1,92 +1,17 @@
-"use client";
-
-import Link from "next/link";
-import { HelsteraLogo } from "@/components/icons/helstera-logo";
+import { OperatorContact } from "@/components/operator-contact";
+import { PublicInformationPage } from "@/components/public-information-page";
+import { siteOperator } from "@/lib/site-operator";
 
 export default function PrivacyPage() {
   return (
-    <div className="min-h-screen bg-background">
-      {/* Nav — glass */}
-      <header className="sticky top-0 z-50 glass-strong">
-        <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-6">
-          <Link href="/" className="flex items-center gap-2">
-            <HelsteraLogo className="text-base" />
-          </Link>
-          <Link
-            href="/login"
-            className="inline-flex items-center px-4 h-8 rounded-full border border-border/40 text-foreground text-sm font-medium glass-soft hover:glass transition-all"
-          >
-            登录
-          </Link>
-        </div>
-      </header>
-
-      <main>
-
-      {/* Content */}
-      <div className="mx-auto max-w-4xl px-6 py-32">
-        <p className="eyebrow">法律文档</p>
-        <h1 className="display-lg mt-5 text-foreground">隐私政策</h1>
-        <p className="text-sm text-muted-foreground/80 font-light mt-5">
-          更新日期：2026 年 1 月 1 日
-        </p>
-
-        <div className="prose prose-neutral max-w-none space-y-12 mt-16">
-          <section>
-            <h2 className="text-lg font-medium text-foreground tracking-tight mb-4">
-              1. 信息收集
-            </h2>
-            <p className="text-muted-foreground leading-relaxed font-light">
-              Helstera（「我们」）收集您在使用服务时主动提供的信息，包括账户注册信息（姓名、邮箱）、工作空间配置、品牌套件内容、画布数据以及使用日志。我们还收集设备信息和 IP 地址以提升服务安全性和稳定性。所有敏感数据在传输和存储时均经过加密处理。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">2. 信息使用</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              我们使用收集的信息用于：提供和改进 AI 生成服务、处理您的账户和付款、保障服务安全、发送服务通知以及合规用途。未经您同意，我们不会将您的个人信息用于广告推送或转让给第三方用于商业目的。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">3. 数据存储与安全</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              您的数据存储在位于中国大陆及境外的云服务基础设施中。我们采用行业标准的安全措施，包括 TLS 加密传输、AES-256 静态加密、访问控制和定期安全审计。您的品牌资产和画布内容受我们服务条款的保护，未经法律程序不会向第三方披露。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">4. 您的权利</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              您有权访问、更正或删除您的个人数据。您可以通过账户设置导出数据，或联系 <a href="mailto:privacy@helstera.com" className="text-accent underline">privacy@helstera.com</a> 行使数据主体权利。企业用户可联系其账户管理员行使团队数据相关权利。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">5. 儿童隐私</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              Helstera 不面向 14 岁以下儿童，也不故意收集儿童个人信息。如您发现未成年人未经监护人同意使用了我们的服务，请联系我们予以删除。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">6. 政策变更</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              我们可能不时更新本隐私政策。重大变更将通过电子邮件或服务内通知告知您。继续使用服务即表示您接受更新后的政策。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-medium mb-3">7. 联系我们</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              如对本隐私政策有任何疑问，请联系：<br />
-              邮箱：<a href="mailto:privacy@helstera.com" className="text-accent underline">privacy@helstera.com</a><br />
-              地址：北京市朝阳区光华路 10 号院
-            </p>
-          </section>
-        </div>
-        </div>
-      </main>
-    </div>
+    <PublicInformationPage title="隐私政策" summary={`Helstera 由 ${siteOperator.name} 运营。本文说明使用服务时的信息处理、素材保存和联系渠道。`}>
+      <section><h2>1. 我们处理的信息</h2><p>注册登录需要账号邮箱和认证信息。使用创作功能时，我们处理您提交的提示词、参考图片、视频、画布、工程内容和工作区设置。充值产生订单及积分记录；咨询表单收集您填写的姓名、邮箱和问题描述，电话及公司信息由您自愿提供。服务日志可能包含请求时间、IP 地址、设备信息和错误记录，用于排查故障与防止滥用。</p></section>
+      <section><h2>2. AI 与支付服务</h2><p>为完成您确认的生成任务，相关提示词和参考素材会发送给所选模型对应的供应商；数据处理地点及保留规则可能因供应商而异。请仅上传有权使用的内容，避免在提示词和参考素材中加入与任务无关的敏感信息。充值时，订单金额和订单编号等必要信息会提交至支付渠道，支付凭据由支付渠道处理。</p></section>
+      <section><h2>3. 云端与本地保存</h2><p>生成图片与视频的云端副本通常保留 3 天，以资产页面显示的实际到期时间为准。用户删除后进入恢复区的资产有单独的恢复期限；到期清理或主动释放云端副本后，云端链接及相关引用可能失效。工程描述、账号、账单和必要日志有各自的处理用途，不适用素材的 3 天规则。</p><p className="mt-3">保存在浏览器或您选择的电脑文件夹中的副本由设备保管。清理浏览器数据、设备损坏或手动删除文件可能导致本地内容丢失；请自行保留重要备份。跨设备使用时可能需要重新选择原素材。</p></section>
+      <section><h2>4. 访问与保护</h2><p>网站通过 HTTPS 提供服务，私有项目和素材请求使用登录身份与工作区权限校验。我们根据实际运行需要维护访问控制和故障日志；这些措施不构成对所有风险均可避免的保证。</p></section>
+      <section><h2>5. 查询、更正与删除</h2><p>您可以使用页面中的项目、素材和本地保存功能管理内容。需要查询、更正、导出或删除账号相关信息时，请通过下方联系方式提交账号邮箱和具体请求；为保护账号，我们可能需要核验身份。订单争议、法律要求或安全处理所必需的记录可能需要继续保留，我们会说明处理结果。</p></section>
+      <section><h2>6. 未成年人及政策变更</h2><p>Helstera 不面向 14 岁以下儿童。若发现未成年人提交了不适当的个人信息，请联系运营者处理。本文随服务变更更新；涉及信息用途的重要变化，将通过站内说明或其他适当方式告知。</p></section>
+      <section><h2>7. 联系运营者</h2><OperatorContact /></section>
+    </PublicInformationPage>
   );
 }

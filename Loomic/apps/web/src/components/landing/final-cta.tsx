@@ -20,9 +20,6 @@ import { motion } from "framer-motion";
 import { SectionHeader } from "@/components/landing/section-header";
 import { ScrollReveal, fadeUp } from "@/components/landing/motion";
 
-import { TESTIMONIALS } from "./cta-final/testimonials-data";
-import { TestimonialCard } from "./cta-final/testimonial-card";
-import { TrustedByStrip } from "./cta-final/trusted-by-strip";
 
 function FinalCtaButtons() {
   return (
@@ -35,7 +32,7 @@ function FinalCtaButtons() {
           "transition-all duration-300 hover:scale-[1.02] active:scale-[0.99]",
         )}
       >
-        免费开始团队试用
+        注册并开始创作
         <ArrowRight
           className="size-3.5 transition-transform duration-300 group-hover:translate-x-0.5"
           strokeWidth={1.5}
@@ -48,7 +45,7 @@ function FinalCtaButtons() {
           "text-foreground glass-soft hover:glass transition-all duration-300",
         )}
       >
-        预约企业演示
+        联系与咨询
         <ArrowRight
           className="size-3.5 transition-transform duration-300 group-hover:translate-x-0.5"
           strokeWidth={1.5}
@@ -59,7 +56,7 @@ function FinalCtaButtons() {
 }
 
 function FinalTrustStrip() {
-  const ITEMS = ["SOC 2 Type II", "30 天退款保障", "无信用卡", "24/7 支持"];
+  const ITEMS = ["生成前确认费用", "查看任务记录", "保存本地副本"];
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-xs text-muted-foreground">
       {ITEMS.map((item, i) => (
@@ -87,20 +84,12 @@ export function FinalCTA() {
       <div className="max-w-6xl mx-auto px-6 space-y-20">
         <SectionHeader
           title="让设计团队跑在 AI 时代前面"
-          subtitle="立即开始，30 天不满意全额退款。无需信用卡。"
+          subtitle="先建立一个项目，选择模型并确认费用，再开始生成。"
         />
 
         <FinalCtaButtons />
         <FinalTrustStrip />
 
-        <div className="pt-8 space-y-12">
-          <TrustedByStrip />
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {TESTIMONIALS.map((t) => (
-              <TestimonialCard key={t.author} t={t} />
-            ))}
-          </div>
-        </div>
       </div>
     </section>
   );
