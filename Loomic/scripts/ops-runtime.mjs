@@ -1,12 +1,23 @@
 import { createRequire } from 'node:module';
-import { readFile, open, stat, writeFile } from 'node:fs/promises';
+import { readFile, open, stat, link, unlink } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { parseEnv } from 'node:util';
 import { join } from 'node:path';
+import { storageSettings, pruneBackupVersions, checkStorageCapacity } from './ops-storage.mjs';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+
+async function fileHash(path) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
+}
 
 const [configPath, action, ...args] = process.argv.slice(2);
 const config = JSON.parse(await readFile(configPath, 'utf8'));
 const env = parseEnv(await readFile(config.envFile, 'utf8'));
+if (config.storageCredentialsFile) Object.assign(env, parseEnv(await readFile(config.storageCredentialsFile, 'utf8')));
 const require = createRequire(join(config.server, 'package.json'));
 
 async function databaseSummary() {
@@ -26,17 +37,34 @@ async function databaseSummary() {
 
 function storage() {
   const sdk = require('@aws-sdk/client-s3');
-  const client = new sdk.S3Client({ endpoint: `https://s3.${env.QINIU_REGION || 'cn-east-1'}.qiniucs.com`,
-    region: env.QINIU_REGION || 'cn-east-1', forcePathStyle: true,
-    credentials: { accessKeyId: env.QINIU_ACCESS_KEY, secretAccessKey: env.QINIU_SECRET_KEY },
+  const settings = storageSettings(config, env);
+  const client = new sdk.S3Client({ endpoint: settings.endpoint,
+    region: settings.region, forcePathStyle: true,
+    credentials: settings.credentials,
     requestChecksumCalculation: 'WHEN_REQUIRED', responseChecksumValidation: 'WHEN_REQUIRED', maxAttempts: 3 });
-  return { client, sdk, Bucket: config.storageBucket || env.QINIU_PUBLIC_BUCKET };
+  return { client, sdk, Bucket: settings.bucket };
 }
 
 async function uploadEncrypted(file, key) {
   if (!key.startsWith(config.storagePrefix) || !key.endsWith('.enc')) throw new Error('Invalid backup object key');
   const { client, sdk, Bucket } = storage();
-  const { UploadId } = await client.send(new sdk.CreateMultipartUploadCommand({ Bucket, Key: key, ContentType: 'application/octet-stream' }));
+  const bytes = (await stat(file)).size;
+  const sha256 = await fileHash(file);
+  try {
+    const existing = await client.send(new sdk.HeadObjectCommand({ Bucket, Key: key }));
+    if (existing.ContentLength === bytes && existing.Metadata?.sha256 === sha256) {
+      client.destroy();
+      return { key, bytes, sha256, uploadedAt: existing.LastModified?.toISOString(), reused: true };
+    }
+    throw new Error('Backup object name already exists with different content');
+  } catch (error) {
+    if (error?.$metadata?.httpStatusCode !== 404 && error?.name !== 'NotFound') {
+      client.destroy();
+      throw error;
+    }
+  }
+  if (config.storageMaxBytes) await checkStorageCapacity(client, sdk, Bucket, bytes, config.storageMaxBytes, config.storagePrefix);
+  const { UploadId } = await client.send(new sdk.CreateMultipartUploadCommand({ Bucket, Key: key, ContentType: 'application/octet-stream', Metadata: { sha256 } }));
   const handle = await open(file, 'r');
   const parts = [];
   try {
@@ -51,9 +79,8 @@ async function uploadEncrypted(file, key) {
     }
     await client.send(new sdk.CompleteMultipartUploadCommand({ Bucket, Key: key, UploadId, MultipartUpload: { Parts: parts } }));
     const head = await client.send(new sdk.HeadObjectCommand({ Bucket, Key: key }));
-    const bytes = (await stat(file)).size;
-    if (head.ContentLength !== bytes) throw new Error('Backup size mismatch');
-    return { key, bytes, uploadedAt: new Date().toISOString() };
+    if (head.ContentLength !== bytes || head.Metadata?.sha256 !== sha256) throw new Error('Backup size or checksum metadata mismatch');
+    return { key, bytes, sha256, uploadedAt: new Date().toISOString() };
   } catch (error) {
     try { await client.send(new sdk.AbortMultipartUploadCommand({ Bucket, Key: key, UploadId })); }
     catch { console.error(JSON.stringify({ action: 'upload-abort', error: 'cleanup_failed' })); }
@@ -74,13 +101,31 @@ async function execute() {
   if (action === 'download') {
     if (!args[0].startsWith(config.storagePrefix)) throw new Error('Invalid backup object key');
     const { client, sdk, Bucket } = storage();
-    const remote = await client.send(new sdk.GetObjectCommand({ Bucket, Key: args[0] }));
-    await writeFile(args[1], remote.Body, { mode: 0o600 });
-    client.destroy();
-    return { downloaded: true, bytes: (await stat(args[1])).size };
+    const pending = args[1] + '.partial';
+    let output;
+    try {
+      output = await open(pending, 'wx', 0o600);
+      const remote = await client.send(new sdk.GetObjectCommand({ Bucket, Key: args[0] }));
+      await pipeline(remote.Body, output.createWriteStream());
+      const bytes = (await stat(pending)).size;
+      const sha256 = await fileHash(pending);
+      if (bytes !== remote.ContentLength || !remote.Metadata?.sha256 || sha256 !== remote.Metadata.sha256) throw new Error('Downloaded backup checksum differs');
+      await link(pending, args[1]);
+      return { downloaded: true, bytes, sha256 };
+    } finally {
+      if (output) {
+        await output.close();
+        await unlink(pending).catch(error => { if (error.code !== 'ENOENT') throw error; });
+      }
+      client.destroy();
+    }
   }
   if (action === 'prune') {
     const { client, sdk, Bucket } = storage();
+    if (config.storageVersioned) {
+      try { return await pruneBackupVersions(client, sdk, Bucket, config.storagePrefix, config.offsiteKeep || 14); }
+      finally { client.destroy(); }
+    }
     const found = await client.send(new sdk.ListObjectsV2Command({ Bucket, Prefix: config.storagePrefix }));
     if (found.IsTruncated) throw new Error('Backup retention requires pagination review');
     const owned = (found.Contents || []).filter(file => /^\d{8}T\d{6}Z\.tar\.enc$/.test(file.Key.slice(config.storagePrefix.length))).sort((a,b) => b.Key.localeCompare(a.Key));
