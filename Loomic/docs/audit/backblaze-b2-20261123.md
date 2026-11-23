@@ -47,6 +47,6 @@ Windows 任务 `Helstera-B2-Free-Recovery-20261123` 已注册，启用错过后�
 
 ## 后续收尾
 
-三日任务结束后查看完整恢复收据与明文清理结果。永久恢复密钥 `backup-private-key.dpapi` 及其 Windows 用户配置必须保留；它不是临时 SSH 凭据。告警邮件的最终收件与暂停的真实充值验收仍保持原先待办状态。
+三日任务结束后查看完整恢复收据与明文清理结果。永久恢复密钥 `backup-private-key.dpapi` 及其 Windows 用户配置必须保留；它不是临时 SSH 凭据。用户在后续巡检中确认测试告警邮件已收到；真实充值仍暂停，详见 [非付费巡检与最后验收步骤](production-nonpaid-20261123.md)。
 
 参考：[B2 价格](https://www.backblaze.com/cloud-storage/pricing)、[应用密钥](https://www.backblaze.com/docs/cloud-storage-create-and-manage-app-keys)、[S3 权限](https://www.backblaze.com/docs/cloud-storage-s3-compatible-app-keys)。
