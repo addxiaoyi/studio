@@ -16,6 +16,7 @@ export type GenerationApprovalCardProps = {
   hasReferenceImage: boolean;
   expiresAt: string;
   onJobCreated?: (jobId: string) => void;
+  onClosed?: () => void;
 };
 
 export function GenerationApprovalCard(props: GenerationApprovalCardProps) {
@@ -86,6 +87,9 @@ export function GenerationApprovalCard(props: GenerationApprovalCardProps) {
   }, [expiresAt, props.approvalId, props.onJobCreated, session?.access_token]);
 
   const expired = now >= expiresAt || state === "expired";
+  useEffect(() => {
+    if (expired || state === "rejected") props.onClosed?.();
+  }, [expired, state, props.onClosed]);
   const canSubmit = !expired && (state === "pending" || state === "failed") && Boolean(session?.access_token);
   const disabled = !canSubmit;
   const submitting = state === "submitting";

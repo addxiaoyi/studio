@@ -1,10 +1,11 @@
 "use client";
 
 import { Download, ImageIcon, LoaderCircle, Sparkles, Video } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/lib/auth-context";
 import {
+  ApiApplicationError,
   fetchImageModels,
   fetchVideoModels,
   generateImageDirect,
@@ -14,6 +15,9 @@ import {
 } from "@/lib/server-api";
 import { StyledSelect } from "@/components/ui/styled-select";
 import { getModelPricingLabel } from "@/lib/model-pricing";
+import { GenerationApprovalCard } from "@/components/chat/generation-approval-card";
+import { parseCreationApproval, type CreationApproval } from "@/lib/creation-approval";
+import { useCreationJob } from "@/hooks/use-creation-job";
 
 type CreationMode = "image" | "video";
 type GeneratedMedia = { url: string; prompt: string; mimeType: string };
@@ -45,6 +49,47 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
   const [media, setMedia] = useState<GeneratedMedia | null>(null);
+  const [approval, setApproval] = useState<CreationApproval | null>(null);
+  const [jobId, setJobId] = useState<string>();
+  const [submittedPrompt, setSubmittedPrompt] = useState("");
+  const submitting = useRef(false);
+  const job = useCreationJob(session?.access_token, jobId, submittedPrompt);
+  const busy = generating || Boolean(jobId && !job.finished);
+  const locked = busy || Boolean(approval);
+  const recoveryKey = session?.user?.id ? `loomic:creation:${session.user.id}:${mode}` : undefined;
+  const jobCreated = useCallback((id: string) => {
+    setJobId(id);
+    if (!recoveryKey || !approval) return;
+    try { sessionStorage.setItem(recoveryKey, JSON.stringify({ approval, jobId: id, prompt: submittedPrompt })); }
+    catch (cause) { console.warn("[creation-workspace] Could not save job recovery", cause); setError("无法保存任务恢复记录，请在活动记录中查看结果。"); }
+  }, [recoveryKey, approval, submittedPrompt]);
+  const closeApproval = useCallback(() => {
+    setApproval(null);
+    if (recoveryKey) sessionStorage.removeItem(recoveryKey);
+  }, [recoveryKey]);
+
+  useEffect(() => {
+    if (!recoveryKey) return;
+    try {
+      const raw = sessionStorage.getItem(recoveryKey);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as Record<string, unknown>;
+      const restored = parseCreationApproval(saved.approval as Record<string, unknown>);
+      if (typeof saved.prompt !== "string" || (saved.jobId !== undefined && typeof saved.jobId !== "string")) throw new Error("Invalid saved creation job");
+      setApproval(restored);
+      setPrompt(saved.prompt);
+      setSubmittedPrompt(saved.prompt);
+      setJobId(saved.jobId as string | undefined);
+    } catch (cause) {
+      console.warn("[creation-workspace] Could not restore job", cause);
+      setError("无法读取上次任务，请先在活动记录中核对结果，避免重复生成。");
+    }
+  }, [recoveryKey]);
+
+  useEffect(() => {
+    if (job.media) setMedia(job.media);
+    if (job.finished) closeApproval();
+  }, [job.media, job.finished, closeApproval]);
 
   const isVideo = mode === "video";
   const ratios = isVideo ? VIDEO_RATIOS : IMAGE_RATIOS;
@@ -81,19 +126,31 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
   const selectedAdvice = isVideo && selectedModel
     ? getModelAdvice(selectedModel as VideoModelInfo)
     : null;
+  const videoModel = isVideo ? selectedModel as VideoModelInfo | undefined : undefined;
+  const durations = videoModel?.limits?.allowedDurations?.length
+    ? videoModel.limits.allowedDurations
+    : [4, 5, 6, 8, 10].filter((seconds) => seconds <= (videoModel?.limits?.maxDuration ?? 10));
+  const resolutions = videoModel?.resolutionRates?.length
+    ? videoModel.resolutionRates.map((rate) => rate.resolution)
+    : [videoModel?.limits?.maxResolution ?? "720p"];
+  const selectedDuration = durations.includes(duration) ? duration : durations[0] ?? 4;
+  const selectedResolution = resolutions.includes(quality as typeof resolutions[number]) ? quality : resolutions[0] ?? "720p";
 
   async function onGenerate() {
     const token = session?.access_token;
     const cleanPrompt = prompt.trim();
-    if (!token || !cleanPrompt || !model || generating) return;
+    if (!token || !cleanPrompt || !model || locked || submitting.current) return;
+    submitting.current = true;
     setGenerating(true);
+    setSubmittedPrompt(cleanPrompt);
+    setJobId(undefined);
     setError("");
     try {
       const nextMedia = isVideo
         ? await generateVideoDirect(token, cleanPrompt, {
             model,
-            duration,
-            resolution: quality,
+            duration: selectedDuration,
+            resolution: selectedResolution,
             aspectRatio: ratio,
           })
         : await generateImageDirect(token, cleanPrompt, {
@@ -103,9 +160,19 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
           });
       setMedia(nextMedia);
     } catch (cause) {
+      if (cause instanceof ApiApplicationError && cause.code === "generation_confirmation_required") {
+        try {
+          const quote = parseCreationApproval(cause.details);
+          if (recoveryKey) sessionStorage.setItem(recoveryKey, JSON.stringify({ approval: quote, prompt: cleanPrompt }));
+          setApproval(quote);
+        }
+        catch (invalid) { setError(invalid instanceof Error ? invalid.message : "无法读取费用确认信息。"); }
+        return;
+      }
       console.error(`[${mode}-workspace] Generation failed`, cause);
       setError(cause instanceof Error ? cause.message : "生成失败，请稍后重试。");
     } finally {
+      submitting.current = false;
       setGenerating(false);
     }
   }
@@ -122,6 +189,7 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
         <textarea
           id={`${mode}-prompt`}
           value={prompt}
+          disabled={locked}
           onChange={(event) => setPrompt(event.target.value)}
           placeholder={isVideo ? "描述主体、动作、镜头运动、光线与氛围..." : "描述主体、构图、风格、光线与细节..."}
           className="mt-2 min-h-40 resize-y rounded-lg border bg-background p-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
@@ -132,7 +200,7 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
             <StyledSelect
               value={model}
               onChange={setModel}
-              disabled={loadingModels}
+              disabled={loadingModels || locked}
               aria-label="模型"
               options={models.map((item) => {
                 const advice = isVideo ? getModelAdvice(item as VideoModelInfo) : undefined;
@@ -141,12 +209,12 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
             />
           </Field>
           <Field label="画幅">
-            <StyledSelect value={ratio} onChange={setRatio} aria-label="画幅" options={ratios.map((item) => ({ value: item, label: item }))} />
+            <StyledSelect value={ratio} onChange={setRatio} disabled={locked} aria-label="画幅" options={ratios.map((item) => ({ value: item, label: item }))} />
           </Field>
           <Field label={isVideo ? "清晰度" : "质量"}>
-            <StyledSelect value={quality} onChange={setQuality} aria-label={isVideo ? "清晰度" : "质量"} options={(isVideo ? ["720p", "1080p"] : ["standard", "hd", "ultra"]).map((item) => ({ value: item, label: item }))} />
+            <StyledSelect value={isVideo ? selectedResolution : quality} onChange={setQuality} disabled={locked} aria-label={isVideo ? "清晰度" : "质量"} options={(isVideo ? resolutions : ["standard", "hd", "ultra"]).map((item) => ({ value: item, label: item }))} />
           </Field>
-          {isVideo && <Field label="时长"><StyledSelect value={String(duration)} onChange={(item) => setDuration(Number(item))} aria-label="时长" options={[5, 8, 10].map((item) => ({ value: String(item), label: `${item} 秒` }))} /></Field>}
+          {isVideo && <Field label="时长"><StyledSelect value={String(selectedDuration)} onChange={(item) => setDuration(Number(item))} disabled={locked} aria-label="时长" options={durations.map((item) => ({ value: String(item), label: `${item} 秒` }))} /></Field>}
         </div>
 
         {selectedModel && <div className="mt-4 rounded-xl border border-border/60 bg-muted/30 p-3 text-xs leading-5">
@@ -155,7 +223,9 @@ export function CreationWorkspace({ mode }: { mode: CreationMode }) {
           <p className="mt-1 font-medium text-foreground">{getModelPricingLabel(selectedModel, isVideo ? "video" : "image")}</p>
         </div>}
         {error && <p role="alert" className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
-        <button type="button" onClick={() => void onGenerate()} disabled={!prompt.trim() || !model || generating} className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-foreground px-5 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-40">
+        {approval && <div className="mt-4"><GenerationApprovalCard key={approval.approvalId} {...approval} onJobCreated={jobCreated} onClosed={closeApproval} /></div>}
+        {jobId && <p role="status" className="mt-4 text-sm text-muted-foreground">{job.message}</p>}
+        <button type="button" onClick={onGenerate} disabled={!prompt.trim() || !model || locked} className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-foreground px-5 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-40">
           {generating ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
           {generating ? "正在生成" : "开始生成"}
         </button>
