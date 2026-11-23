@@ -12,6 +12,7 @@ export type AvailableProviderModel = {
   input_token_price_cny: number | null;
   output_token_price_cny: number | null;
   supports_input_image?: boolean;
+  requires_input_image?: boolean;
   supports_input_video?: boolean;
   supports_audio?: boolean;
   max_duration_seconds?: number | null;
@@ -83,6 +84,7 @@ export async function listHealthyModels(
          pm.model_id, pm.display_name, pm.billing_unit,
          pm.price_credits::float8, pm.input_token_price_cny::float8,
          pm.output_token_price_cny::float8, pm.supports_input_image,
+         (pc.api_format='lingke_media' and coalesce(pc.request_template->'required','[]'::jsonb) ? 'images') as requires_input_image,
          pm.supports_input_video, pm.supports_audio, pm.max_duration_seconds,
          pm.max_resolution, pm.priority, pm.health_status, pm.last_error
        from provider_models pm
@@ -127,6 +129,7 @@ export async function listModelAvailability(db: Pool, mediaType: "image" | "vide
        pm.model_id, pm.display_name, pm.billing_unit,
        pm.price_credits::float8, pm.input_token_price_cny::float8,
        pm.output_token_price_cny::float8, pm.supports_input_image,
+       (pc.api_format='lingke_media' and coalesce(pc.request_template->'required','[]'::jsonb) ? 'images') as requires_input_image,
        pm.supports_input_video, pm.supports_audio, pm.max_duration_seconds,
        pm.max_resolution, pm.priority, pm.health_status, pm.last_error,
        pm.last_succeeded_at, pm.last_failed_at, pm.failure_count,

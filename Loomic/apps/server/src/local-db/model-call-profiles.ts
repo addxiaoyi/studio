@@ -79,6 +79,14 @@ const minimaxLingke: ModelCallProfile = {
   pollPath: (baseUrl, taskId) => baseUrl.replace(/\/$/, "") + "/skills/task-status?task_id=" + encodeURIComponent(taskId),
 };
 
+const lingkeVideo: ModelCallProfile = {
+  ...generic,
+  id: "lingke-video",
+  matches: (_model, apiFormat) => apiFormat === "lingke_media",
+  requiresPublicImageUrl: true,
+  inputImageTransport: "provider_url",
+};
+
 const metasoMinimax: ModelCallProfile = {
   ...minimaxLingke,
   id: "metaso-minimax",
@@ -115,7 +123,8 @@ const veo2Vertex: ModelCallProfile = { ...veoVertex, id: "google-vertex-veo-2", 
 const profiles = [minimaxLingke, metasoMinimax, kuaipaoImage, openAiDalle, replicateGoogleImage, replicateSeedreamImage, replicateFluxImage, replicateOpenAiImage, replicateRecraftImage, volcesImage, geminiImage, veo2Vertex, veoVertex, veo2Developer, veoDeveloper, replicateGoogleVideo, replicateHailuo, replicateKling, replicateSeedance, replicateWan, replicateSora, fluxImage, openAiImage, generic];
 
 export function getModelCallProfile(model: string, apiFormat: string): ModelCallProfile {
-  return profiles.find((profile) => profile.matches(model, apiFormat)) ?? generic;
+  return profiles.find((profile) => profile !== generic && profile.matches(model, apiFormat))
+    ?? (lingkeVideo.matches(model, apiFormat) ? lingkeVideo : generic);
 }
 
 export function listModelCallProfiles(): readonly ModelCallProfile[] {

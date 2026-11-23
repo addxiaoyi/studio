@@ -38,7 +38,7 @@ export async function registerVideoModelRoutes(app: FastifyInstance, options: {
         return {
           id: row.model_id,
           displayName: presentation.displayName,
-          description: presentation.description,
+          description: row.requires_input_image ? `${presentation.description} · 需要首帧图片` : presentation.description,
           provider: "configured",
           availability: !available ? "unavailable" : row.health_status === "unknown" ? "unverified" : "available",
           availabilityReason: !available
@@ -53,7 +53,7 @@ export async function registerVideoModelRoutes(app: FastifyInstance, options: {
           accessible: available && authenticated && balance >= minimumCreditCost(row),
           minTier: "free",
           capabilities: {
-            textToVideo: true,
+            textToVideo: !row.requires_input_image,
             imageToVideo: Boolean(row.supports_input_image),
             videoToVideo: Boolean(row.supports_input_video),
             audio: Boolean(row.supports_audio),

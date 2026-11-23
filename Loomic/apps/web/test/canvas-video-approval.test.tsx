@@ -3,12 +3,13 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const api = vi.hoisted(() => ({ generate: vi.fn(), update: vi.fn(), confirm: vi.fn(), job: vi.fn(), close: vi.fn(), scene: vi.fn() }));
+const api = vi.hoisted(() => ({ generate: vi.fn(), update: vi.fn(), confirm: vi.fn(), job: vi.fn(), close: vi.fn(), scene: vi.fn(), upload: vi.fn() }));
 vi.mock("../src/lib/auth-context", () => ({ useAuth: () => ({ session: { access_token: "token" } }) }));
 vi.mock("../src/lib/server-api", async (importOriginal) => ({
   ...await importOriginal<object>(),
   fetchVideoModels: async () => ({ models: [{ id: "hailuo-h3", displayName: "Hailuo H3", billingUnit: "per_second", creditCost: 0.432, providerPriceCny: 0.432, limits: { maxDuration: 30, allowedDurations: [4, 5], maxResolution: "1080p" } }] }),
   generateVideoDirect: api.generate, confirmGenerationApproval: api.confirm,
+  uploadFile: api.upload,
   fetchGenerationApprovalStatus: async () => ({ approvalStatus: "pending" }), fetchJob: api.job,
 }));
 vi.mock("../src/lib/canvas-video-generator", () => ({ updateVideoGeneratorElement: api.update, resizeVideoGeneratorElement: vi.fn() }));

@@ -166,6 +166,7 @@ export function VideoGeneratorPanel({
   const panelPosition = useCanvasPanelPosition(panelRef, screenX, screenY);
 
   const currentModel = models.find((m) => m.id === model);
+  const needsFirstFrame = currentModel?.capabilities?.textToVideo === false;
   const durationOptions = currentModel?.limits?.allowedDurations ?? DURATIONS;
   const resolutionOptions = supportedResolutions(currentModel);
   const configuredRates = currentModel?.resolutionRates?.length
@@ -328,6 +329,10 @@ export function VideoGeneratorPanel({
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() || loading || approval || submitting.current) return;
+    if (needsFirstFrame && !firstFrame) {
+      setError("此模型需要首帧图片，请先点击首帧上传图片。");
+      return;
+    }
     submitting.current = true;
     setJobId(undefined);
 
@@ -415,6 +420,7 @@ export function VideoGeneratorPanel({
     prompt,
     loading,
     approval,
+    needsFirstFrame,
     placeVideo,
     model,
     aspectRatio,
@@ -526,6 +532,7 @@ export function VideoGeneratorPanel({
           {error}
         </div>
       )}
+      {needsFirstFrame && !firstFrame && !approval && <p className="mx-4 mb-2 text-xs text-muted-foreground">此模型需要首帧图片，请先上传。</p>}
 
       {approval && <div className="mx-4 mb-3"><GenerationApprovalCard key={approval.approvalId} {...approval} onJobCreated={jobCreated} onClosed={closeApproval} /></div>}
       {jobId && <p role="status" className="mx-4 mb-3 text-xs text-muted-foreground">{job.message}</p>}
@@ -747,5 +754,5 @@ export function VideoGeneratorPanel({
 }
 
 function needsPublicReferenceUrl(model: string): boolean {
-  return model.includes("/") || /minimax-h3/i.test(model);
+  return model.includes("/") || /(?:minimax|hailuo)-h3/i.test(model);
 }

@@ -285,6 +285,9 @@ export async function registerJobRoutes(
         });
       }
       const model = resolvedModel?.model_id ?? payload.model ?? "wan-video/wan-2.6";
+      if (resolvedModel?.requires_input_image && !payload.input_images?.length && !payload.input_asset_ids?.length) {
+        return reply.code(422).send({ error: { code: "invalid_input", message: "此视频模型需要首帧图片，请先上传图片再生成。" } });
+      }
       payload.resolution = resolveVideoResolution(model, payload.resolution as VideoResolution | undefined);
       const routing = resolvedModel
         ? buildMediaRoute({
