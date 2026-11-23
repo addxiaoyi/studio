@@ -263,6 +263,7 @@ export default function SettingsPage() {
           <>
             <ProfileSection
               displayName={profile.displayName}
+              googleError={searchParams.get("google")}
               email={profile.email}
               onSave={handleProfileSave}
               accounts={publishingAccounts}

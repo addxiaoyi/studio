@@ -67,6 +67,10 @@ jobs:
           node scripts/test-local-postgres.mjs src/http/local-auth-register.postgres.test.ts src/local-db/project-idempotency.postgres.test.ts
           pnpm --filter @helstera/server exec vitest run src/http/public-media.test.ts src/local-db/chat-service.test.ts src/local-db/project-service.test.ts src/features/website-capture/assistant-recording-claim.test.ts
           pnpm --filter @helstera/web exec vitest run test/register.test.tsx test/login.test.tsx test/local-auth-network-error.test.ts
+      - name: Google identity, callback and account linking
+        run: |
+          pnpm --filter @helstera/server exec vitest run src/features/auth/google-identity.test.ts src/http/google-auth.test.ts src/local-db/google-auth.postgres.test.ts
+          pnpm --filter @helstera/web exec vitest run test/google-sign-in.test.tsx test/profile-section.test.tsx
       - name: Structured model planning deadlines
         run: pnpm --filter @helstera/server exec vitest run src/features/agent-goals/goal-planner.test.ts src/features/agent-goals/goal-plan-timeout.test.ts src/features/video-editor/planner.test.ts
       - name: Payment callback and private inquiry launch checks

@@ -10,7 +10,7 @@ const COOKIE = "helstera_session";
 const DESKTOP_LOGIN_TOKEN_TTL_MS = 3 * 60 * 1000;
 const DESKTOP_LOGIN_STATE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
-function sessionCookie(value: string, webOrigin: string) {
+export function sessionCookie(value: string, webOrigin: string) {
   const secure = webOrigin.startsWith("https://") ? "; Secure" : "";
   return `${COOKIE}=${value}; Max-Age=${30 * 24 * 60 * 60}; Path=/; HttpOnly${secure}; SameSite=Lax`;
 }

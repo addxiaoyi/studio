@@ -6,9 +6,11 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { StyledSelect } from "./ui/styled-select";
+import { GoogleSignIn } from "./auth/google-sign-in";
 import type { PublishingAccount } from "@/lib/server-api";
 
 interface ProfileSectionProps {
+  googleError?: string | null;
   displayName: string;
   email: string;
   onSave: (displayName: string) => Promise<void>;
@@ -19,6 +21,7 @@ interface ProfileSectionProps {
 }
 
 export function ProfileSection({
+  googleError,
   displayName: initialName,
   email,
   onSave,
@@ -132,6 +135,12 @@ export function ProfileSection({
           {saving ? "保存中..." : "保存"}
         </Button>
       </form>
+
+      <section className="space-y-3 border-t border-border/60 pt-6" aria-label="Google 账号登录">
+        <h3 className="text-base font-medium">Google 账号登录</h3>
+        <p className="text-sm text-muted-foreground">绑定后可使用 Google 登录当前账号，保留已有工程和积分。</p>
+        <GoogleSignIn linkAccount callbackError={googleError ?? null} />
+      </section>
 
       <section className="space-y-5 border-t border-border/60 pt-8" aria-labelledby="social-accounts-title">
         <div>

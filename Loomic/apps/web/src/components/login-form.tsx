@@ -19,6 +19,7 @@ import {
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import { GoogleSignIn } from "./auth/google-sign-in";
 
 const stagger = {
   hidden: {},
@@ -300,6 +301,7 @@ export function LoginForm({
 
   return (
     <div className="w-full max-w-sm">
+      <GoogleSignIn returnTo={destination} />
       <AnimatePresence mode="wait">
         {codeSent && mode === "code" ? (
           <motion.div

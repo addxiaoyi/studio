@@ -105,6 +105,7 @@ import { PeriodicTasks } from "./runtime/periodic-tasks.js";
 import { registerMetricsRoutes } from "./http/metrics.js";
 import { registerErrorRoutes } from "./http/errors.js";
 import { registerLocalAuthRoutes } from "./http/local-auth.js";
+import { registerGoogleAuthRoutes } from "./http/google-auth.js";
 import { createLocalDbPool } from "./local-db/client.js";
 import { createLocalRequestAuthenticator } from "./local-db/auth.js";
 import { createLocalProjectService } from "./local-db/project-service.js";
@@ -436,6 +437,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   void registerMetricsRoutes(app);
   void registerErrorRoutes(app);
   void registerLocalAuthRoutes(app, { db: localDb, env });
+  registerGoogleAuthRoutes(app, { db: localDb, env, auth });
   void registerLocalAssetRoutes(app, { db: localDb, auth, root: env.storageRoot ?? "/www/helstera/uploads" });
   void registerLocalEcomRoutes(app, { db: localDb, auth, creditService });
   void registerLocalTeamRoutes(app, { db: localDb, auth, viewerService });

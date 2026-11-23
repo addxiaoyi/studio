@@ -2,6 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
@@ -98,6 +99,20 @@ describe("Login page", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "This sign-in link could not be verified. Request a new one and try again.",
     );
+  });
+
+  it("keeps the Google callback error while the session check finishes", async () => {
+    let finishSession: () => void = () => { throw new Error("Session check has not started"); };
+    mockFetchLocalSession.mockImplementationOnce(() => new Promise(resolve => {
+      finishSession = () => resolve({ session: null });
+    }));
+    mockSearchParams.mockReturnValue(new URLSearchParams("error=google_canceled"));
+    const page = render(<AuthProvider><LoginPage /></AuthProvider>);
+    await waitFor(() => expect(mockReplace).toHaveBeenCalled());
+    mockSearchParams.mockReturnValue(new URLSearchParams());
+    page.rerender(<AuthProvider><LoginPage /></AuthProvider>);
+    await act(async () => finishSession());
+    expect(await screen.findByRole("alert")).toHaveTextContent(/取消 Google|Google authorization was canceled/);
   });
 
   it("sends a local verification code", async () => {

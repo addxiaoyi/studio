@@ -34,6 +34,8 @@ export type ServerEnv = {
   agentFilesRoot?: string;
   agentModel: string;
   googleApiKey?: string;
+  googleOAuthClientId?: string;
+  googleOAuthClientSecret?: string;
   googleApplicationCredentials?: string;
   googleFontsApiKey?: string;
   googleVertexLocation?: string;
@@ -127,6 +129,8 @@ export function loadServerEnv(
     overrides.openAIApiKey ?? normalizeOptionalString(source.OPENAI_API_KEY);
   const googleApiKey =
     overrides.googleApiKey ?? normalizeOptionalString(source.GOOGLE_API_KEY);
+  const googleOAuthClientId = overrides.googleOAuthClientId ?? normalizeOptionalString(source.GOOGLE_OAUTH_CLIENT_ID);
+  const googleOAuthClientSecret = overrides.googleOAuthClientSecret ?? normalizeOptionalString(source.GOOGLE_OAUTH_CLIENT_SECRET);
   const googleApplicationCredentials =
     overrides.googleApplicationCredentials ??
     normalizeOptionalString(source.GOOGLE_APPLICATION_CREDENTIALS);
@@ -273,6 +277,8 @@ export function loadServerEnv(
       overrides.webOrigin ?? source.HELSTERA_WEB_ORIGIN ?? DEFAULT_WEB_ORIGIN,
     ...(agentFilesRoot ? { agentFilesRoot } : {}),
     ...(googleApiKey ? { googleApiKey } : {}),
+    ...(googleOAuthClientId ? { googleOAuthClientId } : {}),
+    ...(googleOAuthClientSecret ? { googleOAuthClientSecret } : {}),
     ...(googleApplicationCredentials ? { googleApplicationCredentials } : {}),
     ...(openAIApiBase ? { openAIApiBase } : {}),
     ...(openAIApiKey ? { openAIApiKey } : {}),

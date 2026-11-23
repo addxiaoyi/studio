@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 import { AuthShell } from "../../components/auth/auth-shell";
 import { LoadingScreen } from "../../components/loading-screen";
@@ -9,6 +9,7 @@ import { LoginForm } from "../../components/login-form";
 import { useAuth } from "../../lib/auth-context";
 import { t, useLocale } from "../../lib/i18n";
 import { getSafeRedirect, loginPath } from "../../lib/navigation";
+import { googleAuthMessage } from "../../lib/google-auth-message";
 
 const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
   auth_callback_missing_code:
@@ -21,15 +22,18 @@ const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
 };
 
 function LoginPageContent() {
-  const copy = t(useLocale()).authShell;
+  const locale = useLocale();
+  const copy = t(locale).authShell;
   const { user, loading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackError = searchParams.get("error");
+  // Keep the message while the session loads and the callback query is removed.
+  const [initialCallbackError] = useState(callbackError);
   const desktopMode = searchParams.get("desktop") === "1";
   const redirectTo = getSafeRedirect(searchParams.get("redirect"));
-  const initialErrorMessage = callbackError
-    ? (CALLBACK_ERROR_MESSAGES[callbackError] ??
+  const initialErrorMessage = initialCallbackError
+    ? (googleAuthMessage(initialCallbackError, locale === "en-US") ?? CALLBACK_ERROR_MESSAGES[initialCallbackError] ??
       "Could not complete sign-in. Please try again.")
     : null;
 
