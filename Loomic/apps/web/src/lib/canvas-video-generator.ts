@@ -18,9 +18,9 @@ export type VideoGeneratorData = {
   duration: number;
   resolution: string;
   inputImages?: string[];
-  errorMessage?: string;
-  approval?: CreationApproval;
-  jobId?: string;
+  errorMessage?: string | undefined;
+  approval?: CreationApproval | undefined;
+  jobId?: string | undefined;
 };
 
 function generateId(): string {
