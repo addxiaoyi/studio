@@ -10,11 +10,15 @@ type PreviewState = "loading" | "ready" | "fallback";
 type ProjectThumbnailProps = {
   src?: string | null;
   alt: string;
+  revision?: string | undefined;
   className?: string | undefined;
 };
 
-export function ProjectThumbnail({ src, alt, className }: ProjectThumbnailProps) {
-  const safeSrc = src && !src.includes("/api/uploads/") ? src : null;
+export function ProjectThumbnail({ src, alt, revision, className }: ProjectThumbnailProps) {
+  const source = src && !src.includes("/api/uploads/") ? src : null;
+  const safeSrc = source?.startsWith("/api/projects/")
+    ? `${source}${source.includes("?") ? "&" : "?"}preview=2&v=${encodeURIComponent(revision ?? "")}`
+    : source;
   const [state, setState] = useState<PreviewState>(safeSrc ? "loading" : "fallback");
 
   useEffect(() => {
@@ -31,6 +35,7 @@ export function ProjectThumbnail({ src, alt, className }: ProjectThumbnailProps)
     >
       {hasImage ? (
         <img
+          key={safeSrc}
           src={safeSrc ?? undefined}
           alt={alt}
           className={cn("h-full w-full object-contain", state === "ready" ? "opacity-100" : "opacity-0")}

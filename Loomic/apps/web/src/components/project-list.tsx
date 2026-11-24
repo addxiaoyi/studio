@@ -115,6 +115,7 @@ export function ProjectList({
             <Link href={`${desktopMode ? "/desktop-app/canvas" : "/canvas"}?id=${project.primaryCanvas.id}`} aria-label={`打开项目 ${project.name}`} className={styles.projectLink}>
             <ProjectThumbnail
               src={project.thumbnailUrl ?? null}
+              revision={project.updatedAt}
               alt={`${project.name} 预览`}
               className={styles.projectPreview}
             />

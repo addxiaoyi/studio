@@ -1,11 +1,23 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { ProjectThumbnail } from "../src/components/project-thumbnail";
 
+afterEach(cleanup);
+
 describe("ProjectThumbnail", () => {
+  it("requests a fresh preview when the project's revision changes", () => {
+    const { rerender } = render(<ProjectThumbnail alt="Canvas" src="/api/projects/project-1/thumbnail" revision="first" />);
+    const before = screen.getByRole("img", { name: "Canvas" }).getAttribute("src");
+    fireEvent.error(screen.getByRole("img", { name: "Canvas" }));
+    rerender(<ProjectThumbnail alt="Canvas" src="/api/projects/project-1/thumbnail" revision="second" />);
+    const after = screen.getByRole("img", { name: "Canvas" }).getAttribute("src");
+    expect(after).not.toBe(before);
+    expect(after).toContain("v=second");
+  });
+
   it("shows an explicit empty state when a project has no preview", () => {
     render(<ProjectThumbnail alt="Brand System preview" src={null} />);
 

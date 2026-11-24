@@ -68,7 +68,7 @@ export function ArchivedProjectList({ accessToken, projects, onRestored }: Archi
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {visible.map((project) => (
             <article key={project.id} className="rounded-2xl border border-border/60 bg-card p-3">
-              <ProjectThumbnail src={project.thumbnailUrl ?? null} alt={`${project.name} 预览`} className="aspect-[395/227] w-full rounded-xl" />
+              <ProjectThumbnail src={project.thumbnailUrl ?? null} revision={project.updatedAt} alt={`${project.name} 预览`} className="aspect-[395/227] w-full rounded-xl" />
               <div className="mt-3 min-w-0">
                 <p className="truncate text-sm font-medium text-foreground">{project.name}</p>
                 <p className="mt-1 text-[11px] text-muted-foreground">归档于 {formatDate(project.updatedAt)}</p>

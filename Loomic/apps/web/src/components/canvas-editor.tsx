@@ -29,6 +29,8 @@ import { workflowBinding } from "./workflow/scene";
 import { CanvasWorkflowDocument } from "./canvas/workflow-document";
 import { readWorkflowDocument } from "@helstera/shared";
 import {CanvasChangeTracker,canvasElementsForSave,canvasRecoveryIsSaved} from "../lib/canvas-change-tracker";
+import { buildProjectThumbnail } from "../lib/canvas-thumbnail";
+export { getThumbnailElements } from "../lib/canvas-thumbnail";
 
 const Excalidraw = dynamic(
   () => import("@excalidraw/excalidraw").then((mod) => mod.Excalidraw),
@@ -97,44 +99,6 @@ export function canvasSaveStateLabel(state: CanvasSaveState): string {
 const SAVE_DEBOUNCE_MS = 1500;
 const THUMBNAIL_DEBOUNCE_MS = 10_000;
 const THUMBNAIL_INITIAL_REFRESH_DELAY_MS = 1500;
-const THUMBNAIL_MAX_SIZE = 400;
-
-export function getThumbnailElements(elements: readonly Record<string, unknown>[], appState: Record<string, unknown>) {
-  const visible = elements.filter((element) => element.isDeleted !== true);
-  const zoom = Number((appState.zoom as { value?: number } | undefined)?.value) || 1;
-  const width = Number(appState.width) || 0;
-  const height = Number(appState.height) || 0;
-  if (!visible.length || width <= 0 || height <= 0) return visible;
-
-  const viewportLeft = -(Number(appState.scrollX) || 0);
-  const viewportTop = -(Number(appState.scrollY) || 0);
-  const viewportRight = viewportLeft + width / zoom;
-  const viewportBottom = viewportTop + height / zoom;
-  const inViewport = visible.filter((element) => {
-    const left = Number(element.x) || 0;
-    const top = Number(element.y) || 0;
-    const right = left + Math.abs(Number(element.width) || 0);
-    const bottom = top + Math.abs(Number(element.height) || 0);
-    return right >= viewportLeft && left <= viewportRight && bottom >= viewportTop && top <= viewportBottom;
-  });
-
-  return inViewport.length > 0 ? inViewport : visible;
-}
-
-async function buildThumbnailBlob(api: any): Promise<Blob | null> {
-  const sceneElements = getThumbnailElements(api.getSceneElements(), api.getAppState());
-  if (!sceneElements.length) return null;
-
-  const { exportToBlob } = await import("@excalidraw/excalidraw");
-  return exportToBlob({
-    elements: sceneElements,
-    appState: { exportBackground: true },
-    files: api.getFiles(),
-    mimeType: "image/webp",
-    quality: 0.8,
-    maxWidthOrHeight: THUMBNAIL_MAX_SIZE,
-  });
-}
 
 export function mergeCanvasSaveWithRemoteContent(
   local: { elements: Record<string, unknown>[]; appState: Record<string, unknown>; files: Record<string, Record<string, unknown>> },
@@ -568,7 +532,7 @@ export function CanvasEditor({
   const uploadCurrentThumbnail = useCallback(async (api: any) => {
     if (!api || !hydratedRef.current || thumbnailRefreshCanvasRef.current === canvasId) return;
 
-    const blob = await buildThumbnailBlob(api);
+    const blob = await buildProjectThumbnail(api, accessTokenRef.current);
     if (!blob) return;
 
     thumbnailRefreshCanvasRef.current = canvasId;
@@ -783,7 +747,7 @@ export function CanvasEditor({
       thumbnailTimerRef.current = setTimeout(async () => {
         if (!excalidrawApi) return;
         try {
-          const blob = await buildThumbnailBlob(excalidrawApi);
+          const blob = await buildProjectThumbnail(excalidrawApi, accessTokenRef.current);
           if (!blob) return;
 
           console.log(

@@ -401,6 +401,7 @@ export default function HomePage() {
                 >
                   <ProjectThumbnail
                     src={project.thumbnailUrl ?? null}
+                    revision={project.updatedAt}
                     alt={`${project.name} 预览`}
                     className={styles.thumbnail}
                   />
