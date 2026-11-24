@@ -1,5 +1,5 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { Pool } from "pg";
 import type { ProjectCreateRequest, ProjectSource, ProjectSummary, ProjectUpdateRequest } from "@helstera/shared";
@@ -34,13 +34,8 @@ export function createLocalProjectService(db: Pool, uploadRoot = "/www/helstera/
       );
       return Promise.all(
         rows.map(async (row) => {
-          const thumbnailPath = await findThumbnailPath(
-            uploadRoot,
-            workspace.id,
-            row.id,
-            row.thumbnail_path,
-          );
-          return mapSummary(row, workspace, thumbnailPath ? `/api/projects/${row.id}/thumbnail` : null);
+          const thumbnail = await findThumbnailUrl(uploadRoot, row.id, row.thumbnail_path);
+          return mapSummary(row, workspace, thumbnail);
         }),
       );
     },
@@ -87,8 +82,8 @@ export function createLocalProjectService(db: Pool, uploadRoot = "/www/helstera/
         [workspace.id],
       );
       return Promise.all(rows.map(async (row) => {
-        const thumbnailPath = await findThumbnailPath(uploadRoot, workspace.id, row.id, row.thumbnail_path);
-        return mapSummary(row, workspace, thumbnailPath ? `/api/projects/${row.id}/thumbnail` : null);
+        const thumbnail = await findThumbnailUrl(uploadRoot, row.id, row.thumbnail_path);
+        return mapSummary(row, workspace, thumbnail);
       }));
     },
     async restoreProject(user, projectId) {
@@ -139,12 +134,20 @@ export function createLocalProjectService(db: Pool, uploadRoot = "/www/helstera/
       const objectPath = `${workspace.id}/${projectId}/thumbnail.${ext}`;
       const dir = join(uploadRoot, PROJECT_ASSETS_BUCKET, workspace.id, projectId);
       await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, `thumbnail.${ext}`), buffer);
-      await db.query(
-        "update projects set thumbnail_path = $1, updated_at = now() where id = $2 and workspace_id = $3",
+      const file = join(dir, `thumbnail.${ext}`);
+      const pending = join(dir, `.thumbnail-${randomUUID()}.tmp`);
+      try {
+        await writeFile(pending, buffer, { flag: "wx" });
+        await rename(pending, file);
+      } finally {
+        await rm(pending, { force: true });
+      }
+      const saved = await db.query(
+        "update projects set thumbnail_path = $1 where id = $2 and workspace_id = $3 and archived_at is null",
         [objectPath, projectId, workspace.id],
       );
-      return { thumbnailUrl: `/api/projects/${projectId}/thumbnail` };
+      if (!saved.rowCount) throw new ProjectServiceError("project_not_found", "Project not found.", 404);
+      return { thumbnailUrl: await thumbnailUrl(projectId, file) };
     },
   };
 }
@@ -245,25 +248,25 @@ export function resolveProjectSource(value: unknown): ProjectSource {
   return value === "home" || value === "import" ? value : "manual";
 }
 
-async function findThumbnailPath(
+// Refresh the image cache independently of the project's last edit.
+async function thumbnailUrl(projectId: string, file: string): Promise<string> {
+  const info = await stat(file, { bigint: true });
+  if (!info.isFile()) throw new Error("Project thumbnail is not a file.");
+  const version = `${info.ino.toString(36)}-${info.mtimeNs.toString(36)}-${info.size.toString(36)}`;
+  return `/api/projects/${projectId}/thumbnail?thumb=${version}`;
+}
+
+async function findThumbnailUrl(
   uploadRoot: string,
-  workspaceId: string,
   projectId: string,
   storedPath: string | null | undefined,
 ) {
-  const candidates = [
-    ...(storedPath
-      ? [
-          join(uploadRoot, PROJECT_ASSETS_BUCKET, storedPath),
-          join(uploadRoot, storedPath),
-        ]
-      : []),
-  ];
+  if (!storedPath) return null;
+  const candidates = [join(uploadRoot, PROJECT_ASSETS_BUCKET, storedPath), join(uploadRoot, storedPath)];
 
   for (const candidate of candidates) {
     try {
-      await access(candidate);
-      return candidate;
+      return await thumbnailUrl(projectId, candidate);
     } catch {
       // Try the next compatible storage layout.
     }

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Pool } from "pg";
 import Fastify from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -26,6 +28,7 @@ describe.skipIf(!enabled)("PostgreSQL project creation idempotency", () => {
       create table brand_kits (id text, user_id text, is_default boolean);
       create table projects (id text primary key default gen_random_uuid()::text, workspace_id text, created_by text, name text, slug text, description text, source text, brand_kit_id text, created_at timestamptz default now(), updated_at timestamptz default now());
       create table canvases (id text primary key default gen_random_uuid()::text, project_id text, created_by text, name text, is_primary boolean);
+      alter table projects add column thumbnail_path text, add column archived_at timestamptz;
       insert into workspaces (id, owner_user_id, name) values ('123e4567-e89b-42d3-a456-426614174001', '123e4567-e89b-42d3-a456-426614174000', 'Personal');
     `);
     const migration = await readFile(new URL("./migrations/20261103000001_project_creation_requests.sql", import.meta.url), "utf8");
@@ -87,6 +90,29 @@ describe.skipIf(!enabled)("PostgreSQL project creation idempotency", () => {
     expect(a.workspace.id).not.toBe(b.workspace.id);
     expect((await service.createProjectIdempotent!(other, { name: "Second user" }, "shared-key")).id).toBe(b.id);
   });
+
+  it("changes the thumbnail URL without bumping an older project's date or position", async () => {
+    const root = await mkdtemp(join(tmpdir(), "helstera-project-thumbnail-"));
+    const service = createLocalProjectService(db, root);
+    try {
+      const older = await service.createProject(user, { name: "Older thumbnail project" });
+      const newer = await service.createProject(user, { name: "Newer thumbnail project" });
+      await db.query("update projects set updated_at = '2025-01-01' where id = $1", [older.id]);
+      const before = await service.listProjects(user);
+      const first = await service.saveThumbnail(user, older.id, Buffer.from("abcd"), "image/webp");
+      const middle = await service.listProjects(user);
+      const second = await service.saveThumbnail(user, older.id, Buffer.from("efgh"), "image/webp");
+      const after = await service.listProjects(user);
+
+      expect(after.map(project => [project.id, project.updatedAt])).toEqual(before.map(project => [project.id, project.updatedAt]));
+      expect(after.findIndex(project => project.id === older.id)).toBeGreaterThan(after.findIndex(project => project.id === newer.id));
+      expect(middle.find(project => project.id === older.id)?.thumbnailUrl).toBe(first.thumbnailUrl);
+      expect(after.find(project => project.id === older.id)?.thumbnailUrl).toBe(second.thumbnailUrl);
+      expect(second.thumbnailUrl).not.toBe(first.thumbnailUrl);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it("rolls back the project and key if canvas creation fails", async () => {
     await db.query(`create function reject_canvas_for_test() returns trigger language plpgsql as $$
